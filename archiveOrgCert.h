@@ -1,6 +1,6 @@
 /*
 FILE : archiveOrgCert.h
-PROJECT : xstore (DLC fork)
+PROJECT : Omni360
 DESCRIPTION : RSA trust anchor used for archive.org connections.
 
 Defines IA_TA0_RSA_DN / _N / _E, which downloadFile.cpp passes to

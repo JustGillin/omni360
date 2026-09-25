@@ -1,10 +1,12 @@
-# Archive.org DLC Downloader (X-Store fork)
+# Omni360
 
-A homebrew Xbox 360 app that shows your **installed games** (with real box-art icons, no typing) and downloads their **DLC from archive.org's `msx360gcdlc` collection** straight into the console's Content folder — no PC required.
+A homebrew Xbox 360 app that shows your **installed games** (with real box-art icons, no typing) and downloads their **DLC and title updates from archive.org** straight onto the console — no PC required.
+
+Pick a game, then press **A** for its DLC (from the `msx360gcdlc` collection) or **Y** for its title updates (from `microsoft_xbox360_title-updates`). Both install to the right place on their own: DLC and lowercase `tu...` updates into `Content\`, uppercase `TU_...` updates into `Cache\`.
 
 This is a fork of [951261/X-Store](https://github.com/951261/X-Store), reusing its proven BearSSL/TLS networking core and Direct3D rendering framework. Everything Vimm's Lair/full-game/ISO/updater-related has been stripped out; everything archive.org/DLC/installed-game-related is new. See `docs/` for X-Store's own original architecture notes (still accurate for the networking layer this fork builds on).
 
-**Status: working on real hardware.** The full pipeline — library scan, picker, archive.org auth, DLC lookup, RAR member walk, download into the Content folder — has been run end-to-end against a real 27-game library on a JTAG/RGH console. The **Testing order** section below is kept as a guide for bringing it up on a fresh setup.
+**Status: working on real hardware.** The full pipeline — library scan, picker, archive.org auth, content lookup, archive member walk, install — has been run end-to-end against a real 27-game library on a JTAG/RGH console, for both DLC and title updates (Skyrim's 25.5 MB update installed and was picked up by the dashboard). The **Testing order** section below is kept as a guide for bringing it up on a fresh setup.
 
 ## Why this exists instead of just using X-Store or Aurora
 
@@ -23,8 +25,8 @@ A standalone native `.xex` was the only remaining option with full control over 
 
 ## Setup
 
-1. Build `XboxTLS2.vcxproj` (Release config) once you have the XDK working.
-2. Deploy the resulting `.xex` to your console the same way you would any other homebrew title (standalone, launched from Aurora/your dashboard like X-Store already is — this isn't an Aurora script or plugin).
+1. Open `Omni360.sln` and build `XboxTLS2.vcxproj` (Release config) once you have the XDK working. The project keeps its original name; the Release build produces `Omni360.xex`.
+2. Deploy that `.xex` to your console the same way you would any other homebrew title (standalone, launched from Aurora/your dashboard like X-Store already is — this isn't an Aurora script or plugin).
 3. Optional: two independent settings.txt keys control where things live, since your existing game library and where DLC actually installs can be different drives/folders:
    - `xbla-path:` (same key X-Store already uses) — where downloaded DLC gets written. Defaults to `Hdd1:\Content\0000000000000000`, the standard Xbox content layout.
    - `games-path:` — where your installed game library is scanned from for the picker. Defaults to `Hdd1:\Games`. On setups where Aurora stores GOD/disc-based games in their own dedicated folder (confirmed during testing: `Hdd1:\Games\{TitleID}\00007000\{ContentID}`, same layout as Content, just a different root) rather than under the shared Content partition, this needs to point there instead — `Content\0000000000000000` alone won't have your actual games in it, only DLC/Title Updates/etc.
@@ -37,13 +39,14 @@ A standalone native `.xex` was the only remaining option with full control over 
 ## How it works
 
 1. Walks `Content\0000000000000000\{TitleID}\{ContentType}\*` and reads each installed title's Title ID / display name / box-art icon straight out of its STFS package header (`StfsParser.cpp`) — entirely offline.
-2. Shows that list as an icon grid (`GameListUI.cpp`) — D-pad to move, A to pick, B to cancel.
-3. Sends your IAS3 key pair as an `Authorization: LOW <access>:<secret>` header (`ArchiveOrgDLC.cpp`) and looks up the chosen game against the `msx360gcdlc` item's public metadata (soft name-matching, so a game with several separate DLC packs — e.g. Call of Duty 2's Bonus/Invasion/Skirmish Packs — picks up all of them).
-4. For each matched `.rar`, reads its internal file table via a handful of small `Range` requests (RAR stores headers interleaved with each file's data, not in one central directory, so this walks the chain one entry at a time rather than guessing a byte range).
-5. Downloads each real file through archive.org's `/download/{item}/{rarfile}/{urlencoded/internal/path}` URL form, which serves the member **already extracted server-side** — no RAR decompression is implemented or needed on our end.
-6. Writes each file to `{content path}\{the RAR's own internal path}`, which already matches the `TitleID\ContentType\ContentID` layout Xbox expects.
+2. Shows that list as an icon grid (`GameListUI.cpp`) — D-pad or left stick to move, A for DLC, Y for title updates, B to go back.
+3. Sends your IAS3 key pair as an `Authorization: LOW <access>:<secret>` header (`ArchiveOrgDLC.cpp`) and looks up the chosen game against the relevant item's public metadata — `msx360gcdlc` for DLC, `microsoft_xbox360_title-updates` for updates. Name-matching is soft, so a game with several separate DLC packs — e.g. Call of Duty 2's Bonus/Invasion/Skirmish Packs — picks up all of them.
+4. For each matched archive, reads its internal file table via a handful of small `Range` requests. RAR interleaves headers with each file's data, so that walks the chain one entry at a time; ZIP keeps a central directory at the tail, so one request covers it.
+5. Downloads each real file through archive.org's `/download/{item}/{archive}/{urlencoded/internal/path}` URL form, which serves the member **already extracted server-side** — no RAR or ZIP decompression is implemented or needed on our end.
+6. Writes each file where the console expects it. DLC members already carry a `TitleID\ContentType\ContentID` internal path that matches the Content layout. Title updates are placed by filename: lowercase `tu...` into `Content\0000000000000000\{TitleID}\000B0000\`, uppercase `TU_...` into `{device}\Cache\`.
+7. Avatar-item packs (STFS content type `00009000`) are filtered out — matching Sonic Generations turned up 12 files, 11 of which were avatar data rather than DLC.
 
-## Known limitations / things to verify once it builds
+## Known limitations
 
 - **Games-on-Demand-style split packages** (a folder of numbered parts instead of one file) aren't handled by `EnumerateInstalledGames` — such titles are silently skipped rather than mis-parsed. How common that layout is on a JTAG/RGH+Aurora setup wasn't verified this session.
 - **Display Name encoding**: the STFS field is documented as UTF-8 by the Free60 wiki but historically treated as UTF-16BE by real tooling (Modio, Velocity, Horizon). `StfsParser.cpp` detects which one per-file rather than assuming, but this is the first thing worth checking against your own library — if names come out garbled, that's where to look.
@@ -54,7 +57,7 @@ A standalone native `.xex` was the only remaining option with full control over 
 
 ## Testing order
 
-Since none of this has been compiled or run, bring it up incrementally rather than all at once:
+This is the order the app was originally brought up in, and it is still the fastest way to isolate a failure on a fresh setup — build cycles are slow and there is no emulator, so bisecting after the fact costs more than staging it does:
 
 1. Confirm the stripped project actually builds and boots to a blank screen.
 2. Test the archive.org IAS3 auth header alone (watch `game:\DebugInfo.txt` / the on-screen log) before touching the UI.
@@ -65,3 +68,5 @@ Since none of this has been compiled or run, bring it up incrementally rather th
 ## License
 
 AGPL-3.0, inherited from the original X-Store project (see `LICENSE`). Vendored components keep their own licenses: BearSSL (`SSL/`, MIT), cJSON (`cJSON.c/.h`, MIT). A modified version you distribute must stay under AGPL-3.0 with copyright notices preserved and source available to anyone you give the binary to.
+
+Omni360 is a distinct name for a distinct application, but a good deal of it is still X-Store's code. `dns.cpp`, `parsing.cpp`, `OutputConsole.cpp`, `downloadFile.cpp` and `driveMount.c` carry `PROGRAMMER : 951261` headers, and the BearSSL/TLS networking core underneath them is inherited essentially intact. Those headers, and the fork notice in the startup banner, are there on purpose — AGPL-3.0 requires copyright notices to survive and requires a modified work to say that it has been modified. Rename the product as much as you like; leave those alone.

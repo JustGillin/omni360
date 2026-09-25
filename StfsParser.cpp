@@ -1,6 +1,6 @@
 /*
 FILE : StfsParser.cpp
-PROJECT : xstore (DLC fork)
+PROJECT : Omni360
 DESCRIPTION : reads Title ID / display name / box-art icon directly out of
               installed STFS content packages, and enumerates installed
               titles from the console's Content folder. Offsets are from the

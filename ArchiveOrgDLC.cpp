@@ -1,6 +1,6 @@
 /*
 FILE : ArchiveOrgDLC.cpp
-PROJECT : xstore (DLC fork)
+PROJECT : Omni360
 DESCRIPTION : archive.org IAS3 key auth, DLC lookup (msx360gcdlc item
               metadata), RAR header-only parsing (no decompression - see
               note below), and per-member download via archive.org's

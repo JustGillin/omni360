@@ -112,31 +112,17 @@ The implementation stores BearSSL contexts in an internal heap-allocated struct.
 
 `downloadFile.cpp` owns the app's current trust anchor list. It calls `addTrustAnchors()` after context creation and before connecting.
 
-## Extraction Layer
+## Extraction Layer — removed
 
-There are two extraction steps for disc games:
+X-Store downloaded 7z archives and Xbox ISOs, so it needed `decompressSevenZipFile()` and `extractIso()` behind it. Neither exists here: the `7zip` and `xiso extract` projects were deleted along with the full-game download path.
 
-1. `decompressSevenZipFile()` extracts the downloaded 7z archive into a temporary folder. Large extracted files can be split.
-2. `extractIso()` extracts the resulting Xbox ISO into the final output folder.
+This fork never decompresses anything. Archive.org's virtual-path URL form, `/download/{item}/{archive}/{urlencoded member}`, resolves through `view_archive.php` and serves the member **already extracted server-side** — confirmed on hardware for both RAR and ZIP. The app only ever reads archive *headers* (to learn what is inside and how big it is) and then downloads members as ordinary files.
 
-XBLA content skips ISO extraction. Instead, after 7z extraction, the code scans for an 8-character hex title ID folder that contains a known Xbox content type folder, copies that title ID folder to the XBLA output root, and deletes the temporary extracted folder.
+## Updater Layer — removed
 
-## Updater Layer
+X-Store could update itself from its own GitHub releases, using `runUpdate()`, cJSON for the release JSON and miniz for the ZIP. That path is gone, along with the `updater` and `miniz` projects; you deploy a new `.xex` by hand.
 
-`runUpdate()` is called when the user selects `Update X-Store`. It:
-
-- downloads GitHub's latest release JSON,
-- reads `assets[0].browser_download_url`,
-- finds the currently running main XEX under `game:\`,
-- downloads the release asset ZIP,
-- extracts it with miniz,
-- finds a `.xex` inside the extracted update,
-- moves it into `game:\XStoreUp.xex`,
-- backs up the current XEX to `.old`,
-- replaces the current XEX,
-- launches the updated image.
-
-If replacement fails after backup, it attempts to restore the old XEX.
+Two things outlive it and are *not* dead code: `cJSON` is now used by `ArchiveOrgDLC.cpp` to parse archive.org's item metadata, and `githubCert.h`'s trust anchor is still added during handshake setup in `downloadFile.cpp`.
 
 ## Logging
 

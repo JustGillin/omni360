@@ -1,6 +1,6 @@
 /*
 FILE : dns.cpp
-PROJECT : xstore
+PROJECT : Omni360
 PROGRAMMER : 951261
 DESCRIPTION : Resolves a domain name (example.com) to an IP (384.528.845.259)
 */

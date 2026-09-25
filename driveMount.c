@@ -1,6 +1,6 @@
 /*
 FILE : driveMount.c
-PROJECT : xstore (DLC fork)
+PROJECT : Omni360
 PROGRAMMER : 951261
 DESCRIPTION : mount() - creates the drive aliases (game:, Hdd1:, Usb0:) the
               rest of the app addresses storage through, via the kernel's

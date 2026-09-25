@@ -98,7 +98,7 @@
     <LibraryPath>$(LibraryPath)</LibraryPath>
     <RemoteRoot>Hdd1:\Development</RemoteRoot>
     <PostBuildEventUseInBuild>false</PostBuildEventUseInBuild>
-    <ImageXexOutput>$(OutDir)X-Store.xex</ImageXexOutput>
+    <ImageXexOutput>$(OutDir)Omni360.xex</ImageXexOutput>
   </PropertyGroup>
   <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Release_LTCG|Xbox 360'">
     <LinkIncremental>false</LinkIncremental>
@@ -228,11 +228,15 @@
     </Link>
     <ImageXex>
       <AdditionalSections>font=$(OutDir)Media\Fonts\font.xpr</AdditionalSections>
-      <!-- Kept X-Store's original TitleID (95126000). If you ever want this
-           fork installed alongside an unmodified X-Store on the same
-           console, change this to a different value first - same TitleID
-           means they'd share the same save/content namespace. -->
-      <TitleID>95126000</TitleID>
+      <!-- Omni360's own TitleID, moved off X-Store's 95126000 so the two can
+           coexist on one console. A shared TitleID means a shared save and
+           content namespace, which is a real conflict now this is a separate
+           app rather than a fork running in X-Store's place.
+
+           4F4D0360 is "OM" (0x4F 0x4D) followed by 0360. The field takes
+           eight hex digits, so anything you replace it with must be hex -
+           letters past F are not valid here. -->
+      <TitleID>4F4D0360</TitleID>
     </ImageXex>
     <Deploy>
       <DeploymentType>CopyToHardDrive</DeploymentType>

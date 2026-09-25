@@ -1,6 +1,6 @@
 /*
 FILE : Keyboard.cpp
-PROJECT : xstore (DLC fork)
+PROJECT : Omni360
 DESCRIPTION : on-screen keyboard text input, lifted from X-Store's original
               "user interface/ui.cpp" (OpenKeyboardToString/WideToCharSimple)
               since that whole file is otherwise Vimm-search-specific and

@@ -1,6 +1,6 @@
 /*
 FILE : main.cpp
-PROJECT : xstore (DLC fork)
+PROJECT : Omni360
 DESCRIPTION : entry point. Flow: mount drives -> scan installed games (STFS,
               local, no network) -> icon-list picker -> archive.org IAS3 key
               auth (cached after first run) -> look up + download DLC for the
@@ -657,7 +657,10 @@ int main()
     if (!CheckGameMounted())
         dprintf("Warning: Some paths may not be mounted\n");
 
-    dprintf("Archive.org DLC Downloader " CURRENT_VERSION " (fork of X-Store, https://github.com/951261/X-Store)\n");
+    // The "fork of X-Store" half of this line is not decoration - AGPL-3.0
+    // section 5(a) wants a modified work to say prominently that it has been
+    // modified. Rename the product freely; leave the attribution alone.
+    dprintf("Omni360 " CURRENT_VERSION " (fork of X-Store, https://github.com/951261/X-Store)\n");
 
     if (!InitGameListUI())
     {

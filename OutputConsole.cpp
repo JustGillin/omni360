@@ -1,6 +1,6 @@
 /*
 FILE : OutputConsole.cpp
-PROJECT : xstore
+PROJECT : Omni360
 PROGRAMMER : 951261
 DESCRIPTION : Writes text to the screen. Also writes to debug file
 */

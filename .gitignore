@@ -27,9 +27,9 @@ ipch
 ipch
 
 .env
-free60 store.opensdf
-free60 store.sdf
-free60 store.suo
+Omni360.opensdf
+Omni360.sdf
+Omni360.suo
 
 *.suo
 build_errors.txt

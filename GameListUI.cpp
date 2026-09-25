@@ -1,6 +1,6 @@
 /*
 FILE : GameListUI.cpp
-PROJECT : xstore (DLC fork)
+PROJECT : Omni360
 DESCRIPTION : icon-list game picker + progress bar, replacing X-Store's
               original typed-search text UI for this fork's flow (browse your
               own installed games instead of typing a query).

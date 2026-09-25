@@ -1,6 +1,6 @@
 /*
 FILE : parsing.cpp
-PROJECT : xstore
+PROJECT : Omni360
 PROGRAMMER : 951261
 DESCRIPTION : parses HTTP headers
 */
