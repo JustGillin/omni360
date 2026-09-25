@@ -1,0 +1,121 @@
+<!-- Type 'XBRIGHTS.EXE <filename>' to see the rights for a specific file -->
+
+<Rights>
+    <Right Name="Sample Code" English="Unless otherwise set forth in your Xbox 360 Development Kit License, that\nagreement allows you to reproduce, modify, and make derivative works of the\nSample Code, only for incorporation into one or more Xbox 360 Software Titles.\n" Japanese=""/>
+    <Right Name="Source Code Version of Redistributable Code" English="Unless otherwise set forth in your Xbox 360 Development Kit License, that\nagreement allows you to use the Source Code Version of the Redistributable\nCode in source code form internally only, and only to create and maintain\none or more Xbox 360 Software Titles.\n" Japanese=""/>
+    <Right Name="Object Code Version of Redistributable Code" English="Unless otherwise set forth in your Xbox 360 Development Kit License, that\nagreement allows you to reproduce and incorporate the Object Code Version\nof Redistributable Code in object code form only in and as an inseparable\npart of the Xbox 360 Software Titles.\n" Japanese=""/>
+    <Right Name="Source Code Version of Tools" English="Unless otherwise set forth in your Xbox 360 Development Kit License, that\nagreement allows you to reproduce, modify, and make derivative works of the\nSource Code Version of Tools, but only for internal use, and only to create\nand maintain one or more Xbox 360 Software Titles.\n" Japanese=""/>
+    <Right Name="Object Code Version of Tools" English="Unless otherwise set forth in your Xbox 360 Development Kit License, that\nagreement allows you to use the Object Code Version of Tools internally\nonly for developing and testing Xbox 360 Software Titles.\n" Japanese=""/>
+    <Right Name="Third Party Code" English="Third Party Code may only be used in accordance with the license terms set\nforth in a third party license agreement that applies to such code, or in\naccordance with supplemental license terms provided by Microsoft that apply\nto such code.\n" Japanese=""/>
+    <File Name=".rights" Rights="Object Code Version of Tools"/>
+    <File Name="AtgApobase.h" Rights="Sample Code"/>
+    <File Name="AtgApp.cpp" Rights="Sample Code"/>
+    <File Name="AtgApp.h" Rights="Sample Code"/>
+    <File Name="AtgAudio.cpp" Rights="Sample Code"/>
+    <File Name="AtgAudio.h" Rights="Sample Code"/>
+    <File Name="AtgConsole.cpp" Rights="Sample Code"/>
+    <File Name="AtgConsole.h" Rights="Sample Code"/>
+    <File Name="AtgDevice.cpp" Rights="Sample Code"/>
+    <File Name="AtgDevice.h" Rights="Sample Code"/>
+    <File Name="AtgFont.cpp" Rights="Sample Code"/>
+    <File Name="AtgFont.h" Rights="Sample Code"/>
+    <File Name="AtgHelp.cpp" Rights="Sample Code"/>
+    <File Name="AtgHelp.h" Rights="Sample Code"/>
+    <File Name="AtgHttp.cpp" Rights="Sample Code"/>
+    <File Name="AtgHttp.h" Rights="Sample Code"/>
+    <File Name="AtgInput.cpp" Rights="Sample Code"/>
+    <File Name="AtgInput.h" Rights="Sample Code"/>
+    <File Name="AtgJson.cpp" Rights="Sample Code"/>
+    <File Name="AtgJson.h" Rights="Sample Code"/>
+    <File Name="AtgMediaLocator.cpp" Rights="Sample Code"/>
+    <File Name="AtgMediaLocator.h" Rights="Sample Code"/>
+    <File Name="AtgMesh.cpp" Rights="Sample Code"/>
+    <File Name="AtgMesh.h" Rights="Sample Code"/>
+    <File Name="AtgPostProcess.cpp" Rights="Sample Code"/>
+    <File Name="AtgPostProcess.h" Rights="Sample Code"/>
+    <File Name="AtgResource.cpp" Rights="Sample Code"/>
+    <File Name="AtgResource.h" Rights="Sample Code"/>
+    <File Name="AtgRest.cpp" Rights="Sample Code"/>
+    <File Name="AtgRest.h" Rights="Sample Code"/>
+    <File Name="AtgSignIn.h" Rights="Sample Code"/>
+    <File Name="AtgSignIn.cpp" Rights="Sample Code"/>
+    <File Name="AtgUtil.cpp" Rights="Sample Code"/>
+    <File Name="AtgUtil.h" Rights="Sample Code"/>
+    <File Name="AtgVer.h" Rights="Sample Code"/>
+    <File Name="stdafx.h" Rights="Sample Code"/>
+    <File Name="stdafx.cpp" Rights="Sample Code"/>
+    <File Name="AtgAnimation.h" Rights="Sample Code"/>
+    <File Name="AtgAnimation.cpp" Rights="Sample Code"/>
+    <File Name="AtgAvatarRenderer.h" Rights="Sample Code"/>
+    <File Name="AtgAvatarRenderer.cpp" Rights="Sample Code"/>
+    <File Name="AtgBound.h" Rights="Sample Code"/>
+    <File Name="AtgBound.cpp" Rights="Sample Code"/>
+    <File Name="AtgCollision.h" Rights="Sample Code"/>
+    <File Name="AtgCollision.cpp" Rights="Sample Code"/>
+    <File Name="AtgCamera.cpp" Rights="Sample Code"/>
+    <File Name="AtgCamera.h" Rights="Sample Code"/>
+    <File Name="AtgDebugDraw.h" Rights="Sample Code"/>
+    <File Name="AtgDebugDraw.cpp" Rights="Sample Code"/>
+    <File Name="AtgEnumStrings.h" Rights="Sample Code"/>
+    <File Name="AtgEnumStrings.cpp" Rights="Sample Code"/>
+    <File Name="AtgFrame.h" Rights="Sample Code"/>
+    <File Name="AtgFrame.cpp" Rights="Sample Code"/>
+    <File Name="AtgLight.cpp" Rights="Sample Code"/>
+    <File Name="AtgLight.h" Rights="Sample Code"/>
+    <File Name="AtgLockFreePipe.h" Rights="Sample Code"/>
+    <File Name="AtgMaterials.h" Rights="Sample Code"/>
+    <File Name="AtgMaterials.cpp" Rights="Sample Code"/>
+    <File Name="AtgModel.h" Rights="Sample Code"/>
+    <File Name="AtgModel.cpp" Rights="Sample Code"/>
+    <File Name="AtgNamedTypedObject.h" Rights="Sample Code"/>
+    <File Name="AtgNamedTypedObject.cpp" Rights="Sample Code"/>
+    <File Name="AtgNuiCommon.h" Rights="Sample Code"/>
+    <File Name="AtgNuiCommon.cpp" Rights="Sample Code"/>
+    <File Name="AtgNuiHandRefinement.h" Rights="Sample Code"/>
+    <File Name="AtgNuiHandRefinement.cpp" Rights="Sample Code"/>
+    <File Name="AtgNuiJointConverter.h" Rights="Sample Code"/>
+    <File Name="AtgNuiMenu.cpp" Rights="Sample Code"/>
+    <File Name="AtgNuiMenu.h" Rights="Sample Code"/>
+    <File Name="AtgNuiRelativeCoordinates.cpp" Rights="Sample Code"/>
+    <File Name="AtgNuiRelativeCoordinates.h" Rights="Sample Code"/>
+    <File Name="AtgNuiJointConverter.cpp" Rights="Sample Code"/>
+    <File Name="AtgNuiVisualization.h" Rights="Sample Code"/>
+    <File Name="AtgNuiVisualization.cpp" Rights="Sample Code"/>
+    <File Name="AtgNuiJointFilter.h" Rights="Sample Code"/>
+    <File Name="AtgNuiJointFilter.cpp" Rights="Sample Code"/>
+    <File Name="AtgResourceDatabase.h" Rights="Sample Code"/>
+    <File Name="AtgResourceDatabase.cpp" Rights="Sample Code"/>
+    <File Name="AtgScene.h" Rights="Sample Code"/>
+    <File Name="AtgScene.cpp" Rights="Sample Code"/>
+    <File Name="AtgSceneAll.h" Rights="Sample Code"/>
+    <File Name="AtgSceneMesh.h" Rights="Sample Code"/>
+    <File Name="AtgSceneMesh.cpp" Rights="Sample Code"/>
+    <File Name="AtgSimpleShaders.h" Rights="Sample Code"/>
+    <File Name="AtgSimpleShaders.cpp" Rights="Sample Code"/>
+    <File Name="AtgSceneFileParser.h" Rights="Sample Code"/>
+    <File Name="AtgSceneFileParser.cpp" Rights="Sample Code"/>
+    <File Name="AtgSkeletalAnimation.h" Rights="Sample Code"/>
+    <File Name="AtgSkeletalAnimation.cpp" Rights="Sample Code"/>
+    <File Name="AtgSpectralDisplay.h" Rights="Sample Code"/>
+    <File Name="AtgSpectralDisplay.cpp" Rights="Sample Code"/>
+    <File Name="AtgWavebank.h" Rights="Sample Code"/>
+    <File Name="AtgWavebank.cpp" Rights="Sample Code"/>
+    <File Name="AtgXime.cpp" Rights="Sample Code"/>
+    <File Name="AtgXime.h" Rights="Sample Code"/>
+    <File Name="AtgXmlParser.h" Rights="Sample Code"/>
+    <File Name="AtgXmlParser.cpp" Rights="Sample Code"/>
+    <File Name="AtgXmlWriter.h" Rights="Sample Code"/>
+    <File Name="AtgXmlWriter.cpp" Rights="Sample Code"/>
+    <File Name="AtgDsp.cpp" Rights="Sample Code"/>
+    <File Name="AtgDsp.h" Rights="Sample Code"/>
+    <File Name="AtgMetaVMX.h" Rights="Sample Code"/>
+    <File Name="AtgMeta.h" Rights="Sample Code"/>
+    <File Name="XTLOnPC.h" Rights="Sample Code"/>
+    <File Name="XTLOnPC.cpp" Rights="Sample Code"/>
+    <File Name="AtgSessionManager.h" Rights="Sample Code"/>
+    <File Name="AtgSessionManager.cpp" Rights="Sample Code"/>
+    <File Name="AtgFramework2010.vcxproj" Rights="Sample Code"/>
+    <File Name="AtgFramework2010.vcxproj.filters" Rights="Sample Code"/>
+    <File Name="AtgFrameworkWin322010.vcxproj" Rights="Sample Code"/>
+    <File Name="AtgFrameworkWin322010.vcxproj.filters" Rights="Sample Code"/>
+</Rights>

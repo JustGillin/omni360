@@ -1,0 +1,115 @@
+﻿Build started 25/04/2026 11:13:16 AM.
+     1>Project "C:\Users\stand\Programing_Local\C\XBOX\projects\split xiso extract\Simple 360 NAND Flasher\Common\AtgFramework2010.vcxproj" on node 2 (build target(s)).
+     1>InitializeBuildStatus:
+         Creating "Release_LTCG\AtgFramework.unsuccessfulbuild" because "AlwaysCreate" was specified.
+       ClCompile:
+         C:\Program Files (x86)\Microsoft Xbox 360 SDK\bin\win32\CL.exe /c /Zi /nologo /W4 /WX- /Ox /Oi /Os /GL /D NDEBUG /D _XBOX /D XBOX /D LTCG /D _XBOX_CRT_DEPRECATE_INSECURE /D _MBCS /GF /Gm- /MT /GS- /Gy /fp:fast /fp:except- /Zc:wchar_t /Zc:forScope /GR- /openmp- /Yc"stdafx.h" /Fp"Release_LTCG\AtgFramework.pch" /Fo"Release_LTCG\\" /Fd"Release_LTCG\vc100.pdb" /TP stdafx.cpp /MP /FI"C:\Program Files (x86)\Microsoft Xbox 360 SDK\\include\xbox\xbox_intellisense_platform.h"
+         stdafx.cpp
+         C:\Program Files (x86)\Microsoft Xbox 360 SDK\bin\win32\CL.exe /c /Zi /nologo /W4 /WX- /Ox /Oi /Os /GL /D NDEBUG /D _XBOX /D XBOX /D LTCG /D _XBOX_CRT_DEPRECATE_INSECURE /D _MBCS /GF /Gm- /MT /GS- /Gy /fp:fast /fp:except- /Zc:wchar_t /Zc:forScope /GR- /openmp- /Yu"stdafx.h" /Fp"Release_LTCG\AtgFramework.pch" /Fo"Release_LTCG\\" /Fd"Release_LTCG\vc100.pdb" /TP ATGDsp.cpp ATGNuiJointFilter.cpp ATGSpectralDisplay.cpp AtgAnimation.cpp AtgApp.cpp AtgAudio.cpp AtgAvatarRenderer.cpp AtgBound.cpp AtgCamera.cpp AtgCollision.cpp AtgConsole.cpp AtgDebugDraw.cpp AtgDevice.cpp AtgEnumStrings.cpp AtgFont.cpp AtgFrame.cpp AtgHelp.cpp AtgHttp.cpp AtgInput.cpp AtgJson.cpp AtgLight.cpp AtgMaterials.cpp AtgMediaLocator.cpp AtgMesh.cpp AtgModel.cpp AtgNamedTypedObject.cpp AtgNuiCommon.cpp AtgNuiHandRefinement.cpp AtgNuiJointConverter.cpp AtgNuiMenu.cpp AtgNuiRelativeCoordinates.cpp AtgNuiVisualization.cpp AtgPostProcess.cpp AtgResource.cpp AtgResourceDatabase.cpp AtgRest.cpp AtgScene.cpp AtgSceneFileParser.cpp AtgSceneMesh.cpp AtgSessionManager.cpp AtgSignIn.cpp AtgSimpleShaders.cpp AtgSkeletalAnimation.cpp AtgUtil.cpp AtgWavebank.cpp AtgXime.cpp AtgXmlParser.cpp AtgXmlWriter.cpp /MP /FI"C:\Program Files (x86)\Microsoft Xbox 360 SDK\\include\xbox\xbox_intellisense_platform.h"
+         ATGDsp.cpp
+         ATGNuiJointFilter.cpp
+         ATGSpectralDisplay.cpp
+         AtgAnimation.cpp
+         AtgApp.cpp
+         AtgAudio.cpp
+         AtgAvatarRenderer.cpp
+         AtgBound.cpp
+         AtgCamera.cpp
+         AtgCollision.cpp
+         AtgConsole.cpp
+         AtgDebugDraw.cpp
+         AtgDevice.cpp
+         AtgEnumStrings.cpp
+         AtgFont.cpp
+         AtgFrame.cpp
+         AtgHelp.cpp
+         AtgHttp.cpp
+         AtgInput.cpp
+         AtgJson.cpp
+         AtgLight.cpp
+         AtgMaterials.cpp
+         AtgMediaLocator.cpp
+         AtgMesh.cpp
+         AtgModel.cpp
+         AtgNamedTypedObject.cpp
+         AtgNuiCommon.cpp
+         AtgNuiHandRefinement.cpp
+         AtgNuiJointConverter.cpp
+         AtgNuiMenu.cpp
+         AtgNuiRelativeCoordinates.cpp
+         AtgNuiVisualization.cpp
+         AtgPostProcess.cpp
+         AtgResource.cpp
+         AtgResourceDatabase.cpp
+         AtgRest.cpp
+         AtgScene.cpp
+         AtgSceneFileParser.cpp
+         AtgSceneMesh.cpp
+         AtgSessionManager.cpp
+         AtgSignIn.cpp
+         AtgSimpleShaders.cpp
+         AtgSkeletalAnimation.cpp
+         AtgUtil.cpp
+         AtgWavebank.cpp
+         AtgXime.cpp
+         AtgXmlParser.cpp
+         AtgXmlWriter.cpp
+       Lib:
+         C:\Program Files (x86)\Microsoft Xbox 360 SDK\bin\win32\Lib.exe /OUT:"Release_LTCG\AtgFramework.lib" /NOLOGO /LTCG Release_LTCG\stdafx.obj
+         Release_LTCG\AtgXmlParser.obj
+         Release_LTCG\AtgXmlWriter.obj
+         Release_LTCG\AtgAnimation.obj
+         Release_LTCG\AtgCamera.obj
+         Release_LTCG\AtgFrame.obj
+         Release_LTCG\AtgLight.obj
+         Release_LTCG\AtgMaterials.obj
+         Release_LTCG\AtgModel.obj
+         Release_LTCG\AtgNamedTypedObject.obj
+         Release_LTCG\AtgResourceDatabase.obj
+         Release_LTCG\AtgScene.obj
+         Release_LTCG\AtgSceneMesh.obj
+         Release_LTCG\AtgSkeletalAnimation.obj
+         Release_LTCG\AtgBound.obj
+         Release_LTCG\AtgCollision.obj
+         Release_LTCG\AtgAvatarRenderer.obj
+         Release_LTCG\AtgDebugDraw.obj
+         Release_LTCG\AtgFont.obj
+         Release_LTCG\AtgMesh.obj
+         Release_LTCG\AtgPostProcess.obj
+         Release_LTCG\AtgSimpleShaders.obj
+         Release_LTCG\AtgEnumStrings.obj
+         Release_LTCG\AtgMediaLocator.obj
+         Release_LTCG\AtgResource.obj
+         Release_LTCG\AtgSceneFileParser.obj
+         Release_LTCG\AtgHttp.obj
+         Release_LTCG\AtgJson.obj
+         Release_LTCG\AtgRest.obj
+         Release_LTCG\AtgApp.obj
+         Release_LTCG\AtgConsole.obj
+         Release_LTCG\AtgDevice.obj
+         Release_LTCG\AtgHelp.obj
+         Release_LTCG\AtgInput.obj
+         Release_LTCG\AtgAudio.obj
+         Release_LTCG\ATGDsp.obj
+         Release_LTCG\ATGSpectralDisplay.obj
+         Release_LTCG\AtgWavebank.obj
+         Release_LTCG\AtgUtil.obj
+         Release_LTCG\AtgXime.obj
+         Release_LTCG\AtgSessionManager.obj
+         Release_LTCG\AtgSignIn.obj
+         Release_LTCG\ATGNuiJointFilter.obj
+         Release_LTCG\AtgNuiCommon.obj
+         Release_LTCG\AtgNuiHandRefinement.obj
+         Release_LTCG\AtgNuiJointConverter.obj
+         Release_LTCG\AtgNuiMenu.obj
+         Release_LTCG\AtgNuiRelativeCoordinates.obj
+         Release_LTCG\AtgNuiVisualization.obj
+         AtgFramework2010.vcxproj -> C:\Users\stand\Programing_Local\C\XBOX\projects\split xiso extract\Simple 360 NAND Flasher\Common\Release_LTCG\AtgFramework.lib
+       FinalizeBuildStatus:
+         Deleting file "Release_LTCG\AtgFramework.unsuccessfulbuild".
+         Touching "Release_LTCG\AtgFramework.lastbuildstate".
+     1>Done Building Project "C:\Users\stand\Programing_Local\C\XBOX\projects\split xiso extract\Simple 360 NAND Flasher\Common\AtgFramework2010.vcxproj" (build target(s)).
+
+Build succeeded.
+
+Time Elapsed 00:00:21.69

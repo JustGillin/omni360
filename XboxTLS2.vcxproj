@@ -1,0 +1,655 @@
+﻿<?xml version="1.0" encoding="utf-8"?>
+<Project DefaultTargets="Build" ToolsVersion="4.0" xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
+  <ItemGroup Label="ProjectConfigurations">
+    <ProjectConfiguration Include="CodeAnalysis|Xbox 360">
+      <Configuration>CodeAnalysis</Configuration>
+      <Platform>Xbox 360</Platform>
+    </ProjectConfiguration>
+    <ProjectConfiguration Include="Debug|Xbox 360">
+      <Configuration>Debug</Configuration>
+      <Platform>Xbox 360</Platform>
+    </ProjectConfiguration>
+    <ProjectConfiguration Include="Profile|Xbox 360">
+      <Configuration>Profile</Configuration>
+      <Platform>Xbox 360</Platform>
+    </ProjectConfiguration>
+    <ProjectConfiguration Include="Profile_FastCap|Xbox 360">
+      <Configuration>Profile_FastCap</Configuration>
+      <Platform>Xbox 360</Platform>
+    </ProjectConfiguration>
+    <ProjectConfiguration Include="Release|Xbox 360">
+      <Configuration>Release</Configuration>
+      <Platform>Xbox 360</Platform>
+    </ProjectConfiguration>
+    <ProjectConfiguration Include="Release_LTCG|Xbox 360">
+      <Configuration>Release_LTCG</Configuration>
+      <Platform>Xbox 360</Platform>
+    </ProjectConfiguration>
+  </ItemGroup>
+  <PropertyGroup Label="Globals">
+    <ProjectGuid>{8B766FB7-FB91-4B48-88F0-0ABEDA014DD5}</ProjectGuid>
+    <Keyword>Xbox360Proj</Keyword>
+    <ProjectName>XboxTLS</ProjectName>
+  </PropertyGroup>
+  <Import Project="$(VCTargetsPath)\Microsoft.Cpp.Default.props" />
+  <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='CodeAnalysis|Xbox 360'" Label="Configuration">
+    <ConfigurationType>Application</ConfigurationType>
+    <CharacterSet>MultiByte</CharacterSet>
+  </PropertyGroup>
+  <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Debug|Xbox 360'" Label="Configuration">
+    <ConfigurationType>Application</ConfigurationType>
+    <CharacterSet>MultiByte</CharacterSet>
+  </PropertyGroup>
+  <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Profile|Xbox 360'" Label="Configuration">
+    <ConfigurationType>Application</ConfigurationType>
+    <CharacterSet>MultiByte</CharacterSet>
+  </PropertyGroup>
+  <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Profile_FastCap|Xbox 360'" Label="Configuration">
+    <ConfigurationType>Application</ConfigurationType>
+    <CharacterSet>MultiByte</CharacterSet>
+  </PropertyGroup>
+  <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Release|Xbox 360'" Label="Configuration">
+    <ConfigurationType>Application</ConfigurationType>
+    <CharacterSet>MultiByte</CharacterSet>
+    <WholeProgramOptimization>true</WholeProgramOptimization>
+  </PropertyGroup>
+  <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Release_LTCG|Xbox 360'" Label="Configuration">
+    <ConfigurationType>Application</ConfigurationType>
+    <WholeProgramOptimization>true</WholeProgramOptimization>
+    <CharacterSet>MultiByte</CharacterSet>
+  </PropertyGroup>
+  <Import Project="$(VCTargetsPath)\Microsoft.Cpp.props" />
+  <ImportGroup Label="ExtensionSettings">
+  </ImportGroup>
+  <ImportGroup Label="PropertySheets" Condition="'$(Configuration)|$(Platform)'=='CodeAnalysis|Xbox 360'">
+    <Import Project="$(UserRootDir)\Microsoft.Cpp.$(Platform).user.props" Condition="exists('$(UserRootDir)\Microsoft.Cpp.$(Platform).user.props')" Label="LocalAppDataPlatform" />
+  </ImportGroup>
+  <ImportGroup Label="PropertySheets" Condition="'$(Configuration)|$(Platform)'=='Debug|Xbox 360'">
+    <Import Project="$(UserRootDir)\Microsoft.Cpp.$(Platform).user.props" Condition="exists('$(UserRootDir)\Microsoft.Cpp.$(Platform).user.props')" Label="LocalAppDataPlatform" />
+  </ImportGroup>
+  <ImportGroup Label="PropertySheets" Condition="'$(Configuration)|$(Platform)'=='Profile|Xbox 360'">
+    <Import Project="$(UserRootDir)\Microsoft.Cpp.$(Platform).user.props" Condition="exists('$(UserRootDir)\Microsoft.Cpp.$(Platform).user.props')" Label="LocalAppDataPlatform" />
+  </ImportGroup>
+  <ImportGroup Label="PropertySheets" Condition="'$(Configuration)|$(Platform)'=='Profile_FastCap|Xbox 360'">
+    <Import Project="$(UserRootDir)\Microsoft.Cpp.$(Platform).user.props" Condition="exists('$(UserRootDir)\Microsoft.Cpp.$(Platform).user.props')" Label="LocalAppDataPlatform" />
+  </ImportGroup>
+  <ImportGroup Label="PropertySheets" Condition="'$(Configuration)|$(Platform)'=='Release|Xbox 360'">
+    <Import Project="$(UserRootDir)\Microsoft.Cpp.$(Platform).user.props" Condition="exists('$(UserRootDir)\Microsoft.Cpp.$(Platform).user.props')" Label="LocalAppDataPlatform" />
+  </ImportGroup>
+  <ImportGroup Label="PropertySheets" Condition="'$(Configuration)|$(Platform)'=='Release_LTCG|Xbox 360'">
+    <Import Project="$(UserRootDir)\Microsoft.Cpp.$(Platform).user.props" Condition="exists('$(UserRootDir)\Microsoft.Cpp.$(Platform).user.props')" Label="LocalAppDataPlatform" />
+  </ImportGroup>
+  <PropertyGroup Label="UserMacros" />
+  <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Debug|Xbox 360'">
+    <LinkIncremental>true</LinkIncremental>
+  </PropertyGroup>
+  <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='CodeAnalysis|Xbox 360'">
+    <LinkIncremental>true</LinkIncremental>
+  </PropertyGroup>
+  <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Profile|Xbox 360'">
+    <LinkIncremental>false</LinkIncremental>
+  </PropertyGroup>
+  <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Profile_FastCap|Xbox 360'">
+    <LinkIncremental>false</LinkIncremental>
+  </PropertyGroup>
+  <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Release|Xbox 360'">
+    <LinkIncremental>false</LinkIncremental>
+    <IncludePath>$(IncludePath)</IncludePath>
+    <LibraryPath>$(LibraryPath)</LibraryPath>
+    <RemoteRoot>Hdd1:\Development</RemoteRoot>
+    <PostBuildEventUseInBuild>false</PostBuildEventUseInBuild>
+    <ImageXexOutput>$(OutDir)X-Store.xex</ImageXexOutput>
+  </PropertyGroup>
+  <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Release_LTCG|Xbox 360'">
+    <LinkIncremental>false</LinkIncremental>
+  </PropertyGroup>
+  <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Debug|Xbox 360'">
+    <ClCompile>
+      <PrecompiledHeader>NotUsing</PrecompiledHeader>
+      <WarningLevel>Level3</WarningLevel>
+      <DebugInformationFormat>ProgramDatabase</DebugInformationFormat>
+      <Optimization>Disabled</Optimization>
+      <ExceptionHandling>false</ExceptionHandling>
+      <MinimalRebuild>true</MinimalRebuild>
+      <BufferSecurityCheck>false</BufferSecurityCheck>
+      <PrecompiledHeaderOutputFile>$(OutDir)$(ProjectName).pch</PrecompiledHeaderOutputFile>
+      <RuntimeLibrary>MultiThreadedDebug</RuntimeLibrary>
+      <PreprocessorDefinitions>_DEBUG;_XBOX</PreprocessorDefinitions>
+      <CallAttributedProfiling>Callcap</CallAttributedProfiling>
+      <AdditionalIncludeDirectories>SSL;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+      <CompileAs>Default</CompileAs>
+    </ClCompile>
+    <Link>
+      <GenerateDebugInformation>true</GenerateDebugInformation>
+      <ProgramDatabaseFile>$(OutDir)$(ProjectName).pdb</ProgramDatabaseFile>
+      <AdditionalDependencies>xapilibd.lib;d3d9d.lib;d3dx9d.lib;xgraphicsd.lib;xboxkrnl.lib;xnetd.lib;xaudiod2.lib;xactd3.lib;x3daudiod.lib;xmcored.lib;xbdm.lib;vcompd.lib</AdditionalDependencies>
+    </Link>
+  </ItemDefinitionGroup>
+  <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='CodeAnalysis|Xbox 360'">
+    <ClCompile>
+      <PrecompiledHeader>Use</PrecompiledHeader>
+      <WarningLevel>Level4</WarningLevel>
+      <DebugInformationFormat>ProgramDatabase</DebugInformationFormat>
+      <Optimization>Disabled</Optimization>
+      <ExceptionHandling>false</ExceptionHandling>
+      <MinimalRebuild>true</MinimalRebuild>
+      <PREfast>AnalyzeOnly</PREfast>
+      <BufferSecurityCheck>false</BufferSecurityCheck>
+      <PrecompiledHeaderOutputFile>$(OutDir)$(ProjectName).pch</PrecompiledHeaderOutputFile>
+      <RuntimeLibrary>MultiThreadedDebug</RuntimeLibrary>
+      <PreprocessorDefinitions>_DEBUG;_XBOX</PreprocessorDefinitions>
+      <CallAttributedProfiling>Callcap</CallAttributedProfiling>
+    </ClCompile>
+    <Link>
+      <GenerateDebugInformation>true</GenerateDebugInformation>
+      <ProgramDatabaseFile>$(OutDir)$(ProjectName).pdb</ProgramDatabaseFile>
+      <AdditionalDependencies>xapilibd.lib;d3d9d.lib;d3dx9d.lib;xgraphicsd.lib;xboxkrnl.lib;xnetd.lib;xaudiod2.lib;xactd3.lib;x3daudiod.lib;xmcored.lib;xbdm.lib;vcompd.lib</AdditionalDependencies>
+    </Link>
+  </ItemDefinitionGroup>
+  <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Profile|Xbox 360'">
+    <ClCompile>
+      <WarningLevel>Level3</WarningLevel>
+      <PrecompiledHeader>Use</PrecompiledHeader>
+      <Optimization>Full</Optimization>
+      <FunctionLevelLinking>true</FunctionLevelLinking>
+      <ExceptionHandling>false</ExceptionHandling>
+      <StringPooling>true</StringPooling>
+      <DebugInformationFormat>ProgramDatabase</DebugInformationFormat>
+      <FavorSizeOrSpeed>Size</FavorSizeOrSpeed>
+      <BufferSecurityCheck>false</BufferSecurityCheck>
+      <PrecompiledHeaderOutputFile>$(OutDir)$(ProjectName).pch</PrecompiledHeaderOutputFile>
+      <RuntimeLibrary>MultiThreaded</RuntimeLibrary>
+      <PreprocessorDefinitions>NDEBUG;_XBOX;PROFILE</PreprocessorDefinitions>
+      <CallAttributedProfiling>Callcap</CallAttributedProfiling>
+    </ClCompile>
+    <Link>
+      <GenerateDebugInformation>true</GenerateDebugInformation>
+      <EnableCOMDATFolding>false</EnableCOMDATFolding>
+      <IgnoreSpecificDefaultLibraries>xapilib.lib</IgnoreSpecificDefaultLibraries>
+      <OptimizeReferences>true</OptimizeReferences>
+      <ProgramDatabaseFile>$(OutDir)$(ProjectName).pdb</ProgramDatabaseFile>
+      <SetChecksum>true</SetChecksum>
+      <AdditionalDependencies>xapilibi.lib;d3d9i.lib;d3dx9.lib;xgraphics.lib;xboxkrnl.lib;xnet.lib;xaudio2.lib;xact3i.lib;x3daudioi.lib;xmcorei.lib;xbdm.lib;vcomp.lib</AdditionalDependencies>
+    </Link>
+  </ItemDefinitionGroup>
+  <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Profile_FastCap|Xbox 360'">
+    <ClCompile>
+      <WarningLevel>Level3</WarningLevel>
+      <PrecompiledHeader>Use</PrecompiledHeader>
+      <Optimization>Full</Optimization>
+      <FunctionLevelLinking>true</FunctionLevelLinking>
+      <ExceptionHandling>false</ExceptionHandling>
+      <StringPooling>true</StringPooling>
+      <DebugInformationFormat>ProgramDatabase</DebugInformationFormat>
+      <CallAttributedProfiling>Fastcap</CallAttributedProfiling>
+      <FavorSizeOrSpeed>Size</FavorSizeOrSpeed>
+      <BufferSecurityCheck>false</BufferSecurityCheck>
+      <PrecompiledHeaderOutputFile>$(OutDir)$(ProjectName).pch</PrecompiledHeaderOutputFile>
+      <RuntimeLibrary>MultiThreaded</RuntimeLibrary>
+      <PreprocessorDefinitions>NDEBUG;_XBOX;PROFILE;FASTCAP</PreprocessorDefinitions>
+    </ClCompile>
+    <Link>
+      <GenerateDebugInformation>true</GenerateDebugInformation>
+      <EnableCOMDATFolding>false</EnableCOMDATFolding>
+      <OptimizeReferences>true</OptimizeReferences>
+      <ProgramDatabaseFile>$(OutDir)$(ProjectName).pdb</ProgramDatabaseFile>
+      <SetChecksum>true</SetChecksum>
+      <AdditionalDependencies>xapilib.lib;d3d9.lib;d3dx9.lib;xgraphics.lib;xboxkrnl.lib;xnet.lib;xaudio2.lib;xact3.lib;x3daudio.lib;xmcore.lib;vcomp.lib;xbdm.lib</AdditionalDependencies>
+    </Link>
+  </ItemDefinitionGroup>
+  <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Release|Xbox 360'">
+    <ClCompile>
+      <WarningLevel>TurnOffAllWarnings</WarningLevel>
+      <PrecompiledHeader>NotUsing</PrecompiledHeader>
+      <Optimization>MaxSpeed</Optimization>
+      <FunctionLevelLinking>true</FunctionLevelLinking>
+      <StringPooling>true</StringPooling>
+      <DebugInformationFormat>ProgramDatabase</DebugInformationFormat>
+      <FavorSizeOrSpeed>Speed</FavorSizeOrSpeed>
+      <ExceptionHandling>false</ExceptionHandling>
+      <BufferSecurityCheck>false</BufferSecurityCheck>
+      <PrecompiledHeaderOutputFile>$(OutDir)$(ProjectName).pch</PrecompiledHeaderOutputFile>
+      <RuntimeLibrary>MultiThreaded</RuntimeLibrary>
+      <PreprocessorDefinitions>NDEBUG;_XBOX</PreprocessorDefinitions>
+      <CompileAs>Default</CompileAs>
+      <AdditionalIncludeDirectories>$(ProjectDir);$(ProjectDir)\Common;$(ProjectDir)\SSL;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+      <WholeProgramOptimization>true</WholeProgramOptimization>
+    </ClCompile>
+    <Link>
+      <GenerateDebugInformation>true</GenerateDebugInformation>
+      <EnableCOMDATFolding>true</EnableCOMDATFolding>
+      <OptimizeReferences>true</OptimizeReferences>
+      <ProgramDatabaseFile>$(OutDir)$(ProjectName).pdb</ProgramDatabaseFile>
+      <SetChecksum>true</SetChecksum>
+      <AdditionalDependencies>xapilib.lib;d3d9.lib;d3dx9.lib;xgraphics.lib;xboxkrnl.lib;xnet.lib;xaudio2.lib;xact3.lib;x3daudio.lib;xmcore.lib;vcomp.lib;xuihtml.lib;xuirun.lib;xuirender.lib;xuivideo.lib;xmedia2.lib;AtgFramework.lib</AdditionalDependencies>
+      <AdditionalLibraryDirectories>Common\Release;%(AdditionalLibraryDirectories)</AdditionalLibraryDirectories>
+      <LinkTimeCodeGeneration>UseLinkTimeCodeGeneration</LinkTimeCodeGeneration>
+      <SuppressStartupBanner>true</SuppressStartupBanner>
+    </Link>
+    <ImageXex>
+      <AdditionalSections>font=$(OutDir)Media\Fonts\font.xpr</AdditionalSections>
+      <!-- Kept X-Store's original TitleID (95126000). If you ever want this
+           fork installed alongside an unmodified X-Store on the same
+           console, change this to a different value first - same TitleID
+           means they'd share the same save/content namespace. -->
+      <TitleID>95126000</TitleID>
+    </ImageXex>
+    <Deploy>
+      <DeploymentType>CopyToHardDrive</DeploymentType>
+      <Progress>true</Progress>
+      <ForceCopy>true</ForceCopy>
+    </Deploy>
+  </ItemDefinitionGroup>
+  <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Release_LTCG|Xbox 360'">
+    <ClCompile>
+      <WarningLevel>Level3</WarningLevel>
+      <PrecompiledHeader>Use</PrecompiledHeader>
+      <Optimization>Full</Optimization>
+      <FunctionLevelLinking>true</FunctionLevelLinking>
+      <StringPooling>true</StringPooling>
+      <DebugInformationFormat>ProgramDatabase</DebugInformationFormat>
+      <FavorSizeOrSpeed>Size</FavorSizeOrSpeed>
+      <ExceptionHandling>false</ExceptionHandling>
+      <BufferSecurityCheck>false</BufferSecurityCheck>
+      <PrecompiledHeaderOutputFile>$(OutDir)$(ProjectName).pch</PrecompiledHeaderOutputFile>
+      <RuntimeLibrary>MultiThreaded</RuntimeLibrary>
+      <PreprocessorDefinitions>NDEBUG;_XBOX;LTCG</PreprocessorDefinitions>
+    </ClCompile>
+    <Link>
+      <GenerateDebugInformation>true</GenerateDebugInformation>
+      <EnableCOMDATFolding>true</EnableCOMDATFolding>
+      <OptimizeReferences>true</OptimizeReferences>
+      <ProgramDatabaseFile>$(OutDir)$(ProjectName).pdb</ProgramDatabaseFile>
+      <SetChecksum>true</SetChecksum>
+      <AdditionalDependencies>xapilib.lib;d3d9ltcg.lib;d3dx9.lib;xgraphics.lib;xboxkrnl.lib;xnet.lib;xaudio2.lib;xact3ltcg.lib;x3daudioltcg.lib;xmcoreltcg.lib;vcomp.lib</AdditionalDependencies>
+    </Link>
+  </ItemDefinitionGroup>
+  <ItemGroup>
+    <CustomBuild Include="Media\Fonts\font.rdf">
+      <FileType>Document</FileType>
+      <Command Condition="'$(Configuration)|$(Platform)'=='Release|Xbox 360'">bundler "%(FullPath)" -o "$(OutDir)Media\Fonts\font.xpr"</Command>
+      <Outputs Condition="'$(Configuration)|$(Platform)'=='Release|Xbox 360'">$(OutDir)Media\Fonts\font.xpr</Outputs>
+    </CustomBuild>
+    <None Include="SSL\codec\pemdec.t0" />
+    <None Include="SSL\ssl\ssl_hs_client.t0" />
+    <None Include="SSL\ssl\ssl_hs_common.t0" />
+    <None Include="SSL\ssl\ssl_hs_server.t0" />
+    <None Include="SSL\x509\asn1.t0" />
+    <None Include="SSL\x509\skey_decoder.t0" />
+    <None Include="SSL\x509\x509_decoder.t0" />
+    <None Include="SSL\x509\x509_minimal.t0" />
+  </ItemGroup>
+  <ItemGroup>
+    <ClInclude Include="ArchiveOrgDLC.h" />
+    <ClInclude Include="cJSON.h" />
+    <ClInclude Include="Corona4G.h" />
+    <ClInclude Include="Debug.h" />
+    <ClInclude Include="dns.h" />
+    <ClInclude Include="downloadFile.h" />
+    <ClInclude Include="GameListUI.h" />
+    <ClInclude Include="githubCert.h" />
+    <ClInclude Include="goDaddyRootCA.h" />
+    <ClInclude Include="Keyboard.h" />
+    <ClInclude Include="OutputConsole.h" />
+    <ClInclude Include="parsing.h" />
+    <ClInclude Include="settings.h" />
+    <ClInclude Include="StfsParser.h" />
+    <ClInclude Include="SSL\config.h" />
+    <ClInclude Include="SSL\inc\bearssl.h" />
+    <ClInclude Include="SSL\inc\bearssl_aead.h" />
+    <ClInclude Include="SSL\inc\bearssl_block.h" />
+    <ClInclude Include="SSL\inc\bearssl_ec.h" />
+    <ClInclude Include="SSL\inc\bearssl_hash.h" />
+    <ClInclude Include="SSL\inc\bearssl_hmac.h" />
+    <ClInclude Include="SSL\inc\bearssl_kdf.h" />
+    <ClInclude Include="SSL\inc\bearssl_pem.h" />
+    <ClInclude Include="SSL\inc\bearssl_prf.h" />
+    <ClInclude Include="SSL\inc\bearssl_rand.h" />
+    <ClInclude Include="SSL\inc\bearssl_rsa.h" />
+    <ClInclude Include="SSL\inc\bearssl_ssl.h" />
+    <ClInclude Include="SSL\inc\bearssl_x509.h" />
+    <ClInclude Include="SSL\inner.h" />
+    <ClInclude Include="XboxTLS.h" />
+  </ItemGroup>
+  <ItemGroup>
+    <ClCompile Include="ArchiveOrgDLC.cpp" />
+    <ClCompile Include="cJSON.c" />
+    <ClCompile Include="Corona4G.c" />
+    <ClCompile Include="Debug.cpp" />
+    <ClCompile Include="dns.cpp" />
+    <ClCompile Include="downloadFile.cpp" />
+    <ClCompile Include="GameListUI.cpp" />
+    <ClCompile Include="Keyboard.cpp" />
+    <ClCompile Include="main.cpp" />
+    <ClCompile Include="OutputConsole.cpp" />
+    <ClCompile Include="parsing.cpp" />
+    <ClCompile Include="StfsParser.cpp" />
+    <ClCompile Include="SSL\aead\ccm.c" />
+    <ClCompile Include="SSL\aead\eax.c" />
+    <ClCompile Include="SSL\aead\gcm.c" />
+    <ClCompile Include="SSL\codec\ccopy.c" />
+    <ClCompile Include="SSL\codec\dec16be.c" />
+    <ClCompile Include="SSL\codec\dec16le.c" />
+    <ClCompile Include="SSL\codec\dec32be.c" />
+    <ClCompile Include="SSL\codec\dec32le.c" />
+    <ClCompile Include="SSL\codec\dec64be.c" />
+    <ClCompile Include="SSL\codec\dec64le.c" />
+    <ClCompile Include="SSL\codec\enc16be.c" />
+    <ClCompile Include="SSL\codec\enc16le.c" />
+    <ClCompile Include="SSL\codec\enc32be.c" />
+    <ClCompile Include="SSL\codec\enc32le.c" />
+    <ClCompile Include="SSL\codec\enc64be.c" />
+    <ClCompile Include="SSL\codec\enc64le.c" />
+    <ClCompile Include="SSL\codec\pemdec.c" />
+    <ClCompile Include="SSL\codec\pemenc.c" />
+    <ClCompile Include="SSL\ec\ecdsa_atr.c" />
+    <ClCompile Include="SSL\ec\ecdsa_default_sign_asn1.c" />
+    <ClCompile Include="SSL\ec\ecdsa_default_sign_raw.c" />
+    <ClCompile Include="SSL\ec\ecdsa_default_vrfy_asn1.c" />
+    <ClCompile Include="SSL\ec\ecdsa_default_vrfy_raw.c" />
+    <ClCompile Include="SSL\ec\ecdsa_i15_bits.c" />
+    <ClCompile Include="SSL\ec\ecdsa_i15_sign_asn1.c" />
+    <ClCompile Include="SSL\ec\ecdsa_i15_sign_raw.c" />
+    <ClCompile Include="SSL\ec\ecdsa_i15_vrfy_asn1.c" />
+    <ClCompile Include="SSL\ec\ecdsa_i15_vrfy_raw.c" />
+    <ClCompile Include="SSL\ec\ecdsa_i31_bits.c" />
+    <ClCompile Include="SSL\ec\ecdsa_i31_sign_asn1.c" />
+    <ClCompile Include="SSL\ec\ecdsa_i31_sign_raw.c" />
+    <ClCompile Include="SSL\ec\ecdsa_i31_vrfy_asn1.c" />
+    <ClCompile Include="SSL\ec\ecdsa_i31_vrfy_raw.c" />
+    <ClCompile Include="SSL\ec\ecdsa_rta.c" />
+    <ClCompile Include="SSL\ec\ec_all_m15.c" />
+    <ClCompile Include="SSL\ec\ec_all_m31.c" />
+    <ClCompile Include="SSL\ec\ec_c25519_i15.c" />
+    <ClCompile Include="SSL\ec\ec_c25519_i31.c" />
+    <ClCompile Include="SSL\ec\ec_c25519_m15.c" />
+    <ClCompile Include="SSL\ec\ec_c25519_m31.c" />
+    <ClCompile Include="SSL\ec\ec_c25519_m62.c" />
+    <ClCompile Include="SSL\ec\ec_c25519_m64.c" />
+    <ClCompile Include="SSL\ec\ec_curve25519.c" />
+    <ClCompile Include="SSL\ec\ec_default.c" />
+    <ClCompile Include="SSL\ec\ec_keygen.c" />
+    <ClCompile Include="SSL\ec\ec_p256_m15.c" />
+    <ClCompile Include="SSL\ec\ec_p256_m31.c" />
+    <ClCompile Include="SSL\ec\ec_p256_m62.c" />
+    <ClCompile Include="SSL\ec\ec_p256_m64.c" />
+    <ClCompile Include="SSL\ec\ec_prime_i15.c" />
+    <ClCompile Include="SSL\ec\ec_prime_i31.c" />
+    <ClCompile Include="SSL\ec\ec_pubkey.c" />
+    <ClCompile Include="SSL\ec\ec_secp256r1.c" />
+    <ClCompile Include="SSL\ec\ec_secp384r1.c" />
+    <ClCompile Include="SSL\ec\ec_secp521r1.c" />
+    <ClCompile Include="SSL\hash\dig_oid.c" />
+    <ClCompile Include="SSL\hash\dig_size.c" />
+    <ClCompile Include="SSL\hash\ghash_ctmul.c" />
+    <ClCompile Include="SSL\hash\ghash_ctmul32.c" />
+    <ClCompile Include="SSL\hash\ghash_ctmul64.c" />
+    <ClCompile Include="SSL\hash\ghash_pclmul.c" />
+    <ClCompile Include="SSL\hash\ghash_pwr8.c" />
+    <ClCompile Include="SSL\hash\md5.c" />
+    <ClCompile Include="SSL\hash\md5sha1.c" />
+    <ClCompile Include="SSL\hash\mgf1.c" />
+    <ClCompile Include="SSL\hash\multihash.c" />
+    <ClCompile Include="SSL\hash\sha1.c" />
+    <ClCompile Include="SSL\hash\sha2big.c" />
+    <ClCompile Include="SSL\hash\sha2small.c" />
+    <ClCompile Include="SSL\int\i15_add.c" />
+    <ClCompile Include="SSL\int\i15_bitlen.c" />
+    <ClCompile Include="SSL\int\i15_decmod.c" />
+    <ClCompile Include="SSL\int\i15_decode.c" />
+    <ClCompile Include="SSL\int\i15_decred.c" />
+    <ClCompile Include="SSL\int\i15_encode.c" />
+    <ClCompile Include="SSL\int\i15_fmont.c" />
+    <ClCompile Include="SSL\int\i15_iszero.c" />
+    <ClCompile Include="SSL\int\i15_moddiv.c" />
+    <ClCompile Include="SSL\int\i15_modpow.c" />
+    <ClCompile Include="SSL\int\i15_modpow2.c" />
+    <ClCompile Include="SSL\int\i15_montmul.c" />
+    <ClCompile Include="SSL\int\i15_mulacc.c" />
+    <ClCompile Include="SSL\int\i15_muladd.c" />
+    <ClCompile Include="SSL\int\i15_ninv15.c" />
+    <ClCompile Include="SSL\int\i15_reduce.c" />
+    <ClCompile Include="SSL\int\i15_rshift.c" />
+    <ClCompile Include="SSL\int\i15_sub.c" />
+    <ClCompile Include="SSL\int\i15_tmont.c" />
+    <ClCompile Include="SSL\int\i31_add.c" />
+    <ClCompile Include="SSL\int\i31_bitlen.c" />
+    <ClCompile Include="SSL\int\i31_decmod.c" />
+    <ClCompile Include="SSL\int\i31_decode.c" />
+    <ClCompile Include="SSL\int\i31_decred.c" />
+    <ClCompile Include="SSL\int\i31_encode.c" />
+    <ClCompile Include="SSL\int\i31_fmont.c" />
+    <ClCompile Include="SSL\int\i31_iszero.c" />
+    <ClCompile Include="SSL\int\i31_moddiv.c" />
+    <ClCompile Include="SSL\int\i31_modpow.c" />
+    <ClCompile Include="SSL\int\i31_modpow2.c" />
+    <ClCompile Include="SSL\int\i31_montmul.c" />
+    <ClCompile Include="SSL\int\i31_mulacc.c" />
+    <ClCompile Include="SSL\int\i31_muladd.c" />
+    <ClCompile Include="SSL\int\i31_ninv31.c" />
+    <ClCompile Include="SSL\int\i31_reduce.c" />
+    <ClCompile Include="SSL\int\i31_rshift.c" />
+    <ClCompile Include="SSL\int\i31_sub.c" />
+    <ClCompile Include="SSL\int\i31_tmont.c" />
+    <ClCompile Include="SSL\int\i32_add.c" />
+    <ClCompile Include="SSL\int\i32_bitlen.c" />
+    <ClCompile Include="SSL\int\i32_decmod.c" />
+    <ClCompile Include="SSL\int\i32_decode.c" />
+    <ClCompile Include="SSL\int\i32_decred.c" />
+    <ClCompile Include="SSL\int\i32_div32.c" />
+    <ClCompile Include="SSL\int\i32_encode.c" />
+    <ClCompile Include="SSL\int\i32_fmont.c" />
+    <ClCompile Include="SSL\int\i32_iszero.c" />
+    <ClCompile Include="SSL\int\i32_modpow.c" />
+    <ClCompile Include="SSL\int\i32_montmul.c" />
+    <ClCompile Include="SSL\int\i32_mulacc.c" />
+    <ClCompile Include="SSL\int\i32_muladd.c" />
+    <ClCompile Include="SSL\int\i32_ninv32.c" />
+    <ClCompile Include="SSL\int\i32_reduce.c" />
+    <ClCompile Include="SSL\int\i32_sub.c" />
+    <ClCompile Include="SSL\int\i32_tmont.c" />
+    <ClCompile Include="SSL\int\i62_modpow2.c" />
+    <ClCompile Include="SSL\mac\hmac.c" />
+    <ClCompile Include="SSL\mac\hmac_ct.c" />
+    <ClCompile Include="SSL\rand\aesctr_drbg.c" />
+    <ClCompile Include="SSL\rand\hmac_drbg.c" />
+    <ClCompile Include="SSL\rand\sysrng.c" />
+    <ClCompile Include="SSL\rsa\rsa_default_keygen.c" />
+    <ClCompile Include="SSL\rsa\rsa_default_modulus.c" />
+    <ClCompile Include="SSL\rsa\rsa_default_oaep_decrypt.c" />
+    <ClCompile Include="SSL\rsa\rsa_default_oaep_encrypt.c" />
+    <ClCompile Include="SSL\rsa\rsa_default_pkcs1_sign.c" />
+    <ClCompile Include="SSL\rsa\rsa_default_pkcs1_vrfy.c" />
+    <ClCompile Include="SSL\rsa\rsa_default_priv.c" />
+    <ClCompile Include="SSL\rsa\rsa_default_privexp.c" />
+    <ClCompile Include="SSL\rsa\rsa_default_pss_sign.c" />
+    <ClCompile Include="SSL\rsa\rsa_default_pss_vrfy.c" />
+    <ClCompile Include="SSL\rsa\rsa_default_pub.c" />
+    <ClCompile Include="SSL\rsa\rsa_default_pubexp.c" />
+    <ClCompile Include="SSL\rsa\rsa_i15_keygen.c" />
+    <ClCompile Include="SSL\rsa\rsa_i15_modulus.c" />
+    <ClCompile Include="SSL\rsa\rsa_i15_oaep_decrypt.c" />
+    <ClCompile Include="SSL\rsa\rsa_i15_oaep_encrypt.c" />
+    <ClCompile Include="SSL\rsa\rsa_i15_pkcs1_sign.c" />
+    <ClCompile Include="SSL\rsa\rsa_i15_pkcs1_vrfy.c" />
+    <ClCompile Include="SSL\rsa\rsa_i15_priv.c" />
+    <ClCompile Include="SSL\rsa\rsa_i15_privexp.c" />
+    <ClCompile Include="SSL\rsa\rsa_i15_pss_sign.c" />
+    <ClCompile Include="SSL\rsa\rsa_i15_pss_vrfy.c" />
+    <ClCompile Include="SSL\rsa\rsa_i15_pub.c" />
+    <ClCompile Include="SSL\rsa\rsa_i15_pubexp.c" />
+    <ClCompile Include="SSL\rsa\rsa_i31_keygen.c" />
+    <ClCompile Include="SSL\rsa\rsa_i31_keygen_inner.c" />
+    <ClCompile Include="SSL\rsa\rsa_i31_modulus.c" />
+    <ClCompile Include="SSL\rsa\rsa_i31_oaep_decrypt.c" />
+    <ClCompile Include="SSL\rsa\rsa_i31_oaep_encrypt.c" />
+    <ClCompile Include="SSL\rsa\rsa_i31_pkcs1_sign.c" />
+    <ClCompile Include="SSL\rsa\rsa_i31_pkcs1_vrfy.c" />
+    <ClCompile Include="SSL\rsa\rsa_i31_priv.c" />
+    <ClCompile Include="SSL\rsa\rsa_i31_privexp.c" />
+    <ClCompile Include="SSL\rsa\rsa_i31_pss_sign.c" />
+    <ClCompile Include="SSL\rsa\rsa_i31_pss_vrfy.c" />
+    <ClCompile Include="SSL\rsa\rsa_i31_pub.c" />
+    <ClCompile Include="SSL\rsa\rsa_i31_pubexp.c" />
+    <ClCompile Include="SSL\rsa\rsa_i32_oaep_decrypt.c" />
+    <ClCompile Include="SSL\rsa\rsa_i32_oaep_encrypt.c" />
+    <ClCompile Include="SSL\rsa\rsa_i32_pkcs1_sign.c" />
+    <ClCompile Include="SSL\rsa\rsa_i32_pkcs1_vrfy.c" />
+    <ClCompile Include="SSL\rsa\rsa_i32_priv.c" />
+    <ClCompile Include="SSL\rsa\rsa_i32_pss_sign.c" />
+    <ClCompile Include="SSL\rsa\rsa_i32_pss_vrfy.c" />
+    <ClCompile Include="SSL\rsa\rsa_i32_pub.c" />
+    <ClCompile Include="SSL\rsa\rsa_i62_keygen.c" />
+    <ClCompile Include="SSL\rsa\rsa_i62_oaep_decrypt.c" />
+    <ClCompile Include="SSL\rsa\rsa_i62_oaep_encrypt.c" />
+    <ClCompile Include="SSL\rsa\rsa_i62_pkcs1_sign.c" />
+    <ClCompile Include="SSL\rsa\rsa_i62_pkcs1_vrfy.c" />
+    <ClCompile Include="SSL\rsa\rsa_i62_priv.c" />
+    <ClCompile Include="SSL\rsa\rsa_i62_pss_sign.c" />
+    <ClCompile Include="SSL\rsa\rsa_i62_pss_vrfy.c" />
+    <ClCompile Include="SSL\rsa\rsa_i62_pub.c" />
+    <ClCompile Include="SSL\rsa\rsa_oaep_pad.c" />
+    <ClCompile Include="SSL\rsa\rsa_oaep_unpad.c" />
+    <ClCompile Include="SSL\rsa\rsa_pkcs1_sig_pad.c" />
+    <ClCompile Include="SSL\rsa\rsa_pkcs1_sig_unpad.c" />
+    <ClCompile Include="SSL\rsa\rsa_pss_sig_pad.c" />
+    <ClCompile Include="SSL\rsa\rsa_pss_sig_unpad.c" />
+    <ClCompile Include="SSL\rsa\rsa_ssl_decrypt.c" />
+    <ClCompile Include="SSL\settings.c">
+      <CompileAs Condition="'$(Configuration)|$(Platform)'=='Debug|Xbox 360'">CompileAsC</CompileAs>
+    </ClCompile>
+    <ClCompile Include="SSL\ssl\prf.c" />
+    <ClCompile Include="SSL\ssl\prf_md5sha1.c" />
+    <ClCompile Include="SSL\ssl\prf_sha256.c" />
+    <ClCompile Include="SSL\ssl\prf_sha384.c" />
+    <ClCompile Include="SSL\ssl\ssl_ccert_single_ec.c" />
+    <ClCompile Include="SSL\ssl\ssl_ccert_single_rsa.c" />
+    <ClCompile Include="SSL\ssl\ssl_client.c" />
+    <ClCompile Include="SSL\ssl\ssl_client_default_rsapub.c" />
+    <ClCompile Include="SSL\ssl\ssl_client_full.c" />
+    <ClCompile Include="SSL\ssl\ssl_engine.c" />
+    <ClCompile Include="SSL\ssl\ssl_engine_default_aescbc.c" />
+    <ClCompile Include="SSL\ssl\ssl_engine_default_aesccm.c" />
+    <ClCompile Include="SSL\ssl\ssl_engine_default_aesgcm.c" />
+    <ClCompile Include="SSL\ssl\ssl_engine_default_chapol.c" />
+    <ClCompile Include="SSL\ssl\ssl_engine_default_descbc.c" />
+    <ClCompile Include="SSL\ssl\ssl_engine_default_ec.c" />
+    <ClCompile Include="SSL\ssl\ssl_engine_default_ecdsa.c" />
+    <ClCompile Include="SSL\ssl\ssl_engine_default_rsavrfy.c" />
+    <ClCompile Include="SSL\ssl\ssl_hashes.c" />
+    <ClCompile Include="SSL\ssl\ssl_hs_client.c" />
+    <ClCompile Include="SSL\ssl\ssl_hs_server.c" />
+    <ClCompile Include="SSL\ssl\ssl_io.c" />
+    <ClCompile Include="SSL\ssl\ssl_keyexport.c" />
+    <ClCompile Include="SSL\ssl\ssl_lru.c" />
+    <ClCompile Include="SSL\ssl\ssl_rec_cbc.c" />
+    <ClCompile Include="SSL\ssl\ssl_rec_ccm.c" />
+    <ClCompile Include="SSL\ssl\ssl_rec_chapol.c" />
+    <ClCompile Include="SSL\ssl\ssl_rec_gcm.c" />
+    <ClCompile Include="SSL\ssl\ssl_scert_single_ec.c" />
+    <ClCompile Include="SSL\ssl\ssl_scert_single_rsa.c" />
+    <ClCompile Include="SSL\ssl\ssl_server.c" />
+    <ClCompile Include="SSL\ssl\ssl_server_full_ec.c" />
+    <ClCompile Include="SSL\ssl\ssl_server_full_rsa.c" />
+    <ClCompile Include="SSL\ssl\ssl_server_mine2c.c" />
+    <ClCompile Include="SSL\ssl\ssl_server_mine2g.c" />
+    <ClCompile Include="SSL\ssl\ssl_server_minf2c.c" />
+    <ClCompile Include="SSL\ssl\ssl_server_minf2g.c" />
+    <ClCompile Include="SSL\ssl\ssl_server_minr2g.c" />
+    <ClCompile Include="SSL\ssl\ssl_server_minu2g.c" />
+    <ClCompile Include="SSL\ssl\ssl_server_minv2g.c" />
+    <ClCompile Include="SSL\symcipher\aes_big_cbcdec.c" />
+    <ClCompile Include="SSL\symcipher\aes_big_cbcenc.c" />
+    <ClCompile Include="SSL\symcipher\aes_big_ctr.c" />
+    <ClCompile Include="SSL\symcipher\aes_big_ctrcbc.c" />
+    <ClCompile Include="SSL\symcipher\aes_big_dec.c" />
+    <ClCompile Include="SSL\symcipher\aes_big_enc.c" />
+    <ClCompile Include="SSL\symcipher\aes_common.c" />
+    <ClCompile Include="SSL\symcipher\aes_ct.c" />
+    <ClCompile Include="SSL\symcipher\aes_ct64.c" />
+    <ClCompile Include="SSL\symcipher\aes_ct64_cbcdec.c" />
+    <ClCompile Include="SSL\symcipher\aes_ct64_cbcenc.c" />
+    <ClCompile Include="SSL\symcipher\aes_ct64_ctr.c" />
+    <ClCompile Include="SSL\symcipher\aes_ct64_ctrcbc.c" />
+    <ClCompile Include="SSL\symcipher\aes_ct64_dec.c" />
+    <ClCompile Include="SSL\symcipher\aes_ct64_enc.c" />
+    <ClCompile Include="SSL\symcipher\aes_ct_cbcdec.c" />
+    <ClCompile Include="SSL\symcipher\aes_ct_cbcenc.c" />
+    <ClCompile Include="SSL\symcipher\aes_ct_ctr.c" />
+    <ClCompile Include="SSL\symcipher\aes_ct_ctrcbc.c" />
+    <ClCompile Include="SSL\symcipher\aes_ct_dec.c" />
+    <ClCompile Include="SSL\symcipher\aes_ct_enc.c" />
+    <ClCompile Include="SSL\symcipher\aes_pwr8.c" />
+    <ClCompile Include="SSL\symcipher\aes_pwr8_cbcdec.c" />
+    <ClCompile Include="SSL\symcipher\aes_pwr8_cbcenc.c" />
+    <ClCompile Include="SSL\symcipher\aes_pwr8_ctr.c" />
+    <ClCompile Include="SSL\symcipher\aes_pwr8_ctrcbc.c" />
+    <ClCompile Include="SSL\symcipher\aes_small_cbcdec.c" />
+    <ClCompile Include="SSL\symcipher\aes_small_cbcenc.c" />
+    <ClCompile Include="SSL\symcipher\aes_small_ctr.c" />
+    <ClCompile Include="SSL\symcipher\aes_small_ctrcbc.c" />
+    <ClCompile Include="SSL\symcipher\aes_small_dec.c" />
+    <ClCompile Include="SSL\symcipher\aes_small_enc.c" />
+    <ClCompile Include="SSL\symcipher\aes_x86ni.c" />
+    <ClCompile Include="SSL\symcipher\aes_x86ni_cbcdec.c" />
+    <ClCompile Include="SSL\symcipher\aes_x86ni_cbcenc.c" />
+    <ClCompile Include="SSL\symcipher\aes_x86ni_ctr.c" />
+    <ClCompile Include="SSL\symcipher\aes_x86ni_ctrcbc.c" />
+    <ClCompile Include="SSL\symcipher\chacha20_ct.c" />
+    <ClCompile Include="SSL\symcipher\chacha20_sse2.c" />
+    <ClCompile Include="SSL\symcipher\des_ct.c" />
+    <ClCompile Include="SSL\symcipher\des_ct_cbcdec.c" />
+    <ClCompile Include="SSL\symcipher\des_ct_cbcenc.c" />
+    <ClCompile Include="SSL\symcipher\des_support.c" />
+    <ClCompile Include="SSL\symcipher\des_tab.c" />
+    <ClCompile Include="SSL\symcipher\des_tab_cbcdec.c" />
+    <ClCompile Include="SSL\symcipher\des_tab_cbcenc.c" />
+    <ClCompile Include="SSL\symcipher\poly1305_ctmul.c" />
+    <ClCompile Include="SSL\symcipher\poly1305_ctmul32.c" />
+    <ClCompile Include="SSL\symcipher\poly1305_ctmulq.c">
+      <CompileAs Condition="'$(Configuration)|$(Platform)'=='Debug|Xbox 360'">CompileAsC</CompileAs>
+    </ClCompile>
+    <ClCompile Include="SSL\symcipher\poly1305_i15.c">
+      <CompileAs Condition="'$(Configuration)|$(Platform)'=='Debug|Xbox 360'">CompileAsC</CompileAs>
+    </ClCompile>
+    <ClCompile Include="SSL\x509\asn1enc.c">
+      <CompileAs Condition="'$(Configuration)|$(Platform)'=='Debug|Xbox 360'">Default</CompileAs>
+    </ClCompile>
+    <ClCompile Include="SSL\x509\encode_ec_pk8der.c">
+      <CompileAs Condition="'$(Configuration)|$(Platform)'=='Debug|Xbox 360'">CompileAsC</CompileAs>
+    </ClCompile>
+    <ClCompile Include="SSL\x509\encode_ec_rawder.c">
+      <CompileAs Condition="'$(Configuration)|$(Platform)'=='Debug|Xbox 360'">CompileAsC</CompileAs>
+    </ClCompile>
+    <ClCompile Include="SSL\x509\encode_rsa_pk8der.c">
+      <CompileAs Condition="'$(Configuration)|$(Platform)'=='Debug|Xbox 360'">CompileAsC</CompileAs>
+    </ClCompile>
+    <ClCompile Include="SSL\x509\encode_rsa_rawder.c">
+      <CompileAs Condition="'$(Configuration)|$(Platform)'=='Debug|Xbox 360'">CompileAsC</CompileAs>
+    </ClCompile>
+    <ClCompile Include="SSL\x509\skey_decoder.c">
+      <CompileAs Condition="'$(Configuration)|$(Platform)'=='Debug|Xbox 360'">CompileAsC</CompileAs>
+    </ClCompile>
+    <ClCompile Include="SSL\x509\x509_decoder.c">
+      <CompileAs Condition="'$(Configuration)|$(Platform)'=='Debug|Xbox 360'">CompileAsC</CompileAs>
+    </ClCompile>
+    <ClCompile Include="SSL\x509\x509_knownkey.c">
+      <CompileAs Condition="'$(Configuration)|$(Platform)'=='Debug|Xbox 360'">CompileAsC</CompileAs>
+    </ClCompile>
+    <ClCompile Include="SSL\x509\x509_minimal.c">
+      <CompileAs Condition="'$(Configuration)|$(Platform)'=='Debug|Xbox 360'">CompileAsC</CompileAs>
+    </ClCompile>
+    <ClCompile Include="SSL\x509\x509_minimal_full.c">
+      <CompileAs Condition="'$(Configuration)|$(Platform)'=='Debug|Xbox 360'">CompileAsC</CompileAs>
+    </ClCompile>
+    <ClCompile Include="XboxTLS.cpp" />
+  </ItemGroup>
+  <ItemGroup>
+    <ProjectReference Include="Common\AtgFramework2010.vcxproj">
+      <Project>{91d208a6-9936-47fd-9659-67205c3eb0ab}</Project>
+    </ProjectReference>
+  </ItemGroup>
+  <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />
+  <ImportGroup Label="ExtensionTargets">
+  </ImportGroup>
+</Project>

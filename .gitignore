@@ -1,0 +1,35 @@
+# Build output folders
+**/Release/
+
+# Local reminder folder
+REMEMBER TO OPEN THE .sln FILE!!!/
+
+Release
+
+Profile
+
+Debug
+
+.vscode
+
+ipch
+
+*.sdf
+
+**.sdf
+
+*.ipch
+
+**.ipch
+
+**/*.sdf
+
+ipch
+
+.env
+free60 store.opensdf
+free60 store.sdf
+free60 store.suo
+
+*.suo
+build_errors.txt

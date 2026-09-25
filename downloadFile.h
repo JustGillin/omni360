@@ -1,0 +1,56 @@
+#ifndef DOWNLOAD_FILE_H
+#define DOWNLOAD_FILE_H
+
+#include <string>
+
+enum HttpMethod
+{
+    HTTP_GET,
+    HTTP_POST
+};
+
+/// @brief Called periodically from inside the download read loop so a caller can
+/// draw a real progress bar instead of only getting the text lines printFunction
+/// emits. Both download paths (chunked and non-chunked) report through this.
+///
+/// bytesTotal is 0 when the final size genuinely isn't known (no Content-Length
+/// and no knownTotalSize hint), in which case secondsRemaining is 0 too and only
+/// bytesDone/bytesPerSec are meaningful - a caller should show an indeterminate
+/// state rather than a percentage.
+///
+/// This fires on its own ~100ms throttle, separate from (and much faster than)
+/// the 2-3 second throttle on the text progress prints, so a bar animates
+/// smoothly. Keep implementations cheap: this runs between socket reads, and
+/// anything slow here directly costs download throughput.
+typedef void (*DownloadProgressFn)(unsigned long long bytesDone,
+                                   unsigned long long bytesTotal,
+                                   unsigned long long bytesPerSec,
+                                   unsigned long long secondsRemaining);
+
+/// @brief Formats a byte count as a human-readable string ("12.4 MB"). Already
+/// used internally for the text progress lines; declared here so UI code can
+/// format the same numbers the same way instead of reimplementing it.
+/// output should be ~64 bytes; returns false on a NULL/zero-size buffer.
+bool FormatBytes(unsigned long long bytes, char *output, size_t outputSize);
+
+/// @brief downloads file over https using http 1.1 and tls 1.2
+int downloadFileHTTPS(const std::string URL, const std::string fileName, char *dataBuffer, unsigned long long *outputBufferSize, bool downloadIntoFile, void printFunction(const char *_format, ...));
+
+/// @brief general-purpose HTTPS request supporting GET/POST, a request body, extra
+/// raw request header lines (each ending in "\r\n", e.g. "Cookie: a=b\r\n"), and
+/// optional capture of any Set-Cookie values the response returns (accumulated into
+/// cookieOutBuffer as "name=value; name2=value2"; pass NULL/0 to skip).
+/// knownTotalSize is an optional hint for the final size of the response body,
+/// used for progress/ETA reporting and completion validation when the server
+/// doesn't send a Content-Length (e.g. a chunked response) - pass 0 if unknown.
+/// progressFn, if non-NULL, is called periodically during the body read with
+/// live byte counts - see DownloadProgressFn above.
+int httpRequestHTTPS(const std::string URL, HttpMethod method, const char *requestBody,
+                     const char *extraHeaderLines, const std::string fileName,
+                     char *dataBuffer, unsigned long long *outputBufferSize, bool downloadIntoFile,
+                     char *cookieOutBuffer, unsigned long long cookieOutBufferSize,
+                     void printFunction(const char *_format, ...),
+                     unsigned long long knownTotalSize = 0,
+                     DownloadProgressFn progressFn = NULL);
+
+#endif

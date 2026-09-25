@@ -1,0 +1,1060 @@
+﻿<?xml version="1.0" encoding="utf-8"?>
+<Project ToolsVersion="4.0" xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
+  <ItemGroup>
+    <Filter Include="Source Files">
+      <UniqueIdentifier>{4FC737F1-C7A5-4376-A066-2A32D752A2FF}</UniqueIdentifier>
+      <Extensions>cpp;c;cxx;def;odl;idl;hpj;bat;asm;asmx</Extensions>
+    </Filter>
+    <Filter Include="SSL">
+      <UniqueIdentifier>{53dcca93-f4af-4e93-8c00-f2c4e3ce86f3}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="SSL\aead">
+      <UniqueIdentifier>{b35a9009-bd6e-49af-b75f-b18e87e1ecd3}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="SSL\codec">
+      <UniqueIdentifier>{34ecd3a9-baa8-40b0-9fa4-354594c25fb8}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="SSL\ec">
+      <UniqueIdentifier>{6b5e8a86-dcde-4f1c-8a37-809a4a277719}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="SSL\hash">
+      <UniqueIdentifier>{3d9988bc-11bd-410f-959a-c2583d057a03}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="SSL\inc">
+      <UniqueIdentifier>{5cd840be-2828-4043-b168-c865b87d579c}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="SSL\int">
+      <UniqueIdentifier>{c047c9b8-6379-4ed5-aa52-c48f017cd304}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="SSL\mac">
+      <UniqueIdentifier>{dadaa7f0-dbd9-489d-9bf6-c92ff09699bc}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="SSL\rand">
+      <UniqueIdentifier>{bc555c4f-f98e-4d3b-ac10-4d97d7a80319}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="SSL\rsa">
+      <UniqueIdentifier>{4d7cb161-7f1a-4714-aa65-bd86f6c295dc}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="SSL\ssl">
+      <UniqueIdentifier>{857a80c6-24cc-42f0-80d6-81dc6f548285}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="SSL\symcipher">
+      <UniqueIdentifier>{dd6436c9-b743-4e49-b9b6-ac899bcfba3a}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="SSL\x509">
+      <UniqueIdentifier>{028173a4-505c-4a43-aa84-8074f901b34d}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="Debug">
+      <UniqueIdentifier>{01f6c78f-7a4d-450c-98bb-214b8c745272}</UniqueIdentifier>
+    </Filter>
+  </ItemGroup>
+  <ItemGroup>
+    <None Include="SSL\codec\pemdec.t0">
+      <Filter>SSL\codec</Filter>
+    </None>
+    <None Include="SSL\ssl\ssl_hs_client.t0">
+      <Filter>SSL\ssl</Filter>
+    </None>
+    <None Include="SSL\ssl\ssl_hs_common.t0">
+      <Filter>SSL\ssl</Filter>
+    </None>
+    <None Include="SSL\ssl\ssl_hs_server.t0">
+      <Filter>SSL\ssl</Filter>
+    </None>
+    <None Include="SSL\x509\asn1.t0">
+      <Filter>SSL\x509</Filter>
+    </None>
+    <None Include="SSL\x509\skey_decoder.t0">
+      <Filter>SSL\x509</Filter>
+    </None>
+    <None Include="SSL\x509\x509_decoder.t0">
+      <Filter>SSL\x509</Filter>
+    </None>
+    <None Include="SSL\x509\x509_minimal.t0">
+      <Filter>SSL\x509</Filter>
+    </None>
+  </ItemGroup>
+  <ItemGroup>
+    <ClInclude Include="SSL\inc\bearssl.h">
+      <Filter>SSL\inc</Filter>
+    </ClInclude>
+    <ClInclude Include="SSL\inc\bearssl_aead.h">
+      <Filter>SSL\inc</Filter>
+    </ClInclude>
+    <ClInclude Include="SSL\inc\bearssl_block.h">
+      <Filter>SSL\inc</Filter>
+    </ClInclude>
+    <ClInclude Include="SSL\inc\bearssl_ec.h">
+      <Filter>SSL\inc</Filter>
+    </ClInclude>
+    <ClInclude Include="SSL\inc\bearssl_hash.h">
+      <Filter>SSL\inc</Filter>
+    </ClInclude>
+    <ClInclude Include="SSL\inc\bearssl_hmac.h">
+      <Filter>SSL\inc</Filter>
+    </ClInclude>
+    <ClInclude Include="SSL\inc\bearssl_kdf.h">
+      <Filter>SSL\inc</Filter>
+    </ClInclude>
+    <ClInclude Include="SSL\inc\bearssl_pem.h">
+      <Filter>SSL\inc</Filter>
+    </ClInclude>
+    <ClInclude Include="SSL\inc\bearssl_prf.h">
+      <Filter>SSL\inc</Filter>
+    </ClInclude>
+    <ClInclude Include="SSL\inc\bearssl_rand.h">
+      <Filter>SSL\inc</Filter>
+    </ClInclude>
+    <ClInclude Include="SSL\inc\bearssl_rsa.h">
+      <Filter>SSL\inc</Filter>
+    </ClInclude>
+    <ClInclude Include="SSL\inc\bearssl_ssl.h">
+      <Filter>SSL\inc</Filter>
+    </ClInclude>
+    <ClInclude Include="SSL\inc\bearssl_x509.h">
+      <Filter>SSL\inc</Filter>
+    </ClInclude>
+    <ClInclude Include="SSL\config.h">
+      <Filter>SSL</Filter>
+    </ClInclude>
+    <ClInclude Include="SSL\inner.h">
+      <Filter>SSL</Filter>
+    </ClInclude>
+    <ClInclude Include="Debug.h">
+      <Filter>Debug</Filter>
+    </ClInclude>
+    <ClInclude Include="XboxTLS.h">
+      <Filter>Source Files</Filter>
+    </ClInclude>
+    <ClInclude Include="downloadFile.h">
+      <Filter>Source Files</Filter>
+    </ClInclude>
+    <ClInclude Include="goDaddyRootCA.h">
+      <Filter>Source Files</Filter>
+    </ClInclude>
+    <ClInclude Include="dns.h">
+      <Filter>Source Files</Filter>
+    </ClInclude>
+    <ClInclude Include="parsing.h">
+      <Filter>Source Files</Filter>
+    </ClInclude>
+    <ClInclude Include="Corona4G.h">
+      <Filter>Source Files</Filter>
+    </ClInclude>
+    <ClInclude Include="OutputConsole.h">
+      <Filter>Source Files</Filter>
+    </ClInclude>
+    <ClInclude Include="githubCert.h" />
+    <ClInclude Include="xblaParsing.h">
+      <Filter>Source Files</Filter>
+    </ClInclude>
+  </ItemGroup>
+  <ItemGroup>
+    <ClCompile Include="SSL\aead\ccm.c">
+      <Filter>SSL\aead</Filter>
+    </ClCompile>
+    <ClCompile Include="SSL\aead\eax.c">
+      <Filter>SSL\aead</Filter>
+    </ClCompile>
+    <ClCompile Include="SSL\aead\gcm.c">
+      <Filter>SSL\aead</Filter>
+    </ClCompile>
+    <ClCompile Include="SSL\codec\ccopy.c">
+      <Filter>SSL\codec</Filter>
+    </ClCompile>
+    <ClCompile Include="SSL\codec\dec16be.c">
+      <Filter>SSL\codec</Filter>
+    </ClCompile>
+    <ClCompile Include="SSL\codec\dec16le.c">
+      <Filter>SSL\codec</Filter>
+    </ClCompile>
+    <ClCompile Include="SSL\codec\dec32be.c">
+      <Filter>SSL\codec</Filter>
+    </ClCompile>
+    <ClCompile Include="SSL\codec\dec32le.c">
+      <Filter>SSL\codec</Filter>
+    </ClCompile>
+    <ClCompile Include="SSL\codec\dec64be.c">
+      <Filter>SSL\codec</Filter>
+    </ClCompile>
+    <ClCompile Include="SSL\codec\dec64le.c">
+      <Filter>SSL\codec</Filter>
+    </ClCompile>
+    <ClCompile Include="SSL\codec\enc16be.c">
+      <Filter>SSL\codec</Filter>
+    </ClCompile>
+    <ClCompile Include="SSL\codec\enc16le.c">
+      <Filter>SSL\codec</Filter>
+    </ClCompile>
+    <ClCompile Include="SSL\codec\enc32be.c">
+      <Filter>SSL\codec</Filter>
+    </ClCompile>
+    <ClCompile Include="SSL\codec\enc32le.c">
+      <Filter>SSL\codec</Filter>
+    </ClCompile>
+    <ClCompile Include="SSL\codec\enc64be.c">
+      <Filter>SSL\codec</Filter>
+    </ClCompile>
+    <ClCompile Include="SSL\codec\enc64le.c">
+      <Filter>SSL\codec</Filter>
+    </ClCompile>
+    <ClCompile Include="SSL\codec\pemdec.c">
+      <Filter>SSL\codec</Filter>
+    </ClCompile>
+    <ClCompile Include="SSL\codec\pemenc.c">
+      <Filter>SSL\codec</Filter>
+    </ClCompile>
+    <ClCompile Include="SSL\ec\ec_all_m15.c">
+      <Filter>SSL\ec</Filter>
+    </ClCompile>
+    <ClCompile Include="SSL\ec\ec_all_m31.c">
+      <Filter>SSL\ec</Filter>
+    </ClCompile>
+    <ClCompile Include="SSL\ec\ec_c25519_i15.c">
+      <Filter>SSL\ec</Filter>
+    </ClCompile>
+    <ClCompile Include="SSL\ec\ec_c25519_i31.c">
+      <Filter>SSL\ec</Filter>
+    </ClCompile>
+    <ClCompile Include="SSL\ec\ec_c25519_m15.c">
+      <Filter>SSL\ec</Filter>
+    </ClCompile>
+    <ClCompile Include="SSL\ec\ec_c25519_m31.c">
+      <Filter>SSL\ec</Filter>
+    </ClCompile>
+    <ClCompile Include="SSL\ec\ec_c25519_m62.c">
+      <Filter>SSL\ec</Filter>
+    </ClCompile>
+    <ClCompile Include="SSL\ec\ec_c25519_m64.c">
+      <Filter>SSL\ec</Filter>
+    </ClCompile>
+    <ClCompile Include="SSL\ec\ec_curve25519.c">
+      <Filter>SSL\ec</Filter>
+    </ClCompile>
+    <ClCompile Include="SSL\ec\ec_default.c">
+      <Filter>SSL\ec</Filter>
+    </ClCompile>
+    <ClCompile Include="SSL\ec\ec_keygen.c">
+      <Filter>SSL\ec</Filter>
+    </ClCompile>
+    <ClCompile Include="SSL\ec\ec_p256_m15.c">
+      <Filter>SSL\ec</Filter>
+    </ClCompile>
+    <ClCompile Include="SSL\ec\ec_p256_m31.c">
+      <Filter>SSL\ec</Filter>
+    </ClCompile>
+    <ClCompile Include="SSL\ec\ec_p256_m62.c">
+      <Filter>SSL\ec</Filter>
+    </ClCompile>
+    <ClCompile Include="SSL\ec\ec_p256_m64.c">
+      <Filter>SSL\ec</Filter>
+    </ClCompile>
+    <ClCompile Include="SSL\ec\ec_prime_i15.c">
+      <Filter>SSL\ec</Filter>
+    </ClCompile>
+    <ClCompile Include="SSL\ec\ec_prime_i31.c">
+      <Filter>SSL\ec</Filter>
+    </ClCompile>
+    <ClCompile Include="SSL\ec\ec_pubkey.c">
+      <Filter>SSL\ec</Filter>
+    </ClCompile>
+    <ClCompile Include="SSL\ec\ec_secp256r1.c">
+      <Filter>SSL\ec</Filter>
+    </ClCompile>
+    <ClCompile Include="SSL\ec\ec_secp384r1.c">
+      <Filter>SSL\ec</Filter>
+    </ClCompile>
+    <ClCompile Include="SSL\ec\ec_secp521r1.c">
+      <Filter>SSL\ec</Filter>
+    </ClCompile>
+    <ClCompile Include="SSL\ec\ecdsa_atr.c">
+      <Filter>SSL\ec</Filter>
+    </ClCompile>
+    <ClCompile Include="SSL\ec\ecdsa_default_sign_asn1.c">
+      <Filter>SSL\ec</Filter>
+    </ClCompile>
+    <ClCompile Include="SSL\ec\ecdsa_default_sign_raw.c">
+      <Filter>SSL\ec</Filter>
+    </ClCompile>
+    <ClCompile Include="SSL\ec\ecdsa_default_vrfy_asn1.c">
+      <Filter>SSL\ec</Filter>
+    </ClCompile>
+    <ClCompile Include="SSL\ec\ecdsa_default_vrfy_raw.c">
+      <Filter>SSL\ec</Filter>
+    </ClCompile>
+    <ClCompile Include="SSL\ec\ecdsa_i15_bits.c">
+      <Filter>SSL\ec</Filter>
+    </ClCompile>
+    <ClCompile Include="SSL\ec\ecdsa_i15_sign_asn1.c">
+      <Filter>SSL\ec</Filter>
+    </ClCompile>
+    <ClCompile Include="SSL\ec\ecdsa_i15_sign_raw.c">
+      <Filter>SSL\ec</Filter>
+    </ClCompile>
+    <ClCompile Include="SSL\ec\ecdsa_i15_vrfy_asn1.c">
+      <Filter>SSL\ec</Filter>
+    </ClCompile>
+    <ClCompile Include="SSL\ec\ecdsa_i15_vrfy_raw.c">
+      <Filter>SSL\ec</Filter>
+    </ClCompile>
+    <ClCompile Include="SSL\ec\ecdsa_i31_bits.c">
+      <Filter>SSL\ec</Filter>
+    </ClCompile>
+    <ClCompile Include="SSL\ec\ecdsa_i31_sign_asn1.c">
+      <Filter>SSL\ec</Filter>
+    </ClCompile>
+    <ClCompile Include="SSL\ec\ecdsa_i31_sign_raw.c">
+      <Filter>SSL\ec</Filter>
+    </ClCompile>
+    <ClCompile Include="SSL\ec\ecdsa_i31_vrfy_asn1.c">
+      <Filter>SSL\ec</Filter>
+    </ClCompile>
+    <ClCompile Include="SSL\ec\ecdsa_i31_vrfy_raw.c">
+      <Filter>SSL\ec</Filter>
+    </ClCompile>
+    <ClCompile Include="SSL\ec\ecdsa_rta.c">
+      <Filter>SSL\ec</Filter>
+    </ClCompile>
+    <ClCompile Include="SSL\hash\dig_oid.c">
+      <Filter>SSL\hash</Filter>
+    </ClCompile>
+    <ClCompile Include="SSL\hash\dig_size.c">
+      <Filter>SSL\hash</Filter>
+    </ClCompile>
+    <ClCompile Include="SSL\hash\ghash_ctmul.c">
+      <Filter>SSL\hash</Filter>
+    </ClCompile>
+    <ClCompile Include="SSL\hash\ghash_ctmul32.c">
+      <Filter>SSL\hash</Filter>
+    </ClCompile>
+    <ClCompile Include="SSL\hash\ghash_ctmul64.c">
+      <Filter>SSL\hash</Filter>
+    </ClCompile>
+    <ClCompile Include="SSL\hash\ghash_pclmul.c">
+      <Filter>SSL\hash</Filter>
+    </ClCompile>
+    <ClCompile Include="SSL\hash\ghash_pwr8.c">
+      <Filter>SSL\hash</Filter>
+    </ClCompile>
+    <ClCompile Include="SSL\hash\md5.c">
+      <Filter>SSL\hash</Filter>
+    </ClCompile>
+    <ClCompile Include="SSL\hash\md5sha1.c">
+      <Filter>SSL\hash</Filter>
+    </ClCompile>
+    <ClCompile Include="SSL\hash\mgf1.c">
+      <Filter>SSL\hash</Filter>
+    </ClCompile>
+    <ClCompile Include="SSL\hash\multihash.c">
+      <Filter>SSL\hash</Filter>
+    </ClCompile>
+    <ClCompile Include="SSL\hash\sha1.c">
+      <Filter>SSL\hash</Filter>
+    </ClCompile>
+    <ClCompile Include="SSL\hash\sha2big.c">
+      <Filter>SSL\hash</Filter>
+    </ClCompile>
+    <ClCompile Include="SSL\hash\sha2small.c">
+      <Filter>SSL\hash</Filter>
+    </ClCompile>
+    <ClCompile Include="SSL\int\i15_add.c">
+      <Filter>SSL\int</Filter>
+    </ClCompile>
+    <ClCompile Include="SSL\int\i15_bitlen.c">
+      <Filter>SSL\int</Filter>
+    </ClCompile>
+    <ClCompile Include="SSL\int\i15_decmod.c">
+      <Filter>SSL\int</Filter>
+    </ClCompile>
+    <ClCompile Include="SSL\int\i15_decode.c">
+      <Filter>SSL\int</Filter>
+    </ClCompile>
+    <ClCompile Include="SSL\int\i15_decred.c">
+      <Filter>SSL\int</Filter>
+    </ClCompile>
+    <ClCompile Include="SSL\int\i15_encode.c">
+      <Filter>SSL\int</Filter>
+    </ClCompile>
+    <ClCompile Include="SSL\int\i15_fmont.c">
+      <Filter>SSL\int</Filter>
+    </ClCompile>
+    <ClCompile Include="SSL\int\i15_iszero.c">
+      <Filter>SSL\int</Filter>
+    </ClCompile>
+    <ClCompile Include="SSL\int\i15_moddiv.c">
+      <Filter>SSL\int</Filter>
+    </ClCompile>
+    <ClCompile Include="SSL\int\i15_modpow.c">
+      <Filter>SSL\int</Filter>
+    </ClCompile>
+    <ClCompile Include="SSL\int\i15_modpow2.c">
+      <Filter>SSL\int</Filter>
+    </ClCompile>
+    <ClCompile Include="SSL\int\i15_montmul.c">
+      <Filter>SSL\int</Filter>
+    </ClCompile>
+    <ClCompile Include="SSL\int\i15_mulacc.c">
+      <Filter>SSL\int</Filter>
+    </ClCompile>
+    <ClCompile Include="SSL\int\i15_muladd.c">
+      <Filter>SSL\int</Filter>
+    </ClCompile>
+    <ClCompile Include="SSL\int\i15_ninv15.c">
+      <Filter>SSL\int</Filter>
+    </ClCompile>
+    <ClCompile Include="SSL\int\i15_reduce.c">
+      <Filter>SSL\int</Filter>
+    </ClCompile>
+    <ClCompile Include="SSL\int\i15_rshift.c">
+      <Filter>SSL\int</Filter>
+    </ClCompile>
+    <ClCompile Include="SSL\int\i15_sub.c">
+      <Filter>SSL\int</Filter>
+    </ClCompile>
+    <ClCompile Include="SSL\int\i15_tmont.c">
+      <Filter>SSL\int</Filter>
+    </ClCompile>
+    <ClCompile Include="SSL\int\i31_add.c">
+      <Filter>SSL\int</Filter>
+    </ClCompile>
+    <ClCompile Include="SSL\int\i31_bitlen.c">
+      <Filter>SSL\int</Filter>
+    </ClCompile>
+    <ClCompile Include="SSL\int\i31_decmod.c">
+      <Filter>SSL\int</Filter>
+    </ClCompile>
+    <ClCompile Include="SSL\int\i31_decode.c">
+      <Filter>SSL\int</Filter>
+    </ClCompile>
+    <ClCompile Include="SSL\int\i31_decred.c">
+      <Filter>SSL\int</Filter>
+    </ClCompile>
+    <ClCompile Include="SSL\int\i31_encode.c">
+      <Filter>SSL\int</Filter>
+    </ClCompile>
+    <ClCompile Include="SSL\int\i31_fmont.c">
+      <Filter>SSL\int</Filter>
+    </ClCompile>
+    <ClCompile Include="SSL\int\i31_iszero.c">
+      <Filter>SSL\int</Filter>
+    </ClCompile>
+    <ClCompile Include="SSL\int\i31_moddiv.c">
+      <Filter>SSL\int</Filter>
+    </ClCompile>
+    <ClCompile Include="SSL\int\i31_modpow.c">
+      <Filter>SSL\int</Filter>
+    </ClCompile>
+    <ClCompile Include="SSL\int\i31_modpow2.c">
+      <Filter>SSL\int</Filter>
+    </ClCompile>
+    <ClCompile Include="SSL\int\i31_montmul.c">
+      <Filter>SSL\int</Filter>
+    </ClCompile>
+    <ClCompile Include="SSL\int\i31_mulacc.c">
+      <Filter>SSL\int</Filter>
+    </ClCompile>
+    <ClCompile Include="SSL\int\i31_muladd.c">
+      <Filter>SSL\int</Filter>
+    </ClCompile>
+    <ClCompile Include="SSL\int\i31_ninv31.c">
+      <Filter>SSL\int</Filter>
+    </ClCompile>
+    <ClCompile Include="SSL\int\i31_reduce.c">
+      <Filter>SSL\int</Filter>
+    </ClCompile>
+    <ClCompile Include="SSL\int\i31_rshift.c">
+      <Filter>SSL\int</Filter>
+    </ClCompile>
+    <ClCompile Include="SSL\int\i31_sub.c">
+      <Filter>SSL\int</Filter>
+    </ClCompile>
+    <ClCompile Include="SSL\int\i31_tmont.c">
+      <Filter>SSL\int</Filter>
+    </ClCompile>
+    <ClCompile Include="SSL\int\i32_add.c">
+      <Filter>SSL\int</Filter>
+    </ClCompile>
+    <ClCompile Include="SSL\int\i32_bitlen.c">
+      <Filter>SSL\int</Filter>
+    </ClCompile>
+    <ClCompile Include="SSL\int\i32_decmod.c">
+      <Filter>SSL\int</Filter>
+    </ClCompile>
+    <ClCompile Include="SSL\int\i32_decode.c">
+      <Filter>SSL\int</Filter>
+    </ClCompile>
+    <ClCompile Include="SSL\int\i32_decred.c">
+      <Filter>SSL\int</Filter>
+    </ClCompile>
+    <ClCompile Include="SSL\int\i32_div32.c">
+      <Filter>SSL\int</Filter>
+    </ClCompile>
+    <ClCompile Include="SSL\int\i32_encode.c">
+      <Filter>SSL\int</Filter>
+    </ClCompile>
+    <ClCompile Include="SSL\int\i32_fmont.c">
+      <Filter>SSL\int</Filter>
+    </ClCompile>
+    <ClCompile Include="SSL\int\i32_iszero.c">
+      <Filter>SSL\int</Filter>
+    </ClCompile>
+    <ClCompile Include="SSL\int\i32_modpow.c">
+      <Filter>SSL\int</Filter>
+    </ClCompile>
+    <ClCompile Include="SSL\int\i32_montmul.c">
+      <Filter>SSL\int</Filter>
+    </ClCompile>
+    <ClCompile Include="SSL\int\i32_mulacc.c">
+      <Filter>SSL\int</Filter>
+    </ClCompile>
+    <ClCompile Include="SSL\int\i32_muladd.c">
+      <Filter>SSL\int</Filter>
+    </ClCompile>
+    <ClCompile Include="SSL\int\i32_ninv32.c">
+      <Filter>SSL\int</Filter>
+    </ClCompile>
+    <ClCompile Include="SSL\int\i32_reduce.c">
+      <Filter>SSL\int</Filter>
+    </ClCompile>
+    <ClCompile Include="SSL\int\i32_sub.c">
+      <Filter>SSL\int</Filter>
+    </ClCompile>
+    <ClCompile Include="SSL\int\i32_tmont.c">
+      <Filter>SSL\int</Filter>
+    </ClCompile>
+    <ClCompile Include="SSL\int\i62_modpow2.c">
+      <Filter>SSL\int</Filter>
+    </ClCompile>
+    <ClCompile Include="SSL\mac\hmac.c">
+      <Filter>SSL\mac</Filter>
+    </ClCompile>
+    <ClCompile Include="SSL\mac\hmac_ct.c">
+      <Filter>SSL\mac</Filter>
+    </ClCompile>
+    <ClCompile Include="SSL\rand\aesctr_drbg.c">
+      <Filter>SSL\rand</Filter>
+    </ClCompile>
+    <ClCompile Include="SSL\rand\hmac_drbg.c">
+      <Filter>SSL\rand</Filter>
+    </ClCompile>
+    <ClCompile Include="SSL\rand\sysrng.c">
+      <Filter>SSL\rand</Filter>
+    </ClCompile>
+    <ClCompile Include="SSL\rsa\rsa_default_keygen.c">
+      <Filter>SSL\rsa</Filter>
+    </ClCompile>
+    <ClCompile Include="SSL\rsa\rsa_default_modulus.c">
+      <Filter>SSL\rsa</Filter>
+    </ClCompile>
+    <ClCompile Include="SSL\rsa\rsa_default_oaep_decrypt.c">
+      <Filter>SSL\rsa</Filter>
+    </ClCompile>
+    <ClCompile Include="SSL\rsa\rsa_default_oaep_encrypt.c">
+      <Filter>SSL\rsa</Filter>
+    </ClCompile>
+    <ClCompile Include="SSL\rsa\rsa_default_pkcs1_sign.c">
+      <Filter>SSL\rsa</Filter>
+    </ClCompile>
+    <ClCompile Include="SSL\rsa\rsa_default_pkcs1_vrfy.c">
+      <Filter>SSL\rsa</Filter>
+    </ClCompile>
+    <ClCompile Include="SSL\rsa\rsa_default_priv.c">
+      <Filter>SSL\rsa</Filter>
+    </ClCompile>
+    <ClCompile Include="SSL\rsa\rsa_default_privexp.c">
+      <Filter>SSL\rsa</Filter>
+    </ClCompile>
+    <ClCompile Include="SSL\rsa\rsa_default_pss_sign.c">
+      <Filter>SSL\rsa</Filter>
+    </ClCompile>
+    <ClCompile Include="SSL\rsa\rsa_default_pss_vrfy.c">
+      <Filter>SSL\rsa</Filter>
+    </ClCompile>
+    <ClCompile Include="SSL\rsa\rsa_default_pub.c">
+      <Filter>SSL\rsa</Filter>
+    </ClCompile>
+    <ClCompile Include="SSL\rsa\rsa_default_pubexp.c">
+      <Filter>SSL\rsa</Filter>
+    </ClCompile>
+    <ClCompile Include="SSL\rsa\rsa_i15_keygen.c">
+      <Filter>SSL\rsa</Filter>
+    </ClCompile>
+    <ClCompile Include="SSL\rsa\rsa_i15_modulus.c">
+      <Filter>SSL\rsa</Filter>
+    </ClCompile>
+    <ClCompile Include="SSL\rsa\rsa_i15_oaep_decrypt.c">
+      <Filter>SSL\rsa</Filter>
+    </ClCompile>
+    <ClCompile Include="SSL\rsa\rsa_i15_oaep_encrypt.c">
+      <Filter>SSL\rsa</Filter>
+    </ClCompile>
+    <ClCompile Include="SSL\rsa\rsa_i15_pkcs1_sign.c">
+      <Filter>SSL\rsa</Filter>
+    </ClCompile>
+    <ClCompile Include="SSL\rsa\rsa_i15_pkcs1_vrfy.c">
+      <Filter>SSL\rsa</Filter>
+    </ClCompile>
+    <ClCompile Include="SSL\rsa\rsa_i15_priv.c">
+      <Filter>SSL\rsa</Filter>
+    </ClCompile>
+    <ClCompile Include="SSL\rsa\rsa_i15_privexp.c">
+      <Filter>SSL\rsa</Filter>
+    </ClCompile>
+    <ClCompile Include="SSL\rsa\rsa_i15_pss_sign.c">
+      <Filter>SSL\rsa</Filter>
+    </ClCompile>
+    <ClCompile Include="SSL\rsa\rsa_i15_pss_vrfy.c">
+      <Filter>SSL\rsa</Filter>
+    </ClCompile>
+    <ClCompile Include="SSL\rsa\rsa_i15_pub.c">
+      <Filter>SSL\rsa</Filter>
+    </ClCompile>
+    <ClCompile Include="SSL\rsa\rsa_i15_pubexp.c">
+      <Filter>SSL\rsa</Filter>
+    </ClCompile>
+    <ClCompile Include="SSL\rsa\rsa_i31_keygen.c">
+      <Filter>SSL\rsa</Filter>
+    </ClCompile>
+    <ClCompile Include="SSL\rsa\rsa_i31_keygen_inner.c">
+      <Filter>SSL\rsa</Filter>
+    </ClCompile>
+    <ClCompile Include="SSL\rsa\rsa_i31_modulus.c">
+      <Filter>SSL\rsa</Filter>
+    </ClCompile>
+    <ClCompile Include="SSL\rsa\rsa_i31_oaep_decrypt.c">
+      <Filter>SSL\rsa</Filter>
+    </ClCompile>
+    <ClCompile Include="SSL\rsa\rsa_i31_oaep_encrypt.c">
+      <Filter>SSL\rsa</Filter>
+    </ClCompile>
+    <ClCompile Include="SSL\rsa\rsa_i31_pkcs1_sign.c">
+      <Filter>SSL\rsa</Filter>
+    </ClCompile>
+    <ClCompile Include="SSL\rsa\rsa_i31_pkcs1_vrfy.c">
+      <Filter>SSL\rsa</Filter>
+    </ClCompile>
+    <ClCompile Include="SSL\rsa\rsa_i31_priv.c">
+      <Filter>SSL\rsa</Filter>
+    </ClCompile>
+    <ClCompile Include="SSL\rsa\rsa_i31_privexp.c">
+      <Filter>SSL\rsa</Filter>
+    </ClCompile>
+    <ClCompile Include="SSL\rsa\rsa_i31_pss_sign.c">
+      <Filter>SSL\rsa</Filter>
+    </ClCompile>
+    <ClCompile Include="SSL\rsa\rsa_i31_pss_vrfy.c">
+      <Filter>SSL\rsa</Filter>
+    </ClCompile>
+    <ClCompile Include="SSL\rsa\rsa_i31_pub.c">
+      <Filter>SSL\rsa</Filter>
+    </ClCompile>
+    <ClCompile Include="SSL\rsa\rsa_i31_pubexp.c">
+      <Filter>SSL\rsa</Filter>
+    </ClCompile>
+    <ClCompile Include="SSL\rsa\rsa_i32_oaep_decrypt.c">
+      <Filter>SSL\rsa</Filter>
+    </ClCompile>
+    <ClCompile Include="SSL\rsa\rsa_i32_oaep_encrypt.c">
+      <Filter>SSL\rsa</Filter>
+    </ClCompile>
+    <ClCompile Include="SSL\rsa\rsa_i32_pkcs1_sign.c">
+      <Filter>SSL\rsa</Filter>
+    </ClCompile>
+    <ClCompile Include="SSL\rsa\rsa_i32_pkcs1_vrfy.c">
+      <Filter>SSL\rsa</Filter>
+    </ClCompile>
+    <ClCompile Include="SSL\rsa\rsa_i32_priv.c">
+      <Filter>SSL\rsa</Filter>
+    </ClCompile>
+    <ClCompile Include="SSL\rsa\rsa_i32_pss_sign.c">
+      <Filter>SSL\rsa</Filter>
+    </ClCompile>
+    <ClCompile Include="SSL\rsa\rsa_i32_pss_vrfy.c">
+      <Filter>SSL\rsa</Filter>
+    </ClCompile>
+    <ClCompile Include="SSL\rsa\rsa_i32_pub.c">
+      <Filter>SSL\rsa</Filter>
+    </ClCompile>
+    <ClCompile Include="SSL\rsa\rsa_i62_keygen.c">
+      <Filter>SSL\rsa</Filter>
+    </ClCompile>
+    <ClCompile Include="SSL\rsa\rsa_i62_oaep_decrypt.c">
+      <Filter>SSL\rsa</Filter>
+    </ClCompile>
+    <ClCompile Include="SSL\rsa\rsa_i62_oaep_encrypt.c">
+      <Filter>SSL\rsa</Filter>
+    </ClCompile>
+    <ClCompile Include="SSL\rsa\rsa_i62_pkcs1_sign.c">
+      <Filter>SSL\rsa</Filter>
+    </ClCompile>
+    <ClCompile Include="SSL\rsa\rsa_i62_pkcs1_vrfy.c">
+      <Filter>SSL\rsa</Filter>
+    </ClCompile>
+    <ClCompile Include="SSL\rsa\rsa_i62_priv.c">
+      <Filter>SSL\rsa</Filter>
+    </ClCompile>
+    <ClCompile Include="SSL\rsa\rsa_i62_pss_sign.c">
+      <Filter>SSL\rsa</Filter>
+    </ClCompile>
+    <ClCompile Include="SSL\rsa\rsa_i62_pss_vrfy.c">
+      <Filter>SSL\rsa</Filter>
+    </ClCompile>
+    <ClCompile Include="SSL\rsa\rsa_i62_pub.c">
+      <Filter>SSL\rsa</Filter>
+    </ClCompile>
+    <ClCompile Include="SSL\rsa\rsa_oaep_pad.c">
+      <Filter>SSL\rsa</Filter>
+    </ClCompile>
+    <ClCompile Include="SSL\rsa\rsa_oaep_unpad.c">
+      <Filter>SSL\rsa</Filter>
+    </ClCompile>
+    <ClCompile Include="SSL\rsa\rsa_pkcs1_sig_pad.c">
+      <Filter>SSL\rsa</Filter>
+    </ClCompile>
+    <ClCompile Include="SSL\rsa\rsa_pkcs1_sig_unpad.c">
+      <Filter>SSL\rsa</Filter>
+    </ClCompile>
+    <ClCompile Include="SSL\rsa\rsa_pss_sig_pad.c">
+      <Filter>SSL\rsa</Filter>
+    </ClCompile>
+    <ClCompile Include="SSL\rsa\rsa_pss_sig_unpad.c">
+      <Filter>SSL\rsa</Filter>
+    </ClCompile>
+    <ClCompile Include="SSL\rsa\rsa_ssl_decrypt.c">
+      <Filter>SSL\rsa</Filter>
+    </ClCompile>
+    <ClCompile Include="SSL\ssl\prf.c">
+      <Filter>SSL\ssl</Filter>
+    </ClCompile>
+    <ClCompile Include="SSL\ssl\prf_md5sha1.c">
+      <Filter>SSL\ssl</Filter>
+    </ClCompile>
+    <ClCompile Include="SSL\ssl\prf_sha256.c">
+      <Filter>SSL\ssl</Filter>
+    </ClCompile>
+    <ClCompile Include="SSL\ssl\prf_sha384.c">
+      <Filter>SSL\ssl</Filter>
+    </ClCompile>
+    <ClCompile Include="SSL\ssl\ssl_ccert_single_ec.c">
+      <Filter>SSL\ssl</Filter>
+    </ClCompile>
+    <ClCompile Include="SSL\ssl\ssl_ccert_single_rsa.c">
+      <Filter>SSL\ssl</Filter>
+    </ClCompile>
+    <ClCompile Include="SSL\ssl\ssl_client.c">
+      <Filter>SSL\ssl</Filter>
+    </ClCompile>
+    <ClCompile Include="SSL\ssl\ssl_client_default_rsapub.c">
+      <Filter>SSL\ssl</Filter>
+    </ClCompile>
+    <ClCompile Include="SSL\ssl\ssl_client_full.c">
+      <Filter>SSL\ssl</Filter>
+    </ClCompile>
+    <ClCompile Include="SSL\ssl\ssl_engine.c">
+      <Filter>SSL\ssl</Filter>
+    </ClCompile>
+    <ClCompile Include="SSL\ssl\ssl_engine_default_aescbc.c">
+      <Filter>SSL\ssl</Filter>
+    </ClCompile>
+    <ClCompile Include="SSL\ssl\ssl_engine_default_aesccm.c">
+      <Filter>SSL\ssl</Filter>
+    </ClCompile>
+    <ClCompile Include="SSL\ssl\ssl_engine_default_aesgcm.c">
+      <Filter>SSL\ssl</Filter>
+    </ClCompile>
+    <ClCompile Include="SSL\ssl\ssl_engine_default_chapol.c">
+      <Filter>SSL\ssl</Filter>
+    </ClCompile>
+    <ClCompile Include="SSL\ssl\ssl_engine_default_descbc.c">
+      <Filter>SSL\ssl</Filter>
+    </ClCompile>
+    <ClCompile Include="SSL\ssl\ssl_engine_default_ec.c">
+      <Filter>SSL\ssl</Filter>
+    </ClCompile>
+    <ClCompile Include="SSL\ssl\ssl_engine_default_ecdsa.c">
+      <Filter>SSL\ssl</Filter>
+    </ClCompile>
+    <ClCompile Include="SSL\ssl\ssl_engine_default_rsavrfy.c">
+      <Filter>SSL\ssl</Filter>
+    </ClCompile>
+    <ClCompile Include="SSL\ssl\ssl_hashes.c">
+      <Filter>SSL\ssl</Filter>
+    </ClCompile>
+    <ClCompile Include="SSL\ssl\ssl_hs_client.c">
+      <Filter>SSL\ssl</Filter>
+    </ClCompile>
+    <ClCompile Include="SSL\ssl\ssl_hs_server.c">
+      <Filter>SSL\ssl</Filter>
+    </ClCompile>
+    <ClCompile Include="SSL\ssl\ssl_io.c">
+      <Filter>SSL\ssl</Filter>
+    </ClCompile>
+    <ClCompile Include="SSL\ssl\ssl_keyexport.c">
+      <Filter>SSL\ssl</Filter>
+    </ClCompile>
+    <ClCompile Include="SSL\ssl\ssl_lru.c">
+      <Filter>SSL\ssl</Filter>
+    </ClCompile>
+    <ClCompile Include="SSL\ssl\ssl_rec_cbc.c">
+      <Filter>SSL\ssl</Filter>
+    </ClCompile>
+    <ClCompile Include="SSL\ssl\ssl_rec_ccm.c">
+      <Filter>SSL\ssl</Filter>
+    </ClCompile>
+    <ClCompile Include="SSL\ssl\ssl_rec_chapol.c">
+      <Filter>SSL\ssl</Filter>
+    </ClCompile>
+    <ClCompile Include="SSL\ssl\ssl_rec_gcm.c">
+      <Filter>SSL\ssl</Filter>
+    </ClCompile>
+    <ClCompile Include="SSL\ssl\ssl_scert_single_ec.c">
+      <Filter>SSL\ssl</Filter>
+    </ClCompile>
+    <ClCompile Include="SSL\ssl\ssl_scert_single_rsa.c">
+      <Filter>SSL\ssl</Filter>
+    </ClCompile>
+    <ClCompile Include="SSL\ssl\ssl_server.c">
+      <Filter>SSL\ssl</Filter>
+    </ClCompile>
+    <ClCompile Include="SSL\ssl\ssl_server_full_ec.c">
+      <Filter>SSL\ssl</Filter>
+    </ClCompile>
+    <ClCompile Include="SSL\ssl\ssl_server_full_rsa.c">
+      <Filter>SSL\ssl</Filter>
+    </ClCompile>
+    <ClCompile Include="SSL\ssl\ssl_server_mine2c.c">
+      <Filter>SSL\ssl</Filter>
+    </ClCompile>
+    <ClCompile Include="SSL\ssl\ssl_server_mine2g.c">
+      <Filter>SSL\ssl</Filter>
+    </ClCompile>
+    <ClCompile Include="SSL\ssl\ssl_server_minf2c.c">
+      <Filter>SSL\ssl</Filter>
+    </ClCompile>
+    <ClCompile Include="SSL\ssl\ssl_server_minf2g.c">
+      <Filter>SSL\ssl</Filter>
+    </ClCompile>
+    <ClCompile Include="SSL\ssl\ssl_server_minr2g.c">
+      <Filter>SSL\ssl</Filter>
+    </ClCompile>
+    <ClCompile Include="SSL\ssl\ssl_server_minu2g.c">
+      <Filter>SSL\ssl</Filter>
+    </ClCompile>
+    <ClCompile Include="SSL\ssl\ssl_server_minv2g.c">
+      <Filter>SSL\ssl</Filter>
+    </ClCompile>
+    <ClCompile Include="SSL\symcipher\aes_big_cbcdec.c">
+      <Filter>SSL\symcipher</Filter>
+    </ClCompile>
+    <ClCompile Include="SSL\symcipher\aes_big_cbcenc.c">
+      <Filter>SSL\symcipher</Filter>
+    </ClCompile>
+    <ClCompile Include="SSL\symcipher\aes_big_ctr.c">
+      <Filter>SSL\symcipher</Filter>
+    </ClCompile>
+    <ClCompile Include="SSL\symcipher\aes_big_ctrcbc.c">
+      <Filter>SSL\symcipher</Filter>
+    </ClCompile>
+    <ClCompile Include="SSL\symcipher\aes_big_dec.c">
+      <Filter>SSL\symcipher</Filter>
+    </ClCompile>
+    <ClCompile Include="SSL\symcipher\aes_big_enc.c">
+      <Filter>SSL\symcipher</Filter>
+    </ClCompile>
+    <ClCompile Include="SSL\symcipher\aes_common.c">
+      <Filter>SSL\symcipher</Filter>
+    </ClCompile>
+    <ClCompile Include="SSL\symcipher\aes_ct.c">
+      <Filter>SSL\symcipher</Filter>
+    </ClCompile>
+    <ClCompile Include="SSL\symcipher\aes_ct_cbcdec.c">
+      <Filter>SSL\symcipher</Filter>
+    </ClCompile>
+    <ClCompile Include="SSL\symcipher\aes_ct_cbcenc.c">
+      <Filter>SSL\symcipher</Filter>
+    </ClCompile>
+    <ClCompile Include="SSL\symcipher\aes_ct_ctr.c">
+      <Filter>SSL\symcipher</Filter>
+    </ClCompile>
+    <ClCompile Include="SSL\symcipher\aes_ct_ctrcbc.c">
+      <Filter>SSL\symcipher</Filter>
+    </ClCompile>
+    <ClCompile Include="SSL\symcipher\aes_ct_dec.c">
+      <Filter>SSL\symcipher</Filter>
+    </ClCompile>
+    <ClCompile Include="SSL\symcipher\aes_ct_enc.c">
+      <Filter>SSL\symcipher</Filter>
+    </ClCompile>
+    <ClCompile Include="SSL\symcipher\aes_ct64.c">
+      <Filter>SSL\symcipher</Filter>
+    </ClCompile>
+    <ClCompile Include="SSL\symcipher\aes_ct64_cbcdec.c">
+      <Filter>SSL\symcipher</Filter>
+    </ClCompile>
+    <ClCompile Include="SSL\symcipher\aes_ct64_cbcenc.c">
+      <Filter>SSL\symcipher</Filter>
+    </ClCompile>
+    <ClCompile Include="SSL\symcipher\aes_ct64_ctr.c">
+      <Filter>SSL\symcipher</Filter>
+    </ClCompile>
+    <ClCompile Include="SSL\symcipher\aes_ct64_ctrcbc.c">
+      <Filter>SSL\symcipher</Filter>
+    </ClCompile>
+    <ClCompile Include="SSL\symcipher\aes_ct64_dec.c">
+      <Filter>SSL\symcipher</Filter>
+    </ClCompile>
+    <ClCompile Include="SSL\symcipher\aes_ct64_enc.c">
+      <Filter>SSL\symcipher</Filter>
+    </ClCompile>
+    <ClCompile Include="SSL\symcipher\aes_pwr8.c">
+      <Filter>SSL\symcipher</Filter>
+    </ClCompile>
+    <ClCompile Include="SSL\symcipher\aes_pwr8_cbcdec.c">
+      <Filter>SSL\symcipher</Filter>
+    </ClCompile>
+    <ClCompile Include="SSL\symcipher\aes_pwr8_cbcenc.c">
+      <Filter>SSL\symcipher</Filter>
+    </ClCompile>
+    <ClCompile Include="SSL\symcipher\aes_pwr8_ctr.c">
+      <Filter>SSL\symcipher</Filter>
+    </ClCompile>
+    <ClCompile Include="SSL\symcipher\aes_pwr8_ctrcbc.c">
+      <Filter>SSL\symcipher</Filter>
+    </ClCompile>
+    <ClCompile Include="SSL\symcipher\aes_small_cbcdec.c">
+      <Filter>SSL\symcipher</Filter>
+    </ClCompile>
+    <ClCompile Include="SSL\symcipher\aes_small_cbcenc.c">
+      <Filter>SSL\symcipher</Filter>
+    </ClCompile>
+    <ClCompile Include="SSL\symcipher\aes_small_ctr.c">
+      <Filter>SSL\symcipher</Filter>
+    </ClCompile>
+    <ClCompile Include="SSL\symcipher\aes_small_ctrcbc.c">
+      <Filter>SSL\symcipher</Filter>
+    </ClCompile>
+    <ClCompile Include="SSL\symcipher\aes_small_dec.c">
+      <Filter>SSL\symcipher</Filter>
+    </ClCompile>
+    <ClCompile Include="SSL\symcipher\aes_small_enc.c">
+      <Filter>SSL\symcipher</Filter>
+    </ClCompile>
+    <ClCompile Include="SSL\symcipher\aes_x86ni.c">
+      <Filter>SSL\symcipher</Filter>
+    </ClCompile>
+    <ClCompile Include="SSL\symcipher\aes_x86ni_cbcdec.c">
+      <Filter>SSL\symcipher</Filter>
+    </ClCompile>
+    <ClCompile Include="SSL\symcipher\aes_x86ni_cbcenc.c">
+      <Filter>SSL\symcipher</Filter>
+    </ClCompile>
+    <ClCompile Include="SSL\symcipher\aes_x86ni_ctr.c">
+      <Filter>SSL\symcipher</Filter>
+    </ClCompile>
+    <ClCompile Include="SSL\symcipher\aes_x86ni_ctrcbc.c">
+      <Filter>SSL\symcipher</Filter>
+    </ClCompile>
+    <ClCompile Include="SSL\symcipher\chacha20_ct.c">
+      <Filter>SSL\symcipher</Filter>
+    </ClCompile>
+    <ClCompile Include="SSL\symcipher\chacha20_sse2.c">
+      <Filter>SSL\symcipher</Filter>
+    </ClCompile>
+    <ClCompile Include="SSL\symcipher\des_ct.c">
+      <Filter>SSL\symcipher</Filter>
+    </ClCompile>
+    <ClCompile Include="SSL\symcipher\des_ct_cbcdec.c">
+      <Filter>SSL\symcipher</Filter>
+    </ClCompile>
+    <ClCompile Include="SSL\symcipher\des_ct_cbcenc.c">
+      <Filter>SSL\symcipher</Filter>
+    </ClCompile>
+    <ClCompile Include="SSL\symcipher\des_support.c">
+      <Filter>SSL\symcipher</Filter>
+    </ClCompile>
+    <ClCompile Include="SSL\symcipher\des_tab.c">
+      <Filter>SSL\symcipher</Filter>
+    </ClCompile>
+    <ClCompile Include="SSL\symcipher\des_tab_cbcdec.c">
+      <Filter>SSL\symcipher</Filter>
+    </ClCompile>
+    <ClCompile Include="SSL\symcipher\des_tab_cbcenc.c">
+      <Filter>SSL\symcipher</Filter>
+    </ClCompile>
+    <ClCompile Include="SSL\symcipher\poly1305_ctmul.c">
+      <Filter>SSL\symcipher</Filter>
+    </ClCompile>
+    <ClCompile Include="SSL\symcipher\poly1305_ctmul32.c">
+      <Filter>SSL\symcipher</Filter>
+    </ClCompile>
+    <ClCompile Include="SSL\symcipher\poly1305_ctmulq.c">
+      <Filter>SSL\symcipher</Filter>
+    </ClCompile>
+    <ClCompile Include="SSL\symcipher\poly1305_i15.c">
+      <Filter>SSL\symcipher</Filter>
+    </ClCompile>
+    <ClCompile Include="SSL\settings.c">
+      <Filter>SSL</Filter>
+    </ClCompile>
+    <ClCompile Include="SSL\x509\asn1enc.c">
+      <Filter>SSL\x509</Filter>
+    </ClCompile>
+    <ClCompile Include="SSL\x509\encode_ec_pk8der.c">
+      <Filter>SSL\x509</Filter>
+    </ClCompile>
+    <ClCompile Include="SSL\x509\encode_ec_rawder.c">
+      <Filter>SSL\x509</Filter>
+    </ClCompile>
+    <ClCompile Include="SSL\x509\encode_rsa_pk8der.c">
+      <Filter>SSL\x509</Filter>
+    </ClCompile>
+    <ClCompile Include="SSL\x509\encode_rsa_rawder.c">
+      <Filter>SSL\x509</Filter>
+    </ClCompile>
+    <ClCompile Include="SSL\x509\skey_decoder.c">
+      <Filter>SSL\x509</Filter>
+    </ClCompile>
+    <ClCompile Include="SSL\x509\x509_decoder.c">
+      <Filter>SSL\x509</Filter>
+    </ClCompile>
+    <ClCompile Include="SSL\x509\x509_knownkey.c">
+      <Filter>SSL\x509</Filter>
+    </ClCompile>
+    <ClCompile Include="SSL\x509\x509_minimal.c">
+      <Filter>SSL\x509</Filter>
+    </ClCompile>
+    <ClCompile Include="SSL\x509\x509_minimal_full.c">
+      <Filter>SSL\x509</Filter>
+    </ClCompile>
+    <ClCompile Include="Debug.cpp">
+      <Filter>Debug</Filter>
+    </ClCompile>
+    <ClCompile Include="XboxTLS.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="downloadFile.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="main.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="dns.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="parsing.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="Corona4G.c">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="OutputConsole.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="xblaParsing.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+  </ItemGroup>
+  <ItemGroup>
+    <CustomBuild Include="Media\Fonts\font.rdf" />
+  </ItemGroup>
+</Project>
