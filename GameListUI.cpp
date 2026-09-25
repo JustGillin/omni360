@@ -35,6 +35,7 @@ hand-paced to ~60fps, so per-frame animation is viable here.
 
 #include <stdio.h>
 #include <string.h>
+#include <math.h> // sqrtf, for the round button badges in the footer
 
 using namespace ATG;
 
@@ -313,6 +314,146 @@ static void DrawGradientRect(float x, float y, float w, float h,
 }
 
 // ---------------------------------------------------------------------------
+// Footer button badges
+// ---------------------------------------------------------------------------
+//
+// The controller-button hints at the bottom of the screen, drawn as shapes
+// rather than glyphs.
+//
+// AtgFont.h defines GLYPH_A_BUTTON and friends at codepoints 0x100-0x107, and
+// the XDK's own sample fonts do carry artwork there - but this app's embedded
+// "embed:\font" does not. Its .abc header declares m_cMaxGlyph = 0x00FF, so
+// those codepoints are past the end of its translator table entirely and come
+// out as empty boxes. (ufont.abc reaches 0xFFFF but maps that range straight
+// through to Unicode, where 0x100 is a Latin letter, not a button.)
+//
+// Shipping one of the XDK sample fonts instead would work, but those are
+// Microsoft sample media accompanied by a .rights file, and this repo is
+// AGPL-3.0 and publishable - so a disc with a letter on it, drawn here from
+// primitives, avoids the question entirely and themes cleanly besides.
+//
+// Everything is built from DrawRect because the 1x1 white texture is the only
+// one this file can safely fill: see the QuadPixelShader comment on the GPU's
+// texture tiling making naive LockRect writes wrong above 1x1.
+
+// A filled disc, approximated by horizontal bands sampled off the circle
+// equation. Nine bands is enough that the edge reads as curved at the ~22px
+// this draws at, and cheap enough not to matter next to everything else.
+static void DrawDiscBadge(float cx, float cy, float diameter, D3DCOLOR color)
+{
+    const int BANDS = 9;
+    float r = diameter * 0.5f;
+    float bandH = diameter / (float)BANDS;
+
+    for (int i = 0; i < BANDS; ++i)
+    {
+        // Sample at each band's vertical centre, normalised to -1..1.
+        float t = (((float)i + 0.5f) / (float)BANDS) * 2.0f - 1.0f;
+        float halfW = r * sqrtf(1.0f - t * t);
+
+        DrawRect(cx - halfW, cy - r + (float)i * bandH, halfW * 2.0f, bandH, color);
+    }
+}
+
+// A rounded rectangle for the shoulder buttons, which are wider than they are
+// tall. Three rects: a full-width body with narrower caps above and below.
+static void DrawPillBadge(float x, float y, float w, float h, D3DCOLOR color)
+{
+    float inset = h * 0.22f;
+
+    DrawRect(x, y + inset, w, h - inset * 2.0f, color);
+    DrawRect(x + inset, y, w - inset * 2.0f, inset, color);
+    DrawRect(x + inset, y + h - inset, w - inset * 2.0f, inset, color);
+}
+
+// One hint: a badge with a letter on it, followed by what that button does.
+//
+// Laid out once and then drawn twice - the badge shapes belong in the quad
+// pass and the text in the font pass, and both need identical positions. The
+// x fields are filled in by LayoutButtonHints and read by both draw calls,
+// which is what keeps the letter centred on its own badge.
+struct ButtonHint
+{
+    const WCHAR *glyph;
+    const WCHAR *label;
+    D3DCOLOR     face;
+    bool         shoulder;
+
+    float badgeX;
+    float badgeW;
+    float labelX;
+};
+
+#define HINT_GLYPH_SCALE 0.62f
+#define HINT_LABEL_SCALE 0.78f
+
+// Walks the hints left to right, measuring each label so the spacing follows
+// the text instead of assuming every label is the same length ("DLC" and
+// "Title update" are not). Returns the total width.
+static float LayoutButtonHints(ButtonHint *hints, int count, float startX)
+{
+    float badgeH = 22.0f * g_M.scale;
+    float gapBadgeToLabel = 7.0f * g_M.scale;
+    float gapBetweenHints = 26.0f * g_M.scale;
+
+    float x = startX;
+
+    for (int i = 0; i < count; ++i)
+    {
+        hints[i].badgeX = x;
+        hints[i].badgeW = hints[i].shoulder ? badgeH * 1.7f : badgeH;
+
+        hints[i].labelX = x + hints[i].badgeW + gapBadgeToLabel;
+
+        g_UiFont.SetScaleFactors(HINT_LABEL_SCALE * g_M.scale, HINT_LABEL_SCALE * g_M.scale);
+        float labelW = g_UiFont.GetTextWidth(hints[i].label);
+
+        x = hints[i].labelX + labelW + gapBetweenHints;
+    }
+
+    return x - gapBetweenHints - startX;
+}
+
+// Quad pass: the badge shapes only.
+static void DrawButtonHintShapes(const ButtonHint *hints, int count, float centerY)
+{
+    float badgeH = 22.0f * g_M.scale;
+
+    for (int i = 0; i < count; ++i)
+    {
+        if (hints[i].shoulder)
+            DrawPillBadge(hints[i].badgeX, centerY - badgeH * 0.5f,
+                          hints[i].badgeW, badgeH, hints[i].face);
+        else
+            DrawDiscBadge(hints[i].badgeX + hints[i].badgeW * 0.5f, centerY,
+                          badgeH, hints[i].face);
+    }
+}
+
+// Font pass: the letter on each badge, then its label. Must be called inside
+// an open Font Begin/End.
+static void DrawButtonHintText(const ButtonHint *hints, int count, float centerY)
+{
+    float badgeH = 22.0f * g_M.scale;
+
+    for (int i = 0; i < count; ++i)
+    {
+        g_UiFont.SetScaleFactors(HINT_GLYPH_SCALE * g_M.scale, HINT_GLYPH_SCALE * g_M.scale);
+
+        // Centred on the badge by measuring the letter rather than nudging by
+        // a constant - "LB" and "A" are different widths.
+        float glyphW = g_UiFont.GetTextWidth(hints[i].glyph);
+        float glyphX = hints[i].badgeX + (hints[i].badgeW - glyphW) * 0.5f;
+
+        g_UiFont.DrawText(glyphX, centerY - badgeH * 0.34f, COL_BTN_LABEL, hints[i].glyph);
+
+        g_UiFont.SetScaleFactors(HINT_LABEL_SCALE * g_M.scale, HINT_LABEL_SCALE * g_M.scale);
+        g_UiFont.DrawText(hints[i].labelX, centerY - badgeH * 0.40f,
+                          COL_TEXT_DIM, hints[i].label);
+    }
+}
+
+// ---------------------------------------------------------------------------
 // Small helpers
 // ---------------------------------------------------------------------------
 
@@ -393,6 +534,15 @@ static void Utf8ToWide(const char *in, WCHAR *out, int outSize)
 #define COL_SCROLL_TRACK   0x1AFFFFFF
 #define COL_SCROLL_THUMB   0x99FFFFFF
 #define COL_BAR_TROUGH     0x26FFFFFF
+
+// Face colours for the footer button badges. Muted rather than saturated so
+// they sit inside this UI's palette instead of fighting it - these are hint
+// markers at the bottom of the screen, not the thing being looked at.
+#define COL_BTN_A          0xFF5CA83C
+#define COL_BTN_B          0xFFB04A40
+#define COL_BTN_Y          0xFFC29A33
+#define COL_BTN_SHOULDER   0xFF55605A
+#define COL_BTN_LABEL      0xFF101410 // the letter drawn on a badge; dark, for contrast on the face
 
 // ---------------------------------------------------------------------------
 // Layout metrics
@@ -689,7 +839,7 @@ static void EnsureIconsLoaded(const InstalledGame *games, int gameCount)
 }
 
 GameListUIResult ShowGameListUI(const InstalledGame *games, int gameCount, int initialSelection,
-                                const bool *hasDlcInstalled)
+                                const bool *hasDlcInstalled, const bool *hasUpdateInstalled)
 {
     GameListUIResult result = {false, -1, false};
 
@@ -849,6 +999,37 @@ GameListUIResult ShowGameListUI(const InstalledGame *games, int gameCount, int i
         bool showScroll = (gameCount > g_M.visibleRows);
         float plateW = g_M.contentW - (showScroll ? scrollGutter : 0.0f);
 
+        // Footer hints. Laid out here rather than next to where they are drawn
+        // because the badge shapes go down in pass 1 and their letters in pass
+        // 2, and both need identical positions - so the layout has to happen
+        // before either. It also has to follow showScroll, which decides
+        // whether the paging hint appears at all.
+        //
+        // "Exit", not "Back" - this screen is the root, so it is the one place
+        // B leaves the app rather than stepping back a screen. Every other
+        // screen says Back, which is what makes that distinction readable.
+        ButtonHint hints[4];
+        int hintCount = 0;
+
+        hints[hintCount].glyph = L"A";  hints[hintCount].label = L"DLC";
+        hints[hintCount].face = COL_BTN_A;  hints[hintCount].shoulder = false; hintCount++;
+
+        hints[hintCount].glyph = L"Y";  hints[hintCount].label = L"Title update";
+        hints[hintCount].face = COL_BTN_Y;  hints[hintCount].shoulder = false; hintCount++;
+
+        hints[hintCount].glyph = L"B";  hints[hintCount].label = L"Exit";
+        hints[hintCount].face = COL_BTN_B;  hints[hintCount].shoulder = false; hintCount++;
+
+        if (showScroll)
+        {
+            hints[hintCount].glyph = L"LB/RB"; hints[hintCount].label = L"Page";
+            hints[hintCount].face = COL_BTN_SHOULDER; hints[hintCount].shoulder = true; hintCount++;
+        }
+
+        LayoutButtonHints(hints, hintCount, g_M.contentX);
+
+        float hintCenterY = g_M.footerY + 9.0f * g_M.scale;
+
         for (int row = 0; row < g_M.visibleRows; ++row)
         {
             int index = scrollOffset + row;
@@ -901,6 +1082,8 @@ GameListUIResult ShowGameListUI(const InstalledGame *games, int gameCount, int i
             DrawGradientRect(trackX, thumbY, scrollW, thumbH, COL_SCROLL_THUMB, COL_ACCENT_DIM, true);
         }
 
+        DrawButtonHintShapes(hints, hintCount, hintCenterY);
+
         // --- Pass 2: all text, one Begin/End ---
         g_UiFont.Begin();
 
@@ -909,8 +1092,11 @@ GameListUIResult ShowGameListUI(const InstalledGame *games, int gameCount, int i
         // safe to change between calls inside a single batch - which is what
         // gives this screen an actual type hierarchy rather than one uniform
         // size everywhere.
-        g_UiFont.SetScaleFactors(1.25f * g_M.scale, 1.25f * g_M.scale);
-        g_UiFont.DrawText(g_M.contentX, g_M.headerTextY, COL_TEXT_PRIMARY, L"YOUR LIBRARY");
+        //
+        // Routed through DrawChromeHeading rather than drawn inline, so this
+        // screen picks up the same "OMNI360" brand every other screen shows
+        // instead of being the one view that omits it.
+        DrawChromeHeading("YOUR LIBRARY");
 
         // Position readout, right-aligned against the content edge.
         // Fixed "%d" specifiers into a generously sized buffer, explicitly
@@ -928,19 +1114,9 @@ GameListUIResult ShowGameListUI(const InstalledGame *games, int gameCount, int i
         g_UiFont.DrawText(g_M.contentX + g_M.contentW, g_M.headerTextY + 6.0f * g_M.scale,
                           COL_TEXT_DIM, wideCounter, ATGFONT_RIGHT);
 
-        // Footer hints. GLYPH_A_BUTTON/GLYPH_B_BUTTON (AtgFont.h) render as
-        // empty boxes - those private-use codepoints only have glyph bitmaps
-        // in the ATG samples' font assets that were actually built with them
-        // baked in; our embedded "embed:\font" resource evidently wasn't.
-        // Plain text needs nothing from the font but the basic glyphs already
-        // proven working everywhere else in this UI.
-        //
-        // "Exit", not "Back" - this screen is the root, so it's the one place
-        // B leaves the app rather than stepping back a screen. Every other
-        // screen says Back, which is what makes that distinction readable.
-        g_UiFont.DrawText(g_M.contentX, g_M.footerY, COL_TEXT_DIM,
-                          showScroll ? L"A  DLC      Y  Title update      B  Exit      LB / RB  Page"
-                                     : L"A  DLC      Y  Title update      B  Exit");
+        // Footer hints - letters on their badges, then the labels. The badge
+        // shapes themselves went down in pass 1; see LayoutButtonHints.
+        DrawButtonHintText(hints, hintCount, hintCenterY);
 
         // Row text. The name is truncated with an ellipsis rather than
         // overrunning into the scrollbar - ATGFONT_TRUNCATED plus a max pixel
@@ -979,15 +1155,28 @@ GameListUIResult ShowGameListUI(const InstalledGame *games, int gameCount, int i
             g_UiFont.DrawText(textX, rowY + 40.0f * g_M.scale,
                               isSelected ? COL_TEXT_SECONDARY : COL_TEXT_DIM, wideId);
 
-            // "Already has DLC" marker, sharing the secondary line with the
+            // "Already installed" marker, sharing the secondary line with the
             // title ID. Plain text in the accent colour rather than a tick
             // glyph: GLYPH_* codepoints render as empty boxes in the embedded
-            // font (see the footer hint comment above), so a checkmark would
+            // font (see the footer badge comment above), so a checkmark would
             // come out as a blank square on hardware.
-            if (hasDlcInstalled != NULL && hasDlcInstalled[index])
+            //
+            // One combined string rather than two separately positioned
+            // labels, so the common "both installed" case reads as a single
+            // phrase and needs no width measurement to lay out.
+            bool dlcHere    = (hasDlcInstalled != NULL && hasDlcInstalled[index]);
+            bool updateHere = (hasUpdateInstalled != NULL && hasUpdateInstalled[index]);
+
+            if (dlcHere || updateHere)
             {
+                const WCHAR *marker = L"DLC + UPDATE INSTALLED";
+                if (!updateHere)
+                    marker = L"DLC INSTALLED";
+                else if (!dlcHere)
+                    marker = L"UPDATE INSTALLED";
+
                 g_UiFont.DrawText(textX + 90.0f * g_M.scale, rowY + 40.0f * g_M.scale,
-                                  COL_ACCENT, L"INSTALLED");
+                                  COL_ACCENT, marker);
             }
         }
 
@@ -1118,13 +1307,31 @@ static void DrawChromeQuads()
 // The heading, drawn at the same size and position on every screen so they
 // read as one app rather than a set of unrelated views. Must be called inside
 // an open Font Begin/End.
+//
+// The app name leads, in the accent colour, with the screen's own heading
+// after it. Putting the brand here rather than only on the root screen means
+// it is present on the progress, picker and message screens too - which are
+// exactly the screens someone might be looking at for several minutes without
+// any other indication of what is running.
+//
+// The heading is positioned by measuring the brand rather than by a fixed
+// offset, because the two are drawn at different sizes and the gap would
+// otherwise drift between 720p and 480p.
 static void DrawChromeHeading(const char *heading)
 {
     WCHAR wide[128];
     Utf8ToWide(heading != NULL ? heading : "", wide, 128);
 
     g_UiFont.SetScaleFactors(1.25f * g_M.scale, 1.25f * g_M.scale);
-    g_UiFont.DrawText(g_M.contentX, g_M.headerTextY, COL_TEXT_PRIMARY, wide);
+    float brandW = g_UiFont.GetTextWidth(L"OMNI360");
+    g_UiFont.DrawText(g_M.contentX, g_M.headerTextY, COL_ACCENT, L"OMNI360");
+
+    if (wide[0] != L'\0')
+    {
+        float gap = 14.0f * g_M.scale;
+        g_UiFont.DrawText(g_M.contentX + brandW + gap, g_M.headerTextY,
+                          COL_TEXT_PRIMARY, wide);
+    }
 }
 
 // Seeds edge-triggered input from the CURRENT pad state rather than from zero.
@@ -1337,6 +1544,22 @@ int ShowChoiceUI(const char *heading, const char **labels, const char **sublabel
         bool showScroll = (count > visibleRows);
         float plateW = g_M.contentW - (showScroll ? scrollGutter : 0.0f);
 
+        // Same badge footer as the game list, for the same reason it is laid
+        // out this early there - see ShowGameListUI. "Back" here, not "Exit":
+        // this screen steps back to the library rather than leaving the app.
+        ButtonHint hints[2];
+        int hintCount = 0;
+
+        hints[hintCount].glyph = L"A";  hints[hintCount].label = L"Download";
+        hints[hintCount].face = COL_BTN_A;  hints[hintCount].shoulder = false; hintCount++;
+
+        hints[hintCount].glyph = L"B";  hints[hintCount].label = L"Back";
+        hints[hintCount].face = COL_BTN_B;  hints[hintCount].shoulder = false; hintCount++;
+
+        LayoutButtonHints(hints, hintCount, g_M.contentX);
+
+        float hintCenterY = g_M.footerY + 9.0f * g_M.scale;
+
         for (int row = 0; row < visibleRows; ++row)
         {
             int index = scrollOffset + row;
@@ -1373,6 +1596,8 @@ int ShowChoiceUI(const char *heading, const char **labels, const char **sublabel
             DrawGradientRect(trackX, thumbY, scrollW, thumbH, COL_SCROLL_THUMB, COL_ACCENT_DIM, true);
         }
 
+        DrawButtonHintShapes(hints, hintCount, hintCenterY);
+
         // --- Pass 2: all text, one Begin/End ---
         g_UiFont.Begin();
 
@@ -1389,8 +1614,7 @@ int ShowChoiceUI(const char *heading, const char **labels, const char **sublabel
         g_UiFont.DrawText(g_M.contentX + g_M.contentW, g_M.headerTextY + 6.0f * g_M.scale,
                           COL_TEXT_DIM, wideCounter, ATGFONT_RIGHT);
 
-        g_UiFont.DrawText(g_M.contentX, g_M.footerY, COL_TEXT_DIM,
-                          L"A  Download      B  Back");
+        DrawButtonHintText(hints, hintCount, hintCenterY);
 
         float textX = g_M.contentX + 18.0f * g_M.scale;
         float textMaxW = (g_M.contentX + plateW) - textX - 16.0f * g_M.scale;

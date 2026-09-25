@@ -152,23 +152,55 @@ static void GetGamesPath(char *outPath, size_t outPathSize)
 }
 
 // ---------------------------------------------------------------------------
-// "Already has DLC" detection for the game list
+// Game list ordering
 // ---------------------------------------------------------------------------
 
-// True if this title has at least one file under its Marketplace Content
-// folder, i.e. {contentBase}\{TitleID}\00000002\*.
+// EnumerateInstalledGames returns titles in raw FATX directory order, which is
+// roughly the order they were written to the drive - so the list came out
+// looking shuffled, with titles sharing a name prefix scattered apart rather
+// than sitting together. Sorted by display name instead, which is the only
+// order someone scanning for a specific game can actually predict.
+//
+// Case-insensitive, because FATX preserves whatever case the package's
+// metadata used and a case-sensitive sort would file every lowercase title
+// after every uppercase one. Ties break on title ID so the order is total and
+// stable across launches: two titles genuinely can share a display name, and
+// the ID is the thing that tells them apart (which is why the row draws it).
+static int CompareGamesByName(const void *a, const void *b)
+{
+    const InstalledGame *ga = (const InstalledGame *)a;
+    const InstalledGame *gb = (const InstalledGame *)b;
+
+    int byName = _stricmp(ga->displayName, gb->displayName);
+    if (byName != 0)
+        return byName;
+
+    if (ga->titleId < gb->titleId)
+        return -1;
+    if (ga->titleId > gb->titleId)
+        return 1;
+    return 0;
+}
+
+// ---------------------------------------------------------------------------
+// "Already installed" detection for the game list
+// ---------------------------------------------------------------------------
+
+// True if this title has at least one file under the given content-type
+// folder, i.e. {contentBase}\{TitleID}\{contentType}\*.
 //
 // Deliberately a shallow, purely LOCAL check. Answering "is this exact pack
 // installed?" would mean walking every candidate archive's RAR headers over
 // the network just to draw a marker - dozens of requests before the list could
 // even be shown. A folder test costs one directory open per title and answers
-// the question people actually have at that screen: have I already got DLC for
-// this, or not.
-static bool HasInstalledDlc(const char *contentBasePath, unsigned long titleId)
+// the question people actually have at that screen: have I already got this,
+// or not.
+static bool HasInstalledContent(const char *contentBasePath, unsigned long titleId,
+                                unsigned long contentType)
 {
     char pattern[512];
     _snprintf(pattern, sizeof(pattern), "%s\\%08lX\\%08lX\\*",
-              contentBasePath, titleId, (unsigned long)STFS_CONTENT_MARKETPLACE);
+              contentBasePath, titleId, contentType);
     pattern[sizeof(pattern) - 1] = '\0';
 
     WIN32_FIND_DATAA findData;
@@ -192,12 +224,26 @@ static bool HasInstalledDlc(const char *contentBasePath, unsigned long titleId)
 }
 
 // Recomputed rather than updated incrementally, and cheap enough to just redo
-// after every download - a directory open per title, no network.
-static void RefreshDlcInstalledFlags(const char *contentBasePath, const InstalledGame *games,
-                                     int gameCount, bool *outFlags)
+// after every download - two directory opens per title, no network.
+//
+// KNOWN GAP on the title-update flag: this only sees updates that installed
+// into {TitleID}\000B0000\. Uppercase "TU_..." updates go to {device}\Cache\
+// instead, where the filenames are not reliably attributable to a title, so a
+// game whose update landed in Cache shows no marker. The flag means "an update
+// is definitely installed", never "no update exists" - which is the safe way
+// round for a hint whose only job is to stop you re-downloading.
+static void RefreshInstalledFlags(const char *contentBasePath, const InstalledGame *games,
+                                  int gameCount, bool *outDlcFlags, bool *outUpdateFlags)
 {
     for (int i = 0; i < gameCount; ++i)
-        outFlags[i] = HasInstalledDlc(contentBasePath, games[i].titleId);
+    {
+        if (outDlcFlags != NULL)
+            outDlcFlags[i] = HasInstalledContent(contentBasePath, games[i].titleId,
+                                                 STFS_CONTENT_MARKETPLACE);
+        if (outUpdateFlags != NULL)
+            outUpdateFlags[i] = HasInstalledContent(contentBasePath, games[i].titleId,
+                                                    STFS_CONTENT_TITLE_UPDATE);
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -705,6 +751,13 @@ int main()
 
     dprintf("Found %d installed games\n", gameCount);
 
+    // Sorted once, here, rather than inside EnumerateInstalledGames - that
+    // function's job is to walk the filesystem, and leaving presentation order
+    // to the caller keeps it that way. Everything downstream (the installed
+    // flags, listSelection) indexes into this array after the sort, so nothing
+    // else has to know it happened.
+    qsort(games, gameCount, sizeof(InstalledGame), CompareGamesByName);
+
     // Session loop. The game list is the app's root screen, and B steps BACK a
     // screen everywhere else - out of the pack picker to here, out of here to
     // the dashboard. Previously every B unwound straight out of main(), so
@@ -717,17 +770,19 @@ int main()
     bool haveAuth = false;
     int listSelection = 0;
 
-    // Which titles already have DLC on the console. Refreshed on every pass
-    // rather than only at startup, so the marker appears the moment someone
-    // comes back from a download instead of on the next launch.
+    // Which titles already have DLC, and which already have a title update, on
+    // the console. Refreshed on every pass rather than only at startup, so the
+    // markers appear the moment someone comes back from a download instead of
+    // on the next launch.
     bool *dlcInstalled = (bool *)malloc(sizeof(bool) * gameCount);
+    bool *updateInstalled = (bool *)malloc(sizeof(bool) * gameCount);
 
     for (;;)
     {
-        if (dlcInstalled != NULL)
-            RefreshDlcInstalledFlags(contentBasePath, games, gameCount, dlcInstalled);
+        RefreshInstalledFlags(contentBasePath, games, gameCount, dlcInstalled, updateInstalled);
 
-        GameListUIResult pick = ShowGameListUI(games, gameCount, listSelection, dlcInstalled);
+        GameListUIResult pick = ShowGameListUI(games, gameCount, listSelection,
+                                               dlcInstalled, updateInstalled);
 
         if (!pick.selected)
         {
@@ -764,6 +819,7 @@ int main()
     }
 
     free(dlcInstalled);
+    free(updateInstalled);
     free(games);
 
     dprintf("Done.\n");

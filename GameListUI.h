@@ -33,13 +33,16 @@ struct GameListUIResult
 // Cover art is loaded on the first call and kept until ShutdownGameListUI, so
 // returning here is instant rather than re-decoding the whole library.
 //
-// hasDlcInstalled, when non-NULL, is a caller-owned array of gameCount flags
-// marking which titles already have DLC on the console; those rows get an
-// "INSTALLED" marker. The caller works this out rather than this screen doing
-// it, because it is a question about content paths on disk and this file has
-// no business knowing where DLC lives.
+// hasDlcInstalled and hasUpdateInstalled, when non-NULL, are caller-owned
+// arrays of gameCount flags marking which titles already have DLC, and which
+// already have a title update, on the console. Those rows get an "INSTALLED"
+// marker naming whichever is present. The caller works this out rather than
+// this screen doing it, because it is a question about content paths on disk
+// and this file has no business knowing where content lives.
+//
+// Either pointer may be NULL, which simply suppresses that marker.
 GameListUIResult ShowGameListUI(const InstalledGame *games, int gameCount, int initialSelection,
-                                const bool *hasDlcInstalled);
+                                const bool *hasDlcInstalled, const bool *hasUpdateInstalled);
 
 // Draws one progress-bar frame. Intended to be called repeatedly from inside
 // a download loop - see main.cpp's DlcProgressCallback, which drives it from

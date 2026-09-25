@@ -47,6 +47,7 @@ bool BuildIas3AuthHeader(const std::string &accessKey, const std::string &secret
 // members, eleven of which are avatar items rather than game content.
 #define STFS_CONTENT_MARKETPLACE  0x00000002UL // Marketplace Content - real DLC
 #define STFS_CONTENT_AVATAR_ITEM  0x00009000UL // Avatar Item - clothing/props, not game content
+#define STFS_CONTENT_TITLE_UPDATE 0x000B0000UL // Title Update - the folder lowercase "tu..." updates install to
 
 // One matched DLC file discovered inside an archive.org item's RAR, with the
 // internal member path we want to fetch (see FindDlcMemberPaths).
