@@ -233,10 +233,20 @@
            content namespace, which is a real conflict now this is a separate
            app rather than a fork running in X-Store's place.
 
-           4F4D0360 is "OM" (0x4F 0x4D) followed by 0360. The field takes
-           eight hex digits, so anything you replace it with must be hex -
-           letters past F are not valid here. -->
-      <TitleID>4F4D0360</TitleID>
+           FFFF is the dev/sample publisher prefix - the XDK's own
+           ArcadeLicenseCheck sample ships FFFF07A7 - and unsigned homebrew
+           conventionally sits in the FFFE/FFFF range. 0360 is arbitrary.
+
+           Do NOT just pick any eight hex digits. 4F4D0360 ("OM" + 0360) was
+           tried here and imagexex rejected it outright:
+
+               error IM1059: invalid value ('4F4D0360') for titleid
+
+           Being valid hex is not sufficient - imagexex constrains the
+           publisher half (the high 16 bits), and an arbitrary ASCII-looking
+           publisher code is not accepted. If you change this, keep the FFFF
+           prefix and only vary the low four digits. -->
+      <TitleID>FFFF0360</TitleID>
     </ImageXex>
     <Deploy>
       <DeploymentType>CopyToHardDrive</DeploymentType>
