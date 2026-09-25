@@ -1,5 +1,5 @@
-#ifndef __Corona4G_h
-#define __Corona4G_h
+#ifndef __driveMount_h
+#define __driveMount_h
 
 #include <stdio.h>
 #include <xtl.h>

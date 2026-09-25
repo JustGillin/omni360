@@ -129,7 +129,7 @@
     <ClInclude Include="downloadFile.h">
       <Filter>Source Files</Filter>
     </ClInclude>
-    <ClInclude Include="goDaddyRootCA.h">
+    <ClInclude Include="archiveOrgCert.h">
       <Filter>Source Files</Filter>
     </ClInclude>
     <ClInclude Include="dns.h">
@@ -138,7 +138,7 @@
     <ClInclude Include="parsing.h">
       <Filter>Source Files</Filter>
     </ClInclude>
-    <ClInclude Include="Corona4G.h">
+    <ClInclude Include="driveMount.h">
       <Filter>Source Files</Filter>
     </ClInclude>
     <ClInclude Include="OutputConsole.h">
@@ -1044,7 +1044,7 @@
     <ClCompile Include="parsing.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
-    <ClCompile Include="Corona4G.c">
+    <ClCompile Include="driveMount.c">
       <Filter>Source Files</Filter>
     </ClCompile>
     <ClCompile Include="OutputConsole.cpp">

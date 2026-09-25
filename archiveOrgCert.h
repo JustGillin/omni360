@@ -1,8 +1,18 @@
 /*
-FILE : 
-PROJECT : xstore
-PROGRAMMER : 951261
-DESCRIPTION : Trusted ROOT CA for GoDaddy certificates
+FILE : archiveOrgCert.h
+PROJECT : xstore (DLC fork)
+DESCRIPTION : RSA trust anchor used for archive.org connections.
+
+Defines IA_TA0_RSA_DN / _N / _E, which downloadFile.cpp passes to
+XboxTLS_AddTrustAnchor_RSA alongside the other anchors before the TLS
+handshake. The console has no OS certificate store, so every anchor the app
+needs is compiled in like this.
+
+This file was called goDaddyRootCA.h until it was renamed, which was actively
+misleading - the anchors in it are the ones this fork uses to reach
+archive.org, nothing to do with GoDaddy. The name mattered: during a cleanup
+pass it looked exactly like leftover X-Store debris and came close to being
+deleted, which would have broken TLS.
 */
 
 static const unsigned char IA_TA0_RSA_DN[] = {

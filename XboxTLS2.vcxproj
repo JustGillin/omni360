@@ -282,13 +282,13 @@
   <ItemGroup>
     <ClInclude Include="ArchiveOrgDLC.h" />
     <ClInclude Include="cJSON.h" />
-    <ClInclude Include="Corona4G.h" />
+    <ClInclude Include="driveMount.h" />
     <ClInclude Include="Debug.h" />
     <ClInclude Include="dns.h" />
     <ClInclude Include="downloadFile.h" />
     <ClInclude Include="GameListUI.h" />
     <ClInclude Include="githubCert.h" />
-    <ClInclude Include="goDaddyRootCA.h" />
+    <ClInclude Include="archiveOrgCert.h" />
     <ClInclude Include="Keyboard.h" />
     <ClInclude Include="OutputConsole.h" />
     <ClInclude Include="parsing.h" />
@@ -314,7 +314,7 @@
   <ItemGroup>
     <ClCompile Include="ArchiveOrgDLC.cpp" />
     <ClCompile Include="cJSON.c" />
-    <ClCompile Include="Corona4G.c" />
+    <ClCompile Include="driveMount.c" />
     <ClCompile Include="Debug.cpp" />
     <ClCompile Include="dns.cpp" />
     <ClCompile Include="downloadFile.cpp" />

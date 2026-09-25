@@ -34,7 +34,7 @@ The repository is a Visual Studio 2010 Xbox 360 solution named `free60 store.sln
 
 `xblaParsing.cpp` contains two XBLA helpers: recursive directory copy and recursive scanning for a valid title ID content folder.
 
-`Corona4G.c` / `Corona4G.h` come from a broader Simple 360 NAND Flasher-style helper set. X Store uses the `mount()` wrapper from this file to create symbolic drive aliases such as `game:`, `Usb0:`, `Usb1:`, and `Hdd:`. The NAND read/write helpers are not part of the X Store download pipeline.
+`driveMount.c` / `driveMount.h` (named `Corona4G.c` / `.h` in X-Store) come from a broader Simple 360 NAND Flasher-style helper set. The app uses the `mount()` wrapper from this file to create symbolic drive aliases such as `game:`, `Usb0:`, `Usb1:`, and `Hdd:` — nothing else in the project declares `mount()`, so it is load-bearing despite the file looking like vendor debris. The NAND read/write helpers are inherited and unused.
 
 `settings.h` stores global constants: current version, buffer/path limits, Vimm download domains, and FATX-safe folder name length.
 

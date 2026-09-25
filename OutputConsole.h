@@ -64,7 +64,7 @@ void ClearConsole();
 // Turn it on only once the drawn UI is confirmed up, so a failure before that
 // point still has somewhere visible to report itself.
 //
-// Takes an int, not a bool, because Corona4G.c includes this header and MSVC
+// Takes an int, not a bool, because driveMount.c includes this header and MSVC
 // compiles .c as C89 - where `bool` is not a type.
 void SetConsoleQuiet(int quiet);
 

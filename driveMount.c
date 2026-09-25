@@ -1,15 +1,30 @@
 /*
-FILE : Corona4G.c
-PROJECT : xstore
+FILE : driveMount.c
+PROJECT : xstore (DLC fork)
 PROGRAMMER : 951261
-DESCRIPTION : Modified from Simple 360 NAND Flasher. Only useful function is to mount a drive (USB, HDD, etc...)
+DESCRIPTION : mount() - creates the drive aliases (game:, Hdd1:, Usb0:) the
+              rest of the app addresses storage through, via the kernel's
+              symbolic-link calls.
+
+Modified from Simple 360 NAND Flasher, and called Corona4G.c until it was
+renamed. mount() is the ONLY function anything outside this file calls -
+main.cpp's CheckGameMounted() uses it three times, and nothing else in the
+project would work without it. The NAND dump/flash helpers below
+(try_rawdump4g, try_rawflash4g, getflashsz, Corona4GWrite) are inherited and
+unused; they are kept only because removing code that talks to flash memory
+is not worth the risk for the space saved.
+
+The old name hid all of that: nothing about "Corona4G" suggests drive
+mounting, so a cleanup pass searching for leftover X-Store files by name
+found no callers and deleted it - which broke the build, since mount() is
+declared nowhere else.
 */
 
 #include <xtl.h>
 #include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
-#include "Corona4G.h"
+#include "driveMount.h"
 #include "OutputConsole.h"
 
 #define BUF_SIZE	0x8000
