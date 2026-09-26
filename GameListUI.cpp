@@ -1528,11 +1528,31 @@ GameListUIResult ShowGameListUI(const InstalledGame *games, int gameCount, int i
         // the two can be compared directly rather than from memory.
         //
         // Charset: the accented characters are exactly what the atlas cannot
-        // draw - it stops at 0x7F, so those come out as the unknown glyph
-        // there. If they render here, the charset ceiling is gone.
+        // draw - it stops at 0x7F, so those come out blank there. If they
+        // render here, the charset ceiling is gone.
+        //
+        // Built as explicit code points rather than written literally. A
+        // previous version had the characters inline; they were saved as UTF-8
+        // and MSVC read this BOM-less file as ANSI, so every byte of a
+        // multi-byte character became its own WCHAR and the probe rendered
+        // mojibake. Source stays pure ASCII, and the values cannot be
+        // reinterpreted by whatever encoding a file happens to be saved in.
+        //
+        // 0x2122 is the trademark sign, which is not hypothetical: it is in
+        // this library right now - see the Spider-Man title, where the atlas
+        // draws a gap.
+        static const WCHAR probeText[] = {
+            'X','U','I',' ','2','2','p','t',' ','-',' ',
+            'C','a','f', 0x00E9, ' ',                     // Cafe with acute
+            'n','a', 0x00EF, 'v','e', ' ',                // naive with diaeresis
+            0x00C0, 0x00C9, 0x00CE, 0x00D5, 0x00DC, ' ',  // A-grave .. U-diaeresis
+            0x2122,                                       // trademark sign
+            0
+        };
+
         DrawXuiTextProbe(g_M.contentX + 40.0f * g_M.scale,
                          g_M.listY + 30.0f * g_M.scale,
-                         L"XUI 22pt - Café naïve ÀÉÎÕÜ",
+                         probeText,
                          0xFFFFD24A);
 
         g_pd3dDevice->Present(NULL, NULL, NULL, NULL);

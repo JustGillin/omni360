@@ -172,6 +172,30 @@ bool InitXuiText()
         return false;
     }
 
+    // What that point size actually became in pixels.
+    //
+    // XuiCreateFont takes POINTS while the rest of this UI is laid out in
+    // PIXELS against a 22px atlas strike, so the probe and the rows it sits
+    // beside are not the same size - which makes comparing their sharpness
+    // unreliable, since a size difference reads as a quality difference.
+    //
+    // XUIFontMetrics reports pixels at the current size, so this gives the
+    // conversion directly instead of another round of guessing. With it, a
+    // point size can be chosen that matches the rows exactly and the
+    // comparison becomes fair.
+    XUIFontMetrics metrics;
+    HRESULT hrMetrics = XuiGetFontMetrics(g_hFont, &metrics);
+    if (SUCCEEDED(hrMetrics))
+    {
+        dprintf("[XUI] %.1fpt -> lineHeight=%.1fpx ascent=%.1f descent=%.1f maxHeight=%.1f\n",
+                XUI_PROBE_FONT_PT, metrics.fLineHeight, metrics.fMaxAscent,
+                metrics.fMaxDescent, metrics.fMaxHeight);
+    }
+    else
+    {
+        dprintf("[XUI] XuiGetFontMetrics -> 0x%08lX\n", (unsigned long)hrMetrics);
+    }
+
     g_XuiReady = true;
     dprintf("[XUI] ready\n");
     return true;
