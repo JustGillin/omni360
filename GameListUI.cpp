@@ -32,7 +32,7 @@ hand-paced to ~60fps, so per-frame animation is viable here.
 #include "AtgConsole.h"
 #include "AtgFont.h"
 #include "OutputConsole.h"
-#include "XuiTextProbe.h" // spike - see that header
+#include "UiText.h" // XUI-backed text renderer; replaced ATG::Font
 
 #include <stdio.h>
 #include <string.h>
@@ -135,7 +135,10 @@ static D3DTexture *g_pRingTexture = NULL;
 
 static bool CreateBadgeTextures();
 
-static ATG::Font g_UiFont;
+// XUI-backed now, not ATG::Font. UiFont deliberately mirrors ATG::Font's
+// method names and signatures, so this declaration is the whole switch -
+// none of the forty-six call sites below needed touching.
+static UiFont g_UiFont;
 static bool g_Initialized = false;
 
 static void ReleaseIcons(); // defined with the cover-art cache below; called from ShutdownGameListUI
@@ -643,20 +646,19 @@ static bool ComputeUiMetrics()
     g_M.screenH = is720p ? 720.0f : 480.0f;
     g_M.scale = g_M.screenH / 720.0f;
 
-    // Text scale is the layout scale corrected for whatever font actually got
-    // loaded. Every type size in this file is a multiple of g_M.textScale, and
-    // those multipliers were chosen against a 22px strike - the height of the
-    // font this project originally shipped.
+    // Every type size in this file is a multiple of g_M.textScale, and those
+    // multipliers were chosen against a 22px design height.
     //
-    // A font's strike height is not its nominal point size: Selawik generated
-    // at "16" comes out as a 28px strike, which would render every label ~27%
-    // larger than the layout expects and overflow rows at 480p. Dividing it
-    // back out means swapping fonts is a build-step change and nothing more -
-    // no retuning twenty call sites, and no drift the next time one changes.
+    // This correction existed because the bitmap atlas had a strike height of
+    // its own - 28px, where the layout wanted 22 - so every string was
+    // resampled and small text went soft. Dividing the difference back out
+    // fixed the size but could not undo the resampling.
     //
-    // Runs after g_UiFont.Create() in InitGameListUI, so the height is real.
-    // The guard is for a zero from a font that failed to load, which would
-    // otherwise make every scale factor infinite.
+    // UiFont renders at whatever size is asked for, so there is no strike to
+    // disagree with: GetFontHeight returns the design height and this becomes
+    // g_M.scale exactly. The arithmetic is kept rather than deleted because it
+    // costs nothing, keeps every call site reading the same, and would
+    // immediately re-correct if the text renderer were ever swapped again.
     float fontHeight = g_UiFont.GetFontHeight();
     g_M.textScale = (fontHeight > 1.0f) ? g_M.scale * (22.0f / fontHeight) : g_M.scale;
 
@@ -931,16 +933,14 @@ bool InitGameListUI()
     if (!CreateQuadResources())
         return false;
 
-    if (FAILED(g_UiFont.Create("embed:\\font"))) // same embedded font resource MakeConsole() already loads
+    // The path argument is accepted and ignored - UiFont loads selawk.ttf
+    // through XUI. It stays in the signature so this line reads as it always
+    // did, and so the switch stayed a one-line change.
+    if (FAILED(g_UiFont.Create(NULL)))
         return false;
 
     if (!ComputeUiMetrics())
         return false;
-
-    // Spike, deliberately not gated on success: if XUI cannot come up, the UI
-    // is exactly what it was and only the probe string is missing. See
-    // XuiTextProbe.h for what this is measuring.
-    InitXuiText();
 
     g_Initialized = true;
     return true;
@@ -953,9 +953,7 @@ void ShutdownGameListUI()
 
     ReleaseIcons(); // cover art is held for the whole session now - see EnsureIconsLoaded
 
-    ShutdownXuiText(); // no-op if the spike never initialised
-
-    g_UiFont.Destroy();
+    g_UiFont.Destroy(); // tears XUI down with it
 
     if (g_pWhiteTexture != NULL) { g_pWhiteTexture->Release(); g_pWhiteTexture = NULL; }
     if (g_pDiscTexture != NULL) { g_pDiscTexture->Release(); g_pDiscTexture = NULL; }
@@ -1517,44 +1515,6 @@ GameListUIResult ShowGameListUI(const InstalledGame *games, int gameCount, int i
         g_UiFont.SetScaleFactors(1.0f, 1.0f);
 
         g_UiFont.End();
-
-        // Spike, drawn LAST - after every quad and every ATG string, before
-        // Present.
-        //
-        // The first question (does XuiRenderBegin wipe the frame?) is answered:
-        // it does not, with a transparent clear colour. So this now asks the
-        // two that decide whether the migration is worth doing.
-        //
-        // Sharpness: it sits right beside rows drawn from the bitmap atlas, so
-        // the two can be compared directly rather than from memory.
-        //
-        // Charset: the accented characters are exactly what the atlas cannot
-        // draw - it stops at 0x7F, so those come out blank there. If they
-        // render here, the charset ceiling is gone.
-        //
-        // Built as explicit code points rather than written literally. A
-        // previous version had the characters inline; they were saved as UTF-8
-        // and MSVC read this BOM-less file as ANSI, so every byte of a
-        // multi-byte character became its own WCHAR and the probe rendered
-        // mojibake. Source stays pure ASCII, and the values cannot be
-        // reinterpreted by whatever encoding a file happens to be saved in.
-        //
-        // 0x2122 is the trademark sign, which is not hypothetical: it is in
-        // this library right now - see the Spider-Man title, where the atlas
-        // draws a gap.
-        static const WCHAR probeText[] = {
-            'X','U','I',' ','2','2','p','t',' ','-',' ',
-            'C','a','f', 0x00E9, ' ',                     // Cafe with acute
-            'n','a', 0x00EF, 'v','e', ' ',                // naive with diaeresis
-            0x00C0, 0x00C9, 0x00CE, 0x00D5, 0x00DC, ' ',  // A-grave .. U-diaeresis
-            0x2122,                                       // trademark sign
-            0
-        };
-
-        DrawXuiTextProbe(g_M.contentX + 40.0f * g_M.scale,
-                         g_M.listY + 30.0f * g_M.scale,
-                         probeText,
-                         0xFFFFD24A);
 
         g_pd3dDevice->Present(NULL, NULL, NULL, NULL);
         g_pd3dDevice->Suspend();

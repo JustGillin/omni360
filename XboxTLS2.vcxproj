@@ -291,26 +291,32 @@
     </Link>
   </ItemDefinitionGroup>
   <ItemGroup>
-    <!-- The UI font: a bitmap atlas generated with the XDK's FontMaker from
+    <!-- The CONSOLE font, and only the console font.
+
+         This is a bitmap atlas generated with the XDK's FontMaker from
          Selawik, Microsoft's openly-licensed (SIL OFL) metric-compatible
          stand-in for Segoe UI. See Media/Fonts/OFL.txt for the license and
          copyright notice, which the OFL requires be distributed with it.
 
+         It used to draw the whole UI. It no longer does: UiText.cpp renders
+         the UI through XUI, straight from selawk.ttf, which removed both of
+         this atlas's limits - a fixed strike size that made small text soft,
+         and a character range stopping at 0x7F that blanked the trademark
+         sign in real title names.
+
+         What still needs it is ATG::Console, which draws dprintf output via
+         "embed:\font" before the UI is initialised. That is the path a very
+         early failure reports itself on, so it has to work without XUI being
+         up, which is exactly why this stays.
+
          Named uifont_16 rather than Selawik_16 on purpose. Selawik ships
          "with Reserved Font Name Selawik", and OFL 1.1 defines a Modified
          Version to include a derivative made "by changing formats or by
-         porting the Font Software to a new environment" - which is exactly
-         what converting the TTF to an ATG .abc/.tga atlas is. Clause 3 then
-         bars a Modified Version from using the reserved name. Saying what it
-         derives from, as this comment does, is fine and expected; naming the
-         generated files after it is not.
-
-         Bundled to font.xpr and embedded as the "font" section, so everything
-         loading "embed:\font" - the ATG console and the drawn UI alike - picks
-         it up with no change to either load path.
-
-         Replaced X-Store's own font.rdf/.abc/.tga, which had no stated
-         provenance or license at all. -->
+         porting the Font Software to a new environment" - which is what
+         converting the TTF to an ATG .abc/.tga atlas is. Clause 3 then bars a
+         Modified Version from using the reserved name. Saying what it derives
+         from, as this comment does, is fine; naming the generated files after
+         it is not. selawk.ttf itself is unmodified, so it keeps its name. -->
     <CustomBuild Include="Media\Fonts\uifont_16.rdf">
       <FileType>Document</FileType>
       <Command Condition="'$(Configuration)|$(Platform)'=='Release|Xbox 360'">bundler "%(FullPath)" -o "$(OutDir)Media\Fonts\font.xpr"</Command>
@@ -340,7 +346,7 @@
     <ClInclude Include="parsing.h" />
     <ClInclude Include="settings.h" />
     <ClInclude Include="StfsParser.h" />
-    <ClInclude Include="XuiTextProbe.h" />
+    <ClInclude Include="UiText.h" />
     <ClInclude Include="SSL\config.h" />
     <ClInclude Include="SSL\inc\bearssl.h" />
     <ClInclude Include="SSL\inc\bearssl_aead.h" />
@@ -371,7 +377,7 @@
     <ClCompile Include="OutputConsole.cpp" />
     <ClCompile Include="parsing.cpp" />
     <ClCompile Include="StfsParser.cpp" />
-    <ClCompile Include="XuiTextProbe.cpp" />
+    <ClCompile Include="UiText.cpp" />
     <ClCompile Include="SSL\aead\ccm.c" />
     <ClCompile Include="SSL\aead\eax.c" />
     <ClCompile Include="SSL\aead\gcm.c" />
