@@ -30,10 +30,14 @@ static unsigned long ReadBE32(const unsigned char *p)
 // STFS tooling (Modio, Velocity, Horizon) has historically treated it as
 // UTF-16BE. Rather than bet on either, detect per-file: if alternating bytes
 // are 0x00 (the ASCII-range signature of BE UTF-16), decode as UTF-16BE;
-// otherwise treat it as UTF-8/ASCII directly. Non-Latin titles under the
-// UTF-16BE path fall back to '?' per character - full UTF-8 re-encoding of
-// non-Latin text isn't implemented, since it wasn't needed to validate the
-// core approach.
+// otherwise treat it as UTF-8/ASCII directly.
+//
+// Both paths now produce real UTF-8, which is what this buffer is declared to
+// hold and what GameListUI's Utf8ToWide expects. The UTF-16BE branch used to
+// clamp to Latin-1 and emit '?' for anything else; see the comment on that
+// branch for what that cost. Characters outside the BMP still become '?',
+// which is a limit of the WCHAR conversion downstream rather than this
+// function, and does not arise for title names in practice.
 static void DecodeDisplayName(const unsigned char *raw, int rawLen, char *out, int outSize)
 {
     bool looksUtf16BE = false;
@@ -58,15 +62,55 @@ static void DecodeDisplayName(const unsigned char *raw, int rawLen, char *out, i
 
     if (looksUtf16BE)
     {
+        // Re-encode each UTF-16BE unit as real UTF-8, because that is what
+        // this buffer is - GameListUI's Utf8ToWide decodes it later.
+        //
+        // This used to write "(hi == 0) ? (char)lo : '?'", which broke every
+        // character above 0x7F in two different ways. A codepoint over 0xFF
+        // became '?' immediately, so a trademark sign (U+2122) was destroyed
+        // here, long before any font got a chance to draw it. And one between
+        // 0x80 and 0xFF was written as a single raw byte, which is not valid
+        // UTF-8 at all - a registered sign (U+00AE) came out as a lone 0xAE,
+        // which Utf8ToWide then correctly rejected as a stray continuation
+        // byte and replaced with '?' anyway.
+        //
+        // Both showed up on real titles in a real library: "Spider-Man(TM):
+        // Dimensions" and "Call of Duty: Modern Warfare(R) 3".
         for (int i = 0; i + 1 < rawLen && o + 1 < outSize; i += 2)
         {
-            unsigned char hi = raw[i];
-            unsigned char lo = raw[i + 1];
+            unsigned long cp = ((unsigned long)raw[i] << 8) | raw[i + 1];
 
-            if (hi == 0 && lo == 0)
+            if (cp == 0)
                 break;
 
-            out[o++] = (hi == 0) ? (char)lo : '?';
+            // Surrogates only carry meaning in pairs, and a paired value lands
+            // outside the BMP where Utf8ToWide substitutes '?' regardless. Not
+            // worth decoding for a title name.
+            if (cp >= 0xD800 && cp <= 0xDFFF)
+            {
+                out[o++] = '?';
+                continue;
+            }
+
+            if (cp < 0x80)
+            {
+                out[o++] = (char)cp;
+            }
+            else if (cp < 0x800)
+            {
+                if (o + 2 >= outSize)
+                    break; // truncate on a whole character, never mid-sequence
+                out[o++] = (char)(0xC0 | (cp >> 6));
+                out[o++] = (char)(0x80 | (cp & 0x3F));
+            }
+            else
+            {
+                if (o + 3 >= outSize)
+                    break;
+                out[o++] = (char)(0xE0 | (cp >> 12));
+                out[o++] = (char)(0x80 | ((cp >> 6) & 0x3F));
+                out[o++] = (char)(0x80 | (cp & 0x3F));
+            }
         }
     }
     else

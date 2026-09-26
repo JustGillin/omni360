@@ -483,15 +483,16 @@ static float SelectionPulse()
 // Small helpers
 // ---------------------------------------------------------------------------
 
-// StfsParser's UTF-16BE decode path does clamp to ASCII/Latin-1 (see its own
-// comment on non-Latin titles), but its UTF-8 passthrough path does NOT - it
-// copies the package's raw UTF-8 bytes verbatim, multi-byte sequences and
-// all. A byte-widen (one WCHAR per input byte, as this used to do) is only
-// correct for single-byte UTF-8, so any title with a genuine multi-byte
-// character (confirmed: "Modern Warfare(R) 3", U+00AE encoded as UTF-8's
-// 0xC2 0xAE) rendered as two garbled characters ("Â®") instead of one. Real
-// UTF-8 decoding here (BMP range is enough - these are STFS display names,
-// never supplementary-plane characters) fixes both paths at once.
+// Both of StfsParser's decode paths produce real UTF-8, multi-byte sequences
+// included, so this has to decode rather than widen. A byte-widen (one WCHAR
+// per input byte, as this used to do) is only correct for single-byte UTF-8:
+// any title with a genuine multi-byte character - confirmed on "Modern
+// Warfare(R) 3", where U+00AE is encoded as 0xC2 0xAE - rendered as two
+// garbled characters instead of one.
+//
+// BMP range is enough here. These are STFS display names, not
+// supplementary-plane text, and the font would have nothing to draw for it
+// anyway.
 static void Utf8ToWide(const char *in, WCHAR *out, int outSize)
 {
     const unsigned char *p = (const unsigned char *)in;

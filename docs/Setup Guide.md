@@ -72,6 +72,6 @@ Because matching is deliberately loose — it has to cope with release-group nam
 - **Empty game list** — `games-path:` is pointing somewhere without games. See step 3.
 - **401 from archive.org** — key file missing, malformed, or on the wrong line order. Access key line 1, secret key line 2.
 - **No results for a game you know exists** — the collection may genuinely not have it, or the display name may be too abbreviated to match. Not every title has DLC or updates archived.
-- **Garbled game names** — STFS display-name encoding. `StfsParser.cpp` detects UTF-8 versus UTF-16BE per file; non-Latin characters decode to `?` since no full Unicode re-encoding is implemented.
+- **Garbled game names** — STFS display-name encoding. `StfsParser.cpp` detects UTF-8 versus UTF-16BE per file and re-encodes both to UTF-8. If a name still looks wrong, that is worth reporting rather than expected.
 
 There is no automatic resume. A failed download has to be retried by hand.
