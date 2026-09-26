@@ -1055,6 +1055,6 @@
     </ClCompile>
   </ItemGroup>
   <ItemGroup>
-    <CustomBuild Include="Media\Fonts\Selawik_16.rdf" />
+    <CustomBuild Include="Media\Fonts\uifont_16.rdf" />
   </ItemGroup>
 </Project>

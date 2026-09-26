@@ -291,16 +291,27 @@
     </Link>
   </ItemDefinitionGroup>
   <ItemGroup>
-    <!-- Selawik (SIL Open Font License), generated with the XDK's FontMaker.
-         Still bundled to font.xpr and still embedded as the "font" section, so
-         everything loading "embed:\font" - the ATG console and the drawn UI
-         alike - picks it up with no change to either load path.
+    <!-- The UI font: a bitmap atlas generated with the XDK's FontMaker from
+         Selawik, Microsoft's openly-licensed (SIL OFL) metric-compatible
+         stand-in for Segoe UI. See Media/Fonts/OFL.txt for the license and
+         copyright notice, which the OFL requires be distributed with it.
+
+         Named uifont_16 rather than Selawik_16 on purpose. Selawik ships
+         "with Reserved Font Name Selawik", and OFL 1.1 defines a Modified
+         Version to include a derivative made "by changing formats or by
+         porting the Font Software to a new environment" - which is exactly
+         what converting the TTF to an ATG .abc/.tga atlas is. Clause 3 then
+         bars a Modified Version from using the reserved name. Saying what it
+         derives from, as this comment does, is fine and expected; naming the
+         generated files after it is not.
+
+         Bundled to font.xpr and embedded as the "font" section, so everything
+         loading "embed:\font" - the ATG console and the drawn UI alike - picks
+         it up with no change to either load path.
 
          Replaced X-Store's own font.rdf/.abc/.tga, which had no stated
-         provenance or license. Selawik is Microsoft's openly-licensed
-         metric-compatible stand-in for Segoe UI, so it is both closer to the
-         360's own look and actually redistributable with this repo. -->
-    <CustomBuild Include="Media\Fonts\Selawik_16.rdf">
+         provenance or license at all. -->
+    <CustomBuild Include="Media\Fonts\uifont_16.rdf">
       <FileType>Document</FileType>
       <Command Condition="'$(Configuration)|$(Platform)'=='Release|Xbox 360'">bundler "%(FullPath)" -o "$(OutDir)Media\Fonts\font.xpr"</Command>
       <Outputs Condition="'$(Configuration)|$(Platform)'=='Release|Xbox 360'">$(OutDir)Media\Fonts\font.xpr</Outputs>

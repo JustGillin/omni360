@@ -4,14 +4,14 @@
 
 <Texture 
 	Name   = "FontTexture"
-	Source = "Selawik_16.tga"
+	Source = "uifont_16.tga"
 	Format = "D3DFMT_LIN_A4R4G4B4"
 	Levels = "1"
 />
 
 <UserData
 	Name     = "FontData"
-	DataFile = "Selawik_16.abc"
+	DataFile = "uifont_16.abc"
 />
 
 </RDF>
