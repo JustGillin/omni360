@@ -49,6 +49,13 @@ the next guess to cost another cycle.
 #define XUI_TYPEFACE_NAME  L"Selawik"
 #define XUI_PROBE_FONT_PT  22.0f
 
+// Back buffer size, captured at init. Needed to bound the measuring rect, and
+// taken from the device's real present parameters rather than assumed to be
+// 720p - this app already runs at 640x480 on an SD console, where a hardcoded
+// 1280x720 would be wrong.
+static float     g_BackBufferW = 0.0f;
+static float     g_BackBufferH = 0.0f;
+
 static bool      g_XuiReady = false;
 static HXUIDC    g_hDC      = NULL;
 static HXUIFONT  g_hFont    = NULL;
@@ -92,6 +99,10 @@ bool InitXuiText()
     if (FAILED(hr))
         return false;
     g_RenderInited = true;
+
+    g_BackBufferW = (float)pParams->BackBufferWidth;
+    g_BackBufferH = (float)pParams->BackBufferHeight;
+    dprintf("[XUI] back buffer %.0fx%.0f\n", g_BackBufferW, g_BackBufferH);
 
     hr = XuiRenderCreateDC(&g_hDC);
     dprintf("[XUI] XuiRenderCreateDC -> 0x%08lX\n", (unsigned long)hr);
@@ -184,29 +195,38 @@ void DrawXuiTextProbe(float x, float y, const wchar_t *text, unsigned long color
         return;
     }
 
-    // Identity view, so the transform below is in whatever space the DC was
-    // created for - the back buffer. Getting this wrong puts the text
-    // off-screen rather than failing, which is itself worth seeing.
+    // Identity view, so the transform below is in the space the DC was created
+    // for - the back buffer.
     D3DXMATRIX matView;
     D3DXMatrixIdentity(&matView);
     XuiRenderSetViewTransform(g_hDC, &matView);
 
+    // Measure FIRST, then draw into the measured rect.
+    //
+    // This is the step whose absence made the first run render the string at
+    // enormous size. XuiMeasureText overwrites the rect with the text's own
+    // extent; XuiDrawText then lays the string out within whatever rect it is
+    // handed. Passing an unmeasured full-screen rect asks it to fit the text
+    // to the whole display, which is exactly what it did.
+    //
+    // The rect starts as the space actually remaining from the draw position,
+    // so measuring has a sensible bound to work within.
+    XUIRect clipRect;
+    clipRect.left = 0.0f;
+    clipRect.top = 0.0f;
+    clipRect.right = g_BackBufferW - x;
+    clipRect.bottom = g_BackBufferH - y;
+
+    XuiMeasureText(g_hFont, text, -1, XUI_FONT_STYLE_NORMAL, 0, &clipRect);
+
     D3DXMATRIX matPos;
-    D3DXMatrixTranslation(&matPos, x, y, 0.0f);
+    D3DXMatrixIdentity(&matPos);
+    matPos._41 = x;
+    matPos._42 = y;
     XuiRenderSetTransform(g_hDC, &matPos);
 
     XuiSelectFont(g_hDC, g_hFont);
     XuiSetColorFactor(g_hDC, (DWORD)color);
-
-    // A generous clip rect - this is a probe, and a too-small rect would
-    // silently clip the string and look like a failure that it is not.
-    // Float fields, and the struct has a constructor - so it is left to
-    // default-construct rather than being ZeroMemory'd.
-    XUIRect clipRect;
-    clipRect.left = 0.0f;
-    clipRect.top = 0.0f;
-    clipRect.right = 1280.0f;
-    clipRect.bottom = 720.0f;
 
     XuiDrawText(g_hDC, text, XUI_FONT_STYLE_NORMAL, 0, &clipRect);
 

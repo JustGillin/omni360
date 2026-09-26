@@ -1517,13 +1517,22 @@ GameListUIResult ShowGameListUI(const InstalledGame *games, int gameCount, int i
 
         g_UiFont.End();
 
-        // Spike: drawn LAST, after every quad and every ATG string, and before
-        // Present. Placed over the list rather than in empty space on purpose -
-        // if XuiRenderBegin clears the target, the rows behind this vanish and
-        // the answer is obvious at a glance rather than something to squint at.
+        // Spike, drawn LAST - after every quad and every ATG string, before
+        // Present.
+        //
+        // The first question (does XuiRenderBegin wipe the frame?) is answered:
+        // it does not, with a transparent clear colour. So this now asks the
+        // two that decide whether the migration is worth doing.
+        //
+        // Sharpness: it sits right beside rows drawn from the bitmap atlas, so
+        // the two can be compared directly rather than from memory.
+        //
+        // Charset: the accented characters are exactly what the atlas cannot
+        // draw - it stops at 0x7F, so those come out as the unknown glyph
+        // there. If they render here, the charset ceiling is gone.
         DrawXuiTextProbe(g_M.contentX + 40.0f * g_M.scale,
                          g_M.listY + 30.0f * g_M.scale,
-                         L"XUI PROBE - if the rows are still here, XUI shares the frame",
+                         L"XUI 22pt - Café naïve ÀÉÎÕÜ",
                          0xFFFFD24A);
 
         g_pd3dDevice->Present(NULL, NULL, NULL, NULL);
