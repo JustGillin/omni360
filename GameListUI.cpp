@@ -440,6 +440,38 @@ static void DrawGradientRect(float x, float y, float w, float h,
     DrawQuadEx(NULL, x, y, w, h, 0xFFFFFFFF, colorA, colorB, vertical);
 }
 
+// Scales a colour's RGB while leaving its alpha alone, clamping each channel.
+// Used to brighten and dim the selected row as it pulses.
+static D3DCOLOR ScaleColorBrightness(D3DCOLOR c, float mul)
+{
+    unsigned long a = (c >> 24) & 0xFF;
+    float r = (float)((c >> 16) & 0xFF) * mul;
+    float g = (float)((c >> 8) & 0xFF) * mul;
+    float b = (float)(c & 0xFF) * mul;
+
+    if (r > 255.0f) r = 255.0f;
+    if (g > 255.0f) g = 255.0f;
+    if (b > 255.0f) b = 255.0f;
+
+    return (a << 24) | ((unsigned long)r << 16) | ((unsigned long)g << 8) | (unsigned long)b;
+}
+
+// Brightness multiplier for the selected row this frame, oscillating gently
+// around 1.0.
+//
+// Driven off GetTickCount rather than a frame counter so the rate is the same
+// regardless of what the renderer is managing - these screens do real work
+// between frames (scanning a library, streaming a download), and a per-frame
+// counter would make the pulse speed up and slow down with the workload.
+//
+// The wrap of GetTickCount after ~49 days is harmless: the modulo simply
+// starts over, which at worst skips the pulse forward once.
+static float SelectionPulse()
+{
+    float phase = (float)(GetTickCount() % (DWORD)SEL_PULSE_PERIOD_MS) / SEL_PULSE_PERIOD_MS;
+    return 1.0f + SEL_PULSE_AMOUNT * sinf(phase * 6.2831853f);
+}
+
 // ---------------------------------------------------------------------------
 // Small helpers
 // ---------------------------------------------------------------------------
@@ -507,8 +539,30 @@ static void Utf8ToWide(const char *in, WCHAR *out, int outSize)
 #define COL_HEADER_RULE_A  0xFF5FBF46 // accent rule under the header, fading out to the right
 #define COL_HEADER_RULE_B  0x005FBF46
 #define COL_PANEL          0x12FFFFFF // unselected row plate
-#define COL_PANEL_SEL_A    0x33FFFFFF // selected row plate, brightest at its left edge
-#define COL_PANEL_SEL_B    0x0CFFFFFF
+
+// Selected row: a solid green bar with a vertical gradient, light at the top
+// falling to deeper green at the bottom.
+//
+// This used to be translucent white fading horizontally, with the green
+// confined to a thin strip down the left edge - so the palette had an accent
+// colour it barely spent. Putting the green in the bar itself is what makes a
+// selection read from across a room, which is the only distance that matters
+// on a TV.
+#define COL_PANEL_SEL_A    0xFF93E063 // top of the selected bar
+#define COL_PANEL_SEL_B    0xFF4C9A31 // bottom
+
+// How far the selected bar brightens and dims as it pulses, and how long one
+// full cycle takes. Deliberately small - this should register as the row being
+// alive, not as something demanding attention while someone reads it.
+#define SEL_PULSE_AMOUNT   0.10f
+#define SEL_PULSE_PERIOD_MS 2200.0f
+
+// Text drawn ON the selected green bar. White holds up on mid-green; the
+// dimmer greys used elsewhere do not, and the accent green would disappear
+// into it entirely.
+#define COL_SEL_TEXT       0xFFFFFFFF
+#define COL_SEL_SUBTEXT    0xD9FFFFFF
+#define COL_SEL_MARKER     0xFF0F2A08
 #define COL_ACCENT         0xFF7FD44F // selection marker, progress fill
 #define COL_ACCENT_DIM     0xFF3E8A2E
 #define COL_ICON_PLACEHLD  0xFF2A332C
@@ -1232,7 +1286,6 @@ GameListUIResult ShowGameListUI(const InstalledGame *games, int gameCount, int i
 
         const float rowGap = 6.0f * g_M.scale;
         const float plateH = g_M.rowH - rowGap;
-        const float accentW = 4.0f * g_M.scale;
         const float iconX = g_M.contentX + 16.0f * g_M.scale;
         const float scrollW = 5.0f * g_M.scale;
         const float scrollGutter = 18.0f * g_M.scale;
@@ -1284,13 +1337,19 @@ GameListUIResult ShowGameListUI(const InstalledGame *games, int gameCount, int i
 
             if (index == selected)
             {
-                // Selected: a brighter plate that falls off to the right, plus
-                // a solid accent marker down the left edge. The horizontal
-                // falloff is what keeps a full-width highlight from looking
-                // like a flat block.
+                // Selected: a green bar, lit from the top and pulsing gently.
+                // Vertical, not horizontal - a top-down gradient reads as a
+                // lit surface, where the old left-to-right falloff just read
+                // as a highlight running out of steam.
+                //
+                // The separate accent strip that used to sit down the left
+                // edge is gone: it existed to get some green into a row that
+                // was otherwise translucent white, and the bar now carries
+                // that itself.
+                float pulse = SelectionPulse();
                 DrawGradientRect(g_M.contentX, rowY, plateW, plateH,
-                                 COL_PANEL_SEL_A, COL_PANEL_SEL_B, false);
-                DrawRect(g_M.contentX, rowY, accentW, plateH, COL_ACCENT);
+                                 ScaleColorBrightness(COL_PANEL_SEL_A, pulse),
+                                 ScaleColorBrightness(COL_PANEL_SEL_B, pulse), true);
             }
             else
             {
@@ -1382,7 +1441,7 @@ GameListUIResult ShowGameListUI(const InstalledGame *games, int gameCount, int i
 
             g_UiFont.SetScaleFactors(1.0f * g_M.textScale, 1.0f * g_M.textScale);
             g_UiFont.DrawText(textX, rowY + 14.0f * g_M.scale,
-                              isSelected ? COL_TEXT_PRIMARY : COL_TEXT_SECONDARY,
+                              isSelected ? COL_SEL_TEXT : COL_TEXT_SECONDARY,
                               wideName, ATGFONT_TRUNCATED, textMaxW);
 
             // Secondary line: the title ID, which is the thing that actually
@@ -1403,7 +1462,7 @@ GameListUIResult ShowGameListUI(const InstalledGame *games, int gameCount, int i
             // nearer 1.0 and looked fine by comparison.
             g_UiFont.SetScaleFactors(0.85f * g_M.textScale, 0.85f * g_M.textScale);
             g_UiFont.DrawText(textX, rowY + 40.0f * g_M.scale,
-                              isSelected ? COL_TEXT_SECONDARY : COL_TEXT_DIM, wideId);
+                              isSelected ? COL_SEL_SUBTEXT : COL_TEXT_DIM, wideId);
 
             float idW = g_UiFont.GetTextWidth(wideId);
 
@@ -1431,9 +1490,14 @@ GameListUIResult ShowGameListUI(const InstalledGame *games, int gameCount, int i
                 // offset. The old constant was 90px, chosen when this line was
                 // drawn at 0.72 - an eight-character ID at 0.85 can reach past
                 // that and the two would have overlapped.
+                //
+                // Dark on the selected row, accent green everywhere else. This
+                // marker was accent green unconditionally, which was fine
+                // against a translucent white plate and invisible the moment
+                // the selected row became green itself.
                 g_UiFont.DrawText(textX + idW + 18.0f * g_M.scale,
                                   rowY + 40.0f * g_M.scale,
-                                  COL_ACCENT, marker);
+                                  isSelected ? COL_SEL_MARKER : COL_ACCENT, marker);
             }
         }
 
@@ -1724,7 +1788,6 @@ int ShowChoiceUI(const char *heading, const char **labels, const char **sublabel
     const float rowH = 56.0f * g_M.scale;
     const float rowGap = 6.0f * g_M.scale;
     const float plateH = rowH - rowGap;
-    const float accentW = 4.0f * g_M.scale;
     const float scrollW = 5.0f * g_M.scale;
     const float scrollGutter = 18.0f * g_M.scale;
 
@@ -1827,9 +1890,11 @@ int ShowChoiceUI(const char *heading, const char **labels, const char **sublabel
 
             if (index == selected)
             {
+                // Same treatment as the game list - see the comment there.
+                float pulse = SelectionPulse();
                 DrawGradientRect(g_M.contentX, rowY, plateW, plateH,
-                                 COL_PANEL_SEL_A, COL_PANEL_SEL_B, false);
-                DrawRect(g_M.contentX, rowY, accentW, plateH, COL_ACCENT);
+                                 ScaleColorBrightness(COL_PANEL_SEL_A, pulse),
+                                 ScaleColorBrightness(COL_PANEL_SEL_B, pulse), true);
             }
             else
             {
@@ -1893,7 +1958,7 @@ int ShowChoiceUI(const char *heading, const char **labels, const char **sublabel
 
             g_UiFont.SetScaleFactors(0.95f * g_M.textScale, 0.95f * g_M.textScale);
             g_UiFont.DrawText(textX, rowY + 10.0f * g_M.scale,
-                              isSelected ? COL_TEXT_PRIMARY : COL_TEXT_SECONDARY,
+                              isSelected ? COL_SEL_TEXT : COL_TEXT_SECONDARY,
                               wideLabel, ATGFONT_TRUNCATED, textMaxW);
 
             if (sublabels != NULL && sublabels[index] != NULL)
@@ -1905,7 +1970,7 @@ int ShowChoiceUI(const char *heading, const char **labels, const char **sublabel
                 // bump, for the same sharpness reason.
                 g_UiFont.SetScaleFactors(0.85f * g_M.textScale, 0.85f * g_M.textScale);
                 g_UiFont.DrawText(textX, rowY + 32.0f * g_M.scale,
-                                  isSelected ? COL_TEXT_SECONDARY : COL_TEXT_DIM,
+                                  isSelected ? COL_SEL_SUBTEXT : COL_TEXT_DIM,
                                   wideSub, ATGFONT_TRUNCATED, textMaxW);
             }
         }
