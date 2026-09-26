@@ -32,6 +32,7 @@ hand-paced to ~60fps, so per-frame animation is viable here.
 #include "AtgConsole.h"
 #include "AtgFont.h"
 #include "OutputConsole.h"
+#include "XuiTextProbe.h" // spike - see that header
 
 #include <stdio.h>
 #include <string.h>
@@ -934,6 +935,11 @@ bool InitGameListUI()
     if (!ComputeUiMetrics())
         return false;
 
+    // Spike, deliberately not gated on success: if XUI cannot come up, the UI
+    // is exactly what it was and only the probe string is missing. See
+    // XuiTextProbe.h for what this is measuring.
+    InitXuiText();
+
     g_Initialized = true;
     return true;
 }
@@ -944,6 +950,8 @@ void ShutdownGameListUI()
         return;
 
     ReleaseIcons(); // cover art is held for the whole session now - see EnsureIconsLoaded
+
+    ShutdownXuiText(); // no-op if the spike never initialised
 
     g_UiFont.Destroy();
 
@@ -1507,6 +1515,15 @@ GameListUIResult ShowGameListUI(const InstalledGame *games, int gameCount, int i
         g_UiFont.SetScaleFactors(1.0f, 1.0f);
 
         g_UiFont.End();
+
+        // Spike: drawn LAST, after every quad and every ATG string, and before
+        // Present. Placed over the list rather than in empty space on purpose -
+        // if XuiRenderBegin clears the target, the rows behind this vanish and
+        // the answer is obvious at a glance rather than something to squint at.
+        DrawXuiTextProbe(g_M.contentX + 40.0f * g_M.scale,
+                         g_M.listY + 30.0f * g_M.scale,
+                         L"XUI PROBE - if the rows are still here, XUI shares the frame",
+                         0xFFFFD24A);
 
         g_pd3dDevice->Present(NULL, NULL, NULL, NULL);
         g_pd3dDevice->Suspend();

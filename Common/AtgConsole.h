@@ -46,6 +46,13 @@ public:
     // own already-reliably-linked device pointer avoids that entirely).
     static D3DDevice* GetDevice() { return m_pd3dDevice; }
 
+    // Same reasoning as GetDevice above, for the present parameters.
+    // XuiRenderInitShared() requires the D3DPRESENT_PARAMETERS the device was
+    // actually created with, and m_d3dpp is private; reusing Console's copy
+    // guarantees XUI is told the same back buffer format and size the device
+    // really has rather than a reconstructed guess.
+    static const D3DPRESENT_PARAMETERS* GetPresentParams() { return &m_d3dpp; }
+
     // Clear the screen
     VOID            Clear();
 

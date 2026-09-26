@@ -340,6 +340,7 @@
     <ClInclude Include="parsing.h" />
     <ClInclude Include="settings.h" />
     <ClInclude Include="StfsParser.h" />
+    <ClInclude Include="XuiTextProbe.h" />
     <ClInclude Include="SSL\config.h" />
     <ClInclude Include="SSL\inc\bearssl.h" />
     <ClInclude Include="SSL\inc\bearssl_aead.h" />
@@ -370,6 +371,7 @@
     <ClCompile Include="OutputConsole.cpp" />
     <ClCompile Include="parsing.cpp" />
     <ClCompile Include="StfsParser.cpp" />
+    <ClCompile Include="XuiTextProbe.cpp" />
     <ClCompile Include="SSL\aead\ccm.c" />
     <ClCompile Include="SSL\aead\eax.c" />
     <ClCompile Include="SSL\aead\gcm.c" />
