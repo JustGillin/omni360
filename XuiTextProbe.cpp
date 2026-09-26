@@ -21,7 +21,14 @@ the next guess to cost another cycle.
 #include "AtgConsole.h"
 #include "OutputConsole.h"
 
-using namespace ATG;
+// Deliberately NOT "using namespace ATG". The XDK declares D3DDevice at
+// global scope (d3d9.h) and ATG forward-declares it inside its own namespace;
+// pulling ATG in wholesale makes both visible and every unqualified use
+// ambiguous:
+//
+//     error C2872: 'D3DDevice' : ambiguous symbol
+//
+// Qualifying each name explicitly sidesteps it and says which one is meant.
 
 // The TrueType file, deployed beside the XEX rather than embedded as a XEX
 // section the way the bitmap atlas is.
@@ -55,14 +62,14 @@ bool InitXuiText()
     if (g_XuiReady)
         return true;
 
-    D3DDevice *pDevice = Console::GetDevice();
+    ::D3DDevice *pDevice = ATG::Console::GetDevice();
     if (pDevice == NULL)
     {
         dprintf("[XUI] no D3D device from Console - init skipped\n");
         return false;
     }
 
-    const D3DPRESENT_PARAMETERS *pParams = Console::GetPresentParams();
+    const D3DPRESENT_PARAMETERS *pParams = ATG::Console::GetPresentParams();
     if (pParams == NULL)
     {
         dprintf("[XUI] no present params from Console - init skipped\n");

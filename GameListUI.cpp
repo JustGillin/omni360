@@ -457,6 +457,12 @@ static D3DCOLOR ScaleColorBrightness(D3DCOLOR c, float mul)
     return (a << 24) | ((unsigned long)r << 16) | ((unsigned long)g << 8) | (unsigned long)b;
 }
 
+// How far the selected bar brightens and dims as it pulses, and how long one
+// full cycle takes. Deliberately small - this should register as the row being
+// alive, not as something demanding attention while someone reads it.
+#define SEL_PULSE_AMOUNT   0.10f
+#define SEL_PULSE_PERIOD_MS 2200.0f
+
 // Brightness multiplier for the selected row this frame, oscillating gently
 // around 1.0.
 //
@@ -552,11 +558,6 @@ static void Utf8ToWide(const char *in, WCHAR *out, int outSize)
 #define COL_PANEL_SEL_A    0xFF93E063 // top of the selected bar
 #define COL_PANEL_SEL_B    0xFF4C9A31 // bottom
 
-// How far the selected bar brightens and dims as it pulses, and how long one
-// full cycle takes. Deliberately small - this should register as the row being
-// alive, not as something demanding attention while someone reads it.
-#define SEL_PULSE_AMOUNT   0.10f
-#define SEL_PULSE_PERIOD_MS 2200.0f
 
 // Text drawn ON the selected green bar. White holds up on mid-green; the
 // dimmer greys used elsewhere do not, and the accent green would disappear
