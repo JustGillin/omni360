@@ -506,11 +506,12 @@ static bool ComputeUiMetrics()
 // rather than glyphs.
 //
 // AtgFont.h defines GLYPH_A_BUTTON and friends at codepoints 0x100-0x107, and
-// the XDK's own sample fonts do carry artwork there - but this app's embedded
-// "embed:\font" does not. Its .abc header declares m_cMaxGlyph = 0x00FF, so
-// those codepoints are past the end of its translator table entirely and come
-// out as empty boxes. (ufont.abc reaches 0xFFFF but maps that range straight
-// through to Unicode, where 0x100 is a Latin letter, not a button.)
+// the XDK's own sample fonts do carry artwork there - but no font this app is
+// likely to ship does. The embedded Selawik declares m_cMaxGlyph = 0x007F in
+// its .abc header, so those codepoints are past the end of its translator
+// table entirely and would come out as empty boxes. A general-purpose text
+// font that did reach 0x100 would map it to Unicode, where it is a Latin
+// letter rather than a button, so a wider charset does not help either.
 //
 // Shipping one of the XDK sample fonts instead would work, but those are
 // Microsoft sample media accompanied by a .rights file, and this repo is
@@ -1262,9 +1263,18 @@ GameListUIResult ShowGameListUI(const InstalledGame *games, int gameCount, int i
             WCHAR wideId[32];
             Utf8ToWide(idText, wideId, 32);
 
-            g_UiFont.SetScaleFactors(0.72f * g_M.textScale, 0.72f * g_M.textScale);
+            // 0.85 rather than the 0.72 this started at. Two reasons, and the
+            // second is the one that actually matters: it is bigger, and it is
+            // closer to 1:1 against the font atlas. A bitmap font is only
+            // truly sharp when drawn at its own strike size, and this line was
+            // landing at 0.72 * textScale - barely over half scale - which
+            // made it by far the mushiest text on screen. Everything else sits
+            // nearer 1.0 and looked fine by comparison.
+            g_UiFont.SetScaleFactors(0.85f * g_M.textScale, 0.85f * g_M.textScale);
             g_UiFont.DrawText(textX, rowY + 40.0f * g_M.scale,
                               isSelected ? COL_TEXT_SECONDARY : COL_TEXT_DIM, wideId);
+
+            float idW = g_UiFont.GetTextWidth(wideId);
 
             // "Already installed" marker, sharing the secondary line with the
             // title ID. Plain text in the accent colour rather than a tick
@@ -1274,7 +1284,7 @@ GameListUIResult ShowGameListUI(const InstalledGame *games, int gameCount, int i
             //
             // One combined string rather than two separately positioned
             // labels, so the common "both installed" case reads as a single
-            // phrase and needs no width measurement to lay out.
+            // phrase.
             bool dlcHere    = (hasDlcInstalled != NULL && hasDlcInstalled[index]);
             bool updateHere = (hasUpdateInstalled != NULL && hasUpdateInstalled[index]);
 
@@ -1286,7 +1296,12 @@ GameListUIResult ShowGameListUI(const InstalledGame *games, int gameCount, int i
                 else if (!dlcHere)
                     marker = L"UPDATE INSTALLED";
 
-                g_UiFont.DrawText(textX + 90.0f * g_M.scale, rowY + 40.0f * g_M.scale,
+                // Placed after the measured title ID rather than at a fixed
+                // offset. The old constant was 90px, chosen when this line was
+                // drawn at 0.72 - an eight-character ID at 0.85 can reach past
+                // that and the two would have overlapped.
+                g_UiFont.DrawText(textX + idW + 18.0f * g_M.scale,
+                                  rowY + 40.0f * g_M.scale,
                                   COL_ACCENT, marker);
             }
         }
@@ -1755,7 +1770,9 @@ int ShowChoiceUI(const char *heading, const char **labels, const char **sublabel
                 WCHAR wideSub[128];
                 Utf8ToWide(sublabels[index], wideSub, 128);
 
-                g_UiFont.SetScaleFactors(0.72f * g_M.textScale, 0.72f * g_M.textScale);
+                // Matches the game list's secondary line - same 0.72 -> 0.85
+                // bump, for the same sharpness reason.
+                g_UiFont.SetScaleFactors(0.85f * g_M.textScale, 0.85f * g_M.textScale);
                 g_UiFont.DrawText(textX, rowY + 32.0f * g_M.scale,
                                   isSelected ? COL_TEXT_SECONDARY : COL_TEXT_DIM,
                                   wideSub, ATGFONT_TRUNCATED, textMaxW);
