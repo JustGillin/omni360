@@ -522,18 +522,27 @@ static void Utf8ToWide(const char *in, WCHAR *out, int outSize)
 #define COL_SCROLL_THUMB   0x99FFFFFF
 #define COL_BAR_TROUGH     0x26FFFFFF
 
-// Accent colours for the footer button badges. Each one tints both the ring
-// and the letter inside it; the interior stays dark for all of them.
+// Fill colours for the footer button badges - the whole disc takes the
+// colour, with a border around it and a grey letter on top.
 //
-// Brighter than the first version, which used these as a solid fill behind a
-// dark letter. A thin ring and a small glyph carry far less colour than a
-// filled disc does, so they can be more saturated without shouting - and they
-// need to be, to read at this size.
-#define COL_BTN_A          0xFF86D95C
-#define COL_BTN_B          0xFFE0675A
-#define COL_BTN_Y          0xFFEBBF48
-#define COL_BTN_SHOULDER   0xFFB6C2BC
-#define COL_BTN_FILL       0xE60E1410 // dark interior, slightly translucent so the background still reads through
+// An earlier version had this inside out: a dark disc with a coloured ring
+// and a matching coloured letter. That reads as an outline, not a button.
+// The colour belongs in the fill; the ring is only there to give the shape
+// an edge against the background.
+#define COL_BTN_A          0xFF5FA83F
+#define COL_BTN_B          0xFFB8473C
+#define COL_BTN_Y          0xFFCB9E2E
+#define COL_BTN_SHOULDER   0xFF79837E
+
+// The border, drawn as the ring layer over the fill. Translucent black rather
+// than a per-button shade, so one value darkens the rim of every badge
+// regardless of what colour sits under it.
+#define COL_BTN_BORDER     0x4D000000
+
+// The letter, grey on every badge rather than tinted per button. Dark enough
+// to hold contrast across all four fills - the amber is the one that decides
+// how dark this can go, since it is the lightest of them.
+#define COL_BTN_GLYPH      0xFF4A514D
 
 // ---------------------------------------------------------------------------
 // Layout metrics
@@ -655,15 +664,16 @@ static void DrawQuadUVFlat(D3DTexture *texture, float x, float y, float w, float
     DrawQuadUV(texture, x, y, w, h, u0, v0, u1, v1, tint, 0xFFFFFFFF, 0xFFFFFFFF, true);
 }
 
-// A face button: dark interior with a coloured ring, matching how the console
-// and every dashboard on it draw these. The letter goes on top in the same
-// colour during the text pass.
+// A face button: a disc filled with the button's colour, with a border drawn
+// over its rim. The letter goes on top in grey during the text pass.
 //
-// This replaced a solid disc with a dark letter punched out of it, which read
-// as a flat blob - the ring is what makes it look like a button rather than a
-// dot. Both layers come from the antialiased textures built in
-// CreateBadgeTextures, so the edges are smooth instead of stair-stepped, and
-// it is two draw calls instead of the ~26 the per-pixel-row rasteriser cost.
+// Both layers come from the antialiased textures built in CreateBadgeTextures,
+// so the edges are smooth rather than stair-stepped, and it is two draw calls
+// instead of the ~26 the earlier per-pixel-row rasteriser cost.
+//
+// ringColor is the border here, not the button colour. A previous version had
+// these swapped - dark fill, coloured ring, coloured letter - which drew an
+// outline rather than a button. The colour belongs in the fill.
 static void DrawFaceBadge(float cx, float cy, float diameter,
                           D3DCOLOR ringColor, D3DCOLOR fillColor)
 {
@@ -684,6 +694,9 @@ static void DrawFaceBadge(float cx, float cy, float diameter,
 // The ring's thickness is BADGE_RING_FRAC of the texture's diameter, so when
 // the texture is drawn at height h that thickness lands at h * BADGE_RING_FRAC
 // - which is what the straight edges have to match to line up with the caps.
+//
+// As with DrawFaceBadge, ringColor is the border and fillColor carries the
+// button's own colour.
 static void DrawCapsuleBadge(float x, float y, float w, float h,
                              D3DCOLOR ringColor, D3DCOLOR fillColor)
 {
@@ -807,10 +820,10 @@ static void DrawButtonHintShapes(const ButtonHint *hints, int count, float cente
     {
         if (hints[i].shoulder)
             DrawCapsuleBadge(hints[i].badgeX, centerY - badgeH * 0.5f,
-                             hints[i].badgeW, badgeH, hints[i].face, COL_BTN_FILL);
+                             hints[i].badgeW, badgeH, COL_BTN_BORDER, hints[i].face);
         else
             DrawFaceBadge(hints[i].badgeX + hints[i].badgeW * 0.5f, centerY,
-                          badgeH, hints[i].face, COL_BTN_FILL);
+                          badgeH, COL_BTN_BORDER, hints[i].face);
     }
 }
 
@@ -828,13 +841,12 @@ static void DrawButtonHintText(const ButtonHint *hints, int count, float centerY
         float glyphW = g_UiFont.GetTextWidth(hints[i].glyph);
         float glyphX = hints[i].badgeX + (hints[i].badgeW - glyphW) * 0.5f;
 
-        // The letter takes the badge's own colour, matching the ring, and sits
-        // on the dark interior. That is the inverse of the first version - a
-        // dark letter on a solid colour fill - and is both closer to how the
-        // console draws these and easier to read, since a small glyph carries
-        // more contrast against near-black than against a mid-tone.
+        // Grey on every badge, not tinted to match its button. A letter in the
+        // same colour as the fill it sits on has almost nothing to separate it
+        // from that fill; grey is what makes it legible, and it is what the
+        // console's own prompts do.
         g_UiFont.DrawText(glyphX, TextTopForCenter(centerY, glyphScale),
-                          hints[i].face, hints[i].glyph);
+                          COL_BTN_GLYPH, hints[i].glyph);
 
         float labelScale = HINT_LABEL_SCALE * g_M.textScale;
         g_UiFont.SetScaleFactors(labelScale, labelScale);
