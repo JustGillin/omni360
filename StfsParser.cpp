@@ -26,6 +26,57 @@ static unsigned long ReadBE32(const unsigned char *p)
            ((unsigned long)p[2] << 8) | (unsigned long)p[3];
 }
 
+// True if these bytes are well-formed UTF-8 AND contain at least one
+// multi-byte sequence.
+//
+// Used to recognise a package whose UTF-16 Display Name field actually holds
+// UTF-8 BYTES widened one-per-unit - confirmed on real titles, where a
+// trademark sign was stored as the three units 00E2 0084 00A2 rather than as
+// the single unit 2122.
+//
+// The multi-byte requirement is what makes this safe to act on. Plain ASCII
+// passes UTF-8 validation trivially and says nothing either way, so it is
+// excluded. Genuine Latin-1 text is very unlikely to validate: an accented
+// character sitting on its own is an invalid lead byte or a stray
+// continuation byte, and fails immediately. Something that validates AND has
+// a real multi-byte sequence in it is UTF-8 that lost its encoding somewhere,
+// not a coincidence.
+static bool LooksLikeWidenedUtf8(const unsigned char *bytes, int len)
+{
+    bool sawMultiByte = false;
+    int i = 0;
+
+    while (i < len)
+    {
+        unsigned char b = bytes[i];
+        int extra;
+
+        if (b < 0x80)
+        {
+            i++;
+            continue;
+        }
+        else if ((b & 0xE0) == 0xC0) extra = 1;
+        else if ((b & 0xF0) == 0xE0) extra = 2;
+        else if ((b & 0xF8) == 0xF0) extra = 3;
+        else return false; // stray continuation or invalid lead byte
+
+        if (i + extra >= len)
+            return false; // truncated sequence
+
+        for (int k = 1; k <= extra; ++k)
+        {
+            if ((bytes[i + k] & 0xC0) != 0x80)
+                return false;
+        }
+
+        sawMultiByte = true;
+        i += 1 + extra;
+    }
+
+    return sawMultiByte;
+}
+
 // Display Name is documented as UTF-8 by the Free60 wiki, but established
 // STFS tooling (Modio, Velocity, Horizon) has historically treated it as
 // UTF-16BE. Rather than bet on either, detect per-file: if alternating bytes
@@ -62,20 +113,65 @@ static void DecodeDisplayName(const unsigned char *raw, int rawLen, char *out, i
 
     if (looksUtf16BE)
     {
-        // Re-encode each UTF-16BE unit as real UTF-8, because that is what
-        // this buffer is - GameListUI's Utf8ToWide decodes it later.
+        // Two different things get stored in this field, and they need
+        // opposite handling.
         //
-        // This used to write "(hi == 0) ? (char)lo : '?'", which broke every
-        // character above 0x7F in two different ways. A codepoint over 0xFF
-        // became '?' immediately, so a trademark sign (U+2122) was destroyed
-        // here, long before any font got a chance to draw it. And one between
-        // 0x80 and 0xFF was written as a single raw byte, which is not valid
-        // UTF-8 at all - a registered sign (U+00AE) came out as a lone 0xAE,
-        // which Utf8ToWide then correctly rejected as a stray continuation
-        // byte and replaced with '?' anyway.
+        // Normally each unit is a real codepoint and has to be encoded to
+        // UTF-8, since that is what this buffer is - GameListUI's Utf8ToWide
+        // decodes it later. An older version instead wrote "(hi == 0) ?
+        // (char)lo : '?'", which destroyed everything above 0x7F: a codepoint
+        // over 0xFF became '?' outright, and one between 0x80 and 0xFF was
+        // written as a lone byte that is not valid UTF-8 at all.
         //
-        // Both showed up on real titles in a real library: "Spider-Man(TM):
-        // Dimensions" and "Call of Duty: Modern Warfare(R) 3".
+        // But some packages store UTF-8 BYTES here, widened one per unit.
+        // Confirmed on this library: a trademark sign arrives as the three
+        // units 00E2 0084 00A2 - which is UTF-8's E2 84 A2 - rather than as
+        // the single unit 2122. Encoding those three "codepoints" is
+        // technically correct and gives the wrong answer, because they were
+        // never codepoints. That is what turned "Spider-Man(TM)" into
+        // mojibake, and why the old lossy code accidentally looked right here:
+        // writing raw bytes collapsed the widening straight back.
+        //
+        // So: if every unit fits in a byte and those bytes are well-formed
+        // UTF-8 with a genuine multi-byte sequence in them, take them as the
+        // UTF-8 they already are. Otherwise encode each unit properly.
+        int unitCount = 0;
+        unsigned long units[64];
+
+        for (int i = 0; i + 1 < rawLen && unitCount < 64; i += 2)
+        {
+            unsigned long cp = ((unsigned long)raw[i] << 8) | raw[i + 1];
+            if (cp == 0)
+                break;
+            units[unitCount++] = cp;
+        }
+
+        bool allFitInAByte = true;
+        for (int u = 0; u < unitCount; ++u)
+        {
+            if (units[u] > 0xFF)
+            {
+                allFitInAByte = false;
+                break;
+            }
+        }
+
+        if (allFitInAByte && unitCount > 0)
+        {
+            unsigned char asBytes[64];
+            for (int u = 0; u < unitCount; ++u)
+                asBytes[u] = (unsigned char)units[u];
+
+            if (LooksLikeWidenedUtf8(asBytes, unitCount))
+            {
+                for (int u = 0; u < unitCount && o + 1 < outSize; ++u)
+                    out[o++] = (char)asBytes[u];
+
+                out[o] = '\0';
+                return;
+            }
+        }
+
         for (int i = 0; i + 1 < rawLen && o + 1 < outSize; i += 2)
         {
             unsigned long cp = ((unsigned long)raw[i] << 8) | raw[i + 1];
@@ -241,8 +337,41 @@ bool StfsReadTitleInfo(const char *packagePath, StfsTitleInfo *outInfo)
 
     if (outInfo->diagNameNonAscii)
     {
-        outInfo->diagRawNameLen = (int)sizeof(outInfo->diagRawName);
-        memcpy(outInfo->diagRawName, header + 0x0411, outInfo->diagRawNameLen);
+        // Centre the window on the first unit that is not plain ASCII, rather
+        // than dumping from the start of the field.
+        //
+        // The first version always took the opening bytes, and on both of the
+        // titles it was written to diagnose the interesting character sat just
+        // past the end of the window - "Spider-Man" and "Modern War" are each
+        // exactly ten characters, so twenty bytes of UTF-16 stopped one unit
+        // short of the thing being looked for. A diagnostic that reliably
+        // misses the subject is worse than none, because it looks like an
+        // answer.
+        const unsigned char *field = header + 0x0411;
+        const int FIELD_LEN = 0x80;
+        int firstOdd = 0;
+
+        for (int i = 0; i + 1 < FIELD_LEN; i += 2)
+        {
+            if (field[i] != 0x00 || field[i + 1] >= 0x80)
+            {
+                firstOdd = i;
+                break;
+            }
+        }
+
+        int start = firstOdd - 6; // a few units of context before it
+        if (start < 0)
+            start = 0;
+        start &= ~1; // stay on a unit boundary
+
+        int len = (int)sizeof(outInfo->diagRawName);
+        if (start + len > FIELD_LEN)
+            len = FIELD_LEN - start;
+
+        outInfo->diagRawNameLen = len;
+        outInfo->diagRawNameOffset = start;
+        memcpy(outInfo->diagRawName, field + start, len);
     }
 
     // Only look for a thumbnail if the file actually extends that far - a
@@ -476,7 +605,7 @@ int EnumerateInstalledGames(const char *contentBasePath, InstalledGame *outGames
                             h += _snprintf(h, 4, "%02X ", info.diagRawName[b]);
                         *h = '\0';
 
-                        printFunction("    name bytes: %s\n", hex);
+                        printFunction("    name bytes @+%d: %s\n", info.diagRawNameOffset, hex);
                     }
 
                     if (IsGameContentType(info.contentType) && count < maxGames)

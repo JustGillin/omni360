@@ -59,6 +59,7 @@ struct StfsTitleInfo
     // those, and nothing else does.
     unsigned char diagRawName[24];
     int           diagRawNameLen;
+    int           diagRawNameOffset; // where in the field the window starts, so the log is locatable
     bool          diagNameNonAscii;
 
     long          diagBytesRead;        // how much of the header this file actually yielded
