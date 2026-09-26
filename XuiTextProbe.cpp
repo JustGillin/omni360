@@ -15,6 +15,7 @@ the next guess to cost another cycle.
 #include <xui.h>
 #include <xuirender.h>
 #include <xuielement.h>
+#include <xuierror.h> // XUI_ERR_* codes, for naming failures instead of printing bare HRESULTs
 #include <d3dx9math.h>
 
 #include "XuiTextProbe.h"
@@ -37,7 +38,14 @@ the next guess to cost another cycle.
 // route is that the font stays a font. game: is where the app already keeps
 // its own runtime files (settings.txt, ArchiveOrgKeys.txt), so this is
 // consistent with the rest rather than a new convention.
-#define XUI_TYPEFACE_PATH  L"game:\\selawk.ttf"
+// A URI, not a Win32 path. XUI wants the "file://" scheme and forward
+// slashes; this started out as "game:\selawk.ttf" and XuiRegisterTypeface
+// rejected it with 0x8030001F, which xuierror.h names
+// XUI_ERR_RESOURCE_LOCATOR_MUST_BE_ABSOLUTE.
+//
+// Note "game:/" with one forward slash after the colon - the drive alias is
+// part of the path, not part of the scheme.
+#define XUI_TYPEFACE_PATH  L"file://game:/selawk.ttf"
 #define XUI_TYPEFACE_NAME  L"Selawik"
 #define XUI_PROBE_FONT_PT  22.0f
 
@@ -124,10 +132,22 @@ bool InitXuiText()
     dprintf("[XUI] XuiRegisterTypeface(%ls) -> 0x%08lX\n", XUI_TYPEFACE_PATH, (unsigned long)hr);
     if (FAILED(hr))
     {
-        // Overwhelmingly the likely cause is the file simply not being on the
-        // console yet - it has to sit beside the XEX. Worth saying plainly,
-        // because it looks identical to a real XUI failure from the log.
-        dprintf("[XUI] typeface failed - is selawk.ttf deployed next to the XEX?\n");
+        // Name the failure rather than guessing at it. The first version of
+        // this printed "is the file deployed?", which sent the search to the
+        // console when the file was fine and the LOCATOR was malformed - a
+        // wasted build cycle for want of decoding one error code.
+        const char *why = "unrecognised - look it up in xuierror.h";
+
+        if (hr == XUI_ERR_RESOURCE_LOCATOR_MUST_BE_ABSOLUTE)
+            why = "locator is not an absolute URI - needs file://game:/name.ttf form";
+        else if (hr == XUI_ERR_RESOURCE_COULD_NOT_BE_OPENED)
+            why = "locator parsed, but the file could not be opened - check it is on the console";
+        else if (hr == XUI_ERR_INVALID_RESOURCE_PATH)
+            why = "resource path rejected - check the drive alias exists";
+        else if (hr == XUI_ERR_FILE_INVALID)
+            why = "file opened but was not a usable font";
+
+        dprintf("[XUI] typeface failed: %s\n", why);
         ShutdownXuiText();
         return false;
     }
