@@ -130,6 +130,12 @@ static bool g_Initialized = false;
 
 static void ReleaseIcons(); // defined with the cover-art cache below; called from ShutdownGameListUI
 
+// Defined further down with the other shared chrome. Forward-declared because
+// the game list draws its header through it, and that screen comes first in
+// this file - the shared chrome sits with the screens that were written to use
+// it rather than being hoisted above everything.
+static void DrawChromeHeading(const char *heading);
+
 static bool CreateQuadResources()
 {
     static const D3DVERTEXELEMENT9 decl[] =
@@ -314,146 +320,6 @@ static void DrawGradientRect(float x, float y, float w, float h,
 }
 
 // ---------------------------------------------------------------------------
-// Footer button badges
-// ---------------------------------------------------------------------------
-//
-// The controller-button hints at the bottom of the screen, drawn as shapes
-// rather than glyphs.
-//
-// AtgFont.h defines GLYPH_A_BUTTON and friends at codepoints 0x100-0x107, and
-// the XDK's own sample fonts do carry artwork there - but this app's embedded
-// "embed:\font" does not. Its .abc header declares m_cMaxGlyph = 0x00FF, so
-// those codepoints are past the end of its translator table entirely and come
-// out as empty boxes. (ufont.abc reaches 0xFFFF but maps that range straight
-// through to Unicode, where 0x100 is a Latin letter, not a button.)
-//
-// Shipping one of the XDK sample fonts instead would work, but those are
-// Microsoft sample media accompanied by a .rights file, and this repo is
-// AGPL-3.0 and publishable - so a disc with a letter on it, drawn here from
-// primitives, avoids the question entirely and themes cleanly besides.
-//
-// Everything is built from DrawRect because the 1x1 white texture is the only
-// one this file can safely fill: see the QuadPixelShader comment on the GPU's
-// texture tiling making naive LockRect writes wrong above 1x1.
-
-// A filled disc, approximated by horizontal bands sampled off the circle
-// equation. Nine bands is enough that the edge reads as curved at the ~22px
-// this draws at, and cheap enough not to matter next to everything else.
-static void DrawDiscBadge(float cx, float cy, float diameter, D3DCOLOR color)
-{
-    const int BANDS = 9;
-    float r = diameter * 0.5f;
-    float bandH = diameter / (float)BANDS;
-
-    for (int i = 0; i < BANDS; ++i)
-    {
-        // Sample at each band's vertical centre, normalised to -1..1.
-        float t = (((float)i + 0.5f) / (float)BANDS) * 2.0f - 1.0f;
-        float halfW = r * sqrtf(1.0f - t * t);
-
-        DrawRect(cx - halfW, cy - r + (float)i * bandH, halfW * 2.0f, bandH, color);
-    }
-}
-
-// A rounded rectangle for the shoulder buttons, which are wider than they are
-// tall. Three rects: a full-width body with narrower caps above and below.
-static void DrawPillBadge(float x, float y, float w, float h, D3DCOLOR color)
-{
-    float inset = h * 0.22f;
-
-    DrawRect(x, y + inset, w, h - inset * 2.0f, color);
-    DrawRect(x + inset, y, w - inset * 2.0f, inset, color);
-    DrawRect(x + inset, y + h - inset, w - inset * 2.0f, inset, color);
-}
-
-// One hint: a badge with a letter on it, followed by what that button does.
-//
-// Laid out once and then drawn twice - the badge shapes belong in the quad
-// pass and the text in the font pass, and both need identical positions. The
-// x fields are filled in by LayoutButtonHints and read by both draw calls,
-// which is what keeps the letter centred on its own badge.
-struct ButtonHint
-{
-    const WCHAR *glyph;
-    const WCHAR *label;
-    D3DCOLOR     face;
-    bool         shoulder;
-
-    float badgeX;
-    float badgeW;
-    float labelX;
-};
-
-#define HINT_GLYPH_SCALE 0.62f
-#define HINT_LABEL_SCALE 0.78f
-
-// Walks the hints left to right, measuring each label so the spacing follows
-// the text instead of assuming every label is the same length ("DLC" and
-// "Title update" are not). Returns the total width.
-static float LayoutButtonHints(ButtonHint *hints, int count, float startX)
-{
-    float badgeH = 22.0f * g_M.scale;
-    float gapBadgeToLabel = 7.0f * g_M.scale;
-    float gapBetweenHints = 26.0f * g_M.scale;
-
-    float x = startX;
-
-    for (int i = 0; i < count; ++i)
-    {
-        hints[i].badgeX = x;
-        hints[i].badgeW = hints[i].shoulder ? badgeH * 1.7f : badgeH;
-
-        hints[i].labelX = x + hints[i].badgeW + gapBadgeToLabel;
-
-        g_UiFont.SetScaleFactors(HINT_LABEL_SCALE * g_M.textScale, HINT_LABEL_SCALE * g_M.textScale);
-        float labelW = g_UiFont.GetTextWidth(hints[i].label);
-
-        x = hints[i].labelX + labelW + gapBetweenHints;
-    }
-
-    return x - gapBetweenHints - startX;
-}
-
-// Quad pass: the badge shapes only.
-static void DrawButtonHintShapes(const ButtonHint *hints, int count, float centerY)
-{
-    float badgeH = 22.0f * g_M.scale;
-
-    for (int i = 0; i < count; ++i)
-    {
-        if (hints[i].shoulder)
-            DrawPillBadge(hints[i].badgeX, centerY - badgeH * 0.5f,
-                          hints[i].badgeW, badgeH, hints[i].face);
-        else
-            DrawDiscBadge(hints[i].badgeX + hints[i].badgeW * 0.5f, centerY,
-                          badgeH, hints[i].face);
-    }
-}
-
-// Font pass: the letter on each badge, then its label. Must be called inside
-// an open Font Begin/End.
-static void DrawButtonHintText(const ButtonHint *hints, int count, float centerY)
-{
-    float badgeH = 22.0f * g_M.scale;
-
-    for (int i = 0; i < count; ++i)
-    {
-        g_UiFont.SetScaleFactors(HINT_GLYPH_SCALE * g_M.textScale, HINT_GLYPH_SCALE * g_M.textScale);
-
-        // Centred on the badge by measuring the letter rather than nudging by
-        // a constant - "LB" and "A" are different widths.
-        float glyphW = g_UiFont.GetTextWidth(hints[i].glyph);
-        float glyphX = hints[i].badgeX + (hints[i].badgeW - glyphW) * 0.5f;
-
-        g_UiFont.DrawText(glyphX, centerY - badgeH * 0.34f, COL_BTN_LABEL, hints[i].glyph);
-
-        g_UiFont.SetScaleFactors(HINT_LABEL_SCALE * g_M.textScale, HINT_LABEL_SCALE * g_M.textScale);
-        g_UiFont.DrawText(hints[i].labelX, centerY - badgeH * 0.40f,
-                          COL_TEXT_DIM, hints[i].label);
-    }
-}
-
-// ---------------------------------------------------------------------------
 // Small helpers
 // ---------------------------------------------------------------------------
 
@@ -630,6 +496,146 @@ static bool ComputeUiMetrics()
     if (g_M.visibleRows > 16) g_M.visibleRows = 16; // sanity clamp; nothing realistic hits this
 
     return true;
+}
+
+// ---------------------------------------------------------------------------
+// Footer button badges
+// ---------------------------------------------------------------------------
+//
+// The controller-button hints at the bottom of the screen, drawn as shapes
+// rather than glyphs.
+//
+// AtgFont.h defines GLYPH_A_BUTTON and friends at codepoints 0x100-0x107, and
+// the XDK's own sample fonts do carry artwork there - but this app's embedded
+// "embed:\font" does not. Its .abc header declares m_cMaxGlyph = 0x00FF, so
+// those codepoints are past the end of its translator table entirely and come
+// out as empty boxes. (ufont.abc reaches 0xFFFF but maps that range straight
+// through to Unicode, where 0x100 is a Latin letter, not a button.)
+//
+// Shipping one of the XDK sample fonts instead would work, but those are
+// Microsoft sample media accompanied by a .rights file, and this repo is
+// AGPL-3.0 and publishable - so a disc with a letter on it, drawn here from
+// primitives, avoids the question entirely and themes cleanly besides.
+//
+// Everything is built from DrawRect because the 1x1 white texture is the only
+// one this file can safely fill: see the QuadPixelShader comment on the GPU's
+// texture tiling making naive LockRect writes wrong above 1x1.
+
+// A filled disc, approximated by horizontal bands sampled off the circle
+// equation. Nine bands is enough that the edge reads as curved at the ~22px
+// this draws at, and cheap enough not to matter next to everything else.
+static void DrawDiscBadge(float cx, float cy, float diameter, D3DCOLOR color)
+{
+    const int BANDS = 9;
+    float r = diameter * 0.5f;
+    float bandH = diameter / (float)BANDS;
+
+    for (int i = 0; i < BANDS; ++i)
+    {
+        // Sample at each band's vertical centre, normalised to -1..1.
+        float t = (((float)i + 0.5f) / (float)BANDS) * 2.0f - 1.0f;
+        float halfW = r * sqrtf(1.0f - t * t);
+
+        DrawRect(cx - halfW, cy - r + (float)i * bandH, halfW * 2.0f, bandH, color);
+    }
+}
+
+// A rounded rectangle for the shoulder buttons, which are wider than they are
+// tall. Three rects: a full-width body with narrower caps above and below.
+static void DrawPillBadge(float x, float y, float w, float h, D3DCOLOR color)
+{
+    float inset = h * 0.22f;
+
+    DrawRect(x, y + inset, w, h - inset * 2.0f, color);
+    DrawRect(x + inset, y, w - inset * 2.0f, inset, color);
+    DrawRect(x + inset, y + h - inset, w - inset * 2.0f, inset, color);
+}
+
+// One hint: a badge with a letter on it, followed by what that button does.
+//
+// Laid out once and then drawn twice - the badge shapes belong in the quad
+// pass and the text in the font pass, and both need identical positions. The
+// x fields are filled in by LayoutButtonHints and read by both draw calls,
+// which is what keeps the letter centred on its own badge.
+struct ButtonHint
+{
+    const WCHAR *glyph;
+    const WCHAR *label;
+    D3DCOLOR     face;
+    bool         shoulder;
+
+    float badgeX;
+    float badgeW;
+    float labelX;
+};
+
+#define HINT_GLYPH_SCALE 0.62f
+#define HINT_LABEL_SCALE 0.78f
+
+// Walks the hints left to right, measuring each label so the spacing follows
+// the text instead of assuming every label is the same length ("DLC" and
+// "Title update" are not). Returns the total width.
+static float LayoutButtonHints(ButtonHint *hints, int count, float startX)
+{
+    float badgeH = 22.0f * g_M.scale;
+    float gapBadgeToLabel = 7.0f * g_M.scale;
+    float gapBetweenHints = 26.0f * g_M.scale;
+
+    float x = startX;
+
+    for (int i = 0; i < count; ++i)
+    {
+        hints[i].badgeX = x;
+        hints[i].badgeW = hints[i].shoulder ? badgeH * 1.7f : badgeH;
+
+        hints[i].labelX = x + hints[i].badgeW + gapBadgeToLabel;
+
+        g_UiFont.SetScaleFactors(HINT_LABEL_SCALE * g_M.textScale, HINT_LABEL_SCALE * g_M.textScale);
+        float labelW = g_UiFont.GetTextWidth(hints[i].label);
+
+        x = hints[i].labelX + labelW + gapBetweenHints;
+    }
+
+    return x - gapBetweenHints - startX;
+}
+
+// Quad pass: the badge shapes only.
+static void DrawButtonHintShapes(const ButtonHint *hints, int count, float centerY)
+{
+    float badgeH = 22.0f * g_M.scale;
+
+    for (int i = 0; i < count; ++i)
+    {
+        if (hints[i].shoulder)
+            DrawPillBadge(hints[i].badgeX, centerY - badgeH * 0.5f,
+                          hints[i].badgeW, badgeH, hints[i].face);
+        else
+            DrawDiscBadge(hints[i].badgeX + hints[i].badgeW * 0.5f, centerY,
+                          badgeH, hints[i].face);
+    }
+}
+
+// Font pass: the letter on each badge, then its label. Must be called inside
+// an open Font Begin/End.
+static void DrawButtonHintText(const ButtonHint *hints, int count, float centerY)
+{
+    float badgeH = 22.0f * g_M.scale;
+
+    for (int i = 0; i < count; ++i)
+    {
+        g_UiFont.SetScaleFactors(HINT_GLYPH_SCALE * g_M.textScale, HINT_GLYPH_SCALE * g_M.textScale);
+
+        // Centred on the badge by measuring the letter rather than nudging by
+        // a constant - "LB" and "A" are different widths.
+        float glyphW = g_UiFont.GetTextWidth(hints[i].glyph);
+        float glyphX = hints[i].badgeX + (hints[i].badgeW - glyphW) * 0.5f;
+
+        g_UiFont.DrawText(glyphX, centerY - badgeH * 0.34f, COL_BTN_LABEL, hints[i].glyph);
+
+        g_UiFont.SetScaleFactors(HINT_LABEL_SCALE * g_M.textScale, HINT_LABEL_SCALE * g_M.textScale);
+        g_UiFont.DrawText(hints[i].labelX, centerY - badgeH * 0.40f,
+                          COL_TEXT_DIM, hints[i].label);
+    }
 }
 
 // Full-screen background wash, drawn first every frame. Replaces the flat
