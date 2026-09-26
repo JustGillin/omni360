@@ -226,6 +226,25 @@ bool StfsReadTitleInfo(const char *packagePath, StfsTitleInfo *outInfo)
 
     DecodeDisplayName(header + 0x0411, 0x80, outInfo->displayName, sizeof(outInfo->displayName));
 
+    // Capture the raw field for names that decoded to anything outside ASCII,
+    // so the encoding can be read off the log rather than inferred from how
+    // the result looks on screen.
+    outInfo->diagNameNonAscii = false;
+    for (const unsigned char *d = (const unsigned char *)outInfo->displayName; *d != '\0'; ++d)
+    {
+        if (*d >= 0x80)
+        {
+            outInfo->diagNameNonAscii = true;
+            break;
+        }
+    }
+
+    if (outInfo->diagNameNonAscii)
+    {
+        outInfo->diagRawNameLen = (int)sizeof(outInfo->diagRawName);
+        memcpy(outInfo->diagRawName, header + 0x0411, outInfo->diagRawNameLen);
+    }
+
     // Only look for a thumbnail if the file actually extends that far - a
     // small header (common for GOD packages) may not have this section at
     // all, and reading past actuallyRead would be uninitialized memory.
@@ -429,6 +448,35 @@ int EnumerateInstalledGames(const char *contentBasePath, InstalledGame *outGames
                                      info.diagBytesRead,
                                      info.diagTitleThumbSize, info.diagTitleMagic,
                                      info.diagContentThumbSize, info.diagContentMagic);
+                    }
+
+                    // Raw Display Name bytes, for names that decoded to
+                    // anything outside ASCII. Reading them settles which end
+                    // of the pipeline a mojibake symptom comes from:
+                    //
+                    //   00 AE            -> UTF-16BE holding the real
+                    //                       character; the decoder is at fault
+                    //   00 C2 00 AE      -> UTF-16BE holding UTF-8 BYTES, so
+                    //                       the package itself is
+                    //                       double-encoded and re-encoding it
+                    //                       correctly preserves the damage
+                    //   C2 AE            -> plain UTF-8, handled by the
+                    //                       passthrough branch
+                    //   C3 82 C2 AE      -> already double-encoded UTF-8 in
+                    //                       the package
+                    if (info.diagNameNonAscii && info.diagRawNameLen > 0)
+                    {
+                        char hex[80];
+                        char *h = hex;
+                        int n = info.diagRawNameLen;
+                        if (n > 20)
+                            n = 20; // 20 bytes is well past the first odd character
+
+                        for (int b = 0; b < n; ++b)
+                            h += _snprintf(h, 4, "%02X ", info.diagRawName[b]);
+                        *h = '\0';
+
+                        printFunction("    name bytes: %s\n", hex);
                     }
 
                     if (IsGameContentType(info.contentType) && count < maxGames)

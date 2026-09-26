@@ -48,6 +48,19 @@ struct StfsTitleInfo
     // actually got read, and the leading magic - and from the outside all
     // three look identical: a blank square. Guessing which one is in play
     // costs a full hardware build cycle per guess.
+    // The first bytes of the raw Display Name field, before any decoding.
+    // Logged only for names that decode to something non-ASCII, which is the
+    // only case where the encoding is in question.
+    //
+    // This exists because a mojibake symptom cannot be diagnosed from the
+    // decoded string alone - "WarfareA(R)" looks the same whether the package
+    // stored one character and we mangled it, or the package stored the
+    // mangling and we faithfully reproduced it. The raw bytes distinguish
+    // those, and nothing else does.
+    unsigned char diagRawName[24];
+    int           diagRawNameLen;
+    bool          diagNameNonAscii;
+
     long          diagBytesRead;        // how much of the header this file actually yielded
     unsigned long diagTitleThumbSize;   // declared Title Thumbnail size, before clamping
     unsigned long diagContentThumbSize; // declared Thumbnail size, before clamping
