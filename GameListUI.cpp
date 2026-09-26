@@ -1066,6 +1066,58 @@ static bool CreateIconTexture(const unsigned char *data, unsigned long size, Ico
         {
             dprintf("[icon]   GetImageInfo also failed -> 0x%08lX - D3DX cannot parse these bytes\n",
                     (unsigned long)hrInfo);
+
+            // 0x88760B59 is D3DXERR_INVALIDDATA, and the magic above is a
+            // real PNG signature - so this is a genuine PNG whose CONTENT
+            // D3DX's decoder will not take. Which feature it objects to is
+            // stated plainly in the IHDR chunk, which PNG fixes at the very
+            // start of the file:
+            //
+            //   0..7   signature        8..11  IHDR length (13)
+            //   12..15 "IHDR"           16..19 width
+            //   20..23 height            24    bit depth
+            //   25     colour type       26    compression
+            //   27     filter            28    interlace
+            //
+            // Colour type and bit depth are the usual culprits - D3DX9's PNG
+            // support is narrower than the format allows, and 16-bit channels
+            // or a paletted/greyscale-with-alpha variant are the kinds of
+            // thing it declines. Interlace 1 (Adam7) is another.
+            if (size >= 29 && magic == 0x89504E47UL &&
+                data[12] == 'I' && data[13] == 'H' && data[14] == 'D' && data[15] == 'R')
+            {
+                unsigned long pngW = ((unsigned long)data[16] << 24) | ((unsigned long)data[17] << 16) |
+                                     ((unsigned long)data[18] << 8)  | (unsigned long)data[19];
+                unsigned long pngH = ((unsigned long)data[20] << 24) | ((unsigned long)data[21] << 16) |
+                                     ((unsigned long)data[22] << 8)  | (unsigned long)data[23];
+
+                dprintf("[icon]   PNG IHDR: %lux%lu depth=%u colourType=%u compression=%u filter=%u interlace=%u\n",
+                        pngW, pngH,
+                        (unsigned)data[24], (unsigned)data[25],
+                        (unsigned)data[26], (unsigned)data[27], (unsigned)data[28]);
+
+                // Whether the declared size actually contains the whole file.
+                // A PNG always ends with an IEND chunk, so its absence means
+                // the thumbnail field is truncated - the image is fine and we
+                // are simply not reading all of it, which is a completely
+                // different fix from an unsupported format.
+                bool sawEnd = false;
+                if (size >= 8)
+                {
+                    for (unsigned long b = 0; b + 4 <= size; ++b)
+                    {
+                        if (data[b] == 'I' && data[b + 1] == 'E' &&
+                            data[b + 2] == 'N' && data[b + 3] == 'D')
+                        {
+                            sawEnd = true;
+                            break;
+                        }
+                    }
+                }
+
+                dprintf("[icon]   IEND present: %s\n", sawEnd ? "yes - data looks complete"
+                                                              : "NO - thumbnail data is truncated");
+            }
         }
         else
         {
