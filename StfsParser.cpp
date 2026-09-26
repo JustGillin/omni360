@@ -82,6 +82,35 @@ static void DecodeDisplayName(const unsigned char *raw, int rawLen, char *out, i
     out[o] = '\0';
 }
 
+// Whether an embedded thumbnail starts with a magic number D3DX can actually
+// decode.
+//
+// This gate is not cosmetic. GOD conversion tools have a long history of
+// leaving the thumbnail field zeroed or garbage despite a nonzero declared
+// size - thumbnails aren't needed for gameplay, so plenty of converters don't
+// bother - and feeding those bytes straight to
+// D3DXCreateTextureFromFileInMemoryEx crashed the GPU hard enough to need a
+// cold boot. Confirmed the hard way earlier in this project.
+//
+// It accepted PNG only until now. D3DX decodes JPEG too, and a package whose
+// art happens to be JPEG would have been refused for no reason - one candidate
+// for why a few titles come out blank. Widening it keeps the protection that
+// matters (a known-good magic, not merely a nonzero size) while removing a
+// restriction nothing justified.
+static bool ImageMagicLooksDecodable(const unsigned char *data)
+{
+    static const unsigned char PNG[8]  = {0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A};
+    static const unsigned char JPEG[3] = {0xFF, 0xD8, 0xFF};
+
+    if (memcmp(data, PNG, sizeof(PNG)) == 0)
+        return true;
+
+    if (memcmp(data, JPEG, sizeof(JPEG)) == 0)
+        return true;
+
+    return false;
+}
+
 bool StfsReadTitleInfo(const char *packagePath, StfsTitleInfo *outInfo)
 {
     memset(outInfo, 0, sizeof(StfsTitleInfo));
@@ -176,17 +205,26 @@ bool StfsReadTitleInfo(const char *packagePath, StfsTitleInfo *outInfo)
             contentThumbSize = maxThumbSize;
     }
 
-    // GOD conversion tools have a long history of leaving the thumbnail
-    // field zeroed/garbage despite a nonzero declared size (thumbnails
-    // aren't needed for gameplay, so plenty of converters don't bother) -
-    // confirmed necessary this session: feeding non-PNG bytes straight to
-    // D3DXCreateTextureFromFileInMemoryEx crashed the GPU hard enough to need
-    // a cold boot. Only trust it if it actually starts with the real PNG
-    // signature.
-    static const unsigned char PNG_SIGNATURE[8] = {0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A};
+    // Each image has to clear three separate gates: a plausible declared
+    // size, bounds against how much of the header this file actually yielded,
+    // and a magic number D3DX can decode. See ImageMagicLooksDecodable for
+    // why the last one is not optional.
 
-    if (thumbSize > sizeof(PNG_SIGNATURE) && (long)(0x571A + thumbSize) <= actuallyRead &&
-        memcmp(header + 0x571A, PNG_SIGNATURE, sizeof(PNG_SIGNATURE)) == 0)
+    // Shortest magic the helper accepts; at or under this it cannot be an image.
+    const unsigned long MIN_IMAGE_BYTES = 8;
+
+    // Record what was actually found before any of it is judged, so a title
+    // that ends up with no art can say which gate refused it.
+    outInfo->diagBytesRead = actuallyRead;
+    outInfo->diagTitleThumbSize = thumbSize;
+    outInfo->diagContentThumbSize = contentThumbSize;
+    if (actuallyRead >= 0x571A + 4)
+        outInfo->diagTitleMagic = ReadBE32(header + 0x571A);
+    if (actuallyRead >= 0x171A + 4)
+        outInfo->diagContentMagic = ReadBE32(header + 0x171A);
+
+    if (thumbSize > MIN_IMAGE_BYTES && (long)(0x571A + thumbSize) <= actuallyRead &&
+        ImageMagicLooksDecodable(header + 0x571A))
     {
         outInfo->titleThumbnail = (unsigned char *)malloc(thumbSize);
         if (outInfo->titleThumbnail != NULL)
@@ -196,10 +234,10 @@ bool StfsReadTitleInfo(const char *packagePath, StfsTitleInfo *outInfo)
         }
     }
 
-    // Same PNG-signature gate for the content thumbnail, for exactly the same
-    // reason - a converter that zeroed one field very plausibly zeroed both.
-    if (contentThumbSize > sizeof(PNG_SIGNATURE) && (long)(0x171A + contentThumbSize) <= actuallyRead &&
-        memcmp(header + 0x171A, PNG_SIGNATURE, sizeof(PNG_SIGNATURE)) == 0)
+    // Same magic gate for the content thumbnail, for exactly the same reason -
+    // a converter that zeroed one field very plausibly zeroed both.
+    if (contentThumbSize > MIN_IMAGE_BYTES && (long)(0x171A + contentThumbSize) <= actuallyRead &&
+        ImageMagicLooksDecodable(header + 0x171A))
     {
         outInfo->contentThumbnail = (unsigned char *)malloc(contentThumbSize);
         if (outInfo->contentThumbnail != NULL)
@@ -325,6 +363,29 @@ int EnumerateInstalledGames(const char *contentBasePath, InstalledGame *outGames
                     printFunction("  %s -> parsed OK, contentType=%08lX, titleId=%08lX, name=\"%s\"%s\n",
                                  packagePath, info.contentType, info.titleId, info.displayName,
                                  IsGameContentType(info.contentType) ? "" : " (not a game content type, skipped)");
+
+                    // Only for titles that came out with no art at all. Three
+                    // separate gates can refuse an image and from the outside
+                    // all three look the same - a blank square - so this says
+                    // which one it was rather than leaving it to guesswork at
+                    // a full hardware build cycle per guess.
+                    //
+                    // Reading it: size 0 means the package genuinely declares
+                    // no image. A nonzero size with 0x89504E47 (PNG) or
+                    // FFD8FFxx (JPEG) magic that still got refused means the
+                    // bounds check did it - the image runs past bytesRead, so
+                    // this header file is shorter than the image it claims.
+                    // Any other magic is a converter that left the field as
+                    // garbage, which is exactly what the gate is there to
+                    // catch.
+                    if (IsGameContentType(info.contentType) &&
+                        info.titleThumbnail == NULL && info.contentThumbnail == NULL)
+                    {
+                        printFunction("    no icon: bytesRead=%ld titleThumb(size=%lu magic=%08lX) contentThumb(size=%lu magic=%08lX)\n",
+                                     info.diagBytesRead,
+                                     info.diagTitleThumbSize, info.diagTitleMagic,
+                                     info.diagContentThumbSize, info.diagContentMagic);
+                    }
 
                     if (IsGameContentType(info.contentType) && count < maxGames)
                     {
