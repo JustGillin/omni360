@@ -291,7 +291,16 @@
     </Link>
   </ItemDefinitionGroup>
   <ItemGroup>
-    <CustomBuild Include="Media\Fonts\font.rdf">
+    <!-- Selawik (SIL Open Font License), generated with the XDK's FontMaker.
+         Still bundled to font.xpr and still embedded as the "font" section, so
+         everything loading "embed:\font" - the ATG console and the drawn UI
+         alike - picks it up with no change to either load path.
+
+         Replaced X-Store's own font.rdf/.abc/.tga, which had no stated
+         provenance or license. Selawik is Microsoft's openly-licensed
+         metric-compatible stand-in for Segoe UI, so it is both closer to the
+         360's own look and actually redistributable with this repo. -->
+    <CustomBuild Include="Media\Fonts\Selawik_16.rdf">
       <FileType>Document</FileType>
       <Command Condition="'$(Configuration)|$(Platform)'=='Release|Xbox 360'">bundler "%(FullPath)" -o "$(OutDir)Media\Fonts\font.xpr"</Command>
       <Outputs Condition="'$(Configuration)|$(Platform)'=='Release|Xbox 360'">$(OutDir)Media\Fonts\font.xpr</Outputs>

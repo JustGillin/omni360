@@ -405,7 +405,7 @@ static float LayoutButtonHints(ButtonHint *hints, int count, float startX)
 
         hints[i].labelX = x + hints[i].badgeW + gapBadgeToLabel;
 
-        g_UiFont.SetScaleFactors(HINT_LABEL_SCALE * g_M.scale, HINT_LABEL_SCALE * g_M.scale);
+        g_UiFont.SetScaleFactors(HINT_LABEL_SCALE * g_M.textScale, HINT_LABEL_SCALE * g_M.textScale);
         float labelW = g_UiFont.GetTextWidth(hints[i].label);
 
         x = hints[i].labelX + labelW + gapBetweenHints;
@@ -438,7 +438,7 @@ static void DrawButtonHintText(const ButtonHint *hints, int count, float centerY
 
     for (int i = 0; i < count; ++i)
     {
-        g_UiFont.SetScaleFactors(HINT_GLYPH_SCALE * g_M.scale, HINT_GLYPH_SCALE * g_M.scale);
+        g_UiFont.SetScaleFactors(HINT_GLYPH_SCALE * g_M.textScale, HINT_GLYPH_SCALE * g_M.textScale);
 
         // Centred on the badge by measuring the letter rather than nudging by
         // a constant - "LB" and "A" are different widths.
@@ -447,7 +447,7 @@ static void DrawButtonHintText(const ButtonHint *hints, int count, float centerY
 
         g_UiFont.DrawText(glyphX, centerY - badgeH * 0.34f, COL_BTN_LABEL, hints[i].glyph);
 
-        g_UiFont.SetScaleFactors(HINT_LABEL_SCALE * g_M.scale, HINT_LABEL_SCALE * g_M.scale);
+        g_UiFont.SetScaleFactors(HINT_LABEL_SCALE * g_M.textScale, HINT_LABEL_SCALE * g_M.textScale);
         g_UiFont.DrawText(hints[i].labelX, centerY - badgeH * 0.40f,
                           COL_TEXT_DIM, hints[i].label);
     }
@@ -556,7 +556,8 @@ static void Utf8ToWide(const char *in, WCHAR *out, int outSize)
 struct UiMetrics
 {
     float screenW, screenH;
-    float scale;        // 1.0 at 720p, ~0.67 at 480p - multiplies font size and spacing
+    float scale;        // 1.0 at 720p, ~0.67 at 480p - multiplies spacing and layout
+    float textScale;    // scale, corrected for the loaded font's strike height (see ComputeUiMetrics)
     float contentX;     // title-safe left edge
     float contentW;     // title-safe width
     float headerTextY;
@@ -584,6 +585,23 @@ static bool ComputeUiMetrics()
     g_M.screenW = is720p ? 1280.0f : 640.0f;
     g_M.screenH = is720p ? 720.0f : 480.0f;
     g_M.scale = g_M.screenH / 720.0f;
+
+    // Text scale is the layout scale corrected for whatever font actually got
+    // loaded. Every type size in this file is a multiple of g_M.textScale, and
+    // those multipliers were chosen against a 22px strike - the height of the
+    // font this project originally shipped.
+    //
+    // A font's strike height is not its nominal point size: Selawik generated
+    // at "16" comes out as a 28px strike, which would render every label ~27%
+    // larger than the layout expects and overflow rows at 480p. Dividing it
+    // back out means swapping fonts is a build-step change and nothing more -
+    // no retuning twenty call sites, and no drift the next time one changes.
+    //
+    // Runs after g_UiFont.Create() in InitGameListUI, so the height is real.
+    // The guard is for a zero from a font that failed to load, which would
+    // otherwise make every scale factor infinite.
+    float fontHeight = g_UiFont.GetFontHeight();
+    g_M.textScale = (fontHeight > 1.0f) ? g_M.scale * (22.0f / fontHeight) : g_M.scale;
 
     // Title-safe inset, matching AtgConsole's percentages (90% of the screen
     // on HD, 85% on 4:3) - a real TV can and does crop the rest.
@@ -1110,7 +1128,7 @@ GameListUIResult ShowGameListUI(const InstalledGame *games, int gameCount, int i
         WCHAR wideCounter[64];
         Utf8ToWide(counter, wideCounter, 64);
 
-        g_UiFont.SetScaleFactors(0.9f * g_M.scale, 0.9f * g_M.scale);
+        g_UiFont.SetScaleFactors(0.9f * g_M.textScale, 0.9f * g_M.textScale);
         g_UiFont.DrawText(g_M.contentX + g_M.contentW, g_M.headerTextY + 6.0f * g_M.scale,
                           COL_TEXT_DIM, wideCounter, ATGFONT_RIGHT);
 
@@ -1137,7 +1155,7 @@ GameListUIResult ShowGameListUI(const InstalledGame *games, int gameCount, int i
             WCHAR wideName[256];
             Utf8ToWide(games[index].displayName, wideName, 256);
 
-            g_UiFont.SetScaleFactors(1.0f * g_M.scale, 1.0f * g_M.scale);
+            g_UiFont.SetScaleFactors(1.0f * g_M.textScale, 1.0f * g_M.textScale);
             g_UiFont.DrawText(textX, rowY + 14.0f * g_M.scale,
                               isSelected ? COL_TEXT_PRIMARY : COL_TEXT_SECONDARY,
                               wideName, ATGFONT_TRUNCATED, textMaxW);
@@ -1151,7 +1169,7 @@ GameListUIResult ShowGameListUI(const InstalledGame *games, int gameCount, int i
             WCHAR wideId[32];
             Utf8ToWide(idText, wideId, 32);
 
-            g_UiFont.SetScaleFactors(0.72f * g_M.scale, 0.72f * g_M.scale);
+            g_UiFont.SetScaleFactors(0.72f * g_M.textScale, 0.72f * g_M.textScale);
             g_UiFont.DrawText(textX, rowY + 40.0f * g_M.scale,
                               isSelected ? COL_TEXT_SECONDARY : COL_TEXT_DIM, wideId);
 
@@ -1256,16 +1274,16 @@ void RenderProgressFrame(const char *title, const char *statusLine,
 
     g_UiFont.Begin();
 
-    g_UiFont.SetScaleFactors(1.25f * g_M.scale, 1.25f * g_M.scale);
+    g_UiFont.SetScaleFactors(1.25f * g_M.textScale, 1.25f * g_M.textScale);
     g_UiFont.DrawText(g_M.contentX, g_M.headerTextY, COL_TEXT_PRIMARY, L"DOWNLOADING");
 
     // Pack name truncated rather than overrunning - these are real archive
     // filenames and they get long.
-    g_UiFont.SetScaleFactors(1.0f * g_M.scale, 1.0f * g_M.scale);
+    g_UiFont.SetScaleFactors(1.0f * g_M.textScale, 1.0f * g_M.textScale);
     g_UiFont.DrawText(g_M.contentX, blockY, COL_TEXT_PRIMARY, wideTitle,
                       ATGFONT_TRUNCATED, g_M.contentW);
 
-    g_UiFont.SetScaleFactors(0.85f * g_M.scale, 0.85f * g_M.scale);
+    g_UiFont.SetScaleFactors(0.85f * g_M.textScale, 0.85f * g_M.textScale);
     g_UiFont.DrawText(g_M.contentX, blockY + 28.0f * g_M.scale, COL_TEXT_SECONDARY, wideStatus);
 
     // Percentage, right-aligned above the bar opposite the status line.
@@ -1281,7 +1299,7 @@ void RenderProgressFrame(const char *title, const char *statusLine,
                           COL_ACCENT, widePct, ATGFONT_RIGHT);
     }
 
-    g_UiFont.SetScaleFactors(0.8f * g_M.scale, 0.8f * g_M.scale);
+    g_UiFont.SetScaleFactors(0.8f * g_M.textScale, 0.8f * g_M.textScale);
     g_UiFont.DrawText(g_M.contentX, barY + barH + 12.0f * g_M.scale, COL_TEXT_DIM, wideDetail);
 
     g_UiFont.SetScaleFactors(1.0f, 1.0f);
@@ -1322,7 +1340,7 @@ static void DrawChromeHeading(const char *heading)
     WCHAR wide[128];
     Utf8ToWide(heading != NULL ? heading : "", wide, 128);
 
-    g_UiFont.SetScaleFactors(1.25f * g_M.scale, 1.25f * g_M.scale);
+    g_UiFont.SetScaleFactors(1.25f * g_M.textScale, 1.25f * g_M.textScale);
     float brandW = g_UiFont.GetTextWidth(L"OMNI360");
     g_UiFont.DrawText(g_M.contentX, g_M.headerTextY, COL_ACCENT, L"OMNI360");
 
@@ -1400,13 +1418,13 @@ static void RenderStatusFrameInternal(const char *heading, const char *message,
 
     DrawChromeHeading(heading);
 
-    g_UiFont.SetScaleFactors(1.0f * g_M.scale, 1.0f * g_M.scale);
+    g_UiFont.SetScaleFactors(1.0f * g_M.textScale, 1.0f * g_M.textScale);
     g_UiFont.DrawText(g_M.contentX, blockY, COL_TEXT_PRIMARY, wideMessage,
                       ATGFONT_TRUNCATED, g_M.contentW);
 
     if (detailLine != NULL && detailLine[0] != '\0')
     {
-        g_UiFont.SetScaleFactors(0.85f * g_M.scale, 0.85f * g_M.scale);
+        g_UiFont.SetScaleFactors(0.85f * g_M.textScale, 0.85f * g_M.textScale);
         g_UiFont.DrawText(g_M.contentX, blockY + 32.0f * g_M.scale, COL_TEXT_SECONDARY,
                           wideDetail, ATGFONT_TRUNCATED, g_M.contentW);
     }
@@ -1415,7 +1433,7 @@ static void RenderStatusFrameInternal(const char *heading, const char *message,
     {
         WCHAR wideHint[128];
         Utf8ToWide(footerHint, wideHint, 128);
-        g_UiFont.SetScaleFactors(0.9f * g_M.scale, 0.9f * g_M.scale);
+        g_UiFont.SetScaleFactors(0.9f * g_M.textScale, 0.9f * g_M.textScale);
         g_UiFont.DrawText(g_M.contentX, g_M.footerY, COL_TEXT_DIM, wideHint);
     }
 
@@ -1610,7 +1628,7 @@ int ShowChoiceUI(const char *heading, const char **labels, const char **sublabel
         WCHAR wideCounter[64];
         Utf8ToWide(counter, wideCounter, 64);
 
-        g_UiFont.SetScaleFactors(0.9f * g_M.scale, 0.9f * g_M.scale);
+        g_UiFont.SetScaleFactors(0.9f * g_M.textScale, 0.9f * g_M.textScale);
         g_UiFont.DrawText(g_M.contentX + g_M.contentW, g_M.headerTextY + 6.0f * g_M.scale,
                           COL_TEXT_DIM, wideCounter, ATGFONT_RIGHT);
 
@@ -1634,7 +1652,7 @@ int ShowChoiceUI(const char *heading, const char **labels, const char **sublabel
             WCHAR wideLabel[256];
             Utf8ToWide(labels[index] != NULL ? labels[index] : "", wideLabel, 256);
 
-            g_UiFont.SetScaleFactors(0.95f * g_M.scale, 0.95f * g_M.scale);
+            g_UiFont.SetScaleFactors(0.95f * g_M.textScale, 0.95f * g_M.textScale);
             g_UiFont.DrawText(textX, rowY + 10.0f * g_M.scale,
                               isSelected ? COL_TEXT_PRIMARY : COL_TEXT_SECONDARY,
                               wideLabel, ATGFONT_TRUNCATED, textMaxW);
@@ -1644,7 +1662,7 @@ int ShowChoiceUI(const char *heading, const char **labels, const char **sublabel
                 WCHAR wideSub[128];
                 Utf8ToWide(sublabels[index], wideSub, 128);
 
-                g_UiFont.SetScaleFactors(0.72f * g_M.scale, 0.72f * g_M.scale);
+                g_UiFont.SetScaleFactors(0.72f * g_M.textScale, 0.72f * g_M.textScale);
                 g_UiFont.DrawText(textX, rowY + 32.0f * g_M.scale,
                                   isSelected ? COL_TEXT_SECONDARY : COL_TEXT_DIM,
                                   wideSub, ATGFONT_TRUNCATED, textMaxW);
