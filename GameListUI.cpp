@@ -989,7 +989,13 @@ struct Icon
 // Creates a texture from raw PNG/JPEG bytes, recording the source aspect.
 // Leaves out->texture NULL on any failure, so callers can just fall through
 // to the next source.
-static bool CreateIconTexture(const unsigned char *data, unsigned long size, Icon *out)
+// whichImage and gameName are for diagnostics only. This used to fail
+// silently - it returned false and the caller drew a placeholder, so a title
+// with no cover looked identical whether the package had no artwork or D3DX
+// had refused perfectly good artwork. Those need different fixes, and telling
+// them apart from the screen is impossible.
+static bool CreateIconTexture(const unsigned char *data, unsigned long size, Icon *out,
+                              const char *whichImage, const char *gameName)
 {
     if (data == NULL || size == 0)
         return false;
@@ -1000,7 +1006,10 @@ static bool CreateIconTexture(const unsigned char *data, unsigned long size, Ico
     // nothing about the original proportions while UV 0..1 still covers it.
     float aspect = 1.0f;
     D3DXIMAGE_INFO imgInfo;
-    if (SUCCEEDED(D3DXGetImageInfoFromFileInMemory(data, size, &imgInfo)) && imgInfo.Height > 0)
+    ZeroMemory(&imgInfo, sizeof(imgInfo));
+
+    HRESULT hrInfo = D3DXGetImageInfoFromFileInMemory(data, size, &imgInfo);
+    if (SUCCEEDED(hrInfo) && imgInfo.Height > 0)
         aspect = (float)imgInfo.Width / (float)imgInfo.Height;
 
     // MipLevels=1 and an explicit D3DFMT_A8R8G8B8 (not D3DX_DEFAULT /
@@ -1029,7 +1038,44 @@ static bool CreateIconTexture(const unsigned char *data, unsigned long size, Ico
         D3DPOOL_MANAGED, D3DX_DEFAULT, D3DX_DEFAULT, 0, NULL, NULL, &texture);
 
     if (FAILED(hr) || texture == NULL)
+    {
+        // Report what D3DX was handed and what it made of it. The two calls
+        // fail for different reasons and the distinction is the whole point:
+        //
+        //   GetImageInfo failed too  -> D3DX cannot parse these bytes at all.
+        //                               The data is a format it does not
+        //                               support, or is not really an image,
+        //                               even though it cleared the magic gate.
+        //   GetImageInfo succeeded   -> it parsed fine and only texture
+        //                               creation failed, which points at the
+        //                               creation parameters (size, format,
+        //                               pool) rather than the data.
+        unsigned long magic = 0;
+        if (size >= 4)
+        {
+            magic = ((unsigned long)data[0] << 24) | ((unsigned long)data[1] << 16) |
+                    ((unsigned long)data[2] << 8) | (unsigned long)data[3];
+        }
+
+        dprintf("[icon] \"%s\" %s: CreateTexture -> 0x%08lX (size=%lu magic=%08lX)\n",
+                gameName != NULL ? gameName : "?",
+                whichImage != NULL ? whichImage : "?",
+                (unsigned long)hr, size, magic);
+
+        if (FAILED(hrInfo))
+        {
+            dprintf("[icon]   GetImageInfo also failed -> 0x%08lX - D3DX cannot parse these bytes\n",
+                    (unsigned long)hrInfo);
+        }
+        else
+        {
+            dprintf("[icon]   but GetImageInfo parsed it: %ux%u fmt=%d type=%d mips=%u\n",
+                    imgInfo.Width, imgInfo.Height, (int)imgInfo.Format,
+                    (int)imgInfo.ImageFileFormat, imgInfo.MipLevels);
+        }
+
         return false;
+    }
 
     out->texture = texture;
     out->aspect = aspect;
@@ -1106,16 +1152,26 @@ static void EnsureIconsLoaded(const InstalledGame *games, int gameCount)
         g_icons[i].texture = NULL;
         g_icons[i].aspect = 1.0f;
 
+        // Whether the package carried any artwork at all, kept because info is
+        // freed before the placeholder is reported and the two cases need
+        // opposite responses: no data means the package genuinely has none,
+        // while data that failed means D3DX refused something that was there.
+        bool hadImageData = false;
+
         StfsTitleInfo info;
         if (StfsReadTitleInfo(games[i].packagePath, &info))
         {
+            hadImageData = (info.titleThumbnail != NULL || info.contentThumbnail != NULL);
+
             if (info.titleThumbnail != NULL)
-                CreateIconTexture(info.titleThumbnail, info.titleThumbnailSize, &g_icons[i]);
+                CreateIconTexture(info.titleThumbnail, info.titleThumbnailSize, &g_icons[i],
+                                  "title thumbnail", games[i].displayName);
 
             // Second embedded image - GOD converters frequently leave the
             // title thumbnail zeroed while this one survives.
             if (g_icons[i].texture == NULL && info.contentThumbnail != NULL)
-                CreateIconTexture(info.contentThumbnail, info.contentThumbnailSize, &g_icons[i]);
+                CreateIconTexture(info.contentThumbnail, info.contentThumbnailSize, &g_icons[i],
+                                  "content thumbnail", games[i].displayName);
 
             if (g_icons[i].texture != NULL)
                 fromStfs++;
@@ -1131,8 +1187,10 @@ static void EnsureIconsLoaded(const InstalledGame *games, int gameCount)
             // Capped so a library that finds no art at all doesn't flood the
             // log.
             if (placeholders < 10)
-                dprintf("  No cover art for \"%s\" (Title ID %08lX)\n",
-                        games[i].displayName, games[i].titleId);
+                dprintf("  No cover art for \"%s\" (Title ID %08lX) - %s\n",
+                        games[i].displayName, games[i].titleId,
+                        hadImageData ? "package HAS artwork, D3DX rejected it (see [icon] lines above)"
+                                     : "package carries no artwork");
             else if (placeholders == 10)
                 dprintf("  (further titles without cover art not listed)\n");
 
