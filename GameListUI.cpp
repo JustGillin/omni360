@@ -125,6 +125,15 @@ static D3DVertexShader *g_pQuadVertexShader = NULL;
 static D3DPixelShader *g_pQuadPixelShader = NULL;
 static D3DTexture *g_pWhiteTexture = NULL; // 1x1 white, for DrawRect (solid-color quads reuse the textured-quad path)
 
+// Antialiased shapes for the footer button badges - white, with the shape
+// carried in alpha so one texture tints to any colour. Built once in
+// CreateBadgeTextures, which is defined below but called from
+// CreateQuadResources above it.
+static D3DTexture *g_pDiscTexture = NULL;
+static D3DTexture *g_pRingTexture = NULL;
+
+static bool CreateBadgeTextures();
+
 static ATG::Font g_UiFont;
 static bool g_Initialized = false;
 
@@ -179,6 +188,107 @@ static bool CreateQuadResources()
         g_pWhiteTexture->UnlockRect(0);
     }
 
+    if (!CreateBadgeTextures())
+        return false;
+
+    return true;
+}
+
+// ---------------------------------------------------------------------------
+// Badge textures
+// ---------------------------------------------------------------------------
+//
+// A filled disc and a ring, both antialiased, both pure white with the shape
+// carried entirely in the alpha channel so a single texture can be tinted any
+// colour at draw time.
+//
+// The older comment on the gradient shader said hand-filling a texture was off
+// the table because the GPU's tiling makes a naive linear LockRect write wrong
+// for anything above 1x1. That is true of the TILED formats - but the XDK also
+// exposes linear ones, D3DFMT_LIN_A8R8G8B8 here, where memory really is row
+// after row and a straightforward write is correct. The same family is already
+// trusted elsewhere in this project: the font atlas is built as
+// D3DFMT_LIN_A4R4G4B4 (see Media/Fonts/uifont_16.rdf).
+//
+// Doing it this way is both better looking and cheaper than the alternative.
+// Rasterising a circle from 1px rects gave hard, stair-stepped edges and cost
+// ~26 draw calls per badge; this is one quad per layer with proper coverage
+// antialiasing, from supersampling each texel 4x4.
+#define BADGE_TEX_SIZE   64
+#define BADGE_TEX_SS      4    // subsamples per axis, so 16 coverage samples per texel
+#define BADGE_RING_FRAC   0.13f // ring thickness as a fraction of the diameter
+
+static bool FillBadgeTexture(D3DTexture *tex, bool ringOnly)
+{
+    D3DLOCKED_RECT lr;
+    if (FAILED(tex->LockRect(0, &lr, NULL, 0)))
+        return false;
+
+    const float center = BADGE_TEX_SIZE * 0.5f;
+
+    // One texel of margin so the shape never touches the edge - with clamped
+    // addressing, a shape running to the border would smear when scaled.
+    const float outer = center - 1.0f;
+    const float inner = outer - BADGE_TEX_SIZE * BADGE_RING_FRAC;
+
+    const float step = 1.0f / (float)BADGE_TEX_SS;
+    const float sampleWeight = 1.0f / (float)(BADGE_TEX_SS * BADGE_TEX_SS);
+
+    for (int y = 0; y < BADGE_TEX_SIZE; ++y)
+    {
+        DWORD *row = (DWORD *)((BYTE *)lr.pBits + y * lr.Pitch);
+
+        for (int x = 0; x < BADGE_TEX_SIZE; ++x)
+        {
+            int hits = 0;
+
+            for (int sy = 0; sy < BADGE_TEX_SS; ++sy)
+            {
+                for (int sx = 0; sx < BADGE_TEX_SS; ++sx)
+                {
+                    float px = (float)x + ((float)sx + 0.5f) * step;
+                    float py = (float)y + ((float)sy + 0.5f) * step;
+
+                    float dx = px - center;
+                    float dy = py - center;
+                    float dist = sqrtf(dx * dx + dy * dy);
+
+                    if (dist <= outer && (!ringOnly || dist >= inner))
+                        hits++;
+                }
+            }
+
+            float coverage = (float)hits * sampleWeight;
+
+            DWORD alpha = (DWORD)(coverage * 255.0f + 0.5f);
+            if (alpha > 255) alpha = 255;
+
+            row[x] = (alpha << 24) | 0x00FFFFFF; // white; the shape lives in alpha
+        }
+    }
+
+    tex->UnlockRect(0);
+    return true;
+}
+
+static bool CreateBadgeTextures()
+{
+    if (FAILED(g_pd3dDevice->CreateTexture(BADGE_TEX_SIZE, BADGE_TEX_SIZE, 1, 0,
+                                           D3DFMT_LIN_A8R8G8B8, D3DPOOL_MANAGED,
+                                           &g_pDiscTexture, NULL)))
+        return false;
+
+    if (FAILED(g_pd3dDevice->CreateTexture(BADGE_TEX_SIZE, BADGE_TEX_SIZE, 1, 0,
+                                           D3DFMT_LIN_A8R8G8B8, D3DPOOL_MANAGED,
+                                           &g_pRingTexture, NULL)))
+        return false;
+
+    if (!FillBadgeTexture(g_pDiscTexture, false))
+        return false;
+
+    if (!FillBadgeTexture(g_pRingTexture, true))
+        return false;
+
     return true;
 }
 
@@ -194,7 +304,8 @@ static void ColorToFloat4(D3DCOLOR c, float *out)
 // Core quad draw. gradA/gradB/vertical describe the two-stop gradient the
 // pixel shader applies on top of tint; pass the same color for both to get a
 // flat fill (which is what DrawQuad/DrawRect below do).
-static void DrawQuadEx(D3DTexture *texture, float x, float y, float w, float h,
+static void DrawQuadUV(D3DTexture *texture, float x, float y, float w, float h,
+                       float u0, float v0, float u1, float v1,
                        D3DCOLOR tint, D3DCOLOR gradA, D3DCOLOR gradB, bool vertical)
 {
     float tintF[4];
@@ -272,10 +383,10 @@ static void DrawQuadEx(D3DTexture *texture, float x, float y, float w, float h,
     HRESULT hr = g_pd3dDevice->BeginVertices(D3DPT_QUADLIST, 4, sizeof(QuadVertex), (VOID **)&pVertex);
     if (SUCCEEDED(hr))
     {
-        pVertex[0] = x;         pVertex[1] = y;         pVertex[2] = 0.0f; pVertex[3] = 0.0f;  // TL
-        pVertex[4] = x + w;     pVertex[5] = y;         pVertex[6] = 1.0f; pVertex[7] = 0.0f;  // TR
-        pVertex[8] = x + w;     pVertex[9] = y + h;     pVertex[10] = 1.0f; pVertex[11] = 1.0f; // BR
-        pVertex[12] = x;        pVertex[13] = y + h;    pVertex[14] = 0.0f; pVertex[15] = 1.0f; // BL
+        pVertex[0] = x;         pVertex[1] = y;         pVertex[2] = u0;  pVertex[3] = v0;  // TL
+        pVertex[4] = x + w;     pVertex[5] = y;         pVertex[6] = u1;  pVertex[7] = v0;  // TR
+        pVertex[8] = x + w;     pVertex[9] = y + h;     pVertex[10] = u1; pVertex[11] = v1; // BR
+        pVertex[12] = x;        pVertex[13] = y + h;    pVertex[14] = u0; pVertex[15] = v1; // BL
 
         g_pd3dDevice->EndVertices();
     }
@@ -297,6 +408,16 @@ static void DrawQuadEx(D3DTexture *texture, float x, float y, float w, float h,
     g_pd3dDevice->SetVertexDeclaration(NULL);
     g_pd3dDevice->SetVertexShader(NULL);
     g_pd3dDevice->SetPixelShader(NULL);
+}
+
+// The whole-texture case, which is every call that existed before the badge
+// work needed UV subranges. Kept as its own function rather than defaulted
+// arguments so none of those call sites had to change - the state setup above
+// took real hardware debugging to get right and is not worth disturbing.
+static void DrawQuadEx(D3DTexture *texture, float x, float y, float w, float h,
+                       D3DCOLOR tint, D3DCOLOR gradA, D3DCOLOR gradB, bool vertical)
+{
+    DrawQuadUV(texture, x, y, w, h, 0.0f, 0.0f, 1.0f, 1.0f, tint, gradA, gradB, vertical);
 }
 
 // Flat textured quad - the gradient stops are both white, making the shader's
@@ -401,14 +522,18 @@ static void Utf8ToWide(const char *in, WCHAR *out, int outSize)
 #define COL_SCROLL_THUMB   0x99FFFFFF
 #define COL_BAR_TROUGH     0x26FFFFFF
 
-// Face colours for the footer button badges. Muted rather than saturated so
-// they sit inside this UI's palette instead of fighting it - these are hint
-// markers at the bottom of the screen, not the thing being looked at.
-#define COL_BTN_A          0xFF6DBE49
-#define COL_BTN_B          0xFFC85A4E
-#define COL_BTN_Y          0xFFD4A93C
-#define COL_BTN_SHOULDER   0xFF6A7670
-#define COL_BTN_LABEL      0xFF101410 // the letter drawn on a badge; dark, for contrast on the face
+// Accent colours for the footer button badges. Each one tints both the ring
+// and the letter inside it; the interior stays dark for all of them.
+//
+// Brighter than the first version, which used these as a solid fill behind a
+// dark letter. A thin ring and a small glyph carry far less colour than a
+// filled disc does, so they can be more saturated without shouting - and they
+// need to be, to read at this size.
+#define COL_BTN_A          0xFF86D95C
+#define COL_BTN_B          0xFFE0675A
+#define COL_BTN_Y          0xFFEBBF48
+#define COL_BTN_SHOULDER   0xFFB6C2BC
+#define COL_BTN_FILL       0xE60E1410 // dark interior, slightly translucent so the background still reads through
 
 // ---------------------------------------------------------------------------
 // Layout metrics
@@ -522,82 +647,69 @@ static bool ComputeUiMetrics()
 // one this file can safely fill: see the QuadPixelShader comment on the GPU's
 // texture tiling making naive LockRect writes wrong above 1x1.
 
-// A filled disc, rasterised one screen pixel row at a time.
-//
-// The first version used nine equal bands across the whole diameter, which at
-// ~22px made each band nearly 2.5px tall and read as a faceted polygon rather
-// than a circle. Stepping per pixel row instead costs about twenty small rects
-// per badge - nothing next to the icons and plates already being drawn - and
-// gives an actual round silhouette.
-//
-// Rows are snapped to whole pixels. D3DRS_VIEWPORTENABLE is FALSE here so the
-// shader works in raw pixel coordinates (see the vertex shader comment), which
-// means 1.0f really is one pixel and a row landing on a fractional boundary
-// would smear across two.
-static void DrawDiscBadge(float cx, float cy, float diameter, D3DCOLOR color)
+// Flat-tinted quad with an explicit UV subrange, for drawing half of the
+// badge textures at a time when building a capsule.
+static void DrawQuadUVFlat(D3DTexture *texture, float x, float y, float w, float h,
+                           float u0, float v0, float u1, float v1, D3DCOLOR tint)
 {
-    float r = diameter * 0.5f;
-
-    int rows = (int)(diameter + 0.5f);
-    if (rows < 1)
-        rows = 1;
-
-    float top = floorf(cy - r + 0.5f);
-
-    for (int i = 0; i < rows; ++i)
-    {
-        float yTop = top + (float)i;
-
-        // Where this row's centre sits on the circle, normalised to -1..1.
-        float t = ((yTop + 0.5f) - cy) / r;
-        if (t < -1.0f) t = -1.0f;
-        if (t >  1.0f) t =  1.0f;
-
-        float halfW = r * sqrtf(1.0f - t * t);
-        if (halfW <= 0.0f)
-            continue;
-
-        DrawRect(cx - halfW, yTop, halfW * 2.0f, 1.0f, color);
-    }
+    DrawQuadUV(texture, x, y, w, h, u0, v0, u1, v1, tint, 0xFFFFFFFF, 0xFFFFFFFF, true);
 }
 
-// A rounded rectangle for the shoulder buttons, which are wider than they are
-// tall. Same per-row approach as the disc, so the corners curve properly
-// instead of stepping: rows inside the straight section run full width, rows
-// within the corner radius inset by the circle equation.
-static void DrawPillBadge(float x, float y, float w, float h, D3DCOLOR color)
+// A face button: dark interior with a coloured ring, matching how the console
+// and every dashboard on it draw these. The letter goes on top in the same
+// colour during the text pass.
+//
+// This replaced a solid disc with a dark letter punched out of it, which read
+// as a flat blob - the ring is what makes it look like a button rather than a
+// dot. Both layers come from the antialiased textures built in
+// CreateBadgeTextures, so the edges are smooth instead of stair-stepped, and
+// it is two draw calls instead of the ~26 the per-pixel-row rasteriser cost.
+static void DrawFaceBadge(float cx, float cy, float diameter,
+                          D3DCOLOR ringColor, D3DCOLOR fillColor)
 {
-    float radius = h * 0.38f;
-    float midY = y + h * 0.5f;
-    float straight = h * 0.5f - radius; // half-height of the un-rounded middle
+    float x = cx - diameter * 0.5f;
+    float y = cy - diameter * 0.5f;
 
-    int rows = (int)(h + 0.5f);
-    if (rows < 1)
-        rows = 1;
+    DrawQuad(g_pDiscTexture, x, y, diameter, diameter, fillColor);
+    DrawQuad(g_pRingTexture, x, y, diameter, diameter, ringColor);
+}
 
-    float top = floorf(y + 0.5f);
+// A capsule, for the shoulder buttons, which are wider than they are tall.
+//
+// Built by splitting the badge textures down the middle: the left half of the
+// disc is exactly a left round cap, the right half exactly a right one, and a
+// plain rect spans between them. The ring layer works the same way, with two
+// thin rects carrying the straight top and bottom edges between the caps.
+//
+// The ring's thickness is BADGE_RING_FRAC of the texture's diameter, so when
+// the texture is drawn at height h that thickness lands at h * BADGE_RING_FRAC
+// - which is what the straight edges have to match to line up with the caps.
+static void DrawCapsuleBadge(float x, float y, float w, float h,
+                             D3DCOLOR ringColor, D3DCOLOR fillColor)
+{
+    if (w < h)
+        w = h; // narrower than tall is not a capsule, it is a circle
 
-    for (int i = 0; i < rows; ++i)
+    float r = h * 0.5f;      // cap width, i.e. half the texture
+    float midW = w - h;      // straight span between the two caps
+    float rightX = x + r + midW;
+
+    // Fill.
+    DrawQuadUVFlat(g_pDiscTexture, x, y, r, h, 0.0f, 0.0f, 0.5f, 1.0f, fillColor);
+    if (midW > 0.0f)
+        DrawRect(x + r, y, midW, h, fillColor);
+    DrawQuadUVFlat(g_pDiscTexture, rightX, y, r, h, 0.5f, 0.0f, 1.0f, 1.0f, fillColor);
+
+    // Ring.
+    float t = h * BADGE_RING_FRAC;
+
+    DrawQuadUVFlat(g_pRingTexture, x, y, r, h, 0.0f, 0.0f, 0.5f, 1.0f, ringColor);
+    if (midW > 0.0f)
     {
-        float yTop = top + (float)i;
-        float dy = (yTop + 0.5f) - midY;
-        if (dy < 0.0f) dy = -dy;
-
-        float inset = 0.0f;
-
-        if (dy > straight && radius > 0.0f)
-        {
-            float k = (dy - straight) / radius;
-            if (k > 1.0f) k = 1.0f;
-            inset = radius * (1.0f - sqrtf(1.0f - k * k));
-        }
-
-        float rowW = w - inset * 2.0f;
-        if (rowW <= 0.0f)
-            continue;
-
-        DrawRect(x + inset, yTop, rowW, 1.0f, color);
+        DrawRect(x + r, y, midW, t, ringColor);
+        DrawRect(x + r, y + h - t, midW, t, ringColor);
     }
+    DrawQuadUVFlat(g_pRingTexture, rightX, y, r, h, 0.5f, 0.0f, 1.0f, 1.0f, ringColor);
 }
 
 // One hint: a badge with a letter on it, followed by what that button does.
@@ -694,11 +806,11 @@ static void DrawButtonHintShapes(const ButtonHint *hints, int count, float cente
     for (int i = 0; i < count; ++i)
     {
         if (hints[i].shoulder)
-            DrawPillBadge(hints[i].badgeX, centerY - badgeH * 0.5f,
-                          hints[i].badgeW, badgeH, hints[i].face);
+            DrawCapsuleBadge(hints[i].badgeX, centerY - badgeH * 0.5f,
+                             hints[i].badgeW, badgeH, hints[i].face, COL_BTN_FILL);
         else
-            DrawDiscBadge(hints[i].badgeX + hints[i].badgeW * 0.5f, centerY,
-                          badgeH, hints[i].face);
+            DrawFaceBadge(hints[i].badgeX + hints[i].badgeW * 0.5f, centerY,
+                          badgeH, hints[i].face, COL_BTN_FILL);
     }
 }
 
@@ -716,8 +828,13 @@ static void DrawButtonHintText(const ButtonHint *hints, int count, float centerY
         float glyphW = g_UiFont.GetTextWidth(hints[i].glyph);
         float glyphX = hints[i].badgeX + (hints[i].badgeW - glyphW) * 0.5f;
 
+        // The letter takes the badge's own colour, matching the ring, and sits
+        // on the dark interior. That is the inverse of the first version - a
+        // dark letter on a solid colour fill - and is both closer to how the
+        // console draws these and easier to read, since a small glyph carries
+        // more contrast against near-black than against a mid-tone.
         g_UiFont.DrawText(glyphX, TextTopForCenter(centerY, glyphScale),
-                          COL_BTN_LABEL, hints[i].glyph);
+                          hints[i].face, hints[i].glyph);
 
         float labelScale = HINT_LABEL_SCALE * g_M.textScale;
         g_UiFont.SetScaleFactors(labelScale, labelScale);
@@ -765,6 +882,8 @@ void ShutdownGameListUI()
     g_UiFont.Destroy();
 
     if (g_pWhiteTexture != NULL) { g_pWhiteTexture->Release(); g_pWhiteTexture = NULL; }
+    if (g_pDiscTexture != NULL) { g_pDiscTexture->Release(); g_pDiscTexture = NULL; }
+    if (g_pRingTexture != NULL) { g_pRingTexture->Release(); g_pRingTexture = NULL; }
     if (g_pQuadPixelShader != NULL) { g_pQuadPixelShader->Release(); g_pQuadPixelShader = NULL; }
     if (g_pQuadVertexShader != NULL) { g_pQuadVertexShader->Release(); g_pQuadVertexShader = NULL; }
     if (g_pQuadVertexDecl != NULL) { g_pQuadVertexDecl->Release(); g_pQuadVertexDecl = NULL; }
