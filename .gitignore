@@ -33,3 +33,8 @@ Omni360.suo
 
 *.suo
 build_errors.txt
+
+# FontMaker output still carrying Selawik's Reserved Font Name. Generated
+# atlases must be renamed off "Selawik" before being committed - see the
+# font comment in XboxTLS2.vcxproj and Media/Fonts/OFL.txt.
+Media/Fonts/Selawik_*
