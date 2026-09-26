@@ -404,10 +404,10 @@ static void Utf8ToWide(const char *in, WCHAR *out, int outSize)
 // Face colours for the footer button badges. Muted rather than saturated so
 // they sit inside this UI's palette instead of fighting it - these are hint
 // markers at the bottom of the screen, not the thing being looked at.
-#define COL_BTN_A          0xFF5CA83C
-#define COL_BTN_B          0xFFB04A40
-#define COL_BTN_Y          0xFFC29A33
-#define COL_BTN_SHOULDER   0xFF55605A
+#define COL_BTN_A          0xFF6DBE49
+#define COL_BTN_B          0xFFC85A4E
+#define COL_BTN_Y          0xFFD4A93C
+#define COL_BTN_SHOULDER   0xFF6A7670
 #define COL_BTN_LABEL      0xFF101410 // the letter drawn on a badge; dark, for contrast on the face
 
 // ---------------------------------------------------------------------------
@@ -521,34 +521,82 @@ static bool ComputeUiMetrics()
 // one this file can safely fill: see the QuadPixelShader comment on the GPU's
 // texture tiling making naive LockRect writes wrong above 1x1.
 
-// A filled disc, approximated by horizontal bands sampled off the circle
-// equation. Nine bands is enough that the edge reads as curved at the ~22px
-// this draws at, and cheap enough not to matter next to everything else.
+// A filled disc, rasterised one screen pixel row at a time.
+//
+// The first version used nine equal bands across the whole diameter, which at
+// ~22px made each band nearly 2.5px tall and read as a faceted polygon rather
+// than a circle. Stepping per pixel row instead costs about twenty small rects
+// per badge - nothing next to the icons and plates already being drawn - and
+// gives an actual round silhouette.
+//
+// Rows are snapped to whole pixels. D3DRS_VIEWPORTENABLE is FALSE here so the
+// shader works in raw pixel coordinates (see the vertex shader comment), which
+// means 1.0f really is one pixel and a row landing on a fractional boundary
+// would smear across two.
 static void DrawDiscBadge(float cx, float cy, float diameter, D3DCOLOR color)
 {
-    const int BANDS = 9;
     float r = diameter * 0.5f;
-    float bandH = diameter / (float)BANDS;
 
-    for (int i = 0; i < BANDS; ++i)
+    int rows = (int)(diameter + 0.5f);
+    if (rows < 1)
+        rows = 1;
+
+    float top = floorf(cy - r + 0.5f);
+
+    for (int i = 0; i < rows; ++i)
     {
-        // Sample at each band's vertical centre, normalised to -1..1.
-        float t = (((float)i + 0.5f) / (float)BANDS) * 2.0f - 1.0f;
-        float halfW = r * sqrtf(1.0f - t * t);
+        float yTop = top + (float)i;
 
-        DrawRect(cx - halfW, cy - r + (float)i * bandH, halfW * 2.0f, bandH, color);
+        // Where this row's centre sits on the circle, normalised to -1..1.
+        float t = ((yTop + 0.5f) - cy) / r;
+        if (t < -1.0f) t = -1.0f;
+        if (t >  1.0f) t =  1.0f;
+
+        float halfW = r * sqrtf(1.0f - t * t);
+        if (halfW <= 0.0f)
+            continue;
+
+        DrawRect(cx - halfW, yTop, halfW * 2.0f, 1.0f, color);
     }
 }
 
 // A rounded rectangle for the shoulder buttons, which are wider than they are
-// tall. Three rects: a full-width body with narrower caps above and below.
+// tall. Same per-row approach as the disc, so the corners curve properly
+// instead of stepping: rows inside the straight section run full width, rows
+// within the corner radius inset by the circle equation.
 static void DrawPillBadge(float x, float y, float w, float h, D3DCOLOR color)
 {
-    float inset = h * 0.22f;
+    float radius = h * 0.38f;
+    float midY = y + h * 0.5f;
+    float straight = h * 0.5f - radius; // half-height of the un-rounded middle
 
-    DrawRect(x, y + inset, w, h - inset * 2.0f, color);
-    DrawRect(x + inset, y, w - inset * 2.0f, inset, color);
-    DrawRect(x + inset, y + h - inset, w - inset * 2.0f, inset, color);
+    int rows = (int)(h + 0.5f);
+    if (rows < 1)
+        rows = 1;
+
+    float top = floorf(y + 0.5f);
+
+    for (int i = 0; i < rows; ++i)
+    {
+        float yTop = top + (float)i;
+        float dy = (yTop + 0.5f) - midY;
+        if (dy < 0.0f) dy = -dy;
+
+        float inset = 0.0f;
+
+        if (dy > straight && radius > 0.0f)
+        {
+            float k = (dy - straight) / radius;
+            if (k > 1.0f) k = 1.0f;
+            inset = radius * (1.0f - sqrtf(1.0f - k * k));
+        }
+
+        float rowW = w - inset * 2.0f;
+        if (rowW <= 0.0f)
+            continue;
+
+        DrawRect(x + inset, yTop, rowW, 1.0f, color);
+    }
 }
 
 // One hint: a badge with a letter on it, followed by what that button does.
@@ -569,16 +617,37 @@ struct ButtonHint
     float labelX;
 };
 
-#define HINT_GLYPH_SCALE 0.62f
+#define HINT_GLYPH_SCALE 0.72f
 #define HINT_LABEL_SCALE 0.78f
+
+// One definition of the badge height, rather than the same literal repeated in
+// the layout pass and both draw passes - three copies that have to agree, and
+// silently misalign the letters from their badges if one is ever changed
+// alone.
+static float HintBadgeHeight()
+{
+    return 26.0f * g_M.scale;
+}
+
+// ATG's DrawText positions text by its TOP edge, so centring on a badge means
+// subtracting half the rendered line height - the font's strike height times
+// whatever Y scale is currently set.
+//
+// Taken from the font's own metric rather than a tuned fraction of the badge,
+// which is what the first version did: those constants were fitted by eye to
+// the old 22px font and would have drifted the moment the font changed.
+static float TextTopForCenter(float centerY, float yScale)
+{
+    return centerY - (g_UiFont.GetFontHeight() * yScale) * 0.5f;
+}
 
 // Walks the hints left to right, measuring each label so the spacing follows
 // the text instead of assuming every label is the same length ("DLC" and
 // "Title update" are not). Returns the total width.
 static float LayoutButtonHints(ButtonHint *hints, int count, float startX)
 {
-    float badgeH = 22.0f * g_M.scale;
-    float gapBadgeToLabel = 7.0f * g_M.scale;
+    float badgeH = HintBadgeHeight();
+    float gapBadgeToLabel = 8.0f * g_M.scale;
     float gapBetweenHints = 26.0f * g_M.scale;
 
     float x = startX;
@@ -586,7 +655,24 @@ static float LayoutButtonHints(ButtonHint *hints, int count, float startX)
     for (int i = 0; i < count; ++i)
     {
         hints[i].badgeX = x;
-        hints[i].badgeW = hints[i].shoulder ? badgeH * 1.7f : badgeH;
+
+        if (hints[i].shoulder)
+        {
+            // Sized to its own text plus padding rather than a fixed multiple
+            // of the height: "LB/RB" is five characters and was being crushed
+            // into a pill scaled for two.
+            g_UiFont.SetScaleFactors(HINT_GLYPH_SCALE * g_M.textScale,
+                                     HINT_GLYPH_SCALE * g_M.textScale);
+            float glyphW = g_UiFont.GetTextWidth(hints[i].glyph);
+
+            hints[i].badgeW = glyphW + 14.0f * g_M.scale;
+            if (hints[i].badgeW < badgeH)
+                hints[i].badgeW = badgeH;
+        }
+        else
+        {
+            hints[i].badgeW = badgeH; // a disc is as wide as it is tall
+        }
 
         hints[i].labelX = x + hints[i].badgeW + gapBadgeToLabel;
 
@@ -602,7 +688,7 @@ static float LayoutButtonHints(ButtonHint *hints, int count, float startX)
 // Quad pass: the badge shapes only.
 static void DrawButtonHintShapes(const ButtonHint *hints, int count, float centerY)
 {
-    float badgeH = 22.0f * g_M.scale;
+    float badgeH = HintBadgeHeight();
 
     for (int i = 0; i < count; ++i)
     {
@@ -619,21 +705,22 @@ static void DrawButtonHintShapes(const ButtonHint *hints, int count, float cente
 // an open Font Begin/End.
 static void DrawButtonHintText(const ButtonHint *hints, int count, float centerY)
 {
-    float badgeH = 22.0f * g_M.scale;
-
     for (int i = 0; i < count; ++i)
     {
-        g_UiFont.SetScaleFactors(HINT_GLYPH_SCALE * g_M.textScale, HINT_GLYPH_SCALE * g_M.textScale);
+        float glyphScale = HINT_GLYPH_SCALE * g_M.textScale;
+        g_UiFont.SetScaleFactors(glyphScale, glyphScale);
 
         // Centred on the badge by measuring the letter rather than nudging by
-        // a constant - "LB" and "A" are different widths.
+        // a constant - "LB/RB" and "A" are different widths.
         float glyphW = g_UiFont.GetTextWidth(hints[i].glyph);
         float glyphX = hints[i].badgeX + (hints[i].badgeW - glyphW) * 0.5f;
 
-        g_UiFont.DrawText(glyphX, centerY - badgeH * 0.34f, COL_BTN_LABEL, hints[i].glyph);
+        g_UiFont.DrawText(glyphX, TextTopForCenter(centerY, glyphScale),
+                          COL_BTN_LABEL, hints[i].glyph);
 
-        g_UiFont.SetScaleFactors(HINT_LABEL_SCALE * g_M.textScale, HINT_LABEL_SCALE * g_M.textScale);
-        g_UiFont.DrawText(hints[i].labelX, centerY - badgeH * 0.40f,
+        float labelScale = HINT_LABEL_SCALE * g_M.textScale;
+        g_UiFont.SetScaleFactors(labelScale, labelScale);
+        g_UiFont.DrawText(hints[i].labelX, TextTopForCenter(centerY, labelScale),
                           COL_TEXT_DIM, hints[i].label);
     }
 }
