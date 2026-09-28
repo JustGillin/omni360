@@ -606,8 +606,16 @@ static bool ReadPartition(GodSource *source, const GodImageInfo &info, unsigned 
 GodResult GodConvert(GodSource *source, const GodImageInfo &info, const char *contentRoot,
                      const char *titleName, const unsigned char *iconPng, unsigned long iconPngSize,
                      GodProgressFn progress, void *progressContext,
-                     char *outPackagePath, unsigned long outPackagePathSize)
+                     char *outPackagePath, unsigned long outPackagePathSize,
+                     GodTimings *outTimings)
 {
+    GodTimings timings;
+    memset(&timings, 0, sizeof(timings));
+
+    LARGE_INTEGER freq, t0, t1;
+    QueryPerformanceFrequency(&freq);
+    const double msPerTick = 1000.0 / (double)freq.QuadPart;
+
     PackagePaths paths;
     if (!BuildPaths(contentRoot, info.title, &paths))
         return GOD_WRITE_FAILED;
@@ -672,7 +680,11 @@ GodResult GodConvert(GodSource *source, const GodImageInfo &info, const char *co
             unsigned char *hashBlock = group;
             unsigned char *data = group + BLOCK_SIZE;
 
-            if (!ReadPartition(source, info, (unsigned long long)blocksDone * BLOCK_SIZE, data, n * BLOCK_SIZE))
+            QueryPerformanceCounter(&t0);
+            bool readOk = ReadPartition(source, info, (unsigned long long)blocksDone * BLOCK_SIZE, data, n * BLOCK_SIZE);
+            QueryPerformanceCounter(&t1);
+            timings.readMs += (double)(t1.QuadPart - t0.QuadPart) * msPerTick;
+            if (!readOk)
             {
                 result = GOD_READ_FAILED;
                 break;
@@ -683,9 +695,14 @@ GodResult GodConvert(GodSource *source, const GodImageInfo &info, const char *co
                 Sha1(data + b * BLOCK_SIZE, BLOCK_SIZE, hashBlock + b * 20);
 
             Sha1(hashBlock, BLOCK_SIZE, master + g * 20);
+            QueryPerformanceCounter(&t0);
+            timings.hashMs += (double)(t0.QuadPart - t1.QuadPart) * msPerTick;
 
             size_t bytes = (size_t)(1 + n) * BLOCK_SIZE;
-            if (fwrite(group, 1, bytes, f) != bytes)
+            bool writeOk = (fwrite(group, 1, bytes, f) == bytes);
+            QueryPerformanceCounter(&t1);
+            timings.writeMs += (double)(t1.QuadPart - t0.QuadPart) * msPerTick;
+            if (!writeOk)
             {
                 result = GOD_WRITE_FAILED;
                 break;
@@ -698,7 +715,10 @@ GodResult GodConvert(GodSource *source, const GodImageInfo &info, const char *co
                 unsigned long long done = (unsigned long long)blocksDone * BLOCK_SIZE;
                 if (done > info.usedSize)
                     done = info.usedSize;
-                if (!progress(done, info.usedSize, progressContext))
+                bool keepGoing = progress(done, info.usedSize, progressContext);
+                QueryPerformanceCounter(&t0);
+                timings.progressMs += (double)(t0.QuadPart - t1.QuadPart) * msPerTick;
+                if (!keepGoing)
                     result = GOD_CANCELLED;
             }
         }
@@ -759,6 +779,9 @@ GodResult GodConvert(GodSource *source, const GodImageInfo &info, const char *co
     free(masters);
     free(group);
     free(header);
+
+    if (outTimings != NULL)
+        *outTimings = timings;
 
     if (result != GOD_OK)
     {

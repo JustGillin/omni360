@@ -29,6 +29,7 @@ end-to-end on real hardware against a real 27-game library.
 #include "downloadFile.h" // DownloadProgressFn + FormatBytes, for the progress callback
 #include "GodConvert.h"
 #include "DiscSource.h"
+#include "ReadAhead.h"
 #include "TitleNames.h"
 
 #include <xtl.h>
@@ -1615,14 +1616,30 @@ static void InstallDiscAsGame(Library &lib, const char *gamesPath, int &listSele
     WriteInstallMarker(gamesPath, info, name.c_str());
 
     char packagePath[MAX_TEXT_LENGTH] = "";
-    result = GodConvert(&disc, info, gamesPath, name.c_str(), NULL, 0,
-                        DiscInstallProgressCallback, &progress, packagePath, sizeof(packagePath));
+    GodTimings timings;
+    memset(&timings, 0, sizeof(timings));
+    {
+        // The drive keeps reading while each group is hashed and written -
+        // see ReadAhead.h. 8MB ahead, in 1MB reads. Scoped so its thread has
+        // finished with the drive before the drive is closed.
+        ReadAheadSource ahead(&disc, 1024 * 1024, 8);
+        result = GodConvert(&ahead, info, gamesPath, name.c_str(), NULL, 0,
+                            DiscInstallProgressCallback, &progress, packagePath, sizeof(packagePath), &timings);
+    }
 
     ClearInstallMarker();
 
     DWORD seconds = (GetTickCount() - progress.startTick) / 1000;
     dprintf("[disc] install %s after %lu:%02lu: %s\n", GodResultText(result),
             (unsigned long)(seconds / 60), (unsigned long)(seconds % 60), packagePath);
+
+    // Which part is the limit: reading the disc, hashing, or writing. With
+    // read-ahead, "waiting for the disc" is only the time the drive couldn't
+    // keep up.
+    if (seconds > 0)
+        dprintf("[disc] %I64u MB at %.2f MB/s - waiting for the disc %.0fs, hashing %.0fs, writing %.0fs, progress screen %.0fs\n",
+                info.usedSize / (1024 * 1024), (double)info.usedSize / (1024.0 * 1024.0) / (double)seconds,
+                timings.readMs / 1000.0, timings.hashMs / 1000.0, timings.writeMs / 1000.0, timings.progressMs / 1000.0);
 
     disc.Close();
 

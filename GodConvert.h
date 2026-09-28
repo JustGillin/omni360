@@ -86,6 +86,17 @@ GodResult GodInspect(GodSource *source, GodImageInfo *outInfo);
 // far. Returning false cancels the conversion.
 typedef bool (*GodProgressFn)(unsigned long long bytesDone, unsigned long long bytesTotal, void *context);
 
+// Where a conversion's time went, in milliseconds - for the log, to see
+// whether the source, the hashing or the drive being written to is what
+// limits the speed.
+struct GodTimings
+{
+    double readMs;      // waiting for the source
+    double hashMs;
+    double writeMs;
+    double progressMs;  // inside the progress callback (drawing, the cancel prompt)
+};
+
 // Largest icon the header has room for (metadata version 2 thumbnails).
 #define GOD_ICON_MAX 0x3D00
 
@@ -97,11 +108,12 @@ typedef bool (*GodProgressFn)(unsigned long long bytesDone, unsigned long long b
 //
 // The header is written last, so a package is only ever visible once it is
 // whole. On any failure, what was written is removed again. outPackagePath,
-// if non-NULL, gets the header's path.
+// if non-NULL, gets the header's path, and outTimings where the time went.
 GodResult GodConvert(GodSource *source, const GodImageInfo &info, const char *contentRoot,
                      const char *titleName, const unsigned char *iconPng, unsigned long iconPngSize,
                      GodProgressFn progress, void *progressContext,
-                     char *outPackagePath, unsigned long outPackagePathSize);
+                     char *outPackagePath, unsigned long outPackagePathSize,
+                     GodTimings *outTimings = 0);
 
 // For an install that ended too abruptly to clean up after itself - the
 // console switched off, or the Guide button back to the dashboard. GodConvert
