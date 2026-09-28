@@ -353,8 +353,6 @@
     <ClInclude Include="downloadFile.h" />
     <ClInclude Include="GameListUI.h" />
     <ClInclude Include="HttpResponse.h" />
-    <ClInclude Include="githubCert.h" />
-    <ClInclude Include="archiveOrgCert.h" />
     <ClInclude Include="ButtonAtlas.h" />
     <ClInclude Include="Keyboard.h" />
     <ClInclude Include="OutputConsole.h" />
@@ -363,6 +361,7 @@
     <ClInclude Include="parsing.h" />
     <ClInclude Include="settings.h" />
     <ClInclude Include="StfsParser.h" />
+    <ClInclude Include="TrustAnchors.h" />
     <ClInclude Include="UiText.h" />
     <ClInclude Include="SSL\config.h" />
     <ClInclude Include="SSL\inc\bearssl.h" />

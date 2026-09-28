@@ -407,7 +407,7 @@ bool BuildIas3AuthHeader(const std::string &accessKey, const std::string &secret
 }
 
 // archive.org's S3 service, not archive.org itself. Its certificate chains to
-// the same Go Daddy Root G2 anchor archiveOrgCert.h already carries (through a
+// the same Go Daddy Root G2 anchor TrustAnchors.h already carries (through a
 // "GoDaddy TLS Root CA - R1" cross-signed by G2), so no new anchor is needed.
 // Answers 200 with JSON either way; "authorized" is the verdict. Confirmed
 // with deliberately fake keys:

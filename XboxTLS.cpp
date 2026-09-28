@@ -538,8 +538,13 @@ int XboxTLS_Write(XboxTLSContext* ctx, const void* buf, int len) {
         return -1;
     }
 
+    // No longer "continuing anyway": the copy of BearSSL here used to be
+    // patched to accept an untrusted chain, which let anyone who could sit
+    // between the console and archive.org read requests carrying the user's
+    // keys. An untrusted chain now fails the handshake, so writeResult is
+    // negative below; this just says why, in the log.
     if (ic->xc.err == BR_ERR_X509_NOT_TRUSTED) {
-        debug_tls("WARNING: TLS certificate chain is not trusted; continuing anyway.");
+        debug_tls("TLS certificate chain is not trusted - connection refused.");
     }
 
     if (writeResult < 0) {

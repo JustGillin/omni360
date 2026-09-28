@@ -122,7 +122,7 @@ This fork never decompresses anything. Archive.org's virtual-path URL form, `/do
 
 X-Store could update itself from its own GitHub releases, using `runUpdate()`, cJSON for the release JSON and miniz for the ZIP. That path is gone, along with the `updater` and `miniz` projects; you deploy a new `.xex` by hand.
 
-Two things outlive it and are *not* dead code: `cJSON` is now used by `ArchiveOrgDLC.cpp` to parse archive.org's item metadata, and `githubCert.h`'s trust anchor is still added during handshake setup in `downloadFile.cpp`.
+One thing outlives it and is *not* dead code: `cJSON` is now used by `ArchiveOrgDLC.cpp` to parse archive.org's item metadata. The GitHub trust anchor (`githubCert.h`) went with the updater.
 
 ## Logging
 
