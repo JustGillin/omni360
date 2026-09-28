@@ -1283,8 +1283,8 @@ GameListUIResult ShowGameListUI(const InstalledGame *games, int gameCount, int i
 
         if (gameCount > 0)
         {
-            hints[hintCount].sprite = BUTTON_SPRITE_A; hints[hintCount].label = L"DLC"; hintCount++;
-            hints[hintCount].sprite = BUTTON_SPRITE_X; hints[hintCount].label = L"Title update"; hintCount++;
+            hints[hintCount].sprite = BUTTON_SPRITE_A; hints[hintCount].label = L"Search for DLC"; hintCount++;
+            hints[hintCount].sprite = BUTTON_SPRITE_X; hints[hintCount].label = L"Search for title updates"; hintCount++;
         }
 
         hints[hintCount].sprite = BUTTON_SPRITE_Y; hints[hintCount].label = L"Settings"; hintCount++;

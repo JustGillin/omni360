@@ -38,6 +38,28 @@ rather than a scraped browser login session.
 
 #define ERROR_LOG(s) (printFunction("\nERROR: %s\n", s))
 
+// See ArchiveOrgKeysRejected. Set by NoteAuthStatus, cleared on entry to each
+// public call that sends keys.
+static bool g_keysRejected = false;
+
+// Records whether a keyed request was refused, and passes the status through
+// so it can wrap a request in place. 401 is archive.org not accepting the
+// credentials at all; 403 is it accepting who you are but not letting you
+// have the file - both are fixed in the same place, the keys, so both count.
+// Requests made without keys never set it: a 401 on those means something
+// else entirely.
+static int NoteAuthStatus(int status, const char *authHeader)
+{
+    if ((status == 401 || status == 403) && authHeader != NULL && authHeader[0] != '\0')
+        g_keysRejected = true;
+    return status;
+}
+
+bool ArchiveOrgKeysRejected()
+{
+    return g_keysRejected;
+}
+
 // ---------------------------------------------------------------------------
 // Small helpers
 // ---------------------------------------------------------------------------
@@ -129,7 +151,9 @@ static int HttpGetFollowRedirect(const std::string &url, char *dataBuffer, unsig
                                   NULL, 0, printFunction);
     }
 
-    return status;
+    // Only the final answer counts. A failed attempt on the cached datanode
+    // above is retried from scratch, so it says nothing about the keys yet.
+    return NoteAuthStatus(status, authHeader);
 }
 
 // Lowercases and collapses every run of non-alphanumeric characters to a
@@ -366,6 +390,73 @@ bool BuildIas3AuthHeader(const std::string &accessKey, const std::string &secret
     }
 
     return true;
+}
+
+// archive.org's S3 service, not archive.org itself. Its certificate chains to
+// the same Go Daddy Root G2 anchor archiveOrgCert.h already carries (through a
+// "GoDaddy TLS Root CA - R1" cross-signed by G2), so no new anchor is needed.
+// Answers 200 with JSON either way; "authorized" is the verdict. Confirmed
+// with deliberately fake keys:
+//
+//   {"error": "The AWS Access Key Id you provided does not exist in our
+//    records.", "accesskey": "fakeaccess000000", "authorized": false}
+#define ARCHIVE_S3_CHECK_AUTH_URL "https://s3.us.archive.org/?check_auth=1"
+
+KeyCheckResult CheckArchiveOrgKeys(const char *authHeader, char *outReason, size_t outReasonSize,
+                                   void printFunction(const char *_format, ...))
+{
+    if (outReason != NULL && outReasonSize > 0)
+        outReason[0] = '\0';
+
+    if (authHeader == NULL || authHeader[0] == '\0')
+        return KEYS_REJECTED;
+
+    char buffer[4096];
+    unsigned long long bufferSize = sizeof(buffer) - 1;
+
+    int status = HttpGetFollowRedirect(ARCHIVE_S3_CHECK_AUTH_URL, buffer, &bufferSize,
+                                       NULL, authHeader, printFunction);
+
+    // Anything but a 200 means no verdict was given - offline, a TLS failure,
+    // the service down. That is "couldn't check", never "wrong keys": telling
+    // someone their keys are bad because their network is would send them
+    // off to fix the wrong thing.
+    if (status != 200)
+    {
+        printFunction("Key check: no answer from archive.org (status %d)\n", status);
+        return KEYS_UNCHECKED;
+    }
+
+    buffer[bufferSize < sizeof(buffer) ? bufferSize : sizeof(buffer) - 1] = '\0';
+
+    cJSON *json = cJSON_Parse(buffer);
+    if (json == NULL)
+    {
+        printFunction("Key check: reply was not JSON\n");
+        return KEYS_UNCHECKED;
+    }
+
+    KeyCheckResult result = KEYS_UNCHECKED;
+
+    cJSON *authorized = cJSON_GetObjectItemCaseSensitive(json, "authorized");
+    if (cJSON_IsBool(authorized))
+    {
+        result = cJSON_IsTrue(authorized) ? KEYS_ACCEPTED : KEYS_REJECTED;
+
+        cJSON *error = cJSON_GetObjectItemCaseSensitive(json, "error");
+        if (result == KEYS_REJECTED && cJSON_IsString(error) && error->valuestring != NULL &&
+            outReason != NULL && outReasonSize > 0)
+        {
+            strncpy(outReason, error->valuestring, outReasonSize - 1);
+            outReason[outReasonSize - 1] = '\0';
+        }
+    }
+
+    cJSON_Delete(json);
+
+    printFunction("Key check: %s\n", result == KEYS_ACCEPTED ? "accepted"
+                                   : result == KEYS_REJECTED ? "rejected" : "no verdict in reply");
+    return result;
 }
 
 // ---------------------------------------------------------------------------
@@ -630,6 +721,8 @@ int ListDlcMembers(const std::string &rarFilename, unsigned long long archiveSiz
                    DlcMember *outMembers, int maxMembers,
                    const char *authHeader, void printFunction(const char *_format, ...))
 {
+    g_keysRejected = false;
+
     std::string url = ARCHIVE_DOWNLOAD_BASE + rarFilename;
 
     // Generous per-request chunk: real header fixed part is 32 bytes, and
@@ -819,6 +912,8 @@ bool DownloadDlcMember(const std::string &rarFilename, const DlcMember &member,
                        void printFunction(const char *_format, ...),
                        DownloadProgressFn progressFn)
 {
+    g_keysRejected = false;
+
     // Build the virtual-path URL: /download/{item}/{rarfile}/{urlencoded/internal/path}
     // Each path SEGMENT is percent-encoded separately so the separators
     // themselves become the literal "%2F" archive.org's own virtual-path
@@ -949,6 +1044,8 @@ bool DownloadDlcMember(const std::string &rarFilename, const DlcMember &member,
                                       authHeader, destPath,
                                       NULL, NULL, true, NULL, 0, printFunction, member.unpSize, progressFn);
     }
+
+    NoteAuthStatus(httpStatus, authHeader);
 
     if (httpStatus != 200)
     {
@@ -1417,6 +1514,8 @@ bool DownloadTitleUpdate(const TitleUpdateMatch &update, unsigned long titleId,
                          void printFunction(const char *_format, ...),
                          DownloadProgressFn progressFn)
 {
+    g_keysRejected = false;
+
     char memberName[512];
     unsigned long unpackedSize = 0;
 
@@ -1517,6 +1616,8 @@ bool DownloadTitleUpdate(const TitleUpdateMatch &update, unsigned long titleId,
                                       NULL, NULL, true, NULL, 0, printFunction,
                                       unpackedSize, progressFn);
     }
+
+    NoteAuthStatus(httpStatus, authHeader);
 
     if (httpStatus != 200 && httpStatus != 206)
     {

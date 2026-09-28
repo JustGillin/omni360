@@ -70,7 +70,7 @@ Because matching is deliberately loose — it has to cope with release-group nam
 `game:\DebugInfo.txt` is the log, and it keeps recording even once the drawn UI takes over the screen. Check it first.
 
 - **Empty game list** — the games folder is pointing somewhere without games. The empty list shows which folder it searched; press **Y** to change it in Settings, or see step 3.
-- **401 from archive.org** — the keys are wrong, or in the wrong order. Re-enter them in Settings, or check the file: access key line 1, secret key line 2.
+- **"Keys not accepted"** — archive.org refused your keys. Keys entered on the console are checked with archive.org before they're saved, so this usually means keys put in `ArchiveOrgKeys.txt` by hand are wrong or in the wrong order (access key line 1, secret key line 2), or were reset on archive.org. Re-enter them in Settings.
 - **No results for a game you know exists** — the collection may genuinely not have it, or the display name may be too abbreviated to match. Not every title has DLC or updates archived.
 - **Garbled game names** — STFS display-name encoding. `StfsParser.cpp` detects UTF-8 versus UTF-16BE per file and re-encodes both to UTF-8. If a name still looks wrong, that is worth reporting rather than expected.
 

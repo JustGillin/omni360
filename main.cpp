@@ -494,6 +494,88 @@ static bool PromptKeys(std::string &accessKey, std::string &secretKey)
     return true;
 }
 
+enum KeyEntryOutcome
+{
+    KEY_ENTRY_SAVED,     // new keys are saved
+    KEY_ENTRY_CANCELLED, // backed out of the keyboard - nothing shown yet, the caller may want to say so
+    KEY_ENTRY_FAILED     // didn't save, and a screen already said why
+};
+
+// The one way keys get entered, from Settings or from a first download: ask
+// for them, check them with archive.org, then save them.
+//
+// Checked before saving so a typo is caught while the keys are still on the
+// user's mind, rather than as a failed download later. What happens next
+// depends on the verdict:
+//   accepted  - saved.
+//   rejected  - not saved, since archive.org has said they won't work. Offers
+//               to try again with what was typed still in the keyboard, so
+//               fixing one character doesn't mean retyping both keys.
+//   unchecked - saved anyway. An offline console isn't a reason to refuse
+//               keys, and treating "no answer" as "wrong keys" would send
+//               someone off to fix the wrong thing.
+//
+// accessKey and secretKey come in as the current keys (empty if none) and
+// go out as whatever was last typed.
+static KeyEntryOutcome EnterCheckAndSaveKeys(std::string &accessKey, std::string &secretKey)
+{
+    for (;;)
+    {
+        if (!PromptKeys(accessKey, secretKey))
+            return KEY_ENTRY_CANCELLED;
+
+        char header[IAS3_AUTH_HEADER_MAX];
+        if (!BuildIas3AuthHeader(accessKey, secretKey, header, sizeof(header)))
+        {
+            if (ShowConfirmUI("KEYS TOO LONG", "Those are too long to be archive.org keys.",
+                              "Copy them again from archive.org/account/s3.php.", "Try again"))
+                continue;
+            return KEY_ENTRY_FAILED;
+        }
+
+        RenderStatusFrame("CHECKING KEYS", "Asking archive.org whether these keys work", NULL);
+
+        char reason[160] = "";
+        KeyCheckResult check = CheckArchiveOrgKeys(header, reason, sizeof(reason), dprintf);
+
+        if (check == KEYS_REJECTED)
+        {
+            // archive.org's own wording where it gave one - it can say which
+            // of the two keys it objects to.
+            if (ShowConfirmUI("KEYS NOT ACCEPTED", "archive.org didn't accept those keys.",
+                              reason[0] != '\0' ? reason : "Check them at archive.org/account/s3.php.",
+                              "Try again"))
+                continue;
+            return KEY_ENTRY_FAILED;
+        }
+
+        if (!SaveKeys(accessKey, secretKey))
+        {
+            ShowMessageUI("KEYS NOT SAVED", "ArchiveOrgKeys.txt could not be written.",
+                          "Your previous keys, if any, are unchanged.");
+            return KEY_ENTRY_FAILED;
+        }
+
+        if (check == KEYS_ACCEPTED)
+            ShowMessageUI("KEYS SAVED", "archive.org accepted your keys.",
+                          "They're saved on this console for your next download.");
+        else
+            ShowMessageUI("KEYS SAVED", "Saved, but not checked - archive.org didn't answer.",
+                          "If a download fails, check them again in Settings.");
+
+        return KEY_ENTRY_SAVED;
+    }
+}
+
+// For a download that archive.org turned away because of the keys. Separate
+// from the generic failure messages on purpose: those name the pack or the
+// file, which is the wrong thing to go and fix.
+static void ShowKeysRejected()
+{
+    ShowMessageUI("KEYS NOT ACCEPTED", "archive.org turned down your keys for this download.",
+                  "Check them in Settings - press Y on the game list.");
+}
+
 static bool GetArchiveOrgAuthHeader(char *authHeader, unsigned long long authHeaderSize)
 {
     std::string accessKey, secretKey;
@@ -519,20 +601,27 @@ static bool GetArchiveOrgAuthHeader(char *authHeader, unsigned long long authHea
                       "Get your access and secret key at archive.org/account/s3.php",
                       "Press A to type them in, or put them in ArchiveOrgKeys.txt beforehand.");
 
-        if (!PromptKeys(accessKey, secretKey))
+        KeyEntryOutcome entry = EnterCheckAndSaveKeys(accessKey, secretKey);
+
+        if (entry == KEY_ENTRY_CANCELLED)
         {
             dprintf("ERROR: no keys entered\n");
             ShowMessageUI("NO KEYS ENTERED", "Both keys are required to download from archive.org.",
                           "You can add them any time in Settings - press Y on the game list.");
-            return false;
         }
 
-        SaveKeys(accessKey, secretKey);
+        if (entry != KEY_ENTRY_SAVED)
+            return false; // every other outcome has already shown its own screen
     }
 
+    // Saved keys that can't even form a header - hand-edited into something
+    // far too long. Said on screen, since the caller now leaves explaining
+    // failures to this function.
     if (!BuildIas3AuthHeader(accessKey, secretKey, authHeader, authHeaderSize))
     {
         dprintf("ERROR: could not build auth header from saved keys - delete %s and re-enter them\n", CREDENTIALS_FILE);
+        ShowMessageUI("SAVED KEYS UNUSABLE", "The saved keys are too long to be archive.org keys.",
+                      "Re-enter them in Settings - press Y on the game list.");
         return false;
     }
 
@@ -611,7 +700,11 @@ static void DlcProgressCallback(unsigned long long bytesDone,
 }
 
 // Downloads every file inside one chosen pack.
-static void DownloadOnePack(const DlcRarMatch &pack, const char *contentBasePath, const char *authHeader)
+//
+// Returns false if archive.org refused the keys, so the caller stops offering
+// packs: every one of them would be refused the same way, and the fix is in
+// Settings, back on the game list.
+static bool DownloadOnePack(const DlcRarMatch &pack, const char *contentBasePath, const char *authHeader)
 {
     RenderStatusFrame("READING PACK", "Reading the file list", pack.filename);
 
@@ -620,9 +713,17 @@ static void DownloadOnePack(const DlcRarMatch &pack, const char *contentBasePath
 
     if (memberCount <= 0)
     {
+        // Reading the file list is the first thing that sends the keys, so
+        // this is where wrong ones usually show up.
+        if (ArchiveOrgKeysRejected())
+        {
+            ShowKeysRejected();
+            return false;
+        }
+
         ShowMessageUI("COULD NOT READ PACK",
                       "The file list for this pack could not be read.", pack.filename);
-        return;
+        return true;
     }
 
     // Context for DlcProgressCallback, which the HTTP layer calls with nothing
@@ -663,6 +764,15 @@ static void DownloadOnePack(const DlcRarMatch &pack, const char *contentBasePath
                                authHeader, dprintf, DlcProgressCallback))
         {
             dprintf("  Failed: %s\n", members[f].internalPath);
+
+            // Stop at the first refusal instead of trying the rest - they'd
+            // all be refused, one slow round trip each.
+            if (ArchiveOrgKeysRejected())
+            {
+                ShowKeysRejected();
+                return false;
+            }
+
             failures++;
         }
     }
@@ -689,6 +799,8 @@ static void DownloadOnePack(const DlcRarMatch &pack, const char *contentBasePath
         detail[sizeof(detail) - 1] = '\0';
         ShowMessageUI("FINISHED WITH ERRORS", pack.filename, detail);
     }
+
+    return true;
 }
 
 // Title updates: their own flow, reached with X from the game list rather than
@@ -774,6 +886,13 @@ static void InstallTitleUpdatesForGame(const InstalledGame &game, const char *co
             ShowMessageUI("TITLE UPDATE INSTALLED", updates[choice].filename,
                           "Restart your dashboard to pick up the update.");
         }
+        else if (ArchiveOrgKeysRejected())
+        {
+            // Not "archive.org may not serve this file" - that sends someone
+            // to try a different update, which will be refused the same way.
+            ShowKeysRejected();
+            break;
+        }
         else
         {
             ShowMessageUI("TITLE UPDATE FAILED", updates[choice].filename,
@@ -845,7 +964,8 @@ static void DownloadDlcForGame(const InstalledGame &game, const char *contentBas
 
         pickerSelection = choice; // come back to the pack they just took
 
-        DownloadOnePack(matches[choice], contentBasePath, authHeader);
+        if (!DownloadOnePack(matches[choice], contentBasePath, authHeader))
+            break; // keys refused - back to the game list, where Settings is
     }
 }
 
@@ -956,19 +1076,10 @@ static void ChangeKeys(SettingsOutcome &outcome)
     std::string accessKey, secretKey;
     LoadSavedKeys(accessKey, secretKey); // leaves both empty if there are none yet
 
-    if (!PromptKeys(accessKey, secretKey))
-        return; // cancelled, or left a key empty - nothing changes
-
-    if (!SaveKeys(accessKey, secretKey))
-    {
-        ShowMessageUI("KEYS NOT SAVED", "ArchiveOrgKeys.txt could not be written.",
-                      "Your previous keys, if any, are unchanged.");
-        return;
-    }
-
-    outcome.keysChanged = true;
-    ShowMessageUI("KEYS SAVED", "Your archive.org keys are saved on this console.",
-                  "They'll be used for your next download.");
+    // Cancelling here needs no message - the user is already on the screen
+    // that says what's saved.
+    if (EnterCheckAndSaveKeys(accessKey, secretKey) == KEY_ENTRY_SAVED)
+        outcome.keysChanged = true;
 }
 
 static void RemoveKeys(SettingsOutcome &outcome)
@@ -1211,12 +1322,10 @@ int main()
             // already cached and nothing is prompted at all.
             RenderStatusFrame("SIGNING IN", "Using your saved archive.org keys", chosen.displayName);
 
+            // GetArchiveOrgAuthHeader explains its own failures on screen, so
+            // nothing more is shown here - a second message would only repeat it.
             if (!GetArchiveOrgAuthHeader(authHeader, sizeof(authHeader)))
-            {
-                ShowMessageUI("SIGN-IN FAILED", "No usable archive.org keys.",
-                              "Add or check them in Settings - press Y on the game list.");
                 continue; // back to the list, so they can fix it and retry rather than being thrown out
-            }
 
             haveAuth = true;
         }
@@ -1225,6 +1334,12 @@ int main()
             InstallTitleUpdatesForGame(chosen, contentBasePath, authHeader);
         else
             DownloadDlcForGame(chosen, contentBasePath, authHeader);
+
+        // Refused keys: rebuild the header from the file next time, so keys
+        // fixed outside Settings - by replacing ArchiveOrgKeys.txt over FTP -
+        // are picked up without restarting the app.
+        if (ArchiveOrgKeysRejected())
+            haveAuth = false;
     }
 
     free(lib.games);

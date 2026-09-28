@@ -38,6 +38,34 @@
 bool BuildIas3AuthHeader(const std::string &accessKey, const std::string &secretKey,
                         char *outHeader, unsigned long long outHeaderSize);
 
+// Whether the most recent keyed call - ListDlcMembers, DownloadDlcMember or
+// DownloadTitleUpdate - failed because archive.org refused the keys (HTTP 401
+// or 403), as opposed to a network error, a missing file or anything else.
+// Each of those calls clears it on entry.
+//
+// This exists because the search itself doesn't use the keys - metadata is
+// public - so wrong keys only surface once a download starts, and until
+// this they surfaced as "could not read pack" or "archive.org may not serve
+// this file", neither of which points at the keys.
+bool ArchiveOrgKeysRejected();
+
+enum KeyCheckResult
+{
+    KEYS_ACCEPTED,  // archive.org says these keys are valid
+    KEYS_REJECTED,  // archive.org says they are not
+    KEYS_UNCHECKED  // no usable answer - offline, TLS failure, unexpected reply
+};
+
+// Asks archive.org whether authHeader's keys are valid, via its S3 service's
+// check_auth endpoint - the same check archive.org's own "ia" tool makes. One
+// small request, answered with {"authorized": true|false, ...}.
+//
+// On KEYS_REJECTED, outReason (if non-NULL) receives archive.org's own
+// explanation, e.g. "The AWS Access Key Id you provided does not exist in our
+// records." - worth showing, since it can say which of the two keys is wrong.
+KeyCheckResult CheckArchiveOrgKeys(const char *authHeader, char *outReason, size_t outReasonSize,
+                                   void printFunction(const char *_format, ...));
+
 // STFS content types, from the Free60 wiki's STFS page. A DLC pack's members
 // are laid out as {TitleID}\{ContentType}\{ContentID}, so the middle path
 // segment says what each member actually is - and the same values name the
