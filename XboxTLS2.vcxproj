@@ -341,6 +341,7 @@
     <ClInclude Include="GameListUI.h" />
     <ClInclude Include="githubCert.h" />
     <ClInclude Include="archiveOrgCert.h" />
+    <ClInclude Include="ButtonAtlas.h" />
     <ClInclude Include="Keyboard.h" />
     <ClInclude Include="OutputConsole.h" />
     <ClInclude Include="PngDecode.h" />
