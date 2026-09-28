@@ -227,7 +227,20 @@
       <SuppressStartupBanner>true</SuppressStartupBanner>
     </Link>
     <ImageXex>
-      <AdditionalSections>font=$(OutDir)Media\Fonts\font.xpr</AdditionalSections>
+      <!-- Files carried inside the XEX, so Omni360.xex is the only file to
+           deploy. Each name=file becomes an imagexex /section: switch.
+
+             font    the console font atlas, read by ATG::Console as
+                     embed:\font
+             selawk  the UI font, selawk.ttf byte for byte. UiText.cpp
+                     loads it through XUI's section:// transport.
+             ofl     the SIL Open Font License text. The OFL lets the font
+                     be embedded in software provided the copyright notice
+                     and licence travel with every copy - this is them
+                     travelling with it.
+
+           Section names are capped at 8 characters. -->
+      <AdditionalSections>font=$(OutDir)Media\Fonts\font.xpr;selawk=$(ProjectDir)Media\Fonts\selawk.ttf;ofl=$(ProjectDir)Media\Fonts\OFL.txt</AdditionalSections>
       <!-- Omni360's own TitleID, moved off X-Store's so the two can coexist on
            one console. A shared TitleID means a shared save and content
            namespace, which is a real conflict now this is a separate app

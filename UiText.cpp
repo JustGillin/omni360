@@ -12,6 +12,7 @@ DESCRIPTION : XUI-backed implementation of the UI's text renderer. See
 #include <xuielement.h>
 #include <xuierror.h>
 #include <d3dx9math.h>
+#include <stdio.h> // swprintf_s, for the section:// locator
 
 #include "UiText.h"
 #include "AtgConsole.h"
@@ -21,13 +22,23 @@ DESCRIPTION : XUI-backed implementation of the UI's text renderer. See
 // global scope and ATG forward-declares it inside its namespace; pulling ATG
 // in wholesale makes every unqualified use ambiguous (C2872).
 
-// The TrueType file, deployed beside the XEX rather than baked into a XEX
-// section. The whole point of this route is that the font stays a font.
+// The TrueType file, embedded in the XEX itself as the "selawk" section (see
+// AdditionalSections in XboxTLS2.vcxproj), so Omni360 stays a single file to
+// deploy. It is embedded byte for byte, not converted, so the font is still
+// the font - the SIL OFL allows exactly this kind of bundling, provided the
+// licence goes with it, which it does as the "ofl" section.
 //
-// A URI, not a Win32 path: XUI requires the file:// scheme and forward
-// slashes, and rejects anything else with
+// XUI reads XEX sections through its section:// transport, addressed as
+// section://<module handle in hex>,<section name> - the form the XDK's own
+// AtgXime uses. The locator is built at runtime because the handle is only
+// known then.
+//
+// A selawk.ttf beside the XEX is the fallback if the section is missing, e.g.
+// from a build made without it. Locators are URIs, not Win32 paths: XUI
+// requires a scheme and forward slashes, and rejects anything else with
 // XUI_ERR_RESOURCE_LOCATOR_MUST_BE_ABSOLUTE.
-#define UITEXT_TYPEFACE_URI   L"file://game:/selawk.ttf"
+#define UITEXT_TYPEFACE_SECTION   "selawk"
+#define UITEXT_TYPEFACE_FILE_URI  L"file://game:/selawk.ttf"
 #define UITEXT_TYPEFACE_NAME  L"Selawik"
 
 // The text height the layout is written against. Every SetScaleFactors value
@@ -187,10 +198,35 @@ HRESULT UiFont::Create(const char * /*ignoredLegacyPath*/)
     }
     g_xuiInited = true;
 
+    // Prefer the copy inside the XEX. Checked with XGetModuleSection first
+    // rather than inferred from XuiRegisterTypeface failing, because whether
+    // registration opens the resource straight away or only when a font is
+    // first created isn't documented - a failure there could surface later
+    // and far from its cause.
+    HANDLE hModule = GetModuleHandle(NULL);
+    PVOID sectionData = NULL;
+    ULONG sectionSize = 0;
+
+    WCHAR sectionUri[64];
+    LPCWSTR locator = UITEXT_TYPEFACE_FILE_URI;
+
+    if (XGetModuleSection(hModule, UITEXT_TYPEFACE_SECTION, &sectionData, &sectionSize) && sectionSize > 0)
+    {
+        swprintf_s(sectionUri, ARRAYSIZE(sectionUri), L"section://%x,%S",
+                   (unsigned int)(UINT_PTR)hModule, UITEXT_TYPEFACE_SECTION);
+        locator = sectionUri;
+        dprintf("[UiText] font: XEX section \"%s\" (%lu bytes)\n", UITEXT_TYPEFACE_SECTION, sectionSize);
+    }
+    else
+    {
+        dprintf("[UiText] font: no \"%s\" section in the XEX, trying selawk.ttf beside it\n",
+                UITEXT_TYPEFACE_SECTION);
+    }
+
     TypefaceDescriptor desc;
     ZeroMemory(&desc, sizeof(desc));
     desc.szTypeface = UITEXT_TYPEFACE_NAME;
-    desc.szLocator = UITEXT_TYPEFACE_URI;
+    desc.szLocator = locator;
     desc.szReserved1 = NULL;
     desc.fBaselineAdjust = 0.0f;
     desc.szFallbackTypeface = NULL;
@@ -201,15 +237,15 @@ HRESULT UiFont::Create(const char * /*ignoredLegacyPath*/)
         const char *why = "unrecognised - look it up in xuierror.h";
 
         if (hr == XUI_ERR_RESOURCE_LOCATOR_MUST_BE_ABSOLUTE)
-            why = "locator is not an absolute URI - needs file://game:/name.ttf form";
+            why = "locator is not an absolute URI - needs a scheme, e.g. file://game:/name.ttf";
         else if (hr == XUI_ERR_RESOURCE_COULD_NOT_BE_OPENED)
-            why = "locator parsed, but the file could not be opened - is selawk.ttf beside the XEX?";
+            why = "locator parsed, but the resource could not be opened";
         else if (hr == XUI_ERR_INVALID_RESOURCE_PATH)
             why = "resource path rejected - check the drive alias exists";
         else if (hr == XUI_ERR_FILE_INVALID)
             why = "file opened but was not a usable font";
 
-        dprintf("[UiText] XuiRegisterTypeface -> 0x%08lX: %s\n", (unsigned long)hr, why);
+        dprintf("[UiText] XuiRegisterTypeface(%S) -> 0x%08lX: %s\n", locator, (unsigned long)hr, why);
         Destroy();
         return hr;
     }
