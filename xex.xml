@@ -1,0 +1,17 @@
+<?xml version="1.0"?>
+<!-- imagexex build options for Omni360.xex (ImageXex/ConfigurationFile in
+     XboxTLS2.vcxproj). The title ID and the embedded sections are passed on
+     the command line from the project instead; this file holds only what has
+     no command-line switch.
+
+     Privileges 15 (Multidisc Swap) and 16 (Multidisc Insecure Media): the
+     console otherwise ends the running title whenever the disc tray opens -
+     the XDK's <multidisc> page calls it "the automatic reboot when the DVD
+     is ejected". Multi-disc games carry these so a disc can be changed
+     mid-game. Omni360 needs them for the same reason: it runs from the hard
+     drive while its disc install reads the tray, so taking a disc out (or
+     changing it for the next one) must not close the app. -->
+<xex>
+  <privilege id="15"/>
+  <privilege id="16"/>
+</xex>

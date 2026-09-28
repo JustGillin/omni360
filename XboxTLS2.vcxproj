@@ -272,6 +272,8 @@
            FFFF here is convention only (unsigned homebrew usually sits in
            the FFFE/FFFF range); imagexex does not enforce it. -->
       <TitleID>0xFFFF0360</TitleID>
+      <!-- Keeps the app running when the disc tray opens - see xex.xml. -->
+      <ConfigurationFile>$(ProjectDir)xex.xml</ConfigurationFile>
     </ImageXex>
     <Deploy>
       <DeploymentType>CopyToHardDrive</DeploymentType>
