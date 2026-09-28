@@ -86,14 +86,21 @@ GodResult GodInspect(GodSource *source, GodImageInfo *outInfo);
 // far. Returning false cancels the conversion.
 typedef bool (*GodProgressFn)(unsigned long long bytesDone, unsigned long long bytesTotal, void *context);
 
+// Largest icon the header has room for (metadata version 2 thumbnails).
+#define GOD_ICON_MAX 0x3D00
+
 // Writes the package under contentRoot (e.g. "Hdd1:\Content\0000000000000000").
 // titleName is UTF-8 and goes in the header for the dashboard to show.
+// iconPng, if non-NULL, is the title's icon as a PNG of at most GOD_ICON_MAX
+// bytes (a larger one is left out) - what the dashboard, Aurora and our own
+// library show for the game.
 //
 // The header is written last, so a package is only ever visible once it is
 // whole. On any failure, what was written is removed again. outPackagePath,
 // if non-NULL, gets the header's path.
 GodResult GodConvert(GodSource *source, const GodImageInfo &info, const char *contentRoot,
-                     const char *titleName, GodProgressFn progress, void *progressContext,
+                     const char *titleName, const unsigned char *iconPng, unsigned long iconPngSize,
+                     GodProgressFn progress, void *progressContext,
                      char *outPackagePath, unsigned long outPackagePathSize);
 
 #endif

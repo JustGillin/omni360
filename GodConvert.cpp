@@ -475,6 +475,7 @@ static void WriteTitleField(unsigned char *field, size_t fieldBytes, const char 
 }
 
 static void BuildHeader(unsigned char *h, const GodImageInfo &info, const char *titleName,
+                        const unsigned char *iconPng, unsigned long iconPngSize,
                         const unsigned char mhtHash[20], unsigned long long partsTotalSize)
 {
     memset(h, 0, HEADER_SIZE);
@@ -511,7 +512,16 @@ static void BuildHeader(unsigned char *h, const GodImageInfo &info, const char *
     WriteTitleField(h + 0x411, 0x80, titleName);  // display name (first locale)
     WriteTitleField(h + 0x1691, 0x80, titleName); // title name
 
-    // No thumbnails yet: sizes at 0x1712 and 0x1716 stay 0.
+    // The same icon as both the package thumbnail and the title thumbnail,
+    // as Iso2God does - for a game they are one and the same. Without one,
+    // both sizes stay 0 and the dashboard shows its placeholder.
+    if (iconPng != NULL && iconPngSize > 0 && iconPngSize <= GOD_ICON_MAX)
+    {
+        WriteBE32(h + 0x1712, iconPngSize);
+        WriteBE32(h + 0x1716, iconPngSize);
+        memcpy(h + 0x171A, iconPng, iconPngSize);
+        memcpy(h + 0x571A, iconPng, iconPngSize);
+    }
 
     Sha1(h + 0x344, HEADER_SIZE - 0x344, h + 0x32C);
 }
@@ -537,7 +547,8 @@ static bool ReadPartition(GodSource *source, const GodImageInfo &info, unsigned 
 }
 
 GodResult GodConvert(GodSource *source, const GodImageInfo &info, const char *contentRoot,
-                     const char *titleName, GodProgressFn progress, void *progressContext,
+                     const char *titleName, const unsigned char *iconPng, unsigned long iconPngSize,
+                     GodProgressFn progress, void *progressContext,
                      char *outPackagePath, unsigned long outPackagePathSize)
 {
     PackagePaths paths;
@@ -674,7 +685,7 @@ GodResult GodConvert(GodSource *source, const GodImageInfo &info, const char *co
     {
         unsigned char mhtHash[20];
         Sha1(masters, BLOCK_SIZE, mhtHash);
-        BuildHeader(header, info, titleName, mhtHash, partsTotalSize);
+        BuildHeader(header, info, titleName, iconPng, iconPngSize, mhtHash, partsTotalSize);
 
         FILE *f = fopen(paths.header, "wb");
         if (f == NULL)
