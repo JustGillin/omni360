@@ -322,32 +322,6 @@
       <Command Condition="'$(Configuration)|$(Platform)'=='Release|Xbox 360'">bundler "%(FullPath)" -o "$(OutDir)Media\Fonts\font.xpr"</Command>
       <Outputs Condition="'$(Configuration)|$(Platform)'=='Release|Xbox 360'">$(OutDir)Media\Fonts\font.xpr</Outputs>
     </CustomBuild>
-    <!-- The UI font, copied beside the XEX. UiText.cpp loads it at runtime
-         from file://game:/selawk.ttf - game:\ being the folder the XEX runs
-         from - so it has to travel with Omni360.xex, and the UI has no text
-         without it. This used to be a manual step that nothing enforced.
-
-         OFL.txt goes with it because the SIL Open Font License requires its
-         text to accompany every redistributed copy of the font, and the
-         output folder is exactly what gets copied to a console or shared.
-
-         Keyed on each file's own Outputs, so the copy re-runs only when the
-         source changes. The mkdir covers a clean checkout, where this can run
-         before anything else has created $(OutDir). -->
-    <CustomBuild Include="Media\Fonts\selawk.ttf">
-      <FileType>Document</FileType>
-      <Message>Copying selawk.ttf beside the XEX</Message>
-      <Command>if not exist "$(OutDir)" mkdir "$(OutDir)"
-copy /Y "%(FullPath)" "$(OutDir)selawk.ttf" &gt;nul</Command>
-      <Outputs>$(OutDir)selawk.ttf</Outputs>
-    </CustomBuild>
-    <CustomBuild Include="Media\Fonts\OFL.txt">
-      <FileType>Document</FileType>
-      <Message>Copying the font licence beside the XEX</Message>
-      <Command>if not exist "$(OutDir)" mkdir "$(OutDir)"
-copy /Y "%(FullPath)" "$(OutDir)OFL.txt" &gt;nul</Command>
-      <Outputs>$(OutDir)OFL.txt</Outputs>
-    </CustomBuild>
     <None Include="SSL\codec\pemdec.t0" />
     <None Include="SSL\ssl\ssl_hs_client.t0" />
     <None Include="SSL\ssl\ssl_hs_common.t0" />
