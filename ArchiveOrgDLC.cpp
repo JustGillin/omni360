@@ -24,6 +24,7 @@ rather than a scraped browser login session.
 #include "downloadFile.h"
 #include "parsing.h"
 #include "cJSON.h"
+#include "RarHeaders.h"
 #include "settings.h"
 
 #include <xtl.h>
@@ -616,84 +617,8 @@ int FindDlcRarFilenames(const std::string &gameName, DlcRarMatch *outMatches, in
 // RAR header walk (no decompression - see file header comment)
 // ---------------------------------------------------------------------------
 
-#define RAR_PARSE_ERROR -1
-#define RAR_NEED_MORE_DATA -2
-
-// Parses whatever header data is present in [data, data+dataLen), where
-// data[0] is the archive byte at whatever absolute offset the caller last
-// requested (isFirstChunk means that offset is 0). Returns RAR_NEED_MORE_DATA
-// if a header's fixed part or filename didn't fully fit in this chunk, or
-// RAR_PARSE_ERROR if this doesn't look like a RAR4 archive at all. On
-// success, *outNextPos is set to how many bytes past THE START OF THIS CHUNK
-// the next header begins (0 meaning "no more entries" - headSize was 0) -
-// this is a length/delta, not an absolute archive offset, since this
-// function has no idea what absolute offset data[0] corresponds to. The
-// caller must add its own current absolute position to it, not assign it
-// directly (see the ListDlcMembers loop below - this was originally a real
-// bug: assigning nextPos straight into pos caused the walk to "teleport" to
-// essentially arbitrary offsets on every chunk after the first, since only
-// the very first chunk starts at absolute offset 0 where local and absolute
-// positions happen to coincide).
-static int ParseOneRarHeader(const unsigned char *data, unsigned long dataLen, bool isFirstChunk,
-                             DlcMember *outMember, bool *outIsFileEntry, unsigned long long *outNextPos)
-{
-    unsigned long pos = 0;
-
-    if (isFirstChunk)
-    {
-        static const unsigned char SIG4[7] = {0x52, 0x61, 0x72, 0x21, 0x1A, 0x07, 0x00};
-        if (dataLen < 7 || memcmp(data, SIG4, 7) != 0)
-            return RAR_PARSE_ERROR;
-        pos = 7;
-    }
-
-    if (pos + 7 > dataLen)
-        return RAR_NEED_MORE_DATA;
-
-    unsigned char headType = data[pos + 2];
-    unsigned short headSize = ReadLE16(data + pos + 5);
-
-    if (headSize == 0)
-    {
-        *outIsFileEntry = false;
-        *outNextPos = 0; // caller treats 0 as "no more entries"
-        return 0;
-    }
-
-    if (headType != 0x74) // not a FILE_HEAD (e.g. MAIN_HEAD) - skip it, nothing to report
-    {
-        *outIsFileEntry = false;
-        *outNextPos = pos + headSize;
-        return 0;
-    }
-
-    unsigned long fhPos = pos + 7;
-    if (fhPos + 25 > dataLen)
-        return RAR_NEED_MORE_DATA;
-
-    unsigned long packSize = ReadLE32(data + fhPos + 0);
-    unsigned long unpSize = ReadLE32(data + fhPos + 4);
-    unsigned short nameSize = ReadLE16(data + fhPos + 19);
-    unsigned long nameStart = fhPos + 25;
-
-    if (nameStart + nameSize > dataLen)
-        return RAR_NEED_MORE_DATA;
-
-    *outIsFileEntry = (unpSize > 0); // RAR emits zero-size entries for directory path components; not real files
-    if (*outIsFileEntry)
-    {
-        unsigned long copyLen = nameSize;
-        if (copyLen >= sizeof(outMember->internalPath))
-            copyLen = sizeof(outMember->internalPath) - 1;
-        memcpy(outMember->internalPath, data + nameStart, copyLen);
-        outMember->internalPath[copyLen] = '\0';
-        outMember->packSize = packSize;
-        outMember->unpSize = unpSize;
-    }
-
-    *outNextPos = pos + headSize + packSize;
-    return 0;
-}
+// Header parsing itself lives in RarHeaders.cpp, which handles both RAR4 and
+// RAR5 and is tested on a PC against archives made by rar.exe.
 
 // Reads the content-type segment out of a member's internal path.
 //
@@ -756,6 +681,7 @@ int ListDlcMembers(const std::string &rarFilename, unsigned long long archiveSiz
     int count = 0;
     int skippedAvatar = 0;
     bool isFirstChunk = true;
+    RarFormat format = RAR_FORMAT_UNKNOWN; // known after the first chunk
 
     // Resolved once (on the first Range request below) and reused for every
     // subsequent one against this same rarFilename, instead of re-resolving
@@ -813,32 +739,82 @@ int ListDlcMembers(const std::string &rarFilename, unsigned long long archiveSiz
             return -1;
         }
 
-        DlcMember member;
-        bool isFileEntry = false;
-        unsigned long long nextPos = 0;
+        // The first chunk starts with the archive signature, which says which
+        // of the two RAR formats this is (see RarHeaders.h); the first header
+        // follows it. Every later chunk starts exactly on a header.
+        unsigned long headerStart = 0;
 
-        int parseResult = ParseOneRarHeader((const unsigned char *)chunk, (unsigned long)chunkLen, isFirstChunk,
-                                            &member, &isFileEntry, &nextPos);
-
-        if (parseResult == RAR_PARSE_ERROR)
+        if (isFirstChunk)
         {
-            ERROR_LOG("file does not look like a RAR4 archive");
+            format = RarDetectFormat(chunk, (unsigned long)chunkLen, &headerStart);
+
+            if (format == RAR_FORMAT_UNKNOWN)
+            {
+                // Say what it actually is. "Not a RAR" alone can't tell a RAR
+                // variant this doesn't know from an error page served in the
+                // file's place, and those need very different fixes.
+                char hex[3 * 16 + 1] = "";
+                for (unsigned long i = 0; i < 16 && i < chunkLen; ++i)
+                    _snprintf(hex + i * 3, 4, "%02X ", chunk[i]);
+                hex[sizeof(hex) - 1] = '\0';
+                printFunction("ERROR: not a RAR archive (status %d, %I64u bytes); starts: %s\n",
+                              status, chunkLen, hex);
+                return -1;
+            }
+
+            printFunction("RAR%d archive\n", format == RAR_FORMAT_5 ? 5 : 4);
+            isFirstChunk = false;
+        }
+
+        RarEntry entry;
+        unsigned long long nextPos = 0;
+        int parseResult = RarParseHeader(format, chunk + headerStart, (unsigned long)chunkLen - headerStart,
+                                         &entry, &nextPos);
+
+        if (parseResult == RAR_HEADER_END)
+            break;
+
+        if (parseResult == RAR_HEADER_ENCRYPTED)
+        {
+            ERROR_LOG("this archive's headers are encrypted - its contents can't be listed");
             return -1;
         }
 
-        if (parseResult == RAR_NEED_MORE_DATA)
+        if (parseResult == RAR_HEADER_NEED_MORE)
         {
-            // Shouldn't normally happen with a 1KB chunk and ~32-byte headers
-            // plus short filenames, but guard against an unusually long path
-            // by doubling the chunk size once and retrying from the same pos.
+            // A header longer than the chunk. Not seen in practice: the
+            // longest headers here are a path of ~60 characters plus a few
+            // small extra records, well inside a kilobyte.
             printFunction("Header didn't fit in %lu bytes at offset %I64u, this file/path may be unusually large\n", CHUNK_SIZE, pos);
             return -1;
         }
 
-        isFirstChunk = false;
+        if (parseResult != RAR_HEADER_OK || nextPos == 0)
+        {
+            printFunction("ERROR: unreadable RAR%d header at offset %I64u\n", format == RAR_FORMAT_5 ? 5 : 4, pos);
+            return -1;
+        }
 
-        if (nextPos == 0)
-            break; // headSize == 0: end of the header chain
+        nextPos += headerStart; // measured from the chunk's start, signature included
+
+        // FATX can't hold a file of 4GB or more, so a member that size could
+        // never be installed - and DlcMember's sizes are 32-bit. Log it and
+        // leave it out rather than truncate its size.
+        bool isFileEntry = entry.isFile;
+        if (isFileEntry && (entry.unpSize > 0xFFFFFFFFULL || entry.packSize > 0xFFFFFFFFULL))
+        {
+            printFunction("  Skipping member too large for the console's file system: %s\n", entry.name);
+            isFileEntry = false;
+        }
+
+        DlcMember member;
+        if (isFileEntry)
+        {
+            memcpy(member.internalPath, entry.name, sizeof(member.internalPath) - 1);
+            member.internalPath[sizeof(member.internalPath) - 1] = '\0';
+            member.packSize = (unsigned long)entry.packSize;
+            member.unpSize = (unsigned long)entry.unpSize;
+        }
 
         if (isFileEntry)
             filesChecked++;
@@ -877,7 +853,7 @@ int ListDlcMembers(const std::string &rarFilename, unsigned long long archiveSiz
 
         // nextPos is a delta from the start of the chunk we just parsed
         // (i.e. from `pos` as it was for this iteration), not an absolute
-        // archive offset - see the comment on ParseOneRarHeader. This used
+        // archive offset - see RarParseHeader. This used
         // to be `pos = nextPos;`, which only ever happened to work for the
         // very first header (where pos was already 0), and silently
         // "teleported" pos to essentially arbitrary values on every header

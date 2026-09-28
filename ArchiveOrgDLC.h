@@ -105,7 +105,7 @@ struct DlcRarMatch
 int FindDlcRarFilenames(const std::string &gameName, DlcRarMatch *outMatches, int maxMatches,
                         void printFunction(const char *_format, ...));
 
-// Walks rarFilename's RAR4 header chain one entry at a time, each via a small,
+// Walks rarFilename's header chain (RAR4 or RAR5 - see RarHeaders.h) one entry at a time, each via a small,
 // precisely-targeted Range request (RAR stores headers interleaved with each
 // file's compressed data, not in one central directory, so this is a series
 // of small requests rather than one big peek) - never downloads or
