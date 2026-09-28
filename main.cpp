@@ -1511,6 +1511,91 @@ static void CleanUpInterruptedInstall()
     ClearInstallMarker();
 }
 
+// Measures how fast the drive delivers the same stretch of disc three ways,
+// to the log: through the file system (the way games read, which the XDK
+// says runs at 6.8-15 MB/s), and raw through the volume in 1MB and 128KB
+// requests (the way the install reads). Installs have been running at about
+// 5 MB/s with the drive audibly spinning slower than in a game, and which
+// read path is to blame decides how to fix it.
+//
+// Each read goes 48MB further along the disc's largest file, so all three
+// sit next to each other on the disc - the same radius, and so the same
+// best-case speed. Temporary: it adds about half a minute to every install.
+#define SPEED_TEST_BYTES (48UL * 1024 * 1024)
+
+static void DiscSpeedTest(DiscSource &disc, const GodImageInfo &info)
+{
+    if (info.largestFileSize < 3 * SPEED_TEST_BYTES || info.largestFile[0] == '\0')
+    {
+        dprintf("[speed] no file on this disc is big enough to measure with (largest %lu bytes)\n",
+                info.largestFileSize);
+        return;
+    }
+
+    RenderStatusFrame("INSTALL DISC", "Measuring the drive's speed", "About half a minute, once, before copying.");
+
+    const unsigned long CHUNK = 1024UL * 1024;
+    unsigned char *buffer = (unsigned char *)VirtualAlloc(NULL, CHUNK, MEM_COMMIT, PAGE_READWRITE);
+    if (buffer == NULL)
+        return;
+
+    LARGE_INTEGER freq, t0, t1;
+    QueryPerformanceFrequency(&freq);
+
+    dprintf("[speed] using %s (%lu MB, sector 0x%lX)\n", info.largestFile,
+            info.largestFileSize / (1024 * 1024), info.largestFileSector);
+
+    // 1. The file system: the disc mapped as a drive, the file opened
+    //    unbuffered so nothing comes from a cache.
+    mount("OmniDvd:", "\\Device\\Cdrom0");
+    char path[300];
+    _snprintf(path, sizeof(path), "OmniDvd:%s", info.largestFile);
+    path[sizeof(path) - 1] = '\0';
+
+    HANDLE f = CreateFile(path, GENERIC_READ, FILE_SHARE_READ, NULL, OPEN_EXISTING, FILE_FLAG_NO_BUFFERING, NULL);
+    if (f == INVALID_HANDLE_VALUE)
+    {
+        dprintf("[speed] file system: couldn't open %s (error %lu)\n", path, GetLastError());
+    }
+    else
+    {
+        bool ok = true;
+        QueryPerformanceCounter(&t0);
+        for (unsigned long done = 0; ok && done < SPEED_TEST_BYTES; done += CHUNK)
+        {
+            DWORD got = 0;
+            ok = ReadFile(f, buffer, CHUNK, &got, NULL) && got == CHUNK;
+        }
+        QueryPerformanceCounter(&t1);
+        CloseHandle(f);
+
+        double secs = (double)(t1.QuadPart - t0.QuadPart) / (double)freq.QuadPart;
+        dprintf("[speed] file system, 1MB reads:  %s %.2f MB/s\n", ok ? "" : "(read failed)",
+                ok && secs > 0 ? 48.0 / secs : 0.0);
+    }
+
+    // 2 and 3. Raw, the install's way, over the next two 48MB of the same file.
+    unsigned long long fileStart = info.rootOffset + (unsigned long long)info.largestFileSector * 0x800;
+    const unsigned long sizes[2] = { CHUNK, 128UL * 1024 };
+
+    for (int i = 0; i < 2; ++i)
+    {
+        unsigned long long at = fileStart + (unsigned long long)(i + 1) * SPEED_TEST_BYTES;
+        bool ok = true;
+
+        QueryPerformanceCounter(&t0);
+        for (unsigned long done = 0; ok && done < SPEED_TEST_BYTES; done += sizes[i])
+            ok = disc.ReadAt(at + done, buffer, sizes[i]);
+        QueryPerformanceCounter(&t1);
+
+        double secs = (double)(t1.QuadPart - t0.QuadPart) / (double)freq.QuadPart;
+        dprintf("[speed] raw, %4luKB reads:       %s %.2f MB/s\n", sizes[i] / 1024, ok ? "" : "(read failed)",
+                ok && secs > 0 ? 48.0 / secs : 0.0);
+    }
+
+    VirtualFree(buffer, 0, MEM_RELEASE);
+}
+
 // START on the library: reads the disc in the drive, asks for the name the
 // dashboard should show, and installs it into the games folder - the same
 // place the library is read from, so the game appears there straight after.
@@ -1612,6 +1697,8 @@ static void InstallDiscAsGame(Library &lib, const char *gamesPath, int &listSele
     progress.startTick = GetTickCount();
     progress.lastFrameTick = 0;
     progress.prevButtons = AnyPadButtons(); // the A that confirmed is still down
+
+    DiscSpeedTest(disc, info);
 
     // From here until GodConvert returns, the marker is what cleans up if
     // the app is ended mid-copy. GodConvert handles every failure it sees -

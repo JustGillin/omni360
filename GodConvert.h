@@ -61,6 +61,12 @@ struct GodImageInfo
     unsigned long blockCount;       // 4KB blocks to copy
     unsigned long partCount;        // Data files
     unsigned long long outputSize;  // every byte the package will take, header included
+
+    // The biggest file on the disc - somewhere long enough to compare read
+    // methods on the same stretch of the disc (see DiscSpeedTest in main.cpp).
+    char largestFile[256];          // path inside the partition, e.g. "\media\big.pak"
+    unsigned long largestFileSector;
+    unsigned long largestFileSize;
 };
 
 enum GodResult
