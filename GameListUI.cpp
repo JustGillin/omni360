@@ -1555,7 +1555,7 @@ GameListUIResult ShowGameListUI(const InstalledGame *games, int gameCount, int i
 // ---------------------------------------------------------------------------
 
 void RenderProgressFrame(const char *title, const char *statusLine,
-                         const char *detailLine, float fraction0to1)
+                         const char *detailLine, float fraction0to1, const char *heading)
 {
     if (!g_Initialized)
         return;
@@ -1605,8 +1605,9 @@ void RenderProgressFrame(const char *title, const char *statusLine,
 
     g_UiFont.Begin();
 
-    g_UiFont.SetScaleFactors(1.25f * g_M.textScale, 1.25f * g_M.textScale);
-    g_UiFont.DrawText(g_M.contentX, g_M.headerTextY, COL_TEXT_PRIMARY, L"DOWNLOADING");
+    // Through DrawChromeHeading like every other screen, so the OMNI360 brand
+    // is here too - this is a screen someone can be looking at for minutes.
+    DrawChromeHeading(heading != NULL ? heading : "DOWNLOADING");
 
     // Pack name truncated rather than overrunning - these are real archive
     // filenames and they get long.

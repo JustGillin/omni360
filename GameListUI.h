@@ -80,8 +80,11 @@ void ReleaseGameListIcons();
 //   fraction0to1 - bar fill; clamped internally. Pass a negative value for an
 //                indeterminate download (unknown total size), which draws an
 //                empty trough rather than a misleading 0%.
+//   heading    - the screen heading, after the OMNI360 brand. "DOWNLOADING"
+//                for the transfer itself; the steps before it name themselves.
 void RenderProgressFrame(const char *title, const char *statusLine,
-                         const char *detailLine, float fraction0to1);
+                         const char *detailLine, float fraction0to1,
+                         const char *heading = "DOWNLOADING");
 
 // Draws one non-interactive status frame and returns immediately - for the
 // blocking phases between screens (scanning the library, talking to

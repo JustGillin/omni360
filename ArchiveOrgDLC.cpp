@@ -719,11 +719,17 @@ static unsigned long MemberContentType(const char *internalPath)
 
 int ListDlcMembers(const std::string &rarFilename, unsigned long long archiveSize,
                    DlcMember *outMembers, int maxMembers,
-                   const char *authHeader, void printFunction(const char *_format, ...))
+                   const char *authHeader, void printFunction(const char *_format, ...),
+                   ListMembersProgressFn progressFn)
 {
     g_keysRejected = false;
 
     std::string url = ARCHIVE_DOWNLOAD_BASE + rarFilename;
+
+    int filesChecked = 0; // every file entry seen, including skipped avatar items - see progressFn
+
+    if (progressFn != NULL)
+        progressFn(0, archiveSize, 0, 0);
 
     // Generous per-request chunk: real header fixed part is 32 bytes, and
     // observed filenames are well under this; this is NOT the whole archive,
@@ -805,6 +811,9 @@ int ListDlcMembers(const std::string &rarFilename, unsigned long long archiveSiz
         if (nextPos == 0)
             break; // headSize == 0: end of the header chain
 
+        if (isFileEntry)
+            filesChecked++;
+
         if (isFileEntry && count < maxMembers)
         {
             unsigned long memberType = MemberContentType(member.internalPath);
@@ -847,6 +856,9 @@ int ListDlcMembers(const std::string &rarFilename, unsigned long long archiveSiz
         // files inside only ever turned up a single (and not even
         // necessarily correct) member.
         pos = pos + nextPos;
+
+        if (progressFn != NULL)
+            progressFn(pos < archiveSize ? pos : archiveSize, archiveSize, filesChecked, count);
     }
 
     if (skippedAvatar > 0)

@@ -112,9 +112,23 @@ int FindDlcRarFilenames(const std::string &gameName, DlcRarMatch *outMatches, in
 // decompresses real archive content. archiveSize (from DlcRarMatch::size)
 // tells it where the archive ends. Fills outMembers (caller-allocated array)
 // and returns the number of entries found, or -1 on failure.
+//
+// That walk is one network round trip per header, and a large pack has
+// dozens - long enough that it needs to visibly move. progressFn, if
+// non-NULL, is called once before the first request and again after every
+// header, with:
+//   bytesScanned / archiveSize - how far through the archive the walk is.
+//                  It advances in uneven jumps, since each step skips a whole
+//                  member's data, so it shows position rather than time left.
+//   filesChecked - file entries read so far, including ones that are skipped
+//   filesToInstall - of those, the ones that will actually be downloaded
+typedef void (*ListMembersProgressFn)(unsigned long long bytesScanned, unsigned long long archiveSize,
+                                      int filesChecked, int filesToInstall);
+
 int ListDlcMembers(const std::string &rarFilename, unsigned long long archiveSize,
                    DlcMember *outMembers, int maxMembers,
-                   const char *authHeader, void printFunction(const char *_format, ...));
+                   const char *authHeader, void printFunction(const char *_format, ...),
+                   ListMembersProgressFn progressFn = NULL);
 
 // Downloads one already-identified DLC member (via archive.org's
 // /download/{item}/{rarfile}/{urlencoded internal path} virtual-path URL,

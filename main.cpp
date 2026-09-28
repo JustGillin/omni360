@@ -699,6 +699,35 @@ static void DlcProgressCallback(unsigned long long bytesDone,
     RenderProgressFrame(g_progressTitle, status, detail, fraction);
 }
 
+// Drawn after each header ListDlcMembers reads. That walk is one network round
+// trip per entry, and on a large pack it went on for a long time behind a
+// single static "Reading the file list" frame, looking hung.
+//
+// The bar is how far through the archive the walk has got. It moves in uneven
+// jumps - each step skips over a whole member's data - so the counts under it
+// are what show it's still going between jumps. The screen can't animate
+// during a request itself: each one blocks until archive.org answers.
+static void ListMembersProgressCallback(unsigned long long bytesScanned, unsigned long long archiveSize,
+                                        int filesChecked, int filesToInstall)
+{
+    char detail[128];
+    if (filesChecked == 0)
+        _snprintf(detail, sizeof(detail), "Connecting...");
+    else if (filesToInstall == filesChecked)
+        _snprintf(detail, sizeof(detail), "%d file%s found", filesChecked, filesChecked == 1 ? "" : "s");
+    else
+        // Avatar items are counted but skipped (see ListDlcMembers), so the
+        // two numbers differ - say both, or the install count looks like it
+        // dropped files.
+        _snprintf(detail, sizeof(detail), "%d file%s checked   -   %d to install",
+                  filesChecked, filesChecked == 1 ? "" : "s", filesToInstall);
+    detail[sizeof(detail) - 1] = '\0';
+
+    float fraction = (archiveSize > 0) ? (float)((double)bytesScanned / (double)archiveSize) : -1.0f;
+
+    RenderProgressFrame(g_progressTitle, "Reading the file list", detail, fraction, "READING PACK");
+}
+
 // Downloads every file inside one chosen pack.
 //
 // Returns false if archive.org refused the keys, so the caller stops offering
@@ -706,10 +735,14 @@ static void DlcProgressCallback(unsigned long long bytesDone,
 // Settings, back on the game list.
 static bool DownloadOnePack(const DlcRarMatch &pack, const char *contentBasePath, const char *authHeader)
 {
-    RenderStatusFrame("READING PACK", "Reading the file list", pack.filename);
+    // The pack name is the progress frames' title, both for the file-list
+    // walk below and for the downloads after it.
+    strncpy(g_progressTitle, pack.filename, sizeof(g_progressTitle) - 1);
+    g_progressTitle[sizeof(g_progressTitle) - 1] = '\0';
 
     DlcMember members[MAX_DLC_MEMBERS];
-    int memberCount = ListDlcMembers(pack.filename, pack.size, members, MAX_DLC_MEMBERS, authHeader, dprintf);
+    int memberCount = ListDlcMembers(pack.filename, pack.size, members, MAX_DLC_MEMBERS, authHeader, dprintf,
+                                     ListMembersProgressCallback);
 
     if (memberCount <= 0)
     {
@@ -727,9 +760,8 @@ static bool DownloadOnePack(const DlcRarMatch &pack, const char *contentBasePath
     }
 
     // Context for DlcProgressCallback, which the HTTP layer calls with nothing
-    // but byte counts.
-    strncpy(g_progressTitle, pack.filename, sizeof(g_progressTitle) - 1);
-    g_progressTitle[sizeof(g_progressTitle) - 1] = '\0';
+    // but byte counts. (g_progressTitle is already the pack name - set above,
+    // for the file-list frames.)
     g_progressFileCount = memberCount;
 
     int failures = 0;
