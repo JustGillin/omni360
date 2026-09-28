@@ -343,6 +343,7 @@
     <ClInclude Include="archiveOrgCert.h" />
     <ClInclude Include="Keyboard.h" />
     <ClInclude Include="OutputConsole.h" />
+    <ClInclude Include="PngDecode.h" />
     <ClInclude Include="parsing.h" />
     <ClInclude Include="settings.h" />
     <ClInclude Include="StfsParser.h" />
@@ -375,6 +376,7 @@
     <ClCompile Include="Keyboard.cpp" />
     <ClCompile Include="main.cpp" />
     <ClCompile Include="OutputConsole.cpp" />
+    <ClCompile Include="PngDecode.cpp" />
     <ClCompile Include="parsing.cpp" />
     <ClCompile Include="StfsParser.cpp" />
     <ClCompile Include="UiText.cpp" />

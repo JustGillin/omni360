@@ -33,6 +33,7 @@ hand-paced to ~60fps, so per-frame animation is viable here.
 #include "AtgFont.h"
 #include "OutputConsole.h"
 #include "UiText.h" // XUI-backed text renderer; replaced ATG::Font
+#include "PngDecode.h" // for the cover thumbnails D3DX refuses
 
 #include <stdio.h>
 #include <string.h>
@@ -986,6 +987,40 @@ struct Icon
     float aspect; // source width / source height
 };
 
+// Builds a texture from decoded pixels (0xAARRGGBB, row-major), for images
+// D3DX won't take. The same linear-format technique as the badge textures
+// (see FillBadgeTexture): D3DFMT_LIN_A8R8G8B8 is laid out row after row, so a
+// plain write through LockRect is correct, which it would not be for a tiled
+// format. Rows go through lr.Pitch rather than assuming width * 4, since the
+// GPU pads linear rows.
+//
+// Kept at the source size rather than resampled to ICON_TEXTURE_SIZE like
+// the D3DX path: thumbnails are 64x64 in practice, well under the size they
+// are drawn at, and PngDecode caps dimensions at PNG_MAX_DIMENSION anyway.
+static D3DTexture *CreateTextureFromArgb(const unsigned long *pixels, unsigned long w, unsigned long h)
+{
+    D3DTexture *tex = NULL;
+    if (FAILED(g_pd3dDevice->CreateTexture(w, h, 1, 0, D3DFMT_LIN_A8R8G8B8, D3DPOOL_MANAGED, &tex, NULL)))
+        return NULL;
+
+    D3DLOCKED_RECT lr;
+    if (FAILED(tex->LockRect(0, &lr, NULL, 0)))
+    {
+        tex->Release();
+        return NULL;
+    }
+
+    for (unsigned long y = 0; y < h; ++y)
+    {
+        DWORD *row = (DWORD *)((BYTE *)lr.pBits + y * lr.Pitch);
+        for (unsigned long x = 0; x < w; ++x)
+            row[x] = (DWORD)pixels[y * w + x];
+    }
+
+    tex->UnlockRect(0);
+    return tex;
+}
+
 // Creates a texture from raw PNG/JPEG bytes, recording the source aspect.
 // Leaves out->texture NULL on any failure, so callers can just fall through
 // to the next source.
@@ -1039,17 +1074,38 @@ static bool CreateIconTexture(const unsigned char *data, unsigned long size, Ico
 
     if (FAILED(hr) || texture == NULL)
     {
-        // Report what D3DX was handed and what it made of it. The two calls
-        // fail for different reasons and the distinction is the whole point:
-        //
-        //   GetImageInfo failed too  -> D3DX cannot parse these bytes at all.
-        //                               The data is a format it does not
-        //                               support, or is not really an image,
-        //                               even though it cleared the magic gate.
-        //   GetImageInfo succeeded   -> it parsed fine and only texture
-        //                               creation failed, which points at the
-        //                               creation parameters (size, format,
-        //                               pool) rather than the data.
+        // D3DX refused it - in practice because it's a palette-indexed PNG,
+        // which neither D3DX nor XUI will decode (see PngDecode.h). Decode it
+        // ourselves instead.
+        unsigned long *pixels = NULL;
+        unsigned long pngW = 0, pngH = 0;
+        const char *pngError = NULL;
+
+        if (PngDecodeToArgb(data, size, &pixels, &pngW, &pngH, &pngError))
+        {
+            texture = CreateTextureFromArgb(pixels, pngW, pngH);
+            PngFree(pixels);
+
+            if (texture != NULL)
+            {
+                // Logged on success too, so it's visible on hardware that the
+                // fallback is what drew a given cover.
+                dprintf("[icon] \"%s\" %s: D3DX refused it (0x%08lX); decoded in-house, %lux%lu colourType=%u\n",
+                        gameName != NULL ? gameName : "?", whichImage != NULL ? whichImage : "?",
+                        (unsigned long)hr, pngW, pngH, size > 25 ? (unsigned)data[25] : 0u);
+
+                out->texture = texture;
+                out->aspect = (float)pngW / (float)pngH;
+                return true;
+            }
+
+            pngError = "decoded, but creating the texture failed";
+        }
+
+        // Both refused. The decoder's reason is specific ("image data is
+        // truncated", "chunk runs past the end of the data", "not a PNG"...),
+        // which is why the IHDR and IEND dumps that used to live here are
+        // gone - they were a way of guessing at exactly this.
         unsigned long magic = 0;
         if (size >= 4)
         {
@@ -1057,74 +1113,9 @@ static bool CreateIconTexture(const unsigned char *data, unsigned long size, Ico
                     ((unsigned long)data[2] << 8) | (unsigned long)data[3];
         }
 
-        dprintf("[icon] \"%s\" %s: CreateTexture -> 0x%08lX (size=%lu magic=%08lX)\n",
-                gameName != NULL ? gameName : "?",
-                whichImage != NULL ? whichImage : "?",
-                (unsigned long)hr, size, magic);
-
-        if (FAILED(hrInfo))
-        {
-            dprintf("[icon]   GetImageInfo also failed -> 0x%08lX - D3DX cannot parse these bytes\n",
-                    (unsigned long)hrInfo);
-
-            // 0x88760B59 is D3DXERR_INVALIDDATA, and the magic above is a
-            // real PNG signature - so this is a genuine PNG whose CONTENT
-            // D3DX's decoder will not take. Which feature it objects to is
-            // stated plainly in the IHDR chunk, which PNG fixes at the very
-            // start of the file:
-            //
-            //   0..7   signature        8..11  IHDR length (13)
-            //   12..15 "IHDR"           16..19 width
-            //   20..23 height            24    bit depth
-            //   25     colour type       26    compression
-            //   27     filter            28    interlace
-            //
-            // Colour type and bit depth are the usual culprits - D3DX9's PNG
-            // support is narrower than the format allows, and 16-bit channels
-            // or a paletted/greyscale-with-alpha variant are the kinds of
-            // thing it declines. Interlace 1 (Adam7) is another.
-            if (size >= 29 && magic == 0x89504E47UL &&
-                data[12] == 'I' && data[13] == 'H' && data[14] == 'D' && data[15] == 'R')
-            {
-                unsigned long pngW = ((unsigned long)data[16] << 24) | ((unsigned long)data[17] << 16) |
-                                     ((unsigned long)data[18] << 8)  | (unsigned long)data[19];
-                unsigned long pngH = ((unsigned long)data[20] << 24) | ((unsigned long)data[21] << 16) |
-                                     ((unsigned long)data[22] << 8)  | (unsigned long)data[23];
-
-                dprintf("[icon]   PNG IHDR: %lux%lu depth=%u colourType=%u compression=%u filter=%u interlace=%u\n",
-                        pngW, pngH,
-                        (unsigned)data[24], (unsigned)data[25],
-                        (unsigned)data[26], (unsigned)data[27], (unsigned)data[28]);
-
-                // Whether the declared size actually contains the whole file.
-                // A PNG always ends with an IEND chunk, so its absence means
-                // the thumbnail field is truncated - the image is fine and we
-                // are simply not reading all of it, which is a completely
-                // different fix from an unsupported format.
-                bool sawEnd = false;
-                if (size >= 8)
-                {
-                    for (unsigned long b = 0; b + 4 <= size; ++b)
-                    {
-                        if (data[b] == 'I' && data[b + 1] == 'E' &&
-                            data[b + 2] == 'N' && data[b + 3] == 'D')
-                        {
-                            sawEnd = true;
-                            break;
-                        }
-                    }
-                }
-
-                dprintf("[icon]   IEND present: %s\n", sawEnd ? "yes - data looks complete"
-                                                              : "NO - thumbnail data is truncated");
-            }
-        }
-        else
-        {
-            dprintf("[icon]   but GetImageInfo parsed it: %ux%u fmt=%d type=%d mips=%u\n",
-                    imgInfo.Width, imgInfo.Height, (int)imgInfo.Format,
-                    (int)imgInfo.ImageFileFormat, imgInfo.MipLevels);
-        }
+        dprintf("[icon] \"%s\" %s: D3DX refused it (0x%08lX, size=%lu magic=%08lX); in-house decoder: %s\n",
+                gameName != NULL ? gameName : "?", whichImage != NULL ? whichImage : "?",
+                (unsigned long)hr, size, magic, pngError != NULL ? pngError : "?");
 
         return false;
     }
@@ -1241,7 +1232,7 @@ static void EnsureIconsLoaded(const InstalledGame *games, int gameCount)
             if (placeholders < 10)
                 dprintf("  No cover art for \"%s\" (Title ID %08lX) - %s\n",
                         games[i].displayName, games[i].titleId,
-                        hadImageData ? "package HAS artwork, D3DX rejected it (see [icon] lines above)"
+                        hadImageData ? "package HAS artwork, but it could not be decoded (see [icon] lines above)"
                                      : "package carries no artwork");
             else if (placeholders == 10)
                 dprintf("  (further titles without cover art not listed)\n");
