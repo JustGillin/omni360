@@ -32,6 +32,10 @@ end-to-end on real hardware against a real 27-game library.
 #include "ReadAhead.h"
 #include "TitleNames.h"
 
+// Kernel exports with no XDK header.
+extern "C" BOOL XexCheckExecutablePrivilege(DWORD privilege);
+extern "C" NTSTATUS XexGetModuleHandle(PSZ moduleName, PHANDLE outHandle);
+
 #include <xtl.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -1712,6 +1716,18 @@ int main()
     // section 5(a) wants a modified work to say prominently that it has been
     // modified. Rename the product freely; leave the attribution alone.
     dprintf("Omni360 " CURRENT_VERSION " (fork of X-Store, https://github.com/951261/X-Store)\n");
+
+    // Whether opening the disc tray should leave the app running (see
+    // xex.xml), and whether DashLaunch - which has its own eject handling -
+    // is loaded. Logged because the console closing the app on eject looks
+    // the same whichever of the two does it.
+    {
+        HANDLE dashLaunch = NULL;
+        bool haveDashLaunch = XexGetModuleHandle("launch.xex", &dashLaunch) >= 0 && dashLaunch != NULL;
+        dprintf("Disc swap privileges: multidisc swap %s, insecure media %s; DashLaunch %s\n",
+                XexCheckExecutablePrivilege(15) ? "yes" : "NO", XexCheckExecutablePrivilege(16) ? "yes" : "NO",
+                haveDashLaunch ? "loaded" : "not loaded");
+    }
 
     if (!InitGameListUI())
     {
