@@ -39,7 +39,9 @@ If Aurora keeps your GOD/disc games in a dedicated folder — `Hdd1:\Games\{Titl
 
 ## 4. Transfer files to the console
 
-Copy `Omni360.xex`, `ArchiveOrgKeys.txt`, and `settings.txt` if you made one, into a single folder on the console — something like `Hdd1:\Apps\Omni360\` or `Usb0:\Apps\Omni360\`. Keep them together, and do not put any other `.xex` in that folder.
+Copy `Omni360.xex`, `selawk.ttf`, `OFL.txt`, `ArchiveOrgKeys.txt`, and `settings.txt` if you made one, into a single folder on the console — something like `Hdd1:\Apps\Omni360\` or `Usb0:\Apps\Omni360\`. Keep them together, and do not put any other `.xex` in that folder.
+
+`selawk.ttf` is the UI font. The build copies it, with its licence `OFL.txt`, into the `Release` folder beside `Omni360.xex`. The app loads it from its own folder at startup, and without it the interface has no text.
 
 Three ways to get them across:
 
