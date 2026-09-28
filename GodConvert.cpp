@@ -445,6 +445,63 @@ static void RemovePackage(const PackagePaths &p)
     RemoveDirectoryA(p.titleDir);
 }
 
+static bool PathsFor(const char *contentRoot, unsigned long titleId, unsigned long mediaId, PackagePaths *p)
+{
+    GodTitleInfo title;
+    memset(&title, 0, sizeof(title));
+    title.titleId = titleId;
+    title.mediaId = mediaId;
+    return BuildPaths(contentRoot, title, p);
+}
+
+static unsigned long long FileSize(const char *path, bool *exists)
+{
+    *exists = false;
+    FILE *f = fopen(path, "rb");
+    if (f == NULL)
+        return 0;
+    *exists = true;
+    unsigned long long size = 0;
+    if (_fseeki64(f, 0, SEEK_END) == 0)
+    {
+        __int64 at = _ftelli64(f);
+        if (at > 0)
+            size = (unsigned long long)at;
+    }
+    fclose(f);
+    return size;
+}
+
+unsigned long long GodPackageSizeOnDisk(const char *contentRoot, unsigned long titleId, unsigned long mediaId)
+{
+    PackagePaths paths;
+    if (!PathsFor(contentRoot, titleId, mediaId, &paths))
+        return 0;
+
+    bool exists = false;
+    unsigned long long total = FileSize(paths.header, &exists);
+    if (!exists)
+        return 0;
+
+    char part[600];
+    for (unsigned long i = 0; i < 10000; ++i)
+    {
+        PartPath(paths, i, part, sizeof(part));
+        unsigned long long size = FileSize(part, &exists);
+        if (!exists)
+            break;
+        total += size;
+    }
+    return total;
+}
+
+void GodRemovePackage(const char *contentRoot, unsigned long titleId, unsigned long mediaId)
+{
+    PackagePaths paths;
+    if (PathsFor(contentRoot, titleId, mediaId, &paths))
+        RemovePackage(paths);
+}
+
 // UTF-8 to UTF-16 big-endian, into a header field of fieldBytes, always
 // terminated. Characters outside the BMP become '?' - the field is UCS-2.
 static void WriteTitleField(unsigned char *field, size_t fieldBytes, const char *utf8)

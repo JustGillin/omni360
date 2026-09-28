@@ -103,4 +103,17 @@ GodResult GodConvert(GodSource *source, const GodImageInfo &info, const char *co
                      GodProgressFn progress, void *progressContext,
                      char *outPackagePath, unsigned long outPackagePathSize);
 
+// For an install that ended too abruptly to clean up after itself - the
+// console switched off, or the Guide button back to the dashboard. GodConvert
+// removes its own partial output on every failure it sees; these are for the
+// ones it can't.
+//
+// GodPackageSizeOnDisk is what the package's files take now, header included,
+// or 0 if it has no header - compare it with GodImageInfo::outputSize to tell
+// a finished install from a partial one. GodRemovePackage removes whatever of
+// the package exists, header first; the title's other content (DLC, title
+// updates) is left alone.
+unsigned long long GodPackageSizeOnDisk(const char *contentRoot, unsigned long titleId, unsigned long mediaId);
+void GodRemovePackage(const char *contentRoot, unsigned long titleId, unsigned long mediaId);
+
 #endif

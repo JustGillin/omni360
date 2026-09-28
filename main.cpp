@@ -1422,6 +1422,90 @@ static bool DiscInstallProgressCallback(unsigned long long done, unsigned long l
     return true;
 }
 
+// An install in progress, recorded before the first byte is copied and
+// removed once it has either finished or cleaned up after itself. Anything
+// that ends the app mid-copy without either - the Guide button to the
+// dashboard, the power, a crash - leaves it behind, and the next launch
+// removes the partial package without asking: half a game is never worth
+// keeping, since an install can't be resumed.
+//
+// Lines: games folder, title ID, media ID, the finished package's size, and
+// the name (for the log and the status line).
+#define INSTALL_MARKER_FILE "game:\\InstallInProgress.txt"
+
+static void WriteInstallMarker(const char *gamesPath, const GodImageInfo &info, const char *name)
+{
+    FILE *f = fopen(INSTALL_MARKER_FILE, "w");
+    if (f == NULL)
+    {
+        dprintf("[disc] couldn't write %s - an interrupted install won't be cleaned up automatically\n",
+                INSTALL_MARKER_FILE);
+        return;
+    }
+    fprintf(f, "%s\n%08lX\n%08lX\n%I64u\n%s\n", gamesPath, info.title.titleId, info.title.mediaId,
+            info.outputSize, name);
+    fclose(f);
+}
+
+static void ClearInstallMarker()
+{
+    remove(INSTALL_MARKER_FILE);
+}
+
+// At startup: if the last install never finished, take its partial package
+// away. A package whose files already add up to the full size did finish -
+// the app just ended before it could clear the marker - and is kept.
+static void CleanUpInterruptedInstall()
+{
+    FILE *f = fopen(INSTALL_MARKER_FILE, "r");
+    if (f == NULL)
+        return;
+
+    char root[MAX_TEXT_LENGTH] = "", idLine[32] = "", mediaLine[32] = "", sizeLine[32] = "", name[256] = "";
+    bool ok = fgets(root, sizeof(root), f) && fgets(idLine, sizeof(idLine), f) &&
+              fgets(mediaLine, sizeof(mediaLine), f) && fgets(sizeLine, sizeof(sizeLine), f);
+    if (ok && fgets(name, sizeof(name), f) == NULL)
+        name[0] = '\0';
+    fclose(f);
+
+    root[strcspn(root, "\r\n")] = '\0';
+    name[strcspn(name, "\r\n")] = '\0';
+
+    unsigned long titleId = strtoul(idLine, NULL, 16);
+    unsigned long mediaId = strtoul(mediaLine, NULL, 16);
+    unsigned long long expected = _strtoui64(sizeLine, NULL, 10);
+
+    if (!ok || root[0] == '\0' || titleId == 0)
+    {
+        dprintf("[disc] %s is unreadable; removing it\n", INSTALL_MARKER_FILE);
+        ClearInstallMarker();
+        return;
+    }
+
+    // Its drive isn't here - a USB drive that has been unplugged. Kept for a
+    // launch where it is, rather than forgetting the partial copy on it.
+    if (!FolderExists(root))
+    {
+        dprintf("[disc] an unfinished install of \"%s\" is on %s, which isn't available; will retry next launch\n",
+                name, root);
+        return;
+    }
+
+    unsigned long long onDisk = GodPackageSizeOnDisk(root, titleId, mediaId);
+    if (expected > 0 && onDisk == expected)
+    {
+        dprintf("[disc] \"%s\" had finished installing (%I64u bytes); keeping it\n", name, onDisk);
+        ClearInstallMarker();
+        return;
+    }
+
+    dprintf("[disc] removing the unfinished install of \"%s\" (%08lX, media %08lX) from %s\n",
+            name, titleId, mediaId, root);
+    RenderStatusFrame("CLEANING UP", "Removing a game install that didn't finish", name);
+    GodRemovePackage(root, titleId, mediaId);
+    ClearInstallMarker();
+}
+
 // START on the library: reads the disc in the drive, asks for the name the
 // dashboard should show, and installs it into the games folder - the same
 // place the library is read from, so the game appears there straight after.
@@ -1524,9 +1608,17 @@ static void InstallDiscAsGame(Library &lib, const char *gamesPath, int &listSele
     progress.lastFrameTick = 0;
     progress.prevButtons = AnyPadButtons(); // the A that confirmed is still down
 
+    // From here until GodConvert returns, the marker is what cleans up if
+    // the app is ended mid-copy. GodConvert handles every failure it sees -
+    // cancelling, a read or write error - by removing its own output first,
+    // so once it returns, by any path, there is nothing left to clean.
+    WriteInstallMarker(gamesPath, info, name.c_str());
+
     char packagePath[MAX_TEXT_LENGTH] = "";
     result = GodConvert(&disc, info, gamesPath, name.c_str(), NULL, 0,
                         DiscInstallProgressCallback, &progress, packagePath, sizeof(packagePath));
+
+    ClearInstallMarker();
 
     DWORD seconds = (GetTickCount() - progress.startTick) / 1000;
     dprintf("[disc] install %s after %lu:%02lu: %s\n", GodResultText(result),
@@ -1625,6 +1717,11 @@ int main()
     char gamesPath[MAX_TEXT_LENGTH];
     GetGamesPath(gamesPath, sizeof(gamesPath));
     dprintf("Games path (scanned for your library): %s\n", gamesPath);
+
+    // First thing, so the space a half-installed game from last time took is
+    // back before anything else checks for room. (It was never listed: the
+    // header is written last, and without one the library doesn't see it.)
+    CleanUpInterruptedInstall();
 
     // From here on the screen belongs to the UI rather than the debug console.
     // The dprintf calls stay - they're the log, and the log is still how
