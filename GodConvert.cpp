@@ -144,7 +144,27 @@ struct DirWalk
     bool foundXex;
     unsigned long xexSector;
     unsigned long xexSize;
+
+    char largestFile[256];
+    unsigned long largestFileSector;
+    unsigned long largestFileSize;
 };
+
+// dir + "\" + name, into out. False (and out untouched) if it won't fit, or
+// if dir is NULL - a folder whose own path didn't fit.
+static bool JoinPath(char *out, size_t outSize, const char *dir, const unsigned char *name, unsigned long nameLen)
+{
+    if (dir == NULL)
+        return false;
+    size_t dirLen = strlen(dir);
+    if (dirLen + 1 + nameLen + 1 > outSize)
+        return false;
+    memmove(out, dir, dirLen);
+    out[dirLen] = '\\';
+    memcpy(out + dirLen + 1, name, nameLen);
+    out[dirLen + 1 + nameLen] = '\0';
+    return true;
+}
 
 static bool NameIs(const unsigned char *name, unsigned long len, const char *want)
 {
@@ -165,7 +185,8 @@ static bool NameIs(const unsigned char *name, unsigned long len, const char *wan
 // and never cross a sector boundary; the rest of a sector is 0xFF. The tables
 // are really binary trees (the first two fields are child offsets), but every
 // entry of a table is in its sectors, so reading them in order finds them all.
-static GodResult WalkTable(DirWalk &w, unsigned long sector, unsigned long size, int depth, bool isRoot)
+static GodResult WalkTable(DirWalk &w, unsigned long sector, unsigned long size, int depth, bool isRoot,
+                           const char *dirPath)
 {
     if (size == 0)
         return GOD_OK;
@@ -238,9 +259,20 @@ static GodResult WalkTable(DirWalk &w, unsigned long sector, unsigned long size,
                 w.xexSize = entSize;
             }
 
+            if (!isDirectory && entSize > w.largestFileSize &&
+                JoinPath(w.largestFile, sizeof(w.largestFile), dirPath, e + 14, nameLen))
+            {
+                w.largestFileSector = entSector;
+                w.largestFileSize = entSize;
+            }
+
             if (isDirectory)
             {
-                result = WalkTable(w, entSector, entSize, depth + 1, false);
+                // A path too long to name isn't tracked for the largest file,
+                // but is still walked for its extents.
+                char childPath[256];
+                bool named = JoinPath(childPath, sizeof(childPath), dirPath, e + 14, nameLen);
+                result = WalkTable(w, entSector, entSize, depth + 1, false, named ? childPath : NULL);
                 if (result != GOD_OK)
                     break;
             }
@@ -355,7 +387,7 @@ GodResult GodInspect(GodSource *source, GodImageInfo *outInfo)
     w.partitionSize = imageSize - type->rootOffset;
     w.usedEnd = 0x21 * SECTOR_SIZE; // through the volume descriptor itself
 
-    GodResult result = WalkTable(w, ReadLE32(descriptor + 20), ReadLE32(descriptor + 24), 0, true);
+    GodResult result = WalkTable(w, ReadLE32(descriptor + 20), ReadLE32(descriptor + 24), 0, true, "");
     if (result != GOD_OK)
         return result;
 
@@ -369,6 +401,10 @@ GodResult GodInspect(GodSource *source, GodImageInfo *outInfo)
     result = ReadExecutionInfo(source, type->rootOffset + xexStart, w.xexSize, &outInfo->title);
     if (result != GOD_OK)
         return result;
+
+    memcpy(outInfo->largestFile, w.largestFile, sizeof(outInfo->largestFile));
+    outInfo->largestFileSector = w.largestFileSector;
+    outInfo->largestFileSize = w.largestFileSize;
 
     outInfo->imageType = type->name;
     outInfo->rootOffset = type->rootOffset;
