@@ -53,4 +53,38 @@ int httpRequestHTTPS(const std::string URL, HttpMethod method, const char *reque
                      unsigned long long knownTotalSize = 0,
                      DownloadProgressFn progressFn = NULL);
 
+/// @brief A connection kept open across a run of small GET requests.
+///
+/// httpRequestHTTPS opens a new connection for every request - DNS lookup,
+/// TCP connect and a full TLS handshake - and asks the server to close it
+/// afterwards. For one download that's fine. For the RAR header walk, which
+/// makes dozens of tiny Range requests in a row, the handshakes were nearly
+/// all of the time spent, since TLS setup is the slow part on the 360.
+///
+/// A session keeps one connection per host open and sends each request on
+/// it, reconnecting only when the host changes or the server closes it. If a
+/// reused connection turns out to have been closed while idle, the request is
+/// retried once on a fresh one. Responses are read with ReadHttpResponse
+/// (HttpResponse.h), which finds their end from the response itself rather
+/// than by waiting for the connection to close.
+///
+/// Buffer-mode GETs only - large downloads to a file stay on httpRequestHTTPS.
+struct HttpsSession;
+
+/// Brings the network stack up for the session's lifetime. NULL on failure;
+/// callers can fall back to httpRequestHTTPS then.
+HttpsSession *HttpsSessionOpen(void printFunction(const char *_format, ...));
+
+/// Closes the connection, if one is open, and logs how many requests went
+/// over how many connections. Safe with NULL.
+void HttpsSessionClose(HttpsSession *session);
+
+/// Same contract as httpRequestHTTPS in buffer mode: returns the HTTP status
+/// (0 or -1 on failure); on 200/206 the body is in dataBuffer and
+/// *dataBufferSize is its length; on a 302 the redirect target is in
+/// dataBuffer instead. dataBuffer needs room for *dataBufferSize + 1 bytes,
+/// as the body is NUL-terminated.
+int HttpsSessionGet(HttpsSession *session, const std::string &url, const char *extraHeaderLines,
+                    char *dataBuffer, unsigned long long *dataBufferSize);
+
 #endif

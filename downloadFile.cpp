@@ -51,6 +51,7 @@ DESCRIPTION : Downloads a file. If the file is larger than 4GB, it splits it int
 #include <iostream>
 
 #include "downloadFile.h"
+#include "HttpResponse.h" // for HttpsSession's reads
 #include "XboxTLS.h"
 #include "dns.h"
 #include "parsing.h"
@@ -63,6 +64,7 @@ DESCRIPTION : Downloads a file. If the file is larger than 4GB, it splits it int
 #include <stdlib.h>
 #include <string.h>
 #include <time.h>
+#include <vector>
 
 #define ERROR(s) (log_printf("\nERROR: %s\n", s))
 #define DEBUG_PRINT(s) (log_printf(s));
@@ -1325,4 +1327,277 @@ downloadFailed:
     free(path);
 
     return httpStatus;
+}
+
+// ---------------------------------------------------------------------------
+// Reusable connections - see HttpsSession in downloadFile.h
+// ---------------------------------------------------------------------------
+//
+// Written alongside httpRequestHTTPS rather than by reworking it, on purpose:
+// that function carries every real download, and it works. The connection
+// setup below repeats its steps (TLS context, trust anchors, DNS, connect)
+// rather than moving them into a shared helper, so none of its paths change.
+
+struct HttpsSession
+{
+    XboxTLSContext ctx;
+    bool connected;
+    char host[256];
+    HttpStream stream; // this connection's incoming bytes; reset on every new connection
+
+    void (*print)(const char *_format, ...);
+
+    // For the log line on close - the whole point is fewer connections, so
+    // it's worth being able to see how many there were.
+    int connectionsOpened;
+    int requestsSent;
+};
+
+static int SessionRead(void *context, char *buf, int len)
+{
+    return XboxTLS_Read((XboxTLSContext *)context, buf, len);
+}
+
+static void SessionDisconnect(HttpsSession *s)
+{
+    if (s->connected)
+    {
+        XboxTLS_Free(&s->ctx);
+        s->connected = false;
+    }
+    s->host[0] = '\0';
+}
+
+static bool SessionConnect(HttpsSession *s, const char *domain)
+{
+    if (strlen(domain) >= sizeof(s->host))
+        return false;
+
+    if (!XboxTLS_CreateContext(&s->ctx, domain))
+    {
+        ERROR("Couldn't create TLS context");
+        return false;
+    }
+
+    if (addTrustAnchors(&s->ctx) != EXIT_SUCCESS)
+    {
+        ERROR("Couldn't add trust anchor");
+        XboxTLS_Free(&s->ctx);
+        return false;
+    }
+
+    // Same lookup as httpRequestHTTPS, minus its network-stack restart
+    // between attempts: the session holds the stack up for its whole life,
+    // so restarting it here would pull it out from under the session.
+    char ip[64] = "";
+    for (int attempt = 0; attempt < 3 && ip[0] == '\0'; ++attempt)
+    {
+        if (ResolveDNS(domain, ip, sizeof(ip)))
+            break;
+        ip[0] = '\0';
+        if (searchDnsCache(domain, ip, sizeof(ip)) == 0)
+            break;
+        ip[0] = '\0';
+        Sleep(1000);
+    }
+
+    if (ip[0] == '\0')
+    {
+        s->print("[https] could not resolve %s\n", domain);
+        XboxTLS_Free(&s->ctx);
+        return false;
+    }
+
+    if (!XboxTLS_Connect(&s->ctx, ip, domain, 443))
+    {
+        s->print("[https] could not connect to %s\n", domain);
+        XboxTLS_Free(&s->ctx);
+        return false;
+    }
+
+    memcpy(s->host, domain, strlen(domain) + 1);
+    s->connected = true;
+    s->connectionsOpened++;
+    HttpStreamInit(&s->stream, SessionRead, &s->ctx);
+    return true;
+}
+
+HttpsSession *HttpsSessionOpen(void printFunction(const char *_format, ...))
+{
+    HttpsSession *s = (HttpsSession *)malloc(sizeof(HttpsSession));
+    if (s == NULL)
+        return NULL;
+
+    memset(s, 0, sizeof(*s));
+    s->print = printFunction;
+
+    // Brought up once for the session, where httpRequestHTTPS does it per
+    // request. Both are reference-counted, so this nests safely with any
+    // other request made while the session is open.
+    XNetStartupParams xnsp = {0};
+    xnsp.cfgSizeOfStruct = sizeof(xnsp);
+    xnsp.cfgFlags = XNET_STARTUP_BYPASS_SECURITY;
+    if (XNetStartup(&xnsp) != 0)
+    {
+        free(s);
+        return NULL;
+    }
+
+    WSADATA wsadata;
+    if (WSAStartup(MAKEWORD(2, 2), &wsadata) != 0)
+    {
+        XNetCleanup();
+        free(s);
+        return NULL;
+    }
+
+    return s;
+}
+
+void HttpsSessionClose(HttpsSession *session)
+{
+    if (session == NULL)
+        return;
+
+    SessionDisconnect(session);
+    session->print("[https] session done: %d request(s) over %d connection(s)\n",
+                   session->requestsSent, session->connectionsOpened);
+
+    WSACleanup();
+    XNetCleanup();
+    free(session);
+}
+
+int HttpsSessionGet(HttpsSession *session, const std::string &url, const char *extraHeaderLines,
+                    char *dataBuffer, unsigned long long *dataBufferSize)
+{
+    if (session == NULL || dataBuffer == NULL || dataBufferSize == NULL)
+        return 0;
+
+    std::vector<char> domainBuf(url.length() + 1), pathBuf(url.length() + 1);
+    char *domain = &domainBuf[0];
+    char *path = &pathBuf[0];
+
+    if (parseURL(url.c_str(), domain, path) != 0)
+    {
+        session->print("[https] could not parse URL\n");
+        return 0;
+    }
+
+    {
+        char safeUrl[1024];
+        LogEscapePercent(url.c_str(), safeUrl, sizeof(safeUrl));
+        session->print("[https] GET %s\n", safeUrl);
+    }
+
+    const unsigned long long capacity = *dataBufferSize;
+    int status = 0;
+
+    // At most two tries, and the second only when the first went over a
+    // REUSED connection. A kept-open connection can be closed by the server
+    // at any moment it's idle, and the first sign of that is this request
+    // failing - so one retry on a fresh connection is the normal cost of
+    // reuse, not an error. These are GETs, so repeating one is harmless.
+    for (int attempt = 0; attempt < 2; ++attempt)
+    {
+        const bool reusing = session->connected && _stricmp(session->host, domain) == 0;
+
+        if (session->connected && !reusing)
+            SessionDisconnect(session); // a different host; connections are per host
+
+        if (!session->connected)
+        {
+            if (!SessionConnect(session, domain))
+                return 0;
+            session->print("[https]   new connection to %s\n", domain);
+        }
+        else
+        {
+            session->print("[https]   reusing connection to %s\n", domain);
+        }
+
+        // Identical to httpRequestHTTPS's request apart from "keep-alive",
+        // which is the one header this whole mechanism turns on.
+        char request[1024 * 5];
+        int requestLen = _snprintf(request, sizeof(request),
+                                   "GET %s HTTP/1.1\r\n"
+                                   "Host: %s\r\n"
+                                   "User-Agent: Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/147.0.0.0 Safari/537.36\r\n"
+                                   "Accept: */*\r\n"
+                                   "Accept-Encoding: identity, *;q=0\r\n"
+                                   "Connection: keep-alive\r\n"
+                                   "%s"
+                                   "\r\n",
+                                   path, domain, (extraHeaderLines != NULL) ? extraHeaderLines : "");
+
+        if (requestLen < 0 || requestLen >= (int)sizeof(request))
+        {
+            ERROR("HTTP request buffer too small");
+            return 0;
+        }
+
+        if (XboxTLS_Write(&session->ctx, request, requestLen) < 0)
+        {
+            SessionDisconnect(session);
+            if (reusing && attempt == 0)
+            {
+                session->print("[https]   connection had closed; retrying on a new one\n");
+                continue;
+            }
+            return 0;
+        }
+
+        session->requestsSent++;
+
+        HttpResponseResult response;
+        if (!ReadHttpResponse(&session->stream, dataBuffer, capacity, &response))
+        {
+            SessionDisconnect(session);
+            if (reusing && attempt == 0)
+            {
+                session->print("[https]   no usable response on the reused connection; retrying on a new one\n");
+                continue;
+            }
+            session->print("[https]   response could not be read (status %d)\n", response.status);
+            return 0;
+        }
+
+        if (!response.keepAlive)
+            SessionDisconnect(session); // the server is closing it, or its framing ruled reuse out
+
+        status = response.status;
+
+        if (status == 302)
+        {
+            // Same contract as DumpResponse in buffer mode: a redirect's
+            // target comes back in the data buffer, for the caller to follow.
+            size_t locLen = strlen(response.location);
+            if (locLen == 0 || locLen >= capacity)
+            {
+                session->print("[https]   redirect with no usable Location\n");
+                return 0;
+            }
+            memcpy(dataBuffer, response.location, locLen + 1);
+            *dataBufferSize = locLen;
+        }
+        else if (status == 200 || status == 206)
+        {
+            if (response.bodyOverflow)
+            {
+                // DumpResponse's "Output Buffer Exhausted" - but reported as
+                // a failure, where DumpResponse still handed back the 206.
+                session->print("[https]   response larger than the buffer (%I64u bytes)\n", capacity);
+                return -1;
+            }
+            *dataBufferSize = response.bodyLen;
+        }
+        else
+        {
+            session->print("Status: %d\n", status);
+        }
+
+        break;
+    }
+
+    return status;
 }

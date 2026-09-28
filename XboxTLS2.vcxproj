@@ -352,6 +352,7 @@
     <ClInclude Include="dns.h" />
     <ClInclude Include="downloadFile.h" />
     <ClInclude Include="GameListUI.h" />
+    <ClInclude Include="HttpResponse.h" />
     <ClInclude Include="githubCert.h" />
     <ClInclude Include="archiveOrgCert.h" />
     <ClInclude Include="ButtonAtlas.h" />
@@ -387,6 +388,7 @@
     <ClCompile Include="dns.cpp" />
     <ClCompile Include="downloadFile.cpp" />
     <ClCompile Include="GameListUI.cpp" />
+    <ClCompile Include="HttpResponse.cpp" />
     <ClCompile Include="Keyboard.cpp" />
     <ClCompile Include="main.cpp" />
     <ClCompile Include="OutputConsole.cpp" />

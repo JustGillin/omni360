@@ -93,10 +93,26 @@ static unsigned long ReadLE32(const unsigned char *p)
 // populated, this skips straight to the datanode with a single hop instead
 // of two; if that ever stops working (expired/moved), it clears the cache
 // and falls back to the normal two-hop path to re-resolve it.
+// One buffer-mode GET: over the session's kept-open connection when there is
+// one, otherwise a connection of its own (see HttpsSession in downloadFile.h).
+static int FetchToBuffer(HttpsSession *session, const std::string &url, const char *headers,
+                         char *dataBuffer, unsigned long long *dataBufferSize,
+                         void printFunction(const char *_format, ...))
+{
+    if (session != NULL)
+        return HttpsSessionGet(session, url, headers, dataBuffer, dataBufferSize);
+
+    return httpRequestHTTPS(url, HTTP_GET, NULL, headers, "", dataBuffer, dataBufferSize, false,
+                            NULL, 0, printFunction);
+}
+
+// session is optional: pass one to make a run of these calls share
+// connections (ListDlcMembers does), or NULL for a connection per request.
 static int HttpGetFollowRedirect(const std::string &url, char *dataBuffer, unsigned long long *dataBufferSize,
                                  const char *extraHeaderLines, const char *authHeader,
                                  void printFunction(const char *_format, ...),
-                                 std::string *ioCachedRedirectUrl = NULL)
+                                 std::string *ioCachedRedirectUrl = NULL,
+                                 HttpsSession *session = NULL)
 {
     char combinedHeaders[IAS3_AUTH_HEADER_MAX + 96] = "";
     if (authHeader != NULL && authHeader[0] != '\0')
@@ -113,9 +129,8 @@ static int HttpGetFollowRedirect(const std::string &url, char *dataBuffer, unsig
 
     if (ioCachedRedirectUrl != NULL && !ioCachedRedirectUrl->empty())
     {
-        int cachedStatus = httpRequestHTTPS(*ioCachedRedirectUrl, HTTP_GET, NULL, combinedHeaders[0] ? combinedHeaders : NULL, "",
-                                            dataBuffer, dataBufferSize, false,
-                                            NULL, 0, printFunction);
+        int cachedStatus = FetchToBuffer(session, *ioCachedRedirectUrl, combinedHeaders[0] ? combinedHeaders : NULL,
+                                         dataBuffer, dataBufferSize, printFunction);
         if (cachedStatus == 200 || cachedStatus == 206)
             return cachedStatus;
 
@@ -126,9 +141,8 @@ static int HttpGetFollowRedirect(const std::string &url, char *dataBuffer, unsig
         *dataBufferSize = bufSize;
     }
 
-    int status = httpRequestHTTPS(url, HTTP_GET, NULL, combinedHeaders[0] ? combinedHeaders : NULL, "",
-                                  dataBuffer, dataBufferSize, false,
-                                  NULL, 0, printFunction);
+    int status = FetchToBuffer(session, url, combinedHeaders[0] ? combinedHeaders : NULL,
+                               dataBuffer, dataBufferSize, printFunction);
 
     if (status == 302)
     {
@@ -146,9 +160,8 @@ static int HttpGetFollowRedirect(const std::string &url, char *dataBuffer, unsig
             *ioCachedRedirectUrl = redirectUrl;
 
         *dataBufferSize = bufSize;
-        status = httpRequestHTTPS(std::string(redirectUrl), HTTP_GET, NULL, combinedHeaders[0] ? combinedHeaders : NULL, "",
-                                  dataBuffer, dataBufferSize, false,
-                                  NULL, 0, printFunction);
+        status = FetchToBuffer(session, std::string(redirectUrl), combinedHeaders[0] ? combinedHeaders : NULL,
+                               dataBuffer, dataBufferSize, printFunction);
     }
 
     // Only the final answer counts. A failed attempt on the cached datanode
@@ -751,6 +764,21 @@ int ListDlcMembers(const std::string &rarFilename, unsigned long long archiveSiz
     // this file's headers - see the comment on HttpGetFollowRedirect.
     std::string cachedDatanodeUrl;
 
+    // And the connection to that datanode is kept open across the whole walk
+    // rather than rebuilt for every header: the handshake was most of the time
+    // each of these requests took. Typically two connections for the entire
+    // walk - archive.org for the first redirect, then the datanode for every
+    // header after it.
+    //
+    // Closed by the guard on every way out of this function. If the session
+    // can't be opened, session is NULL and every request falls back to a
+    // connection of its own, which is how this worked before.
+    struct SessionGuard
+    {
+        HttpsSession *session;
+        ~SessionGuard() { HttpsSessionClose(session); }
+    } guard = { HttpsSessionOpen(printFunction) };
+
     while (pos < archiveSize && count < maxMembers)
     {
         // Request exactly as many bytes as the buffer capacity we're about
@@ -776,7 +804,8 @@ int ListDlcMembers(const std::string &rarFilename, unsigned long long archiveSiz
         char rangeHeader[64];
         _snprintf(rangeHeader, sizeof(rangeHeader), "Range: bytes=%I64u-%I64u\r\n", pos, endPos);
 
-        int status = HttpGetFollowRedirect(url, (char *)chunk, &chunkLen, rangeHeader, authHeader, printFunction, &cachedDatanodeUrl);
+        int status = HttpGetFollowRedirect(url, (char *)chunk, &chunkLen, rangeHeader, authHeader, printFunction,
+                                           &cachedDatanodeUrl, guard.session);
 
         if (status != 206 && status != 200)
         {
