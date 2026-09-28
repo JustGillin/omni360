@@ -49,6 +49,18 @@ bool BuildIas3AuthHeader(const std::string &accessKey, const std::string &secret
 // this file", neither of which points at the keys.
 bool ArchiveOrgKeysRejected();
 
+// Free space on the drive holding `path` (anything starting "Hdd1:", "Usb0:"
+// ...). False if it can't be found out, in which case callers shouldn't block
+// a download over it.
+bool DriveFreeSpace(const std::string &path, unsigned long long *outFree);
+
+// Whether the most recent DownloadDlcMember / DownloadTitleUpdate failed for
+// lack of disk space - refused up front, or run out of mid-transfer - and if
+// so, how much the file needed and how much the drive had. Cleared on entry to
+// each. A full drive used to surface only as a disk write error in the log,
+// under a generic "download failed" on screen.
+bool ArchiveOrgDiskFull(unsigned long long *outNeeded, unsigned long long *outFree);
+
 enum KeyCheckResult
 {
     KEYS_ACCEPTED,  // archive.org says these keys are valid
@@ -120,10 +132,12 @@ int FindDlcRarFilenames(const std::string &gameName, DlcRarMatch *outMatches, in
 //   bytesScanned / archiveSize - how far through the archive the walk is.
 //                  It advances in uneven jumps, since each step skips a whole
 //                  member's data, so it shows position rather than time left.
-//   filesChecked - file entries read so far, including ones that are skipped
-//   filesToInstall - of those, the ones that will actually be downloaded
+//   filesToInstall - files found so far that will be downloaded
+//   avatarItemsSkipped - files found so far that are avatar items (clothing
+//                  and props for an Xbox avatar, not game content) and so
+//                  won't be - counted separately so the screen can say so
 typedef void (*ListMembersProgressFn)(unsigned long long bytesScanned, unsigned long long archiveSize,
-                                      int filesChecked, int filesToInstall);
+                                      int filesToInstall, int avatarItemsSkipped);
 
 int ListDlcMembers(const std::string &rarFilename, unsigned long long archiveSize,
                    DlcMember *outMembers, int maxMembers,

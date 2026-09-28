@@ -576,6 +576,30 @@ static void ShowKeysRejected()
                   "Check them in Settings - press Y on the game list.");
 }
 
+// A full drive, said plainly with both numbers. It used to show up only as a
+// disk write error in the log, under a generic "download failed" - after the
+// download had already filled what space there was.
+static void ShowNotEnoughSpace(const char *path, unsigned long long needed, unsigned long long freeSpace)
+{
+    char drive[16] = "The drive";
+    const char *colon = strchr(path, ':');
+    if (colon != NULL && (size_t)(colon - path) < sizeof(drive) - 1)
+    {
+        memcpy(drive, path, (size_t)(colon - path) + 1);
+        drive[colon - path + 1] = '\0';
+    }
+
+    char neededText[64] = "", freeText[64] = "";
+    FormatBytes(needed, neededText, sizeof(neededText));
+    FormatBytes(freeSpace, freeText, sizeof(freeText));
+
+    char message[160];
+    _snprintf(message, sizeof(message), "This needs %s, but %s has %s free.", neededText, drive, freeText);
+    message[sizeof(message) - 1] = '\0';
+
+    ShowMessageUI("NOT ENOUGH SPACE", message, "Free up some space on the drive and try again.");
+}
+
 static bool GetArchiveOrgAuthHeader(char *authHeader, unsigned long long authHeaderSize)
 {
     std::string accessKey, secretKey;
@@ -708,19 +732,20 @@ static void DlcProgressCallback(unsigned long long bytesDone,
 // are what show it's still going between jumps. The screen can't animate
 // during a request itself: each one blocks until archive.org answers.
 static void ListMembersProgressCallback(unsigned long long bytesScanned, unsigned long long archiveSize,
-                                        int filesChecked, int filesToInstall)
+                                        int filesToInstall, int avatarItemsSkipped)
 {
-    char detail[128];
-    if (filesChecked == 0)
+    char detail[160];
+    if (filesToInstall == 0 && avatarItemsSkipped == 0)
         _snprintf(detail, sizeof(detail), "Connecting...");
-    else if (filesToInstall == filesChecked)
-        _snprintf(detail, sizeof(detail), "%d file%s found", filesChecked, filesChecked == 1 ? "" : "s");
+    else if (avatarItemsSkipped == 0)
+        _snprintf(detail, sizeof(detail), "%d file%s to install", filesToInstall, filesToInstall == 1 ? "" : "s");
     else
-        // Avatar items are counted but skipped (see ListDlcMembers), so the
-        // two numbers differ - say both, or the install count looks like it
-        // dropped files.
-        _snprintf(detail, sizeof(detail), "%d file%s checked   -   %d to install",
-                  filesChecked, filesChecked == 1 ? "" : "s", filesToInstall);
+        // Named, not just counted: many packs are mostly avatar items (one had
+        // 11 of 12), and "skipping 10 items" with no reason reads as though
+        // part of the DLC is being lost.
+        _snprintf(detail, sizeof(detail), "%d file%s to install   -   %d avatar item%s skipped (outfits and props, not game content)",
+                  filesToInstall, filesToInstall == 1 ? "" : "s",
+                  avatarItemsSkipped, avatarItemsSkipped == 1 ? "" : "s");
     detail[sizeof(detail) - 1] = '\0';
 
     float fraction = (archiveSize > 0) ? (float)((double)bytesScanned / (double)archiveSize) : -1.0f;
@@ -756,6 +781,24 @@ static bool DownloadOnePack(const DlcRarMatch &pack, const char *contentBasePath
 
         ShowMessageUI("COULD NOT READ PACK",
                       "The file list for this pack could not be read.", pack.filename);
+        return true;
+    }
+
+    // Checked once for the whole pack, before any of it downloads: running out
+    // partway would leave a pack half installed, after a long wait. Files
+    // already on the console don't count - they won't be fetched again.
+    unsigned long long needed = 0;
+    for (int f = 0; f < memberCount; ++f)
+    {
+        if (!DlcMemberIsInstalled(members[f], contentBasePath))
+            needed += members[f].unpSize;
+    }
+
+    unsigned long long freeSpace = 0;
+    if (needed > 0 && DriveFreeSpace(contentBasePath, &freeSpace) && freeSpace < needed + 4ULL * 1024 * 1024)
+    {
+        dprintf("Not enough space for %s: needs %I64u bytes, %I64u free\n", pack.filename, needed, freeSpace);
+        ShowNotEnoughSpace(contentBasePath, needed, freeSpace);
         return true;
     }
 
@@ -803,6 +846,14 @@ static bool DownloadOnePack(const DlcRarMatch &pack, const char *contentBasePath
             {
                 ShowKeysRejected();
                 return false;
+            }
+
+            // The rest can't fit either, so stop and say why.
+            unsigned long long fileNeeded = 0, fileFree = 0;
+            if (ArchiveOrgDiskFull(&fileNeeded, &fileFree))
+            {
+                ShowNotEnoughSpace(contentBasePath, fileNeeded, fileFree);
+                return true;
             }
 
             failures++;
@@ -912,6 +963,7 @@ static void InstallTitleUpdatesForGame(const InstalledGame &game, const char *co
         g_progressFileIndex = 0;
         g_progressFileCount = 1;
 
+        unsigned long long tuNeeded = 0, tuFree = 0;
         if (DownloadTitleUpdate(updates[choice], game.titleId, contentBasePath,
                                 authHeader, dprintf, DlcProgressCallback))
         {
@@ -924,6 +976,10 @@ static void InstallTitleUpdatesForGame(const InstalledGame &game, const char *co
             // to try a different update, which will be refused the same way.
             ShowKeysRejected();
             break;
+        }
+        else if (ArchiveOrgDiskFull(&tuNeeded, &tuFree))
+        {
+            ShowNotEnoughSpace(contentBasePath, tuNeeded, tuFree);
         }
         else
         {

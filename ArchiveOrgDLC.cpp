@@ -664,8 +664,6 @@ int ListDlcMembers(const std::string &rarFilename, unsigned long long archiveSiz
 
     std::string url = ARCHIVE_DOWNLOAD_BASE + rarFilename;
 
-    int filesChecked = 0; // every file entry seen, including skipped avatar items - see progressFn
-
     if (progressFn != NULL)
         progressFn(0, archiveSize, 0, 0);
 
@@ -816,9 +814,6 @@ int ListDlcMembers(const std::string &rarFilename, unsigned long long archiveSiz
             member.unpSize = (unsigned long)entry.unpSize;
         }
 
-        if (isFileEntry)
-            filesChecked++;
-
         if (isFileEntry && count < maxMembers)
         {
             unsigned long memberType = MemberContentType(member.internalPath);
@@ -863,7 +858,7 @@ int ListDlcMembers(const std::string &rarFilename, unsigned long long archiveSiz
         pos = pos + nextPos;
 
         if (progressFn != NULL)
-            progressFn(pos < archiveSize ? pos : archiveSize, archiveSize, filesChecked, count);
+            progressFn(pos < archiveSize ? pos : archiveSize, archiveSize, count, skippedAvatar);
     }
 
     if (skippedAvatar > 0)
@@ -949,6 +944,38 @@ static bool FileSizeOnDisk(const char *path, unsigned long long *outSize)
     return true;
 }
 
+// See ArchiveOrgDiskFull. Set by DownloadUrlToFile.
+static bool g_diskFull = false;
+static unsigned long long g_diskNeeded = 0;
+static unsigned long long g_diskFree = 0;
+
+bool DriveFreeSpace(const std::string &path, unsigned long long *outFree)
+{
+    size_t colon = path.find(':');
+    if (colon == std::string::npos)
+        return false;
+
+    std::string root = path.substr(0, colon + 1) + "\\";
+    ULARGE_INTEGER freeToCaller;
+    if (!GetDiskFreeSpaceExA(root.c_str(), &freeToCaller, NULL, NULL))
+        return false;
+
+    *outFree = freeToCaller.QuadPart;
+    return true;
+}
+
+bool ArchiveOrgDiskFull(unsigned long long *outNeeded, unsigned long long *outFree)
+{
+    if (outNeeded != NULL) *outNeeded = g_diskNeeded;
+    if (outFree != NULL) *outFree = g_diskFree;
+    return g_diskFull;
+}
+
+// A little room beyond the file itself: FATX allocates whole clusters, so a
+// file takes slightly more than its size, and filling a drive to the last
+// byte is asking for trouble with everything else on it.
+#define DISK_SPACE_MARGIN (4ULL * 1024 * 1024)
+
 // Where a download in progress is written before being moved into place.
 //
 // Not "<name>.partial" beside the real file, which is what this first did:
@@ -1005,6 +1032,23 @@ static int DownloadUrlToFile(const std::string &url, const std::string &destPath
     const int MAX_ATTEMPTS = 3;
     int httpStatus = 0;
 
+    g_diskFull = false;
+    g_diskNeeded = expectedSize;
+    g_diskFree = 0;
+
+    // Refused before a byte is fetched if it can't fit. Only a known free
+    // space counts against it - if the drive can't report one, go ahead.
+    unsigned long long freeSpace = 0;
+    if (expectedSize > 0 && DriveFreeSpace(destPath, &freeSpace) &&
+        freeSpace < expectedSize + DISK_SPACE_MARGIN)
+    {
+        printFunction("ERROR: not enough space - needs %I64u bytes, the drive has %I64u free\n",
+                      expectedSize, freeSpace);
+        g_diskFull = true;
+        g_diskFree = freeSpace;
+        return -2;
+    }
+
     for (int attempt = 1; attempt <= MAX_ATTEMPTS; ++attempt)
     {
         if (attempt > 1)
@@ -1054,6 +1098,21 @@ static int DownloadUrlToFile(const std::string &url, const std::string &destPath
 
         if (httpStatus == 401 || httpStatus == 403 || httpStatus == 404)
             break;
+
+        // Ran out of space mid-transfer - something else filled the drive, or
+        // the up-front check couldn't be made. Retrying just fills it again.
+        // The staging file is about to be rewritten, so its space counts as
+        // available.
+        unsigned long long staged = 0;
+        FileSizeOnDisk(tempPath.c_str(), &staged);
+        if (expectedSize > 0 && DriveFreeSpace(destPath, &freeSpace) &&
+            freeSpace + staged < expectedSize + DISK_SPACE_MARGIN)
+        {
+            printFunction("ERROR: the drive filled up during the download\n");
+            g_diskFull = true;
+            g_diskFree = freeSpace + staged;
+            break;
+        }
     }
 
     if (httpStatus != 200 && httpStatus != 206)
@@ -1086,6 +1145,7 @@ bool DownloadDlcMember(const std::string &rarFilename, const DlcMember &member,
                        DownloadProgressFn progressFn)
 {
     g_keysRejected = false;
+    g_diskFull = false;
 
     // Build the virtual-path URL: /download/{item}/{rarfile}/{urlencoded/internal/path}
     // Each path SEGMENT is percent-encoded separately so the separators
@@ -1673,6 +1733,7 @@ bool DownloadTitleUpdate(const TitleUpdateMatch &update, unsigned long titleId,
                          DownloadProgressFn progressFn)
 {
     g_keysRejected = false;
+    g_diskFull = false;
 
     char memberName[512];
     unsigned long unpackedSize = 0;
