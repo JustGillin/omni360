@@ -924,6 +924,121 @@ bool DlcMemberIsInstalled(const DlcMember &member, const std::string &contentBas
     return ((unsigned long)onDisk == member.unpSize);
 }
 
+// ---------------------------------------------------------------------------
+// Downloading into place
+// ---------------------------------------------------------------------------
+
+#define PARTIAL_SUFFIX ".partial"
+
+static bool FileSizeOnDisk(const char *path, unsigned long long *outSize)
+{
+    WIN32_FILE_ATTRIBUTE_DATA data;
+    if (!GetFileAttributesExA(path, GetFileExInfoStandard, &data))
+        return false;
+    *outSize = ((unsigned long long)data.nFileSizeHigh << 32) | data.nFileSizeLow;
+    return true;
+}
+
+// Downloads url to destPath without ever leaving an incomplete file under
+// destPath's own name.
+//
+// The body goes to destPath + ".partial" and is renamed into place only once
+// it has arrived whole and at the expected size. Writing straight to destPath,
+// as this used to, meant any download that failed partway - a dropped
+// connection, a server error mid-stream, the console switched off - left a
+// short file exactly where a real one belongs. The game list's "DLC INSTALLED"
+// marker takes a file there as proof the content is installed, so it went on
+// claiming a download had worked when it hadn't; and a dashboard scanning the
+// folder would have found a truncated package.
+//
+// A failure mid-transfer is retried, twice, from the start: a stream breaking
+// partway is usually transient on archive.org's side. Refusals (401/403) and
+// missing files (404) are not retried - another attempt gets the same answer.
+//
+// expectedSize is the size the file must end up, or 0 if unknown. Returns the
+// final HTTP status, as httpRequestHTTPS does.
+static int DownloadUrlToFile(const std::string &url, const std::string &destPath, const char *authHeader,
+                             unsigned long long expectedSize,
+                             void printFunction(const char *_format, ...), DownloadProgressFn progressFn)
+{
+    const std::string tempPath = destPath + PARTIAL_SUFFIX;
+    const int MAX_ATTEMPTS = 3;
+    int httpStatus = 0;
+
+    for (int attempt = 1; attempt <= MAX_ATTEMPTS; ++attempt)
+    {
+        if (attempt > 1)
+        {
+            printFunction("  Retrying (attempt %d of %d)\n", attempt, MAX_ATTEMPTS);
+            Sleep(2000);
+        }
+
+        httpStatus = httpRequestHTTPS(url, HTTP_GET, NULL, authHeader,
+                                      tempPath, NULL, NULL, true,
+                                      NULL, 0, printFunction, expectedSize, progressFn);
+
+        if (httpStatus == 302)
+        {
+            // File-mode requests don't follow redirects: httpRequestHTTPS writes
+            // the redirect URL into the file as a throwaway line and hands back
+            // 302. Re-resolve it through a small buffer-mode request rather than
+            // reading it back out of the file, then fetch the real body - which
+            // reopens the file "wb" and overwrites that line.
+            char redirectBuffer[2048] = "";
+            unsigned long long redirectSize = sizeof(redirectBuffer) - 1;
+            httpRequestHTTPS(url, HTTP_GET, NULL, authHeader, "",
+                             redirectBuffer, &redirectSize, false, NULL, 0, printFunction);
+
+            // progressFn goes on the real body fetch only - the redirect
+            // resolution above is a couple of KB of header, and reporting it
+            // would briefly drive the progress bar with unrelated numbers.
+            httpStatus = httpRequestHTTPS(std::string(redirectBuffer), HTTP_GET, NULL,
+                                          authHeader, tempPath,
+                                          NULL, NULL, true, NULL, 0, printFunction, expectedSize, progressFn);
+        }
+
+        NoteAuthStatus(httpStatus, authHeader);
+
+        if (httpStatus == 200 || httpStatus == 206)
+        {
+            // DumpResponse checks the size against what the server declared;
+            // this checks it against what the archive says it should be, which
+            // also covers a response that declared no size at all.
+            unsigned long long onDisk = 0;
+            if (expectedSize == 0 || (FileSizeOnDisk(tempPath.c_str(), &onDisk) && onDisk == expectedSize))
+                break;
+
+            printFunction("  Downloaded %I64u of %I64u bytes - incomplete\n", onDisk, expectedSize);
+            httpStatus = -1;
+        }
+
+        if (httpStatus == 401 || httpStatus == 403 || httpStatus == 404)
+            break;
+    }
+
+    if (httpStatus != 200 && httpStatus != 206)
+    {
+        DeleteFileA(tempPath.c_str());
+        return httpStatus;
+    }
+
+    // Replaces any older copy in one step.
+    if (!MoveFileExA(tempPath.c_str(), destPath.c_str(), MOVEFILE_REPLACE_EXISTING))
+    {
+        // If the replacing form isn't honoured, fall back to delete-then-move.
+        DeleteFileA(destPath.c_str());
+        if (!MoveFileA(tempPath.c_str(), destPath.c_str()))
+        {
+            printFunction("ERROR: downloaded, but could not move it into place (error %lu): %s\n",
+                          GetLastError(), destPath.c_str());
+            DeleteFileA(tempPath.c_str());
+            return -1;
+        }
+    }
+
+    return httpStatus;
+}
+
 bool DownloadDlcMember(const std::string &rarFilename, const DlcMember &member,
                        const std::string &contentBasePath, const char *authHeader,
                        void printFunction(const char *_format, ...),
@@ -1031,42 +1146,27 @@ bool DownloadDlcMember(const std::string &rarFilename, const DlcMember &member,
 
     printFunction("Downloading DLC member: %s -> %s\n", member.internalPath, destPath.c_str());
 
-    // HttpGetFollowRedirect (used elsewhere in this file) only works in
-    // buffer mode, but a DLC file can be large, so this downloads straight
-    // into destPath instead and follows one redirect manually if needed.
-    int httpStatus = httpRequestHTTPS(url, HTTP_GET, NULL, authHeader,
-                                      destPath, NULL, NULL, true,
-                                      NULL, 0, printFunction, member.unpSize, progressFn);
+    // A file already at destPath with the wrong size is a broken copy - the
+    // leftover of a download that failed before downloads went through a
+    // temporary file (DownloadUrlToFile). The file name is the package's
+    // content ID, derived from a hash of its own header, so a same-named file
+    // of a different size isn't some other valid version of it - and the size
+    // it should be comes straight from the archive. It's replaced on success;
+    // on failure it is
+    // removed as well, since it can't work and it makes the game list claim
+    // the DLC is installed.
+    unsigned long long existing = 0;
+    const bool damagedCopy = FileSizeOnDisk(destPath.c_str(), &existing) && existing != member.unpSize;
+    if (damagedCopy)
+        printFunction("  Replacing an incomplete earlier copy (%I64u of %lu bytes)\n", existing, member.unpSize);
 
-    if (httpStatus == 302)
-    {
-        // The file-mode attempt above, on hitting a 302, already wrote the
-        // raw redirect URL text as a throwaway line into destPath (that's
-        // DumpResponse's existing fallback for file-mode redirects, upstream
-        // of this fork) - harmless, since the real fetch below reopens
-        // destPath in "wb" mode and overwrites it. We re-resolve the target
-        // via a small buffer-mode request instead of trying to read it back
-        // out of the file, then download the real (possibly large) file body
-        // to destPath for real.
-        char redirectBuffer[2048] = "";
-        unsigned long long redirectSize = sizeof(redirectBuffer) - 1;
-        httpRequestHTTPS(url, HTTP_GET, NULL, authHeader, "",
-                        redirectBuffer, &redirectSize, false, NULL, 0, printFunction);
+    int httpStatus = DownloadUrlToFile(url, destPath, authHeader, member.unpSize, printFunction, progressFn);
 
-        // progressFn goes on this real body fetch, but deliberately NOT on the
-        // small buffer-mode redirect-resolution request above - that one is a
-        // couple of KB of header, and reporting its progress would briefly
-        // drive the bar with numbers that have nothing to do with the file.
-        httpStatus = httpRequestHTTPS(std::string(redirectBuffer), HTTP_GET, NULL,
-                                      authHeader, destPath,
-                                      NULL, NULL, true, NULL, 0, printFunction, member.unpSize, progressFn);
-    }
-
-    NoteAuthStatus(httpStatus, authHeader);
-
-    if (httpStatus != 200)
+    if (httpStatus != 200 && httpStatus != 206)
     {
         printFunction("ERROR: failed to download DLC member (status %d)\n", httpStatus);
+        if (damagedCopy)
+            DeleteFileA(destPath.c_str());
         return false;
     }
 
@@ -1604,37 +1704,10 @@ bool DownloadTitleUpdate(const TitleUpdateMatch &update, unsigned long titleId,
 
     std::string url = TITLE_UPDATE_DOWNLOAD_BASE + std::string(encodedZip) + "/" + encodedMember;
 
-    int httpStatus = httpRequestHTTPS(url, HTTP_GET, NULL, authHeader, destPath,
-                                      NULL, NULL, true, NULL, 0, printFunction,
-                                      unpackedSize, progressFn);
-
-    if (httpStatus == 302)
-    {
-        // File-mode requests do NOT follow redirects - httpRequestHTTPS writes
-        // the redirect URL into the destination as a throwaway line and hands
-        // back 302 for the caller to deal with. DownloadDlcMember has had this
-        // same block from the start; leaving it out here is what made a
-        // perfectly good title update report failure on a 302 that simply
-        // hadn't been followed yet.
-        //
-        // Re-resolve through a small buffer-mode request rather than reading
-        // the URL back out of the file, then fetch the real body. The throwaway
-        // line is harmless - this reopens destPath in "wb" and overwrites it.
-        char redirectBuffer[2048] = "";
-        unsigned long long redirectSize = sizeof(redirectBuffer) - 1;
-        httpRequestHTTPS(url, HTTP_GET, NULL, authHeader, "",
-                         redirectBuffer, &redirectSize, false, NULL, 0, printFunction);
-
-        // progressFn goes on the real body fetch only, not on the redirect
-        // resolution above - that one is a couple of KB of header and would
-        // briefly drive the progress bar with unrelated numbers.
-        httpStatus = httpRequestHTTPS(std::string(redirectBuffer), HTTP_GET, NULL,
-                                      authHeader, destPath,
-                                      NULL, NULL, true, NULL, 0, printFunction,
-                                      unpackedSize, progressFn);
-    }
-
-    NoteAuthStatus(httpStatus, authHeader);
+    // Through a temporary file and renamed into place, with retries - see
+    // DownloadUrlToFile - so a failed transfer can't leave a truncated update
+    // where the dashboard will load it.
+    int httpStatus = DownloadUrlToFile(url, destPath, authHeader, unpackedSize, printFunction, progressFn);
 
     if (httpStatus != 200 && httpStatus != 206)
     {

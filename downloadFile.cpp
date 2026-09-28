@@ -62,6 +62,7 @@ DESCRIPTION : Downloads a file. If the file is larger than 4GB, it splits it int
 #include <stdlib.h>
 #include <string.h>
 #include <time.h>
+#include <errno.h>
 #include <vector>
 
 #define ERROR(s) (log_printf("\nERROR: %s\n", s))
@@ -137,6 +138,38 @@ bool FormatBytes(
     return result >= 0 && (size_t)result < outputSize;
 }
 
+// Why the last WriteBody / WriteChunkedBody call failed, for the log. Both
+// used to fail with one shared message - "Failed to decode chunked HTTP
+// body" - which read the same whether the disk refused a write or the server
+// sent something that wasn't valid chunked encoding, and those need entirely
+// different fixes.
+static char g_bodyError[256] = "";
+
+// "at body offset N (decoder state S...); next bytes: 3F 0D 0A ..." - where the
+// stream was when it went wrong, and the bytes it choked on.
+static void NoteChunkedError(const char *what, const ChunkedDecodeState *state,
+                             const char *data, int pos, int len, unsigned long long totalWritten)
+{
+    char hex[3 * 16 + 1] = "";
+    int n = 0;
+    for (int i = pos; i < len && n < 16; ++i, ++n)
+        _snprintf(hex + n * 3, 4, "%02X ", (unsigned char)data[i]);
+    hex[sizeof(hex) - 1] = '\0';
+
+    // The size line collected so far, as hex too - it's the likeliest place
+    // for something that isn't chunked encoding at all (an error page, say)
+    // to show itself, and printing it raw would risk non-printable bytes
+    // reaching the console renderer.
+    char lineHex[3 * 12 + 1] = "";
+    for (int i = 0; i < state->sizeLineLen && i < 12; ++i)
+        _snprintf(lineHex + i * 3, 4, "%02X ", (unsigned char)state->sizeLine[i]);
+    lineHex[sizeof(lineHex) - 1] = '\0';
+
+    _snprintf(g_bodyError, sizeof(g_bodyError), "%s at body offset %I64u (state %d); size line: %s; next bytes: %s",
+              what, totalWritten, state->state, lineHex, hex);
+    g_bodyError[sizeof(g_bodyError) - 1] = '\0';
+}
+
 static bool WriteBody(FILE *file, const char *data, int len, unsigned long long *totalWritten, char *outputBuffer)
 {
     if (len <= 0)
@@ -145,7 +178,12 @@ static bool WriteBody(FILE *file, const char *data, int len, unsigned long long 
     if (outputBuffer == NULL)
     {
         if (fwrite(data, 1, len, file) != (size_t)len)
+        {
+            _snprintf(g_bodyError, sizeof(g_bodyError), "disk write failed at body offset %I64u (errno %d) - is the drive full?",
+                      *totalWritten, errno);
+            g_bodyError[sizeof(g_bodyError) - 1] = '\0';
             return false;
+        }
     }
     else
     {
@@ -175,7 +213,10 @@ static bool WriteChunkedBody(ChunkedDecodeState *state, FILE *file, const char *
                 unsigned long chunkSize;
 
                 if (!ParseChunkSize(state->sizeLine, state->sizeLineLen, &chunkSize))
+                {
+                    NoteChunkedError("invalid chunk-size line", state, data, pos - 1, len, *totalWritten);
                     return false;
+                }
 
                 state->sizeLineLen = 0;
                 state->remaining = chunkSize;
@@ -189,7 +230,10 @@ static bool WriteChunkedBody(ChunkedDecodeState *state, FILE *file, const char *
             }
 
             if (state->sizeLineLen >= (int)sizeof(state->sizeLine))
+            {
+                NoteChunkedError("chunk-size line too long", state, data, pos - 1, len, *totalWritten);
                 return false;
+            }
 
             state->sizeLine[state->sizeLineLen++] = c;
         }
@@ -202,7 +246,7 @@ static bool WriteChunkedBody(ChunkedDecodeState *state, FILE *file, const char *
                 bytesToWrite = available;
 
             if (!WriteBody(file, data + pos, bytesToWrite, totalWritten, outputBuffer))
-                return false;
+                return false; // g_bodyError already says why
 			
             pos += bytesToWrite;
             state->remaining -= (unsigned long)bytesToWrite;
@@ -217,7 +261,10 @@ static bool WriteChunkedBody(ChunkedDecodeState *state, FILE *file, const char *
             if (c == '\n')
                 state->state = 0;
             else if (c != '\r')
+            {
+                NoteChunkedError("chunk data not followed by CRLF", state, data, pos - 1, len, *totalWritten);
                 return false;
+            }
         }
     }
 
@@ -409,6 +456,7 @@ int DumpResponse(XboxTLSContext *ctx,
     }
 
     InitChunkedDecodeState(&chunkedState);
+    g_bodyError[0] = '\0';
 
     unsigned long long startTime = (getClockLong() * (unsigned long long)1000) / (CLOCKS_PER_SEC);
     unsigned long long endTime = (getClockLong() * (unsigned long long)1000) / (CLOCKS_PER_SEC);
@@ -607,7 +655,7 @@ int DumpResponse(XboxTLSContext *ctx,
         {
             if (!WriteChunkedBody(&chunkedState, file, body, bodyLen, &totalWritten, outputBuffer))
             {
-                printFunction("Failed to decode chunked HTTP body\n");
+                printFunction("Chunked HTTP body failed: %s\n", g_bodyError);
                 goto failure;
             }
         }
@@ -651,7 +699,7 @@ int DumpResponse(XboxTLSContext *ctx,
         {
             if (!WriteChunkedBody(&chunkedState, file, body, bodyLen, &totalWritten, outputBuffer))
             {
-                printFunction("Failed to decode chunked HTTP body _2\n");
+                printFunction("Chunked HTTP body failed: %s\n", g_bodyError);
                 break;
             }
         }
