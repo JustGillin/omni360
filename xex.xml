@@ -4,14 +4,17 @@
      the command line from the project instead; this file holds only what has
      no command-line switch.
 
-     Privileges 15 (Multidisc Swap) and 16 (Multidisc Insecure Media): the
-     console otherwise ends the running title whenever the disc tray opens -
-     the XDK's <multidisc> page calls it "the automatic reboot when the DVD
-     is ejected". Multi-disc games carry these so a disc can be changed
-     mid-game. Omni360 needs them for the same reason: it runs from the hard
-     drive while its disc install reads the tray, so taking a disc out (or
-     changing it for the next one) must not close the app. -->
+     Privilege 0 (XEX_PRIVILEGE_NO_FORCE_REBOOT): without it the console
+     sends the running title back to the dashboard whenever the disc tray
+     opens. Omni360 runs from the hard drive while its disc install reads the
+     tray, so taking a disc out - or changing it for the next disc of a set -
+     must not close the app.
+
+     It isn't in this XDK's privilege documentation. It was found by
+     comparing headers (imagexex /DUMP) with XeXMenu, which stays open when
+     the tray is opened on the same console. The documented Multidisc Swap
+     and Multidisc Insecure Media privileges (15, 16) were tried first and
+     made no difference on hardware. -->
 <xex>
-  <privilege id="15"/>
-  <privilege id="16"/>
+  <privilege id="0"/>
 </xex>

@@ -1718,15 +1718,13 @@ int main()
     dprintf("Omni360 " CURRENT_VERSION " (fork of X-Store, https://github.com/951261/X-Store)\n");
 
     // Whether opening the disc tray should leave the app running (see
-    // xex.xml), and whether DashLaunch - which has its own eject handling -
-    // is loaded. Logged because the console closing the app on eject looks
-    // the same whichever of the two does it.
+    // xex.xml), and whether DashLaunch is loaded - the first thing to check
+    // if the app is ever closed by an eject again.
     {
         HANDLE dashLaunch = NULL;
         bool haveDashLaunch = XexGetModuleHandle("launch.xex", &dashLaunch) >= 0 && dashLaunch != NULL;
-        dprintf("Disc swap privileges: multidisc swap %s, insecure media %s; DashLaunch %s\n",
-                XexCheckExecutablePrivilege(15) ? "yes" : "NO", XexCheckExecutablePrivilege(16) ? "yes" : "NO",
-                haveDashLaunch ? "loaded" : "not loaded");
+        dprintf("Stays open when the disc tray opens (no-force-reboot privilege): %s; DashLaunch %s\n",
+                XexCheckExecutablePrivilege(0) ? "yes" : "NO", haveDashLaunch ? "loaded" : "not loaded");
     }
 
     if (!InitGameListUI())
