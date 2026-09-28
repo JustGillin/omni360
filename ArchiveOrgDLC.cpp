@@ -928,22 +928,56 @@ bool DlcMemberIsInstalled(const DlcMember &member, const std::string &contentBas
 // Downloading into place
 // ---------------------------------------------------------------------------
 
-#define PARTIAL_SUFFIX ".partial"
-
+// Measured the same way DlcMemberIsInstalled does - fopen and seek to the end -
+// because that is the method proven on the console, and this size decides
+// whether a file gets deleted. GetFileAttributesExA was used here first and
+// reported a 1-byte size for a file the download had left at well over a
+// megabyte; whatever the cause, it isn't worth trusting for that decision.
 static bool FileSizeOnDisk(const char *path, unsigned long long *outSize)
 {
-    WIN32_FILE_ATTRIBUTE_DATA data;
-    if (!GetFileAttributesExA(path, GetFileExInfoStandard, &data))
+    FILE *f = fopen(path, "rb");
+    if (f == NULL)
         return false;
-    *outSize = ((unsigned long long)data.nFileSizeHigh << 32) | data.nFileSizeLow;
+
+    bool ok = (_fseeki64(f, 0, SEEK_END) == 0);
+    __int64 size = ok ? _ftelli64(f) : -1;
+    fclose(f);
+
+    if (size < 0)
+        return false;
+    *outSize = (unsigned long long)size;
     return true;
+}
+
+// Where a download in progress is written before being moved into place.
+//
+// Not "<name>.partial" beside the real file, which is what this first did:
+// FATX limits a file name to 42 characters, and a DLC package's name is its
+// content ID - exactly 42 - so that name couldn't be created at all
+// (confirmed on hardware: every attempt failed to open the file). Instead the
+// file keeps its real name, in a staging folder at the root of the same drive.
+// A move within one drive is a rename, so putting it into place is still a
+// single step, and nothing half-written ever sits in a content folder.
+#define STAGING_FOLDER "Omni360-partial"
+
+static std::string StagingPathFor(const std::string &destPath)
+{
+    size_t colon = destPath.find(':');
+    size_t lastSep = destPath.find_last_of('\\');
+    if (colon == std::string::npos || lastSep == std::string::npos || lastSep < colon)
+        return "";
+
+    std::string folder = destPath.substr(0, colon + 1) + "\\" STAGING_FOLDER;
+    CreateDirectoryA(folder.c_str(), NULL); // fine if it already exists
+
+    return folder + "\\" + destPath.substr(lastSep + 1);
 }
 
 // Downloads url to destPath without ever leaving an incomplete file under
 // destPath's own name.
 //
-// The body goes to destPath + ".partial" and is renamed into place only once
-// it has arrived whole and at the expected size. Writing straight to destPath,
+// The body goes to a staging copy (see StagingPathFor) and is moved into place
+// only once it has arrived whole and at the expected size. Writing straight to destPath,
 // as this used to, meant any download that failed partway - a dropped
 // connection, a server error mid-stream, the console switched off - left a
 // short file exactly where a real one belongs. The game list's "DLC INSTALLED"
@@ -961,7 +995,13 @@ static int DownloadUrlToFile(const std::string &url, const std::string &destPath
                              unsigned long long expectedSize,
                              void printFunction(const char *_format, ...), DownloadProgressFn progressFn)
 {
-    const std::string tempPath = destPath + PARTIAL_SUFFIX;
+    const std::string tempPath = StagingPathFor(destPath);
+    if (tempPath.empty())
+    {
+        printFunction("ERROR: no drive in destination path: %s\n", destPath.c_str());
+        return -1;
+    }
+
     const int MAX_ATTEMPTS = 3;
     int httpStatus = 0;
 
@@ -1029,9 +1069,10 @@ static int DownloadUrlToFile(const std::string &url, const std::string &destPath
         DeleteFileA(destPath.c_str());
         if (!MoveFileA(tempPath.c_str(), destPath.c_str()))
         {
-            printFunction("ERROR: downloaded, but could not move it into place (error %lu): %s\n",
-                          GetLastError(), destPath.c_str());
-            DeleteFileA(tempPath.c_str());
+            // The download itself is complete and correct - kept, not
+            // deleted, so a full-size file isn't thrown away over a rename.
+            printFunction("ERROR: downloaded, but could not move it into place (error %lu).\n", GetLastError());
+            printFunction("       The complete file is at %s\n", tempPath.c_str());
             return -1;
         }
     }

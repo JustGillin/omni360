@@ -358,13 +358,6 @@ static bool HasInstalledContent(const char *contentBasePath, unsigned long title
         if (findData.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY)
             continue; // skips "." and ".." along with any stray subfolder
 
-        // A download still in progress, or one the console was switched off
-        // during, is a ".partial" file (see DownloadUrlToFile) - not content.
-        size_t nameLen = strlen(findData.cFileName);
-        const size_t suffixLen = sizeof(".partial") - 1;
-        if (nameLen > suffixLen && _stricmp(findData.cFileName + nameLen - suffixLen, ".partial") == 0)
-            continue;
-
         foundFile = true;
         break;
     } while (FindNextFileA(hFind, &findData));
