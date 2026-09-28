@@ -59,7 +59,7 @@ Launch `Omni360.xex` from a file manager or your dashboard's home screen.
 
 1. The app mounts drive aliases, then scans your library and reads each title's name and cover art out of its STFS package header. This is entirely offline and takes a moment on a large library.
 2. Your games appear as an icon list. Move with the **D-pad or left stick**.
-3. Press **A** for a title's DLC, or **X** for its title updates. **Y** opens Settings, for the games folder and your archive.org keys.
+3. Press **A** for a title's DLC, or **X** for its title updates. **Y** opens Settings, for the games folder and your archive.org keys. **START** installs the game disc in the drive: you confirm its name on the keyboard, it checks there's room, and it copies the disc into your games folder as Games on Demand. B stops it partway, and nothing is left behind.
 4. It authenticates to archive.org and searches by fuzzy name match, then shows you what it found, ranked. **Nothing downloads automatically** — you confirm the pack yourself. Anything already installed is marked as such.
 5. Pick one and it downloads with a live progress bar, installing straight to the correct folder. Press **B** to back out at any point; B returns you to the previous screen rather than quitting.
 

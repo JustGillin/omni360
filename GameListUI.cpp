@@ -1229,6 +1229,14 @@ GameListUIResult ShowGameListUI(const InstalledGame *games, int gameCount, int i
             result.selectedIndex = (gameCount > 0) ? selected : -1;
             break;
         }
+        if (pressed & XINPUT_GAMEPAD_START)
+        {
+            // Like Settings, available with an empty library - installing a
+            // disc is one way to start one.
+            result.action = GAMELIST_INSTALL_DISC;
+            result.selectedIndex = (gameCount > 0) ? selected : -1;
+            break;
+        }
         if (pressed & XINPUT_GAMEPAD_B)
         {
             result.action = GAMELIST_EXIT;
@@ -1278,13 +1286,15 @@ GameListUIResult ShowGameListUI(const InstalledGame *games, int gameCount, int i
         // either. It also has to follow showScroll, which decides whether the
         // paging hint appears at all.
         //
-        // In the console's own A, X, Y, B order. The row actions drop out for
-        // an empty library, leaving Settings - the way to fix it - and Exit.
+        // In the console's own A, X, Y, B order, with START (install a disc)
+        // after the face buttons it isn't one of. The row actions drop out
+        // for an empty library, leaving Settings - the way to fix it -
+        // Install disc and Exit.
         //
         // "Exit", not "Back" - this screen is the root, so it is the one place
         // B leaves the app rather than stepping back a screen. Every other
         // screen says Back, which is what makes that distinction readable.
-        ButtonHint hints[5];
+        ButtonHint hints[6];
         int hintCount = 0;
 
         if (gameCount > 0)
@@ -1294,6 +1304,8 @@ GameListUIResult ShowGameListUI(const InstalledGame *games, int gameCount, int i
         }
 
         hints[hintCount].sprite = BUTTON_SPRITE_Y; hints[hintCount].label = L"Settings"; hintCount++;
+
+        hints[hintCount].sprite = BUTTON_SPRITE_START; hints[hintCount].label = L"Install disc"; hintCount++;
 
         hints[hintCount].sprite = BUTTON_SPRITE_B; hints[hintCount].label = L"Exit"; hintCount++;
 

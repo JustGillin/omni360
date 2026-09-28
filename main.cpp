@@ -27,6 +27,9 @@ end-to-end on real hardware against a real 27-game library.
 #include "GameListUI.h"
 #include "ArchiveOrgDLC.h"
 #include "downloadFile.h" // DownloadProgressFn + FormatBytes, for the progress callback
+#include "GodConvert.h"
+#include "DiscSource.h"
+#include "TitleNames.h"
 
 #include <xtl.h>
 #include <stdio.h>
@@ -1294,6 +1297,282 @@ static SettingsOutcome RunSettingsUI(Library &lib, char *gamesPath, size_t games
 }
 
 // ---------------------------------------------------------------------------
+// Installing a disc as Games on Demand
+// ---------------------------------------------------------------------------
+
+// UTF-8 into the keyboard's WCHAR default text. Characters outside the BMP
+// become '?'.
+static void Utf8ToWideText(const char *in, WCHAR *out, int outSize)
+{
+    int n = 0;
+    const unsigned char *s = (const unsigned char *)in;
+    while (*s != 0 && n < outSize - 1)
+    {
+        unsigned long c = *s++;
+        int extra = (c >= 0xF0) ? 3 : (c >= 0xE0) ? 2 : (c >= 0xC0) ? 1 : 0;
+        if (extra > 0)
+            c &= (0x3F >> extra);
+        else if (c >= 0x80)
+            c = '?';
+        for (; extra > 0 && (*s & 0xC0) == 0x80; --extra)
+            c = (c << 6) | (*s++ & 0x3F);
+        out[n++] = (extra > 0 || c > 0xFFFF) ? L'?' : (WCHAR)c;
+    }
+    out[n] = L'\0';
+}
+
+// What OpenKeyboardToString hands back for text: one byte per character, and
+// '?' for anything past U+00FF. Used to tell whether a name came back from
+// the keyboard unchanged.
+static std::string Utf8AsKeyboardText(const char *utf8)
+{
+    WCHAR wide[128];
+    Utf8ToWideText(utf8, wide, 128);
+    std::string out;
+    for (int i = 0; wide[i] != L'\0'; ++i)
+        out += (wide[i] <= 0xFF) ? (char)wide[i] : '?';
+    return out;
+}
+
+static std::string Latin1ToUtf8(const std::string &in)
+{
+    std::string out;
+    for (size_t i = 0; i < in.length(); ++i)
+    {
+        unsigned char c = (unsigned char)in[i];
+        if (c < 0x80)
+            out += (char)c;
+        else
+        {
+            out += (char)(0xC0 | (c >> 6));
+            out += (char)(0x80 | (c & 0x3F));
+        }
+    }
+    return out;
+}
+
+static WORD AnyPadButtons()
+{
+    WORD buttons = 0;
+    for (DWORD i = 0; i < XUSER_MAX_COUNT; ++i)
+    {
+        XINPUT_STATE state;
+        ZeroMemory(&state, sizeof(state));
+        if (XInputGetState(i, &state) == ERROR_SUCCESS)
+            buttons |= state.Gamepad.wButtons;
+    }
+    return buttons;
+}
+
+struct DiscInstallProgress
+{
+    const char *title;
+    DWORD startTick;
+    DWORD lastFrameTick;
+    WORD prevButtons;
+};
+
+// Called by GodConvert after every 816KB. Redraws at most ten times a second
+// - the copy runs at the drive's pace, and a frame costs time the drive could
+// be reading - and offers B to stop.
+static bool DiscInstallProgressCallback(unsigned long long done, unsigned long long total, void *context)
+{
+    DiscInstallProgress *p = (DiscInstallProgress *)context;
+
+    WORD buttons = AnyPadButtons();
+    WORD pressed = buttons & ~p->prevButtons;
+    p->prevButtons = buttons;
+
+    if (pressed & XINPUT_GAMEPAD_B)
+    {
+        if (ShowConfirmUI("STOP INSTALLING?", "The game won't be installed.",
+                          "What has been copied so far is removed.", "Stop"))
+            return false;
+        p->prevButtons = AnyPadButtons(); // the B that answered "no" isn't a fresh press
+    }
+
+    DWORD now = GetTickCount();
+    if (now - p->lastFrameTick < 100 && done < total)
+        return true;
+    p->lastFrameTick = now;
+
+    DWORD elapsedMs = now - p->startTick;
+    unsigned long long bytesPerSec = (elapsedMs > 0) ? done * 1000ULL / elapsedMs : 0;
+
+    char doneText[64] = "", totalText[64] = "", speedText[64] = "";
+    FormatBytes(done, doneText, sizeof(doneText));
+    FormatBytes(total, totalText, sizeof(totalText));
+    FormatBytes(bytesPerSec, speedText, sizeof(speedText));
+
+    char detail[256];
+    if (bytesPerSec > 0 && elapsedMs > 3000) // the first seconds' rate is mostly spin-up
+    {
+        unsigned long long secondsLeft = (total - done) / bytesPerSec;
+        _snprintf(detail, sizeof(detail), "%s / %s   %s/s   %d:%02d left   -   B to stop",
+                  doneText, totalText, speedText, (int)(secondsLeft / 60), (int)(secondsLeft % 60));
+    }
+    else
+    {
+        _snprintf(detail, sizeof(detail), "%s / %s   -   B to stop", doneText, totalText);
+    }
+    detail[sizeof(detail) - 1] = '\0';
+
+    RenderProgressFrame(p->title, "Copying from the disc", detail,
+                        (total > 0) ? (float)((double)done / (double)total) : -1.0f, "INSTALLING");
+    return true;
+}
+
+// START on the library: reads the disc in the drive, asks for the name the
+// dashboard should show, and installs it into the games folder - the same
+// place the library is read from, so the game appears there straight after.
+static void InstallDiscAsGame(Library &lib, const char *gamesPath, int &listSelection)
+{
+    RenderStatusFrame("INSTALL DISC", "Reading the disc", "The drive may take a few seconds to spin up.");
+
+    DiscSource disc;
+    if (!disc.Open(dprintf))
+    {
+        ShowMessageUI("NO DISC", "Put an Xbox 360 game disc in the drive and try again.",
+                      "If one is in, it couldn't be read - the log says why.");
+        return;
+    }
+    disc.LogProbe(dprintf);
+
+    GodImageInfo info;
+    GodResult result = GodInspect(&disc, &info);
+    if (result != GOD_OK)
+    {
+        dprintf("[disc] not installable: %s\n", GodResultText(result));
+        ShowMessageUI("CAN'T INSTALL THIS DISC", GodResultText(result),
+                      (result == GOD_NOT_A_DISC_IMAGE) ? "Only Xbox 360 game discs can be installed." : NULL);
+        return;
+    }
+
+    dprintf("[disc] %s disc: title %08lX, media %08lX, disc %u of %u, %I64u bytes used, package %I64u bytes in %lu parts\n",
+            info.imageType, info.title.titleId, info.title.mediaId, info.title.discNumber, info.title.discCount,
+            info.usedSize, info.outputSize, info.partCount);
+
+    // The name. The bundled list only suggests it - its names are
+    // community-edited - and the keyboard lets it be fixed before it goes on
+    // the dashboard for good.
+    char fallbackName[32];
+    _snprintf(fallbackName, sizeof(fallbackName), "Title %08lX", info.title.titleId);
+    fallbackName[sizeof(fallbackName) - 1] = '\0';
+
+    const char *listed = LookupTitleName(info.title.titleId);
+    const char *suggested = (listed != NULL) ? listed : fallbackName;
+
+    WCHAR wideSuggested[128];
+    Utf8ToWideText(suggested, wideSuggested, 128);
+
+    WCHAR description[160];
+    if (info.title.discCount > 1)
+        swprintf_s(description, 160, L"The name the dashboard and Aurora show. This is disc %u of %u.",
+                   (unsigned)info.title.discNumber, (unsigned)info.title.discCount);
+    else
+        swprintf_s(description, 160, L"The name the dashboard and Aurora show.");
+
+    std::string typed;
+    if (OpenKeyboardToString(XUSER_INDEX_ANY, &typed, L"Game Name", description, wideSuggested) != ERROR_SUCCESS)
+        return; // cancelled
+    TrimInPlace(typed);
+
+    // Unchanged, the original is kept: the keyboard hands text back one byte
+    // per character, which would turn a name like "Modern Warfare® 3" or a
+    // Japanese title into question marks.
+    std::string name;
+    if (typed.empty() || typed == Utf8AsKeyboardText(suggested))
+        name = suggested;
+    else
+        name = Latin1ToUtf8(typed);
+
+    char headerPath[MAX_TEXT_LENGTH];
+    _snprintf(headerPath, sizeof(headerPath), "%s\\%08lX\\00007000\\%08lX", gamesPath, info.title.titleId, info.title.mediaId);
+    headerPath[sizeof(headerPath) - 1] = '\0';
+
+    FILE *existing = fopen(headerPath, "rb");
+    if (existing != NULL)
+    {
+        fclose(existing);
+        if (!ShowConfirmUI("ALREADY INSTALLED", "This disc is already installed.",
+                           "Installing it again replaces the copy on the drive.", "Reinstall"))
+            return;
+    }
+
+    unsigned long long freeSpace = 0;
+    if (DriveFreeSpace(gamesPath, &freeSpace) && freeSpace < info.outputSize + 4ULL * 1024 * 1024)
+    {
+        ShowNotEnoughSpace(gamesPath, info.outputSize, freeSpace);
+        return;
+    }
+
+    char sizeText[64] = "";
+    FormatBytes(info.outputSize, sizeText, sizeof(sizeText));
+
+    char message[200], detail[MAX_TEXT_LENGTH + 64];
+    _snprintf(message, sizeof(message), "Install %s?", name.c_str());
+    message[sizeof(message) - 1] = '\0';
+    _snprintf(detail, sizeof(detail), "%s, to %s", sizeText, gamesPath);
+    detail[sizeof(detail) - 1] = '\0';
+
+    if (!ShowConfirmUI("INSTALL DISC", message, detail, "Install"))
+        return;
+
+    DiscInstallProgress progress;
+    progress.title = name.c_str();
+    progress.startTick = GetTickCount();
+    progress.lastFrameTick = 0;
+    progress.prevButtons = AnyPadButtons(); // the A that confirmed is still down
+
+    char packagePath[MAX_TEXT_LENGTH] = "";
+    result = GodConvert(&disc, info, gamesPath, name.c_str(), NULL, 0,
+                        DiscInstallProgressCallback, &progress, packagePath, sizeof(packagePath));
+
+    DWORD seconds = (GetTickCount() - progress.startTick) / 1000;
+    dprintf("[disc] install %s after %lu:%02lu: %s\n", GodResultText(result),
+            (unsigned long)(seconds / 60), (unsigned long)(seconds % 60), packagePath);
+
+    disc.Close();
+
+    if (result == GOD_CANCELLED)
+    {
+        ShowMessageUI("INSTALL STOPPED", "Nothing was installed.", "What had been copied was removed.");
+        return;
+    }
+    if (result != GOD_OK)
+    {
+        const char *hint = (result == GOD_READ_FAILED) ? "The disc may be dirty or scratched - clean it and try again."
+                         : (result == GOD_WRITE_FAILED) ? "Check the drive the games folder is on, then try again."
+                         : NULL;
+        ShowMessageUI("INSTALL FAILED", GodResultText(result), hint);
+        return;
+    }
+
+    char doneDetail[160];
+    if (info.title.discCount > 1 && info.title.discNumber < info.title.discCount)
+        _snprintf(doneDetail, sizeof(doneDetail), "That was disc %u of %u - put in disc %u and press START to install it.",
+                  (unsigned)info.title.discNumber, (unsigned)info.title.discCount, (unsigned)info.title.discNumber + 1);
+    else
+        _snprintf(doneDetail, sizeof(doneDetail), "Play it from the dashboard or Aurora - the disc isn't needed.");
+    doneDetail[sizeof(doneDetail) - 1] = '\0';
+
+    _snprintf(message, sizeof(message), "%s is installed.", name.c_str());
+    message[sizeof(message) - 1] = '\0';
+    ShowMessageUI("INSTALLED", message, doneDetail);
+
+    // Into the library, and onto its row.
+    ScanLibrary(lib, gamesPath);
+    for (int i = 0; i < lib.count; ++i)
+    {
+        if (lib.games[i].titleId == info.title.titleId)
+        {
+            listSelection = i;
+            break;
+        }
+    }
+}
+
+// ---------------------------------------------------------------------------
 // Entry point
 // ---------------------------------------------------------------------------
 
@@ -1429,6 +1708,16 @@ int main()
             if (changed.keysChanged)
                 haveAuth = false;
 
+            continue;
+        }
+
+        if (pick.action == GAMELIST_INSTALL_DISC)
+        {
+            if (pick.selectedIndex >= 0)
+                listSelection = pick.selectedIndex;
+
+            // No archive.org keys needed: nothing here touches the network.
+            InstallDiscAsGame(lib, gamesPath, listSelection);
             continue;
         }
 

@@ -22,8 +22,9 @@ enum GameListAction
     GAMELIST_EXIT,          // B - this is the root screen, so B leaves the app
     GAMELIST_DLC,           // A on a row
     GAMELIST_TITLE_UPDATES, // X on a row
-    GAMELIST_SETTINGS       // Y - available even when the library is empty, since
+    GAMELIST_SETTINGS,      // Y - available even when the library is empty, since
                             // a wrong games folder is the usual reason it is
+    GAMELIST_INSTALL_DISC   // START - install the disc in the drive as Games on Demand
 };
 
 struct GameListUIResult

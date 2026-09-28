@@ -112,8 +112,11 @@ def render_button(w, h, radius, half_len, base, letter, letter_rgb, engrave):
 
     # The letter, as a coverage mask at full supersampled resolution, centred
     # on its ink rather than its advance box so it sits optically centred.
+    # A callable draws a symbol into the mask instead (START's arrow).
     mask = Image.new("L", (W, H), 0)
-    if letter:
+    if callable(letter):
+        letter(ImageDraw.Draw(mask), cx, cy, R)
+    elif letter:
         target_cap = (R * 2) * (0.40 if L == 0 else 0.44)
         font = ImageFont.truetype(FONT, 100)
         bb = font.getbbox("H")
@@ -220,6 +223,22 @@ def main():
         print("rendered", text)
     sprites.append(("LBRB", 0, CELL, sprite_w, CELL, bm, bm, cap_w + gap + cap_w, BUMPER_H))
     assert sprite_w <= ATLAS_W
+
+    # START: a small graphite disc with the pad's right-pointing arrow. As on
+    # the controller it is smaller than the face buttons - the height of the
+    # shoulder buttons, so it sits in the footer like them.
+    def start_arrow(draw, cx, cy, R):
+        h = R * 0.78                      # arrow height
+        w = h * 0.80
+        ox = w * 0.12                     # nudged right: a triangle's ink sits left of its box centre
+        draw.polygon([(cx - w / 2 + ox, cy - h / 2), (cx + w / 2 + ox, cy), (cx - w / 2 + ox, cy + h / 2)], fill=255)
+
+    start_x = 176
+    assert start_x >= sprite_w and start_x + CELL <= ATLAS_W
+    img = render_button(CELL, CELL, BUMPER_H / 2.0, 0.0, BUMPER_BASE, start_arrow, BUMPER_TEXT, False)
+    atlas.alpha_composite(img, (start_x, CELL))
+    sprites.append(("START", start_x, CELL, CELL, CELL, bm, bm, BUMPER_H, BUMPER_H))
+    print("rendered START")
 
     atlas.save(OUT_PNG, optimize=True)
     png = open(OUT_PNG, "rb").read()

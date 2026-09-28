@@ -358,6 +358,8 @@
     <ClInclude Include="OutputConsole.h" />
     <ClInclude Include="PngDecode.h" />
     <ClInclude Include="GodConvert.h" />
+    <ClInclude Include="DiscSource.h" />
+    <ClInclude Include="TitleNames.h" />
     <ClInclude Include="RarHeaders.h" />
     <ClInclude Include="parsing.h" />
     <ClInclude Include="settings.h" />
@@ -395,6 +397,7 @@
     <ClCompile Include="OutputConsole.cpp" />
     <ClCompile Include="PngDecode.cpp" />
     <ClCompile Include="GodConvert.cpp" />
+    <ClCompile Include="DiscSource.cpp" />
     <ClCompile Include="RarHeaders.cpp" />
     <ClCompile Include="parsing.cpp" />
     <ClCompile Include="StfsParser.cpp" />
