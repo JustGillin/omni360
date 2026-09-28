@@ -1862,7 +1862,17 @@ int ShowChoiceUI(const char *heading, const char **labels, const char **sublabel
 
     // Shorter rows than the game list - there's no artwork to make room for,
     // so row height is set by the two text lines alone.
-    const float rowH = 56.0f * g_M.scale;
+    //
+    // Sized, with the two line offsets below, from a 720p hardware screenshot
+    // of the XUI-rendered text rather than carried over from the bitmap font
+    // these were first tuned for. That font sat higher and smaller: with the
+    // old 56px row, XUI's second line ran its descenders 3px past the bottom
+    // of the plate, and the lines sat 7px apart. Measured, XUI draws a line's
+    // capitals about 5px below the y it's given; the label's capitals are
+    // ~15px tall and the second line's ~12px, plus ~4px of descender.
+    const float rowH = 64.0f * g_M.scale;
+    const float labelY = 6.0f * g_M.scale;    // label capitals ~11px into the 58px plate
+    const float sublabelY = 30.0f * g_M.scale; // 9px under the label's baseline; descenders end ~7px clear of the plate edge
     const float rowGap = 6.0f * g_M.scale;
     const float plateH = rowH - rowGap;
     const float scrollW = 5.0f * g_M.scale;
@@ -2035,7 +2045,7 @@ int ShowChoiceUI(const char *heading, const char **labels, const char **sublabel
             Utf8ToWide(labels[index] != NULL ? labels[index] : "", wideLabel, 256);
 
             g_UiFont.SetScaleFactors(0.95f * g_M.textScale, 0.95f * g_M.textScale);
-            g_UiFont.DrawText(textX, rowY + 10.0f * g_M.scale,
+            g_UiFont.DrawText(textX, rowY + labelY,
                               isSelected ? COL_SEL_TEXT : COL_TEXT_SECONDARY,
                               wideLabel, ATGFONT_TRUNCATED, textMaxW);
 
@@ -2047,7 +2057,7 @@ int ShowChoiceUI(const char *heading, const char **labels, const char **sublabel
                 // Matches the game list's secondary line - same 0.72 -> 0.85
                 // bump, for the same sharpness reason.
                 g_UiFont.SetScaleFactors(0.85f * g_M.textScale, 0.85f * g_M.textScale);
-                g_UiFont.DrawText(textX, rowY + 32.0f * g_M.scale,
+                g_UiFont.DrawText(textX, rowY + sublabelY,
                                   isSelected ? COL_SEL_SUBTEXT : COL_TEXT_DIM,
                                   wideSub, ATGFONT_TRUNCATED, textMaxW);
             }
