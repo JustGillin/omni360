@@ -1074,7 +1074,8 @@ static void EnsureIconsLoaded(const InstalledGame *games, int gameCount)
 
 GameListUIResult ShowGameListUI(const InstalledGame *games, int gameCount, int initialSelection,
                                 const bool *hasDlcInstalled, const bool *hasUpdateInstalled,
-                                const char *gamesPath, const char *bannerText)
+                                const char *gamesPath, const char *bannerText,
+                                const char *footerStatus)
 {
     GameListUIResult result = {GAMELIST_EXIT, -1};
 
@@ -1103,6 +1104,11 @@ GameListUIResult ShowGameListUI(const InstalledGame *games, int gameCount, int i
     const float bannerGap = 10.0f * g_M.scale;
 
     const float listY = g_M.listY + (showBanner ? bannerH + bannerGap : 0.0f);
+
+    // Converted once, not per frame - it doesn't change while this screen is up.
+    WCHAR wideStatus[96] = L"";
+    if (footerStatus != NULL && footerStatus[0] != '\0')
+        Utf8ToWide(footerStatus, wideStatus, 96);
 
     int visibleRows = (int)((g_M.footerY - listY - 16.0f * g_M.scale) / g_M.rowH);
     if (visibleRows < 1) visibleRows = 1;
@@ -1296,9 +1302,21 @@ GameListUIResult ShowGameListUI(const InstalledGame *games, int gameCount, int i
             hints[hintCount].sprite = BUTTON_SPRITE_LBRB; hints[hintCount].label = L"Page"; hintCount++;
         }
 
-        LayoutButtonHints(hints, hintCount, g_M.contentX);
+        float hintsW = LayoutButtonHints(hints, hintCount, g_M.contentX);
 
         float hintCenterY = g_M.footerY + 9.0f * g_M.scale;
+
+        // Free space, right-aligned against the content edge - the same edge
+        // the "3 / 27" counter above it uses. Dropped rather than overlapped
+        // if the hints ever run long enough to reach it; they're the part
+        // that says what the buttons do. (LayoutButtonHints left the label
+        // scale set, so this measures at the size it's drawn.)
+        bool showStatus = false;
+        if (wideStatus[0] != L'\0')
+        {
+            float statusW = g_UiFont.GetTextWidth(wideStatus);
+            showStatus = (hintsW + 26.0f * g_M.scale + statusW <= g_M.contentW);
+        }
 
         // Banner: a lit amber plate with a solid edge and a Y badge, so it
         // reads as "press Y for this" before a word of it is read.
@@ -1412,6 +1430,14 @@ GameListUIResult ShowGameListUI(const InstalledGame *games, int gameCount, int i
         // Footer hint labels. The badges themselves went down in pass 1; see
         // LayoutButtonHints.
         DrawButtonHintText(hints, hintCount, hintCenterY);
+
+        if (showStatus)
+        {
+            const float statusScale = HINT_LABEL_SCALE * g_M.textScale;
+            g_UiFont.SetScaleFactors(statusScale, statusScale);
+            g_UiFont.DrawText(g_M.contentX + g_M.contentW, TextTopForCenter(hintCenterY, statusScale),
+                              COL_TEXT_DIM, wideStatus, ATGFONT_RIGHT);
+        }
 
         if (showBanner)
         {

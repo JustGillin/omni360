@@ -579,15 +579,42 @@ static void ShowKeysRejected()
 // A full drive, said plainly with both numbers. It used to show up only as a
 // disk write error in the log, under a generic "download failed" - after the
 // download had already filled what space there was.
+// "Hdd1:" from "Hdd1:\Content\...", or the fallback if the path names no drive.
+static void DriveLabel(const char *path, char *out, size_t outSize, const char *fallback)
+{
+    _snprintf(out, outSize, "%s", fallback);
+    out[outSize - 1] = '\0';
+
+    const char *colon = strchr(path, ':');
+    if (colon != NULL && (size_t)(colon - path) < outSize - 1)
+    {
+        memcpy(out, path, (size_t)(colon - path) + 1);
+        out[colon - path + 1] = '\0';
+    }
+}
+
+// The library footer's "Hdd1: 120 GB free". Empty if the drive can't say, so
+// the footer shows nothing rather than a wrong number.
+static void FormatFreeSpaceStatus(const char *path, char *out, size_t outSize)
+{
+    out[0] = '\0';
+
+    unsigned long long freeSpace = 0;
+    if (!DriveFreeSpace(path, &freeSpace))
+        return;
+
+    char drive[16], freeText[64] = "";
+    DriveLabel(path, drive, sizeof(drive), "Drive");
+    FormatBytes(freeSpace, freeText, sizeof(freeText));
+
+    _snprintf(out, outSize, "%s %s free", drive, freeText);
+    out[outSize - 1] = '\0';
+}
+
 static void ShowNotEnoughSpace(const char *path, unsigned long long needed, unsigned long long freeSpace)
 {
-    char drive[16] = "The drive";
-    const char *colon = strchr(path, ':');
-    if (colon != NULL && (size_t)(colon - path) < sizeof(drive) - 1)
-    {
-        memcpy(drive, path, (size_t)(colon - path) + 1);
-        drive[colon - path + 1] = '\0';
-    }
+    char drive[16];
+    DriveLabel(path, drive, sizeof(drive), "The drive");
 
     char neededText[64] = "", freeText[64] = "";
     FormatBytes(needed, neededText, sizeof(neededText));
@@ -1369,9 +1396,16 @@ int main()
         std::string savedAccess, savedSecret;
         const bool keysSaved = LoadSavedKeys(savedAccess, savedSecret);
 
+        // Read here, on every return to the list, so it reflects the download
+        // that just finished. Where DLC and title updates install, not where
+        // the games are - that's the drive that fills up.
+        char freeSpaceStatus[96];
+        FormatFreeSpaceStatus(contentBasePath, freeSpaceStatus, sizeof(freeSpaceStatus));
+
         GameListUIResult pick = ShowGameListUI(lib.games, lib.count, listSelection,
                                                lib.dlcInstalled, lib.updateInstalled, gamesPath,
-                                               keysSaved ? NULL : "Add your archive.org keys in Settings to start downloading.");
+                                               keysSaved ? NULL : "Add your archive.org keys in Settings to start downloading.",
+                                               freeSpaceStatus);
 
         if (pick.action == GAMELIST_EXIT)
         {

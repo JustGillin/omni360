@@ -59,9 +59,14 @@ struct GameListUIResult
 // and this file has no business knowing where content lives.
 //
 // Either pointer may be NULL, which simply suppresses that marker.
+//
+// footerStatus, when non-empty, is shown at the right end of the footer - the
+// free space on the drive content installs to. It is left out if the button
+// hints would run into it.
 GameListUIResult ShowGameListUI(const InstalledGame *games, int gameCount, int initialSelection,
                                 const bool *hasDlcInstalled, const bool *hasUpdateInstalled,
-                                const char *gamesPath, const char *bannerText);
+                                const char *gamesPath, const char *bannerText,
+                                const char *footerStatus = NULL);
 
 // Drops the cached cover art, so the next ShowGameListUI loads it afresh. Call
 // after rescanning the library: the cache is matched to the game list by count
