@@ -35,6 +35,8 @@ end-to-end on real hardware against a real 27-game library.
 #include <string>
 
 #define SETTINGS_FILE "game:\\settings.txt"
+#define SETTINGS_TEMP_FILE "game:\\settings.tmp"
+#define GAMES_PATH_KEY "games-path: "
 #define CREDENTIALS_FILE "game:\\ArchiveOrgKeys.txt"
 #define CONTENT_BASE_PATH_DEFAULT "Hdd1:\\Content\\0000000000000000"
 #define GAMES_PATH_DEFAULT "Hdd1:\\Games"
@@ -89,6 +91,35 @@ bool CheckGameMounted()
     }
 
     return true;
+}
+
+// ---------------------------------------------------------------------------
+// Text from the on-screen keyboard
+// ---------------------------------------------------------------------------
+
+// Strips leading and trailing whitespace. A key or path typed on the on-screen
+// keyboard easily picks up a stray trailing space, and for a key that's
+// enough to make every request fail with nothing on screen to show why.
+static void TrimInPlace(std::string &s)
+{
+    size_t start = s.find_first_not_of(" \t\r\n");
+    if (start == std::string::npos)
+    {
+        s.clear();
+        return;
+    }
+    size_t end = s.find_last_not_of(" \t\r\n");
+    s = s.substr(start, end - start + 1);
+}
+
+// For prefilling the on-screen keyboard. Everything this is used on - keys,
+// drive paths - is plain ASCII, so widening byte by byte is exact.
+static void NarrowToWide(const char *in, WCHAR *out, int outSize)
+{
+    int i = 0;
+    for (; i < outSize - 1 && in[i] != '\0'; ++i)
+        out[i] = (WCHAR)(unsigned char)in[i];
+    out[i] = L'\0';
 }
 
 // ---------------------------------------------------------------------------
@@ -148,7 +179,119 @@ static void GetContentBasePath(char *outPath, size_t outPathSize)
 
 static void GetGamesPath(char *outPath, size_t outPathSize)
 {
-    GetSettingsPath("games-path: ", GAMES_PATH_DEFAULT, outPath, outPathSize);
+    GetSettingsPath(GAMES_PATH_KEY, GAMES_PATH_DEFAULT, outPath, outPathSize);
+}
+
+// Writes one key into settings.txt - replacing its existing line, or adding
+// one - and leaves every other line exactly as it was, comments and the
+// content path included. Someone who hand-edited the file keeps their edits.
+//
+// Written in full to a temporary file first and only then swapped in, so a
+// write that fails partway can't leave settings.txt truncated.
+static bool SetSettingsValue(const char *key, const char *value)
+{
+    std::string contents;
+    bool replaced = false;
+    const size_t keyLen = strlen(key);
+
+    FILE *in = fopen(SETTINGS_FILE, "r");
+    if (in != NULL)
+    {
+        char line[512];
+        while (fgets(line, sizeof(line), in) != NULL)
+        {
+            // Same matching rule as GetSettingsPath, so the line replaced here
+            // is the line that would have been read.
+            if (!replaced && line[0] != '#' && strncmp(line, key, keyLen) == 0)
+            {
+                contents += key;
+                contents += value;
+                contents += "\n";
+                replaced = true;
+                continue;
+            }
+            contents += line;
+        }
+        fclose(in);
+
+        if (!contents.empty() && contents[contents.size() - 1] != '\n')
+            contents += "\n";
+    }
+
+    if (!replaced)
+    {
+        contents += key;
+        contents += value;
+        contents += "\n";
+    }
+
+    FILE *out = fopen(SETTINGS_TEMP_FILE, "w");
+    if (out == NULL)
+        return false;
+
+    bool ok = fwrite(contents.data(), 1, contents.size(), out) == contents.size();
+    ok = (fclose(out) == 0) && ok;
+
+    if (!ok)
+    {
+        remove(SETTINGS_TEMP_FILE);
+        return false;
+    }
+
+    remove(SETTINGS_FILE); // rename won't replace an existing file
+    return rename(SETTINGS_TEMP_FILE, SETTINGS_FILE) == 0;
+}
+
+// Tidies a typed folder path into the form the library scan expects: no
+// surrounding spaces, backslashes rather than forward slashes, and no trailing
+// backslash, since the scan appends its own separator. Returns false if what
+// is left has no drive (Hdd1:, Usb0:...) and so can't be a console path.
+static bool NormaliseGamesPath(const std::string &typed, char *out, size_t outSize)
+{
+    std::string path = typed;
+    TrimInPlace(path);
+
+    for (size_t i = 0; i < path.size(); ++i)
+    {
+        if (path[i] == '/')
+            path[i] = '\\';
+    }
+
+    while (!path.empty() && path[path.size() - 1] == '\\')
+        path.erase(path.size() - 1);
+
+    size_t colon = path.find(':');
+    if (colon == std::string::npos || colon == 0)
+        return false;
+
+    // Under 3 characters would also be ignored when settings.txt is next read
+    // (see GetSettingsPath), so refusing it here keeps the two in agreement.
+    if (path.size() < 3 || path.size() >= outSize)
+        return false;
+
+    memcpy(out, path.c_str(), path.size() + 1);
+    return true;
+}
+
+static bool FolderExists(const char *path)
+{
+    // A bare drive ("Hdd1:") needs its root separator to be looked up at all.
+    char probe[MAX_TEXT_LENGTH + 2];
+    size_t len = strlen(path);
+    if (len + 2 > sizeof(probe))
+        return false;
+
+    memcpy(probe, path, len + 1);
+    if (len > 0 && probe[len - 1] == ':')
+    {
+        probe[len] = '\\';
+        probe[len + 1] = '\0';
+    }
+
+    // (DWORD)-1 is GetFileAttributes' failure value. Win32 names it
+    // INVALID_FILE_ATTRIBUTES, but the XDK's headers don't define that.
+    DWORD attributes = GetFileAttributesA(probe);
+    return attributes != (DWORD)-1 && (attributes & FILE_ATTRIBUTE_DIRECTORY) != 0;
 }
 
 // ---------------------------------------------------------------------------
@@ -299,26 +442,56 @@ static bool LoadSavedKeys(std::string &accessKey, std::string &secretKey)
     return true;
 }
 
-static void SaveKeys(const std::string &accessKey, const std::string &secretKey)
+static bool SaveKeys(const std::string &accessKey, const std::string &secretKey)
 {
     FILE *f = fopen(CREDENTIALS_FILE, "wb");
     if (f == NULL)
-        return;
-    fprintf(f, "%s\n%s\n", accessKey.c_str(), secretKey.c_str());
-    fclose(f);
+        return false;
+
+    bool ok = fprintf(f, "%s\n%s\n", accessKey.c_str(), secretKey.c_str()) > 0;
+    ok = (fclose(f) == 0) && ok;
+    return ok;
 }
 
+// Asks for both keys with the on-screen keyboard. accessKey and secretKey come
+// in as the current keys (empty when there are none) and go out as the new
+// ones.
+//
+// The access key is offered for editing. The secret key never is - it is not
+// put on screen at all - and leaving it blank keeps the current one, so
+// correcting a typo in the access key doesn't mean retyping ~40 characters of
+// secret. Returns false if either prompt is cancelled or a key ends up empty,
+// leaving both strings as they came in.
 static bool PromptKeys(std::string &accessKey, std::string &secretKey)
 {
-    if (OpenKeyboardToString(XUSER_INDEX_ANY, &accessKey, L"Archive.org Access Key",
-                             L"From archive.org/account/s3.php", L"") != ERROR_SUCCESS)
+    WCHAR currentAccess[128];
+    NarrowToWide(accessKey.c_str(), currentAccess, 128);
+
+    std::string typedAccess;
+    if (OpenKeyboardToString(XUSER_INDEX_ANY, &typedAccess, L"Archive.org Access Key",
+                             L"From archive.org/account/s3.php", currentAccess) != ERROR_SUCCESS)
+        return false;
+    TrimInPlace(typedAccess);
+
+    const bool haveSecret = !secretKey.empty();
+
+    std::string typedSecret;
+    if (OpenKeyboardToString(XUSER_INDEX_ANY, &typedSecret, L"Archive.org Secret Key",
+                             haveSecret ? L"Leave blank to keep your current secret key"
+                                        : L"From archive.org/account/s3.php",
+                             L"") != ERROR_SUCCESS)
+        return false;
+    TrimInPlace(typedSecret);
+
+    if (typedSecret.empty())
+        typedSecret = secretKey;
+
+    if (typedAccess.empty() || typedSecret.empty())
         return false;
 
-    if (OpenKeyboardToString(XUSER_INDEX_ANY, &secretKey, L"Archive.org Secret Key",
-                             L"From archive.org/account/s3.php", L"") != ERROR_SUCCESS)
-        return false;
-
-    return !accessKey.empty() && !secretKey.empty();
+    accessKey = typedAccess;
+    secretKey = typedSecret;
+    return true;
 }
 
 static bool GetArchiveOrgAuthHeader(char *authHeader, unsigned long long authHeaderSize)
@@ -350,7 +523,7 @@ static bool GetArchiveOrgAuthHeader(char *authHeader, unsigned long long authHea
         {
             dprintf("ERROR: no keys entered\n");
             ShowMessageUI("NO KEYS ENTERED", "Both keys are required to download from archive.org.",
-                          "See the README for how to set up ArchiveOrgKeys.txt.");
+                          "You can add them any time in Settings - press Y on the game list.");
             return false;
         }
 
@@ -518,7 +691,7 @@ static void DownloadOnePack(const DlcRarMatch &pack, const char *contentBasePath
     }
 }
 
-// Title updates: their own flow, reached with Y from the game list rather than
+// Title updates: their own flow, reached with X from the game list rather than
 // A. Keeping them separate is the point - someone who already has a game's DLC
 // installed can fetch just its update without walking through the DLC screens.
 static void InstallTitleUpdatesForGame(const InstalledGame &game, const char *contentBasePath,
@@ -677,6 +850,224 @@ static void DownloadDlcForGame(const InstalledGame &game, const char *contentBas
 }
 
 // ---------------------------------------------------------------------------
+// The installed library
+// ---------------------------------------------------------------------------
+
+// The scanned library and its per-title markers, kept together because they
+// are only meaningful together: the marker arrays index into games, and all
+// three are replaced whenever the games folder changes.
+struct Library
+{
+    InstalledGame *games; // MAX_INSTALLED_GAMES entries, allocated once
+    int count;
+    bool dlcInstalled[MAX_INSTALLED_GAMES];
+    bool updateInstalled[MAX_INSTALLED_GAMES];
+};
+
+static void ScanLibrary(Library &lib, const char *gamesPath)
+{
+    RenderStatusFrame("SCANNING", "Reading your installed games", gamesPath);
+
+    int found = EnumerateInstalledGames(gamesPath, lib.games, MAX_INSTALLED_GAMES, dprintf);
+    lib.count = (found > 0) ? found : 0;
+
+    // Sorted here rather than inside EnumerateInstalledGames - that
+    // function's job is to walk the filesystem, and leaving presentation order
+    // to the caller keeps it that way. Everything downstream (the installed
+    // flags, listSelection) indexes into this array after the sort, so nothing
+    // else has to know it happened.
+    if (lib.count > 1)
+        qsort(lib.games, lib.count, sizeof(InstalledGame), CompareGamesByName);
+
+    // The cover cache belongs to whatever list was there before.
+    ReleaseGameListIcons();
+
+    if (lib.count > 0)
+        dprintf("Found %d installed games under %s\n", lib.count, gamesPath);
+    else
+        dprintf("No installed games found under %s\n", gamesPath);
+}
+
+// ---------------------------------------------------------------------------
+// Settings
+// ---------------------------------------------------------------------------
+
+struct SettingsOutcome
+{
+    bool libraryChanged; // the games folder changed and the library was rescanned
+    bool keysChanged;    // the saved keys were replaced or removed
+};
+
+enum SettingsRow
+{
+    SETTINGS_ROW_GAMES_FOLDER,
+    SETTINGS_ROW_KEYS,
+    SETTINGS_ROW_REMOVE_KEYS
+};
+
+static void ChangeGamesFolder(Library &lib, char *gamesPath, size_t gamesPathSize, SettingsOutcome &outcome)
+{
+    WCHAR current[MAX_TEXT_LENGTH];
+    NarrowToWide(gamesPath, current, MAX_TEXT_LENGTH);
+
+    std::string typed;
+    if (OpenKeyboardToString(XUSER_INDEX_ANY, &typed, L"Games Folder",
+                             L"Where your installed games are, e.g. Hdd1:\\Games", current) != ERROR_SUCCESS)
+        return; // cancelled
+
+    char newPath[MAX_TEXT_LENGTH];
+    if (!NormaliseGamesPath(typed, newPath, sizeof(newPath)) || strlen(newPath) >= gamesPathSize)
+    {
+        ShowMessageUI("NOT A FOLDER PATH", "Include the drive, like Hdd1:\\Games or Usb0:\\Games.",
+                      typed.c_str());
+        return;
+    }
+
+    if (_stricmp(newPath, gamesPath) == 0)
+        return; // unchanged - nothing to save or rescan
+
+    // Checked before saving, so a typo is caught while the old, working path
+    // is still in place rather than after it has been overwritten.
+    if (!FolderExists(newPath))
+    {
+        ShowMessageUI("FOLDER NOT FOUND", "There is no folder at that path.", newPath);
+        return;
+    }
+
+    bool saved = SetSettingsValue(GAMES_PATH_KEY, newPath);
+    dprintf("Games path changed to %s (%s)\n", newPath, saved ? "saved" : "NOT saved");
+
+    // Used for this session either way - the user asked for it and the folder
+    // exists. Only remembering it is in question if the write failed.
+    memcpy(gamesPath, newPath, strlen(newPath) + 1);
+
+    ScanLibrary(lib, gamesPath);
+    outcome.libraryChanged = true;
+
+    if (!saved)
+    {
+        ShowMessageUI("NOT SAVED", "Using this folder for now, but settings.txt could not be written.",
+                      "It will go back to the old folder next time Omni360 starts.");
+    }
+}
+
+static void ChangeKeys(SettingsOutcome &outcome)
+{
+    std::string accessKey, secretKey;
+    LoadSavedKeys(accessKey, secretKey); // leaves both empty if there are none yet
+
+    if (!PromptKeys(accessKey, secretKey))
+        return; // cancelled, or left a key empty - nothing changes
+
+    if (!SaveKeys(accessKey, secretKey))
+    {
+        ShowMessageUI("KEYS NOT SAVED", "ArchiveOrgKeys.txt could not be written.",
+                      "Your previous keys, if any, are unchanged.");
+        return;
+    }
+
+    outcome.keysChanged = true;
+    ShowMessageUI("KEYS SAVED", "Your archive.org keys are saved on this console.",
+                  "They'll be used for your next download.");
+}
+
+static void RemoveKeys(SettingsOutcome &outcome)
+{
+    if (!ShowConfirmUI("REMOVE KEYS", "Remove the archive.org keys saved on this console?",
+                       "You'll need to add them again before you can download.", "Remove"))
+        return;
+
+    if (remove(CREDENTIALS_FILE) != 0)
+    {
+        ShowMessageUI("COULD NOT REMOVE", "ArchiveOrgKeys.txt could not be deleted.", NULL);
+        return;
+    }
+
+    dprintf("Saved archive.org keys removed\n");
+    outcome.keysChanged = true;
+    ShowMessageUI("KEYS REMOVED", "Your archive.org keys have been removed from this console.", NULL);
+}
+
+// The settings screen: a short list whose second lines show the current
+// state, so it doubles as a summary of how the app is set up. Rebuilt on every
+// pass, since each action changes what it should say.
+static SettingsOutcome RunSettingsUI(Library &lib, char *gamesPath, size_t gamesPathSize)
+{
+    SettingsOutcome outcome = {false, false};
+    int selection = 0;
+
+    for (;;)
+    {
+        std::string accessKey, secretKey;
+        const bool haveKeys = LoadSavedKeys(accessKey, secretKey);
+
+        char gamesSub[MAX_TEXT_LENGTH + 64];
+        if (lib.count > 0)
+            _snprintf(gamesSub, sizeof(gamesSub), "%s   -   %d game%s", gamesPath, lib.count,
+                      lib.count == 1 ? "" : "s");
+        else
+            _snprintf(gamesSub, sizeof(gamesSub), "%s   -   no games found here", gamesPath);
+        gamesSub[sizeof(gamesSub) - 1] = '\0';
+
+        // Only the start of the access key is shown - enough to tell which
+        // keys are saved. The secret key is never shown anywhere.
+        char keysSub[128];
+        if (haveKeys)
+        {
+            char shown[5] = "";
+            strncpy(shown, accessKey.c_str(), 4);
+            shown[4] = '\0';
+            _snprintf(keysSub, sizeof(keysSub), "Saved   -   access key %s...", shown);
+        }
+        else
+        {
+            _snprintf(keysSub, sizeof(keysSub),
+                      "Not set   -   needed to download. Get them at archive.org/account/s3.php");
+        }
+        keysSub[sizeof(keysSub) - 1] = '\0';
+
+        const char *labels[3];
+        const char *sublabels[3];
+        SettingsRow rows[3];
+        int rowCount = 0;
+
+        labels[rowCount] = "Games folder";
+        sublabels[rowCount] = gamesSub;
+        rows[rowCount++] = SETTINGS_ROW_GAMES_FOLDER;
+
+        labels[rowCount] = haveKeys ? "Change archive.org keys" : "Add archive.org keys";
+        sublabels[rowCount] = keysSub;
+        rows[rowCount++] = SETTINGS_ROW_KEYS;
+
+        // Only offered when there's something to remove.
+        if (haveKeys)
+        {
+            labels[rowCount] = "Remove archive.org keys";
+            sublabels[rowCount] = "Deletes the saved keys from this console";
+            rows[rowCount++] = SETTINGS_ROW_REMOVE_KEYS;
+        }
+
+        if (selection > rowCount - 1)
+            selection = rowCount - 1; // the Remove row just went away
+
+        int choice = ShowChoiceUI("SETTINGS", labels, sublabels, rowCount, selection, "Select", false);
+        if (choice < 0)
+            break; // B, back to the game list
+
+        selection = choice;
+
+        switch (rows[choice])
+        {
+        case SETTINGS_ROW_GAMES_FOLDER: ChangeGamesFolder(lib, gamesPath, gamesPathSize, outcome); break;
+        case SETTINGS_ROW_KEYS:         ChangeKeys(outcome); break;
+        case SETTINGS_ROW_REMOVE_KEYS:  RemoveKeys(outcome); break;
+        }
+    }
+
+    return outcome;
+}
+
+// ---------------------------------------------------------------------------
 // Entry point
 // ---------------------------------------------------------------------------
 
@@ -735,28 +1126,22 @@ int main()
     // anything that goes wrong gets diagnosed - but every phase the user
     // actually waits on now draws a real frame instead of leaving whatever
     // was last on screen.
-    RenderStatusFrame("SCANNING", "Reading your installed games", gamesPath);
+    Library lib;
+    lib.count = 0;
+    lib.games = (InstalledGame *)malloc(sizeof(InstalledGame) * MAX_INSTALLED_GAMES);
 
-    InstalledGame *games = (InstalledGame *)malloc(sizeof(InstalledGame) * MAX_INSTALLED_GAMES);
-    int gameCount = EnumerateInstalledGames(gamesPath, games, MAX_INSTALLED_GAMES, dprintf);
-
-    if (gameCount <= 0)
+    if (lib.games == NULL)
     {
-        dprintf("No installed games found under %s\n", gamesPath);
-        ShowMessageUI("NO GAMES FOUND", "Nothing was found in your games folder.", gamesPath);
-        free(games);
+        dprintf("ERROR: out of memory for the game list\n");
         ShutdownGameListUI();
         return EXIT_FAILURE;
     }
 
-    dprintf("Found %d installed games\n", gameCount);
-
-    // Sorted once, here, rather than inside EnumerateInstalledGames - that
-    // function's job is to walk the filesystem, and leaving presentation order
-    // to the caller keeps it that way. Everything downstream (the installed
-    // flags, listSelection) indexes into this array after the sort, so nothing
-    // else has to know it happened.
-    qsort(games, gameCount, sizeof(InstalledGame), CompareGamesByName);
+    // An empty library is NOT a reason to quit any more. It used to end the
+    // app with a message, which left someone whose games folder was simply
+    // wrong no way to fix it from the console - the game list now says it is
+    // empty, names the folder it searched, and offers Settings.
+    ScanLibrary(lib, gamesPath);
 
     // Session loop. The game list is the app's root screen, and B steps BACK a
     // screen everywhere else - out of the pack picker to here, out of here to
@@ -764,35 +1149,59 @@ int main()
     // finishing one download, or changing your mind at any point, dropped you
     // out of the app entirely and made you relaunch to fetch a second pack.
     //
-    // The library is scanned once and the keys are fetched once; both are held
-    // across the loop so returning here costs nothing.
+    // The library is scanned once (and again only if Settings changes the
+    // folder) and the auth header is built once; both are held across the loop
+    // so returning here costs nothing.
     char authHeader[IAS3_AUTH_HEADER_MAX];
     bool haveAuth = false;
     int listSelection = 0;
 
-    // Which titles already have DLC, and which already have a title update, on
-    // the console. Refreshed on every pass rather than only at startup, so the
-    // markers appear the moment someone comes back from a download instead of
-    // on the next launch.
-    bool *dlcInstalled = (bool *)malloc(sizeof(bool) * gameCount);
-    bool *updateInstalled = (bool *)malloc(sizeof(bool) * gameCount);
-
     for (;;)
     {
-        RefreshInstalledFlags(contentBasePath, games, gameCount, dlcInstalled, updateInstalled);
+        // Which titles already have DLC, and which already have a title
+        // update, on the console. Refreshed on every pass rather than only at
+        // startup, so the markers appear the moment someone comes back from a
+        // download instead of on the next launch.
+        RefreshInstalledFlags(contentBasePath, lib.games, lib.count, lib.dlcInstalled, lib.updateInstalled);
 
-        GameListUIResult pick = ShowGameListUI(games, gameCount, listSelection,
-                                               dlcInstalled, updateInstalled);
+        // Checked on every pass, not once at startup, so the banner goes away
+        // as soon as keys are added in Settings - and comes back if they're
+        // removed. One small file read per return to this screen.
+        std::string savedAccess, savedSecret;
+        const bool keysSaved = LoadSavedKeys(savedAccess, savedSecret);
 
-        if (!pick.selected)
+        GameListUIResult pick = ShowGameListUI(lib.games, lib.count, listSelection,
+                                               lib.dlcInstalled, lib.updateInstalled, gamesPath,
+                                               keysSaved ? NULL : "Add your archive.org keys in Settings to start downloading.");
+
+        if (pick.action == GAMELIST_EXIT)
         {
             dprintf("Exiting\n");
             break; // B on the root screen is the way out
         }
 
+        if (pick.action == GAMELIST_SETTINGS)
+        {
+            if (pick.selectedIndex >= 0)
+                listSelection = pick.selectedIndex;
+
+            SettingsOutcome changed = RunSettingsUI(lib, gamesPath, sizeof(gamesPath));
+
+            // A different library makes the old row number meaningless.
+            if (changed.libraryChanged)
+                listSelection = 0;
+
+            // The cached header was built from the old keys - or from keys
+            // that no longer exist.
+            if (changed.keysChanged)
+                haveAuth = false;
+
+            continue;
+        }
+
         listSelection = pick.selectedIndex; // return them to the same row afterwards
 
-        const InstalledGame &chosen = games[pick.selectedIndex];
+        const InstalledGame &chosen = lib.games[pick.selectedIndex];
         dprintf("Selected: %s (Title ID %08lX)\n", chosen.displayName, chosen.titleId);
 
         if (!haveAuth)
@@ -805,22 +1214,20 @@ int main()
             if (!GetArchiveOrgAuthHeader(authHeader, sizeof(authHeader)))
             {
                 ShowMessageUI("SIGN-IN FAILED", "No usable archive.org keys.",
-                              "See the README for how to set up ArchiveOrgKeys.txt.");
+                              "Add or check them in Settings - press Y on the game list.");
                 continue; // back to the list, so they can fix it and retry rather than being thrown out
             }
 
             haveAuth = true;
         }
 
-        if (pick.titleUpdates)
+        if (pick.action == GAMELIST_TITLE_UPDATES)
             InstallTitleUpdatesForGame(chosen, contentBasePath, authHeader);
         else
             DownloadDlcForGame(chosen, contentBasePath, authHeader);
     }
 
-    free(dlcInstalled);
-    free(updateInstalled);
-    free(games);
+    free(lib.games);
 
     dprintf("Done.\n");
 

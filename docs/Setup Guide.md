@@ -24,13 +24,13 @@ Log in to archive.org, then visit [archive.org/account/s3.php](https://archive.o
 
 Create a plain text file with the access key on line 1 and the secret key on line 2. You will transfer it as `ArchiveOrgKeys.txt` alongside the XEX.
 
-Doing this on a PC is strongly recommended over the alternative, which is typing a roughly 40-character secret key on an on-screen keyboard with a controller. The app will prompt for the keys on first run if the file is absent, and save them to the same location afterwards.
+Doing this on a PC is strongly recommended over the alternative, which is typing a roughly 40-character secret key on an on-screen keyboard with a controller. You can still do it on the console: until keys are saved, the game list shows a banner pointing you to **Settings** (press **Y**), where you can add, change or remove them. They're saved to the same file.
 
 **This file is plain text either way.** That is fine on a console only you use. Delete it if anyone else has physical or FTP access.
 
 ## 3. Optional: settings.txt
 
-The app works with no settings file. Two keys override its defaults, and they are separate because your game library and your content folder are often on different drives:
+The app works with no settings file. Two keys override its defaults, and they are separate because your game library and your content folder are often on different drives. The games folder can also be changed on the console, in **Settings** (press **Y** on the game list), which writes this file for you:
 
 - `xbla-path:` — where downloaded content is written. Defaults to `Hdd1:\Content\0000000000000000`. The name is inherited from X-Store, which used the same key.
 - `games-path:` — where your installed library is scanned for the picker. Defaults to `Hdd1:\Games`.
@@ -59,7 +59,7 @@ Launch `Omni360.xex` from a file manager or your dashboard's home screen.
 
 1. The app mounts drive aliases, then scans your library and reads each title's name and cover art out of its STFS package header. This is entirely offline and takes a moment on a large library.
 2. Your games appear as an icon list. Move with the **D-pad or left stick**.
-3. Press **A** for a title's DLC, or **Y** for its title updates.
+3. Press **A** for a title's DLC, or **X** for its title updates. **Y** opens Settings, for the games folder and your archive.org keys.
 4. It authenticates to archive.org and searches by fuzzy name match, then shows you what it found, ranked. **Nothing downloads automatically** — you confirm the pack yourself. Anything already installed is marked as such.
 5. Pick one and it downloads with a live progress bar, installing straight to the correct folder. Press **B** to back out at any point; B returns you to the previous screen rather than quitting.
 
@@ -69,8 +69,8 @@ Because matching is deliberately loose — it has to cope with release-group nam
 
 `game:\DebugInfo.txt` is the log, and it keeps recording even once the drawn UI takes over the screen. Check it first.
 
-- **Empty game list** — `games-path:` is pointing somewhere without games. See step 3.
-- **401 from archive.org** — key file missing, malformed, or on the wrong line order. Access key line 1, secret key line 2.
+- **Empty game list** — the games folder is pointing somewhere without games. The empty list shows which folder it searched; press **Y** to change it in Settings, or see step 3.
+- **401 from archive.org** — the keys are wrong, or in the wrong order. Re-enter them in Settings, or check the file: access key line 1, secret key line 2.
 - **No results for a game you know exists** — the collection may genuinely not have it, or the display name may be too abbreviated to match. Not every title has DLC or updates archived.
 - **Garbled game names** — STFS display-name encoding. `StfsParser.cpp` detects UTF-8 versus UTF-16BE per file and re-encodes both to UTF-8. If a name still looks wrong, that is worth reporting rather than expected.
 

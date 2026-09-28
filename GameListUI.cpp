@@ -549,6 +549,14 @@ static void Utf8ToWide(const char *in, WCHAR *out, int outSize)
 #define COL_SCROLL_THUMB   0x99FFFFFF
 #define COL_BAR_TROUGH     0x26FFFFFF
 
+// The notice banner above the game list (e.g. "no archive.org keys yet").
+// Amber, the Y button's own colour, because Y is what fixes it - so the badge
+// in the banner and the banner itself read as one thing.
+#define COL_NOTICE_PLATE_A 0x47F0BE12 // translucent amber, stronger at the left
+#define COL_NOTICE_PLATE_B 0x12F0BE12
+#define COL_NOTICE_EDGE    0xFFF0BE12 // solid strip down the left edge
+#define COL_NOTICE_TEXT    0xFFF6E9C0 // warm off-white, legible over the amber
+
 // ---------------------------------------------------------------------------
 // Layout metrics
 // ---------------------------------------------------------------------------
@@ -720,28 +728,36 @@ static float LayoutButtonHints(ButtonHint *hints, int count, float startX)
     return x - gapBetweenHints - startX;
 }
 
-// Quad pass: the icons.
-static void DrawButtonHintShapes(const ButtonHint *hints, int count, float centerY)
+// One button icon, its left edge at boxX and centred vertically on centerY.
+// Returns the on-screen width of the button itself (not counting its shadow),
+// for placing whatever follows it.
+static float DrawButtonSprite(int sprite, float boxX, float centerY)
 {
     const float k = HintSpriteScale();
     const float invW = 1.0f / (float)BUTTON_ATLAS_WIDTH;
     const float invH = 1.0f / (float)BUTTON_ATLAS_HEIGHT;
 
+    const ButtonSprite &s = kButtonSprites[sprite];
+
+    // Position the button's own box, then draw the whole cell around it. The
+    // margin between box and cell is the drop shadow, which is meant to fall
+    // outside.
+    float cellX = boxX - (float)s.boxX * k;
+    float cellY = centerY - (float)s.boxH * k * 0.5f - (float)s.boxY * k;
+
+    DrawQuadUV(g_pButtonAtlas, cellX, cellY, (float)s.cellW * k, (float)s.cellH * k,
+               (float)s.cellX * invW, (float)s.cellY * invH,
+               (float)(s.cellX + s.cellW) * invW, (float)(s.cellY + s.cellH) * invH,
+               0xFFFFFFFF, 0xFFFFFFFF, 0xFFFFFFFF, true);
+
+    return (float)s.boxW * k;
+}
+
+// Quad pass: the icons.
+static void DrawButtonHintShapes(const ButtonHint *hints, int count, float centerY)
+{
     for (int i = 0; i < count; ++i)
-    {
-        const ButtonSprite &s = kButtonSprites[hints[i].sprite];
-
-        // Position the button's own box - left edge at badgeX, centred on the
-        // row - then draw the whole cell around it. The margin between box
-        // and cell is the drop shadow, which is meant to fall outside.
-        float cellX = hints[i].badgeX - (float)s.boxX * k;
-        float cellY = centerY - (float)s.boxH * k * 0.5f - (float)s.boxY * k;
-
-        DrawQuadUV(g_pButtonAtlas, cellX, cellY, (float)s.cellW * k, (float)s.cellH * k,
-                   (float)s.cellX * invW, (float)s.cellY * invH,
-                   (float)(s.cellX + s.cellW) * invW, (float)(s.cellY + s.cellH) * invH,
-                   0xFFFFFFFF, 0xFFFFFFFF, 0xFFFFFFFF, true);
-    }
+        DrawButtonSprite(hints[i].sprite, hints[i].badgeX, centerY);
 }
 
 // Font pass: the labels. Must be called inside an open Font Begin/End.
@@ -977,6 +993,11 @@ static void ReleaseIcons()
     g_iconCount = 0;
 }
 
+void ReleaseGameListIcons()
+{
+    ReleaseIcons();
+}
+
 static void EnsureIconsLoaded(const InstalledGame *games, int gameCount)
 {
     if (g_icons != NULL && g_iconCount == gameCount)
@@ -1052,27 +1073,50 @@ static void EnsureIconsLoaded(const InstalledGame *games, int gameCount)
 }
 
 GameListUIResult ShowGameListUI(const InstalledGame *games, int gameCount, int initialSelection,
-                                const bool *hasDlcInstalled, const bool *hasUpdateInstalled)
+                                const bool *hasDlcInstalled, const bool *hasUpdateInstalled,
+                                const char *gamesPath, const char *bannerText)
 {
-    GameListUIResult result = {false, -1, false};
+    GameListUIResult result = {GAMELIST_EXIT, -1};
 
-    if (!g_Initialized || gameCount <= 0)
+    if (!g_Initialized)
         return result;
 
-    EnsureIconsLoaded(games, gameCount);
-    if (g_icons == NULL)
-        return result;
+    if (gameCount < 0)
+        gameCount = 0;
 
-    Icon *icons = g_icons;
+    // No covers to load for an empty library - and EnsureIconsLoaded would
+    // take a zero-byte allocation coming back NULL as a failure.
+    Icon *icons = NULL;
+    if (gameCount > 0)
+    {
+        EnsureIconsLoaded(games, gameCount);
+        if (g_icons == NULL)
+            return result;
+        icons = g_icons;
+    }
 
+    // The banner takes the top of the list area, and the list starts below
+    // it - so the row count is worked out here rather than taken from g_M,
+    // which assumes the list has the whole space to itself.
+    const bool showBanner = (bannerText != NULL && bannerText[0] != '\0');
+    const float bannerH = 44.0f * g_M.scale;
+    const float bannerGap = 10.0f * g_M.scale;
+
+    const float listY = g_M.listY + (showBanner ? bannerH + bannerGap : 0.0f);
+
+    int visibleRows = (int)((g_M.footerY - listY - 16.0f * g_M.scale) / g_M.rowH);
+    if (visibleRows < 1) visibleRows = 1;
+
+    // Upper clamp before lower: with an empty library the upper bound is -1,
+    // and the row has to end up at 0, not -1.
     int selected = initialSelection;
-    if (selected < 0) selected = 0;
     if (selected > gameCount - 1) selected = gameCount - 1;
+    if (selected < 0) selected = 0;
 
     // Start the view with the selection already on screen, rather than
     // scrolled to the top and then snapping once the loop's own clamp runs.
-    int scrollOffset = selected - g_M.visibleRows / 2;
-    if (scrollOffset > gameCount - g_M.visibleRows) scrollOffset = gameCount - g_M.visibleRows;
+    int scrollOffset = selected - visibleRows / 2;
+    if (scrollOffset > gameCount - visibleRows) scrollOffset = gameCount - visibleRows;
     if (scrollOffset < 0) scrollOffset = 0;
     WORD prevButtons = CurrentButtons(); // see CurrentButtons: a still-held A must not read as a fresh press
 
@@ -1142,40 +1186,51 @@ GameListUIResult ShowGameListUI(const InstalledGame *games, int gameCount, int i
         }
 
         // Shoulder buttons jump a full page - the fast way through a large
-        // library even with auto-repeat available.
-        if (pressed & XINPUT_GAMEPAD_LEFT_SHOULDER)
+        // library even with auto-repeat available. Skipped for an empty
+        // library, where the upper clamp would land on -1.
+        if (gameCount > 0)
         {
-            selected -= g_M.visibleRows;
-            if (selected < 0) selected = 0;
-        }
-        if (pressed & XINPUT_GAMEPAD_RIGHT_SHOULDER)
-        {
-            selected += g_M.visibleRows;
-            if (selected > gameCount - 1) selected = gameCount - 1;
+            if (pressed & XINPUT_GAMEPAD_LEFT_SHOULDER)
+            {
+                selected -= visibleRows;
+                if (selected < 0) selected = 0;
+            }
+            if (pressed & XINPUT_GAMEPAD_RIGHT_SHOULDER)
+            {
+                selected += visibleRows;
+                if (selected > gameCount - 1) selected = gameCount - 1;
+            }
         }
 
-        if (pressed & XINPUT_GAMEPAD_A)
+        // A and X act on a row, so they need one. Y and B don't.
+        if ((pressed & XINPUT_GAMEPAD_A) && gameCount > 0)
         {
-            result.selected = true;
+            result.action = GAMELIST_DLC;
             result.selectedIndex = selected;
-            result.titleUpdates = false;
+            break;
+        }
+        if ((pressed & XINPUT_GAMEPAD_X) && gameCount > 0)
+        {
+            result.action = GAMELIST_TITLE_UPDATES;
+            result.selectedIndex = selected;
             break;
         }
         if (pressed & XINPUT_GAMEPAD_Y)
         {
-            result.selected = true;
-            result.selectedIndex = selected;
-            result.titleUpdates = true;
+            // The row is reported anyway, so coming back from Settings can
+            // land on the same game rather than the top of the list.
+            result.action = GAMELIST_SETTINGS;
+            result.selectedIndex = (gameCount > 0) ? selected : -1;
             break;
         }
         if (pressed & XINPUT_GAMEPAD_B)
         {
-            result.selected = false;
+            result.action = GAMELIST_EXIT;
             break;
         }
 
         if (selected < scrollOffset) scrollOffset = selected;
-        if (selected >= scrollOffset + g_M.visibleRows) scrollOffset = selected - g_M.visibleRows + 1;
+        if (selected >= scrollOffset + visibleRows) scrollOffset = selected - visibleRows + 1;
 
         g_pd3dDevice->Resume();
         g_pd3dDevice->Clear(0, NULL, D3DCLEAR_TARGET, COL_BG_BOTTOM, 1.0f, 0);
@@ -1208,24 +1263,31 @@ GameListUIResult ShowGameListUI(const InstalledGame *games, int gameCount, int i
 
         // Rows stop short of the scrollbar only when one is actually shown,
         // so a small library uses the full width.
-        bool showScroll = (gameCount > g_M.visibleRows);
+        bool showScroll = (gameCount > visibleRows);
         float plateW = g_M.contentW - (showScroll ? scrollGutter : 0.0f);
 
         // Footer hints. Laid out here rather than next to where they are drawn
-        // because the badge shapes go down in pass 1 and their letters in pass
-        // 2, and both need identical positions - so the layout has to happen
-        // before either. It also has to follow showScroll, which decides
-        // whether the paging hint appears at all.
+        // because the badges go down in pass 1 and their labels in pass 2, and
+        // both need identical positions - so the layout has to happen before
+        // either. It also has to follow showScroll, which decides whether the
+        // paging hint appears at all.
+        //
+        // In the console's own A, X, Y, B order. The row actions drop out for
+        // an empty library, leaving Settings - the way to fix it - and Exit.
         //
         // "Exit", not "Back" - this screen is the root, so it is the one place
         // B leaves the app rather than stepping back a screen. Every other
         // screen says Back, which is what makes that distinction readable.
-        ButtonHint hints[4];
+        ButtonHint hints[5];
         int hintCount = 0;
 
-        hints[hintCount].sprite = BUTTON_SPRITE_A; hints[hintCount].label = L"DLC"; hintCount++;
+        if (gameCount > 0)
+        {
+            hints[hintCount].sprite = BUTTON_SPRITE_A; hints[hintCount].label = L"DLC"; hintCount++;
+            hints[hintCount].sprite = BUTTON_SPRITE_X; hints[hintCount].label = L"Title update"; hintCount++;
+        }
 
-        hints[hintCount].sprite = BUTTON_SPRITE_Y; hints[hintCount].label = L"Title update"; hintCount++;
+        hints[hintCount].sprite = BUTTON_SPRITE_Y; hints[hintCount].label = L"Settings"; hintCount++;
 
         hints[hintCount].sprite = BUTTON_SPRITE_B; hints[hintCount].label = L"Exit"; hintCount++;
 
@@ -1238,13 +1300,29 @@ GameListUIResult ShowGameListUI(const InstalledGame *games, int gameCount, int i
 
         float hintCenterY = g_M.footerY + 9.0f * g_M.scale;
 
-        for (int row = 0; row < g_M.visibleRows; ++row)
+        // Banner: a lit amber plate with a solid edge and a Y badge, so it
+        // reads as "press Y for this" before a word of it is read.
+        const float bannerCenterY = g_M.listY + bannerH * 0.5f;
+        const float bannerBadgeX = g_M.contentX + 18.0f * g_M.scale;
+        float bannerTextX = bannerBadgeX;
+
+        if (showBanner)
+        {
+            DrawGradientRect(g_M.contentX, g_M.listY, g_M.contentW, bannerH,
+                             COL_NOTICE_PLATE_A, COL_NOTICE_PLATE_B, false);
+            DrawRect(g_M.contentX, g_M.listY, 4.0f * g_M.scale, bannerH, COL_NOTICE_EDGE);
+
+            float badgeW = DrawButtonSprite(BUTTON_SPRITE_Y, bannerBadgeX, bannerCenterY);
+            bannerTextX = bannerBadgeX + badgeW + 12.0f * g_M.scale;
+        }
+
+        for (int row = 0; row < visibleRows; ++row)
         {
             int index = scrollOffset + row;
             if (index >= gameCount)
                 break;
 
-            float rowY = g_M.listY + row * g_M.rowH;
+            float rowY = listY + row * g_M.rowH;
             float iconY = rowY + (plateH - g_M.iconSize) * 0.5f; // vertically centred in its plate
 
             if (index == selected)
@@ -1280,16 +1358,16 @@ GameListUIResult ShowGameListUI(const InstalledGame *games, int gameCount, int i
         if (showScroll)
         {
             const float trackX = g_M.contentX + g_M.contentW - scrollW;
-            const float trackY = g_M.listY;
-            const float trackH = g_M.visibleRows * g_M.rowH - rowGap;
+            const float trackY = listY;
+            const float trackH = visibleRows * g_M.rowH - rowGap;
 
-            float thumbH = trackH * ((float)g_M.visibleRows / (float)gameCount);
+            float thumbH = trackH * ((float)visibleRows / (float)gameCount);
             float minThumb = 24.0f * g_M.scale;
             if (thumbH < minThumb) thumbH = minThumb; // stays visible on a very large library
 
             // Positioned by scroll range, not item count, so the thumb lands
             // flush at the bottom on the last page.
-            float scrollRange = (float)(gameCount - g_M.visibleRows);
+            float scrollRange = (float)(gameCount - visibleRows);
             float thumbY = trackY + (trackH - thumbH) * ((float)scrollOffset / scrollRange);
 
             DrawRect(trackX, trackY, scrollW, trackH, COL_SCROLL_TRACK);
@@ -1317,20 +1395,58 @@ GameListUIResult ShowGameListUI(const InstalledGame *games, int gameCount, int i
         // null-terminated: _snprintf on this toolchain does not null-terminate
         // on truncation, and its dynamic-precision specifiers have caused a
         // real crash in this project before.
-        char counter[64];
-        _snprintf(counter, sizeof(counter), "%d / %d", selected + 1, gameCount);
-        counter[sizeof(counter) - 1] = '\0';
+        if (gameCount > 0)
+        {
+            char counter[64];
+            _snprintf(counter, sizeof(counter), "%d / %d", selected + 1, gameCount);
+            counter[sizeof(counter) - 1] = '\0';
 
-        WCHAR wideCounter[64];
-        Utf8ToWide(counter, wideCounter, 64);
+            WCHAR wideCounter[64];
+            Utf8ToWide(counter, wideCounter, 64);
 
-        g_UiFont.SetScaleFactors(0.9f * g_M.textScale, 0.9f * g_M.textScale);
-        g_UiFont.DrawText(g_M.contentX + g_M.contentW, g_M.headerTextY + 6.0f * g_M.scale,
-                          COL_TEXT_DIM, wideCounter, ATGFONT_RIGHT);
+            g_UiFont.SetScaleFactors(0.9f * g_M.textScale, 0.9f * g_M.textScale);
+            g_UiFont.DrawText(g_M.contentX + g_M.contentW, g_M.headerTextY + 6.0f * g_M.scale,
+                              COL_TEXT_DIM, wideCounter, ATGFONT_RIGHT);
+        }
 
-        // Footer hints - letters on their badges, then the labels. The badge
-        // shapes themselves went down in pass 1; see LayoutButtonHints.
+        // Footer hint labels. The badges themselves went down in pass 1; see
+        // LayoutButtonHints.
         DrawButtonHintText(hints, hintCount, hintCenterY);
+
+        if (showBanner)
+        {
+            WCHAR wideBanner[256];
+            Utf8ToWide(bannerText, wideBanner, 256);
+
+            const float bannerScale = 0.9f * g_M.textScale;
+            g_UiFont.SetScaleFactors(bannerScale, bannerScale);
+            g_UiFont.DrawText(bannerTextX, TextTopForCenter(bannerCenterY, bannerScale),
+                              COL_NOTICE_TEXT, wideBanner, ATGFONT_TRUNCATED,
+                              g_M.contentX + g_M.contentW - bannerTextX - 16.0f * g_M.scale);
+        }
+
+        // An empty library says so, and says where it looked - the folder is
+        // almost always the reason, and naming it is what lets someone spot
+        // the typo or the wrong drive.
+        if (gameCount == 0)
+        {
+            WCHAR wideWhere[300];
+            char where[300];
+            _snprintf(where, sizeof(where), "Searched %s", gamesPath != NULL ? gamesPath : "(no folder set)");
+            where[sizeof(where) - 1] = '\0';
+            Utf8ToWide(where, wideWhere, 300);
+
+            const float emptyY = listY + 24.0f * g_M.scale;
+
+            g_UiFont.SetScaleFactors(1.0f * g_M.textScale, 1.0f * g_M.textScale);
+            g_UiFont.DrawText(g_M.contentX, emptyY, COL_TEXT_PRIMARY, L"No games found");
+
+            g_UiFont.SetScaleFactors(0.85f * g_M.textScale, 0.85f * g_M.textScale);
+            g_UiFont.DrawText(g_M.contentX, emptyY + 32.0f * g_M.scale, COL_TEXT_SECONDARY,
+                              wideWhere, ATGFONT_TRUNCATED, g_M.contentW);
+            g_UiFont.DrawText(g_M.contentX, emptyY + 58.0f * g_M.scale, COL_TEXT_DIM,
+                              L"Press Y to choose your games folder in Settings.");
+        }
 
         // Row text. The name is truncated with an ellipsis rather than
         // overrunning into the scrollbar - ATGFONT_TRUNCATED plus a max pixel
@@ -1339,13 +1455,13 @@ GameListUIResult ShowGameListUI(const InstalledGame *games, int gameCount, int i
         float textX = iconX + g_M.iconSize + 18.0f * g_M.scale;
         float textMaxW = (g_M.contentX + plateW) - textX - 16.0f * g_M.scale;
 
-        for (int row = 0; row < g_M.visibleRows; ++row)
+        for (int row = 0; row < visibleRows; ++row)
         {
             int index = scrollOffset + row;
             if (index >= gameCount)
                 break;
 
-            float rowY = g_M.listY + row * g_M.rowH;
+            float rowY = listY + row * g_M.rowH;
             bool isSelected = (index == selected);
 
             WCHAR wideName[256];
@@ -1611,8 +1727,11 @@ static WORD CurrentButtons()
 // Status / message screens
 // ---------------------------------------------------------------------------
 
+// hints may be NULL for a frame with no buttons to press, like the scanning
+// and searching screens. They're laid out here, so the caller only fills in
+// sprite and label.
 static void RenderStatusFrameInternal(const char *heading, const char *message,
-                                      const char *detailLine, const char *footerHint)
+                                      const char *detailLine, ButtonHint *hints, int hintCount)
 {
     if (!g_Initialized)
         return;
@@ -1621,6 +1740,13 @@ static void RenderStatusFrameInternal(const char *heading, const char *message,
     g_pd3dDevice->Clear(0, NULL, D3DCLEAR_TARGET, COL_BG_BOTTOM, 1.0f, 0);
 
     DrawChromeQuads();
+
+    const float hintCenterY = g_M.footerY + 9.0f * g_M.scale;
+    if (hints != NULL && hintCount > 0)
+    {
+        LayoutButtonHints(hints, hintCount, g_M.contentX);
+        DrawButtonHintShapes(hints, hintCount, hintCenterY);
+    }
 
     const float blockY = g_M.screenH * 0.5f - 40.0f * g_M.scale;
 
@@ -1644,13 +1770,8 @@ static void RenderStatusFrameInternal(const char *heading, const char *message,
                           wideDetail, ATGFONT_TRUNCATED, g_M.contentW);
     }
 
-    if (footerHint != NULL)
-    {
-        WCHAR wideHint[128];
-        Utf8ToWide(footerHint, wideHint, 128);
-        g_UiFont.SetScaleFactors(0.9f * g_M.textScale, 0.9f * g_M.textScale);
-        g_UiFont.DrawText(g_M.contentX, g_M.footerY, COL_TEXT_DIM, wideHint);
-    }
+    if (hints != NULL && hintCount > 0)
+        DrawButtonHintText(hints, hintCount, hintCenterY);
 
     g_UiFont.SetScaleFactors(1.0f, 1.0f);
     g_UiFont.End();
@@ -1661,7 +1782,7 @@ static void RenderStatusFrameInternal(const char *heading, const char *message,
 
 void RenderStatusFrame(const char *heading, const char *message, const char *detailLine)
 {
-    RenderStatusFrameInternal(heading, message, detailLine, NULL);
+    RenderStatusFrameInternal(heading, message, detailLine, NULL, 0);
 }
 
 void ShowMessageUI(const char *heading, const char *message, const char *detailLine)
@@ -1680,7 +1801,48 @@ void ShowMessageUI(const char *heading, const char *message, const char *detailL
         if (pressed & (XINPUT_GAMEPAD_B | XINPUT_GAMEPAD_A))
             break;
 
-        RenderStatusFrameInternal(heading, message, detailLine, "B  Continue");
+        // Badged like every other footer; this used to be the plain text
+        // "B  Continue".
+        ButtonHint hints[1];
+        hints[0].sprite = BUTTON_SPRITE_B;
+        hints[0].label = L"Continue";
+
+        RenderStatusFrameInternal(heading, message, detailLine, hints, 1);
+        Sleep(16);
+    }
+}
+
+bool ShowConfirmUI(const char *heading, const char *message, const char *detailLine,
+                   const char *confirmLabel)
+{
+    if (!g_Initialized)
+        return false;
+
+    WCHAR wideConfirm[32];
+    Utf8ToWide(confirmLabel != NULL ? confirmLabel : "Confirm", wideConfirm, 32);
+
+    // Seeded from the current pad state like every screen here, so the A
+    // press that opened this can't also confirm it.
+    WORD prevButtons = CurrentButtons();
+
+    for (;;)
+    {
+        WORD buttons = CurrentButtons();
+        WORD pressed = buttons & ~prevButtons;
+        prevButtons = buttons;
+
+        if (pressed & XINPUT_GAMEPAD_A)
+            return true;
+        if (pressed & XINPUT_GAMEPAD_B)
+            return false;
+
+        ButtonHint hints[2];
+        hints[0].sprite = BUTTON_SPRITE_A;
+        hints[0].label = wideConfirm;
+        hints[1].sprite = BUTTON_SPRITE_B;
+        hints[1].label = L"Cancel";
+
+        RenderStatusFrameInternal(heading, message, detailLine, hints, 2);
         Sleep(16);
     }
 }
@@ -1690,10 +1852,13 @@ void ShowMessageUI(const char *heading, const char *message, const char *detailL
 // ---------------------------------------------------------------------------
 
 int ShowChoiceUI(const char *heading, const char **labels, const char **sublabels,
-                 int count, int initialSelection)
+                 int count, int initialSelection, const char *actionLabel, bool showCounter)
 {
     if (!g_Initialized || labels == NULL || count <= 0)
         return -1;
+
+    WCHAR wideAction[32];
+    Utf8ToWide(actionLabel != NULL ? actionLabel : "Select", wideAction, 32);
 
     // Shorter rows than the game list - there's no artwork to make room for,
     // so row height is set by the two text lines alone.
@@ -1782,7 +1947,7 @@ int ShowChoiceUI(const char *heading, const char **labels, const char **sublabel
         ButtonHint hints[2];
         int hintCount = 0;
 
-        hints[hintCount].sprite = BUTTON_SPRITE_A; hints[hintCount].label = L"Download"; hintCount++;
+        hints[hintCount].sprite = BUTTON_SPRITE_A; hints[hintCount].label = wideAction; hintCount++;
 
         hints[hintCount].sprite = BUTTON_SPRITE_B; hints[hintCount].label = L"Back"; hintCount++;
 
@@ -1835,16 +2000,19 @@ int ShowChoiceUI(const char *heading, const char **labels, const char **sublabel
 
         DrawChromeHeading(heading);
 
-        char counter[64];
-        _snprintf(counter, sizeof(counter), "%d / %d", selected + 1, count);
-        counter[sizeof(counter) - 1] = '\0';
+        if (showCounter)
+        {
+            char counter[64];
+            _snprintf(counter, sizeof(counter), "%d / %d", selected + 1, count);
+            counter[sizeof(counter) - 1] = '\0';
 
-        WCHAR wideCounter[64];
-        Utf8ToWide(counter, wideCounter, 64);
+            WCHAR wideCounter[64];
+            Utf8ToWide(counter, wideCounter, 64);
 
-        g_UiFont.SetScaleFactors(0.9f * g_M.textScale, 0.9f * g_M.textScale);
-        g_UiFont.DrawText(g_M.contentX + g_M.contentW, g_M.headerTextY + 6.0f * g_M.scale,
-                          COL_TEXT_DIM, wideCounter, ATGFONT_RIGHT);
+            g_UiFont.SetScaleFactors(0.9f * g_M.textScale, 0.9f * g_M.textScale);
+            g_UiFont.DrawText(g_M.contentX + g_M.contentW, g_M.headerTextY + 6.0f * g_M.scale,
+                              COL_TEXT_DIM, wideCounter, ATGFONT_RIGHT);
+        }
 
         DrawButtonHintText(hints, hintCount, hintCenterY);
 

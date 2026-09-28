@@ -22,7 +22,7 @@ The ATG framework under `Common/` is intentionally not documented in depth. It i
 
 `main.cpp` mounts storage aliases, creates the console, brings up the drawn UI, then scans the console's own games folder - reading each title's ID, name and cover art straight out of its STFS package header (`StfsParser.cpp`), entirely offline.
 
-That library is shown as a list (`GameListUI.cpp`). **A** picks DLC for a title, **Y** picks title updates; both then authenticate to archive.org with an IAS3 access/secret key pair (`ArchiveOrgDLC.cpp`) and search a collection by fuzzy game-name match.
+That library is shown as a list (`GameListUI.cpp`). **A** picks DLC for a title, **X** picks title updates, **Y** opens Settings (games folder, archive.org keys); both then authenticate to archive.org with an IAS3 access/secret key pair (`ArchiveOrgDLC.cpp`) and search a collection by fuzzy game-name match.
 
 - **DLC** comes from the `msx360gcdlc` item as `.rar` archives. Their member lists are read by walking the RAR header chain over small `Range` requests, and each wanted member is fetched through archive.org's virtual-path URL, which serves it already extracted - so nothing here decompresses RAR. Members land in `Content\0000000000000000\{TitleID}\{ContentType}\{ContentID}`. Avatar-item members are skipped.
 - **Title updates** come from the `microsoft_xbox360_title-updates` item as `.zip` archives holding a single member. Its name is read from the zip's central directory and decides the destination: a lowercase `tu...` name installs under `{TitleID}\000B0000\`, an uppercase `TU_...` name into the console's `Cache` folder.

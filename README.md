@@ -2,7 +2,7 @@
 
 A homebrew Xbox 360 app that shows your **installed games** (with real box-art icons, no typing) and downloads their **DLC and title updates from archive.org** straight onto the console — no PC required.
 
-Pick a game, then press **A** for its DLC (from the `msx360gcdlc` collection) or **Y** for its title updates (from `microsoft_xbox360_title-updates`). Both install to the right place on their own: DLC and lowercase `tu...` updates into `Content\`, uppercase `TU_...` updates into `Cache\`.
+Pick a game, then press **A** for its DLC (from the `msx360gcdlc` collection) or **X** for its title updates (from `microsoft_xbox360_title-updates`). **Y** opens Settings, where the games folder and your archive.org keys can be changed without a PC. Both install to the right place on their own: DLC and lowercase `tu...` updates into `Content\`, uppercase `TU_...` updates into `Cache\`.
 
 This is a fork of [951261/X-Store](https://github.com/951261/X-Store), reusing its proven BearSSL/TLS networking core and Direct3D rendering framework. Everything Vimm's Lair/full-game/ISO/updater-related has been stripped out; everything archive.org/DLC/installed-game-related is new. See `docs/` for X-Store's own original architecture notes (still accurate for the networking layer this fork builds on).
 
@@ -39,7 +39,7 @@ A standalone native `.xex` was the only remaining option with full control over 
 ## How it works
 
 1. Walks `Content\0000000000000000\{TitleID}\{ContentType}\*` and reads each installed title's Title ID / display name / box-art icon straight out of its STFS package header (`StfsParser.cpp`) — entirely offline.
-2. Shows that list as an icon grid (`GameListUI.cpp`) — D-pad or left stick to move, A for DLC, Y for title updates, B to go back.
+2. Shows that list as an icon grid (`GameListUI.cpp`) — D-pad or left stick to move, A for DLC, X for title updates, Y for Settings, B to go back.
 3. Sends your IAS3 key pair as an `Authorization: LOW <access>:<secret>` header (`ArchiveOrgDLC.cpp`) and looks up the chosen game against the relevant item's public metadata — `msx360gcdlc` for DLC, `microsoft_xbox360_title-updates` for updates. Name-matching is soft, so a game with several separate DLC packs — e.g. Call of Duty 2's Bonus/Invasion/Skirmish Packs — picks up all of them.
 4. For each matched archive, reads its internal file table via a handful of small `Range` requests. RAR interleaves headers with each file's data, so that walks the chain one entry at a time; ZIP keeps a central directory at the tail, so one request covers it.
 5. Downloads each real file through archive.org's `/download/{item}/{archive}/{urlencoded/internal/path}` URL form, which serves the member **already extracted server-side** — no RAR or ZIP decompression is implemented or needed on our end.

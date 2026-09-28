@@ -11,20 +11,38 @@
 bool InitGameListUI();
 void ShutdownGameListUI();
 
-struct GameListUIResult
+// What was pressed on the game list.
+//
+// DLC and title updates are both on the list itself rather than behind a
+// submenu, which keeps the common path one press, and lets someone who already
+// has a game's DLC fetch just its update without walking through the DLC
+// screens.
+enum GameListAction
 {
-    bool selected;
-    int selectedIndex; // valid only when selected is true
-
-    // Which of the two actions was taken on that row: A chooses DLC, Y chooses
-    // title updates. Having both on the game list rather than behind a submenu
-    // keeps the common path one press, and lets someone who already has a
-    // game's DLC fetch just its update without walking through the DLC screens.
-    bool titleUpdates;
+    GAMELIST_EXIT,          // B - this is the root screen, so B leaves the app
+    GAMELIST_DLC,           // A on a row
+    GAMELIST_TITLE_UPDATES, // X on a row
+    GAMELIST_SETTINGS       // Y - available even when the library is empty, since
+                            // a wrong games folder is the usual reason it is
 };
 
-// Draws an icon + name list of games, with D-pad up/down to move, A to
-// select, B to cancel - blocks until one of those happens.
+struct GameListUIResult
+{
+    GameListAction action;
+    int selectedIndex; // the highlighted row; -1 when the library is empty
+};
+
+// Draws an icon + name list of games, with D-pad up/down to move - blocks
+// until one of the GameListAction buttons is pressed.
+//
+// gameCount may be 0. The screen then says the library is empty, names
+// gamesPath as the folder that was searched, and offers only Settings and
+// Exit - rather than the app quitting, which left no way to fix the folder
+// without a PC.
+//
+// bannerText, when non-NULL, is shown in a highlighted strip above the list
+// with a Y badge - for something the user needs to do in Settings, like adding
+// their archive.org keys.
 //
 // initialSelection is the row to start on, clamped to the list. This screen is
 // the app's root, so the user returns here after every download; starting them
@@ -42,7 +60,14 @@ struct GameListUIResult
 //
 // Either pointer may be NULL, which simply suppresses that marker.
 GameListUIResult ShowGameListUI(const InstalledGame *games, int gameCount, int initialSelection,
-                                const bool *hasDlcInstalled, const bool *hasUpdateInstalled);
+                                const bool *hasDlcInstalled, const bool *hasUpdateInstalled,
+                                const char *gamesPath, const char *bannerText);
+
+// Drops the cached cover art, so the next ShowGameListUI loads it afresh. Call
+// after rescanning the library: the cache is matched to the game list by count
+// alone, so a new library of the same size would otherwise show the old one's
+// covers.
+void ReleaseGameListIcons();
 
 // Draws one progress-bar frame. Intended to be called repeatedly from inside
 // a download loop - see main.cpp's DlcProgressCallback, which drives it from
@@ -77,12 +102,23 @@ void RenderStatusFrame(const char *heading, const char *message, const char *det
 // initialSelection works the same way as ShowGameListUI's - the user comes
 // back here after each download, and should land on the pack they just took
 // rather than at the top.
+//
+// actionLabel names what A does in the footer ("Download" for the pack
+// pickers). showCounter controls the "3 / 12" position readout, which means
+// something for a list of results and nothing for a short fixed menu.
 int ShowChoiceUI(const char *heading, const char **labels, const char **sublabels,
-                 int count, int initialSelection);
+                 int count, int initialSelection,
+                 const char *actionLabel = "Download", bool showCounter = true);
 
 // Draws a message and waits for B. For terminal states (nothing found, an
 // error, finished) that previously just printed a line and dropped the user
 // back to a console screen.
 void ShowMessageUI(const char *heading, const char *message, const char *detailLine);
+
+// Draws a message and waits for A (returns true) or B (returns false). For
+// actions that can't be undone, like removing the saved archive.org keys.
+// confirmLabel names what A does, e.g. "Remove".
+bool ShowConfirmUI(const char *heading, const char *message, const char *detailLine,
+                   const char *confirmLabel);
 
 #endif
