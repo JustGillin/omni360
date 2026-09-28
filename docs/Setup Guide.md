@@ -33,9 +33,9 @@ Doing this on a PC is strongly recommended over the alternative, which is typing
 The app works with no settings file. Two keys override its defaults, and they are separate because your game library and your content folder are often on different drives. The games folder can also be changed on the console, in **Settings** (press **Y** on the game list), which writes this file for you:
 
 - `xbla-path:` — where downloaded content is written. Defaults to `Hdd1:\Content\0000000000000000`. The name is inherited from X-Store, which used the same key.
-- `games-path:` — where your installed library is scanned for the picker. Defaults to `Hdd1:\Games`.
+- `games-path:` — where your installed library is scanned for the picker. Defaults to `Hdd1:\Content\0000000000000000`, which is where the dashboard installs Games on Demand and arcade titles.
 
-If Aurora keeps your GOD/disc games in a dedicated folder — `Hdd1:\Games\{TitleID}\00007000\{ContentID}` is what testing found — point `games-path:` there. `Content\0000000000000000` on its own holds DLC and title updates, not your actual games, so scanning it will produce an empty or near-empty list.
+If you keep your GOD games in a folder of their own instead — `Hdd1:\Games\{TitleID}\00007000\{ContentID}` is a common choice — point `games-path:` there.
 
 ## 4. Transfer files to the console
 

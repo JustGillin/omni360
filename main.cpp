@@ -39,7 +39,7 @@ end-to-end on real hardware against a real 27-game library.
 #define GAMES_PATH_KEY "games-path: "
 #define CREDENTIALS_FILE "game:\\ArchiveOrgKeys.txt"
 #define CONTENT_BASE_PATH_DEFAULT "Hdd1:\\Content\\0000000000000000"
-#define GAMES_PATH_DEFAULT "Hdd1:\\Games"
+#define GAMES_PATH_DEFAULT CONTENT_BASE_PATH_DEFAULT // where the dashboard itself keeps installed games
 #define MAX_INSTALLED_GAMES 256
 #define MAX_DLC_MEMBERS 128
 
@@ -126,11 +126,11 @@ static void NarrowToWide(const char *in, WCHAR *out, int outSize)
 // settings.txt - two separate paths matter for this fork, and they can be
 // genuinely different locations:
 //   - the GAMES path: where EnumerateInstalledGames looks for your existing
-//     library, to populate the picker. On a setup like Aurora's, disc-based/
-//     GOD games often live in their own dedicated folder (e.g. Hdd1:\Games),
-//     separate from the shared Content partition - confirmed against a real
-//     console this session (00007000 = Game on Demand, same TitleID\
-//     ContentType\ContentID layout, just a different root).
+//     library, to populate the picker. Defaults to the Content folder, which
+//     is where the dashboard installs Games on Demand and arcade titles.
+//     Some people keep GOD games in a folder of their own instead (e.g.
+//     Hdd1:\Games, with the same TitleID\ContentType\ContentID layout under
+//     a different root) and point Aurora at it - this key is for them.
 //   - the CONTENT path: where downloaded DLC actually gets written. This is
 //     always the standard Content\0000000000000000 layout regardless of
 //     where the base game lives, since that's where Xbox/Aurora expect DLC
@@ -1147,7 +1147,7 @@ static void ChangeGamesFolder(Library &lib, char *gamesPath, size_t gamesPathSiz
 
     std::string typed;
     if (OpenKeyboardToString(XUSER_INDEX_ANY, &typed, L"Games Folder",
-                             L"Where your installed games are, e.g. Hdd1:\\Games", current) != ERROR_SUCCESS)
+                             L"Where your installed games are - usually Hdd1:\\Content\\0000000000000000", current) != ERROR_SUCCESS)
         return; // cancelled
 
     char newPath[MAX_TEXT_LENGTH];
