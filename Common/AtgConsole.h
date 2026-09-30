@@ -85,6 +85,8 @@ private:
     static const UINT SCREEN_SIZE_Y_DEFAULT    = 480;
     static const UINT SCREEN_SIZE_X_720p       = 1280;
     static const UINT SCREEN_SIZE_Y_720p       = 720;
+    static const UINT SCREEN_SIZE_X_1080p      = 1920;
+    static const UINT SCREEN_SIZE_Y_1080p      = 1080;
 
     static const UINT SAFE_AREA_PCT_4x3        = 85;
     static const UINT SAFE_AREA_PCT_HDTV       = 90;

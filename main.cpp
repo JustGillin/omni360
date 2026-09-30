@@ -52,7 +52,7 @@ extern "C" NTSTATUS XexGetModuleHandle(PSZ moduleName, PHANDLE outHandle);
 #define MAX_DLC_MEMBERS 128
 
 // (There is deliberately no auto-select threshold here any more - see the
-// comment above the picker in DownloadDlcForGame.)
+// comment above the pickers.)
 
 // ---------------------------------------------------------------------------
 // Drive mounting - kept close to X-Store's original CheckGameMounted(),
@@ -987,180 +987,189 @@ static bool DownloadOnePack(const DlcRarMatch &pack, const char *contentBasePath
     return true;
 }
 
-// Title updates: their own flow, reached with X from the game list rather than
-// A. Keeping them separate is the point - someone who already has a game's DLC
-// installed can fetch just its update without walking through the DLC screens.
-static void InstallTitleUpdatesForGame(const InstalledGame &game, const char *contentBasePath,
-                                       const char *authHeader)
+// ---------------------------------------------------------------------------
+// The DLC pack and title update pickers
+// ---------------------------------------------------------------------------
+//
+// A on a game searches for its DLC, X for its title updates; either way the
+// results open as a picker in place of the library, and B steps back to it.
+//
+// ALWAYS a picker, even for a single perfectly-scored result. The DLC side
+// briefly auto-selected an unambiguous match and skipped straight to
+// downloading. That was removed after actually living with it: the picker is
+// not friction, it is the one place you can see the real filename and size
+// before committing to a download that may be gigabytes, and the one place to
+// back out of a game selected by mistake. For title updates it's also the
+// point: one game routinely has v1/v2/v3 across several regions, and "newest"
+// is not always what someone wants - a specific version is sometimes needed
+// for mods or for matchmaking compatibility.
+//
+// The picker stays open after a download, so a game with several separate
+// packs - Call of Duty 2 has three - can have them taken one at a time.
+
+enum PickerKind
 {
-    RenderStatusFrame("SEARCHING", "Looking up title updates", game.displayName);
+    PICKER_NONE,
+    PICKER_DLC,
+    PICKER_TITLE_UPDATE
+};
 
+#define MAX_PICKER_ROWS (MAX_DLC_RAR_MATCHES > MAX_TITLE_UPDATE_MATCHES ? MAX_DLC_RAR_MATCHES : MAX_TITLE_UPDATE_MATCHES)
+
+struct Picker
+{
+    PickerKind kind;
+    int gameIndex; // into the library
+    int count;
+    int selected;
+    int scroll;
+
+    DlcRarMatch packs[MAX_DLC_RAR_MATCHES];
     TitleUpdateMatch updates[MAX_TITLE_UPDATE_MATCHES];
-    int updateCount = FindTitleUpdates(game.displayName, updates, MAX_TITLE_UPDATE_MATCHES, dprintf);
 
-    if (updateCount < 0)
-    {
-        ShowMessageUI("SEARCH FAILED", "Could not reach archive.org.",
-                      "Check the console's network connection and try again.");
-        return;
-    }
+    // What the list page draws. labels point into packs/updates.
+    const char *labels[MAX_PICKER_ROWS];
+    const char *sublabels[MAX_PICKER_ROWS];
+    char subText[MAX_PICKER_ROWS][96];
+};
 
-    if (updateCount == 0)
-    {
-        ShowMessageUI("NOTHING FOUND", "No title update matched this game.", game.displayName);
-        return;
-    }
-
-    for (int i = 0; i < updateCount; ++i)
-    {
-        // "score N", not "N%" - a literal percent sign does not survive this
-        // logging path (see LogEscapePercent in parsing.h), which is why an
-        // earlier run of this printed "100v1" instead of "100%  v1".
-        dprintf("[TU]   score %d  v%d  region \"%s\"  %I64u bytes  %s\n",
-                updates[i].score, updates[i].version, updates[i].region,
-                updates[i].size, updates[i].filename);
-    }
-
-    // Version and region are the whole reason this is a picker rather than an
-    // automatic pick: one game routinely has v1/v2/v3 across several regions,
-    // and "newest" is not always what someone wants - a specific update version
-    // is sometimes required for mods or for matchmaking compatibility.
-    const char *labels[MAX_TITLE_UPDATE_MATCHES];
-    const char *sublabels[MAX_TITLE_UPDATE_MATCHES];
-    char subText[MAX_TITLE_UPDATE_MATCHES][96];
-
-    for (int i = 0; i < updateCount; ++i)
-    {
-        labels[i] = updates[i].filename;
-
-        char sizeText[64] = "";
-        FormatBytes(updates[i].size, sizeText, sizeof(sizeText));
-
-        _snprintf(subText[i], sizeof(subText[i]), "%s   v%d   %s   %d%% name match",
-                  sizeText, updates[i].version,
-                  updates[i].region[0] != '\0' ? updates[i].region : "unknown region",
-                  updates[i].score);
-        subText[i][sizeof(subText[i]) - 1] = '\0';
-        sublabels[i] = subText[i];
-    }
-
-    // Results are sorted score-first then version-descending, so index 0 is
-    // the newest update for the best-matching name - the right default to land
-    // on, but still shown rather than assumed.
-    int selection = 0;
-
-    for (;;)
-    {
-        int choice = ShowChoiceUI("CHOOSE A TITLE UPDATE", labels, sublabels, updateCount, selection);
-        if (choice < 0)
-            break; // B steps back to the game list
-
-        selection = choice;
-
-        RenderStatusFrame("TITLE UPDATE", "Reading the update", updates[choice].filename);
-
-        strncpy(g_progressTitle, updates[choice].filename, sizeof(g_progressTitle) - 1);
-        g_progressTitle[sizeof(g_progressTitle) - 1] = '\0';
-        g_progressFileIndex = 0;
-        g_progressFileCount = 1;
-        ResetDownloadCancel();
-
-        unsigned long long tuNeeded = 0, tuFree = 0;
-        if (DownloadTitleUpdate(updates[choice], game.titleId, contentBasePath,
-                                authHeader, dprintf, DlcProgressCallback))
-        {
-            ShowMessageUI("TITLE UPDATE INSTALLED", updates[choice].filename,
-                          "Restart your dashboard to pick up the update.");
-        }
-        else if (g_progressCancelled)
-        {
-            // Stopped on purpose - back to the picker with nothing to report.
-        }
-        else if (ArchiveOrgKeysRejected())
-        {
-            // Not "archive.org may not serve this file" - that sends someone
-            // to try a different update, which will be refused the same way.
-            ShowKeysRejected();
-            break;
-        }
-        else if (ArchiveOrgDiskFull(&tuNeeded, &tuFree))
-        {
-            ShowNotEnoughSpace(contentBasePath, tuNeeded, tuFree);
-        }
-        else
-        {
-            ShowMessageUI("TITLE UPDATE FAILED", updates[choice].filename,
-                          "See the log - archive.org may not serve this file directly.");
-        }
-    }
-}
-
-static void DownloadDlcForGame(const InstalledGame &game, const char *contentBasePath, const char *authHeader)
+// Searches for the game's DLC and fills the picker with what it finds. Says so
+// on screen and returns false if the search failed or found nothing.
+static bool FindDlcForPicker(const InstalledGame &game, Picker &picker)
 {
     RenderStatusFrame("SEARCHING", "Looking up DLC on archive.org", game.displayName);
 
-    DlcRarMatch matches[MAX_DLC_RAR_MATCHES];
-    int matchCount = FindDlcRarFilenames(game.displayName, matches, MAX_DLC_RAR_MATCHES, dprintf);
+    int matchCount = FindDlcRarFilenames(game.displayName, picker.packs, MAX_DLC_RAR_MATCHES, dprintf);
 
     if (matchCount < 0)
     {
         ShowMessageUI("SEARCH FAILED", "Could not reach archive.org.",
                       "Check the console's network connection and try again.");
-        return;
+        return false;
     }
 
     if (matchCount == 0)
     {
         ShowMessageUI("NOTHING FOUND", "No DLC in the collection matched this game.",
                       game.displayName);
-        return;
+        return false;
     }
 
-    // Labels for the picker. The filename is what actually identifies a pack,
-    // and the size plus match confidence are what let someone judge between
-    // two similar-looking entries.
-    const char *labels[MAX_DLC_RAR_MATCHES];
-    const char *sublabels[MAX_DLC_RAR_MATCHES];
-    char subText[MAX_DLC_RAR_MATCHES][96];
-
+    // The filename is what actually identifies a pack, and the size plus
+    // match confidence are what let someone judge between two
+    // similar-looking entries.
     for (int i = 0; i < matchCount; ++i)
     {
-        labels[i] = matches[i].filename;
+        picker.labels[i] = picker.packs[i].filename;
 
         char sizeText[64] = "";
-        FormatBytes(matches[i].size, sizeText, sizeof(sizeText));
+        FormatBytes(picker.packs[i].size, sizeText, sizeof(sizeText));
 
-        _snprintf(subText[i], sizeof(subText[i]), "%s   %d%% name match", sizeText, matches[i].score);
-        subText[i][sizeof(subText[i]) - 1] = '\0';
-        sublabels[i] = subText[i];
+        _snprintf(picker.subText[i], sizeof(picker.subText[i]), "%s   %d%% name match",
+                  sizeText, picker.packs[i].score);
+        picker.subText[i][sizeof(picker.subText[i]) - 1] = '\0';
+        picker.sublabels[i] = picker.subText[i];
     }
 
-    // ALWAYS ask, even for a single perfectly-scored result.
-    //
-    // This screen briefly auto-selected an unambiguous match and skipped
-    // straight to downloading. That was removed after actually living with it:
-    // the confirmation is not friction, it is the one place you can see the
-    // real filename and size before committing to a download that may be
-    // gigabytes, and the one place to back out of a game selected by mistake.
-    // Saving a button press is not worth either of those.
-    //
-    // Looping rather than returning after one download: a game can genuinely
-    // have several separate packs - Call of Duty 2 has three - and this lets
-    // someone take them one at a time instead of the original behaviour, which
-    // downloaded every match in one go.
-    int pickerSelection = 0;
+    picker.kind = PICKER_DLC;
+    picker.count = matchCount;
+    return true;
+}
 
-    for (;;)
+static bool FindTitleUpdatesForPicker(const InstalledGame &game, Picker &picker)
+{
+    RenderStatusFrame("SEARCHING", "Looking up title updates", game.displayName);
+
+    int updateCount = FindTitleUpdates(game.displayName, picker.updates, MAX_TITLE_UPDATE_MATCHES, dprintf);
+
+    if (updateCount < 0)
     {
-        int choice = ShowChoiceUI("CHOOSE A DLC PACK", labels, sublabels, matchCount, pickerSelection);
-        if (choice < 0)
-            break; // B here steps back to the game list, not out of the app
-
-        pickerSelection = choice; // come back to the pack they just took
-
-        if (!DownloadOnePack(matches[choice], contentBasePath, authHeader))
-            break; // keys refused - back to the game list, where Settings is
+        ShowMessageUI("SEARCH FAILED", "Could not reach archive.org.",
+                      "Check the console's network connection and try again.");
+        return false;
     }
+
+    if (updateCount == 0)
+    {
+        ShowMessageUI("NOTHING FOUND", "No title update matched this game.", game.displayName);
+        return false;
+    }
+
+    for (int i = 0; i < updateCount; ++i)
+    {
+        const TitleUpdateMatch &update = picker.updates[i];
+
+        // "score N", not "N%" - a literal percent sign does not survive this
+        // logging path (see LogEscapePercent in parsing.h), which is why an
+        // earlier run of this printed "100v1" instead of "100%  v1".
+        dprintf("[TU]   score %d  v%d  region \"%s\"  %I64u bytes  %s\n",
+                update.score, update.version, update.region, update.size, update.filename);
+
+        picker.labels[i] = update.filename;
+
+        char sizeText[64] = "";
+        FormatBytes(update.size, sizeText, sizeof(sizeText));
+
+        _snprintf(picker.subText[i], sizeof(picker.subText[i]), "%s   v%d   %s   %d%% name match",
+                  sizeText, update.version,
+                  update.region[0] != '\0' ? update.region : "unknown region",
+                  update.score);
+        picker.subText[i][sizeof(picker.subText[i]) - 1] = '\0';
+        picker.sublabels[i] = picker.subText[i];
+    }
+
+    // Results are sorted score-first then version-descending, so the first row
+    // is the newest update for the best-matching name - the right default to
+    // land on, but still shown rather than assumed.
+    picker.kind = PICKER_TITLE_UPDATE;
+    picker.count = updateCount;
+    return true;
+}
+
+// Downloads and installs one title update, saying how it went.
+//
+// Returns false if archive.org refused the keys, so the caller closes the
+// picker: every other update would be refused the same way, and the fix is in
+// Settings.
+static bool InstallOneTitleUpdate(const TitleUpdateMatch &update, const InstalledGame &game,
+                                  const char *contentBasePath, const char *authHeader)
+{
+    RenderStatusFrame("TITLE UPDATE", "Reading the update", update.filename);
+
+    strncpy(g_progressTitle, update.filename, sizeof(g_progressTitle) - 1);
+    g_progressTitle[sizeof(g_progressTitle) - 1] = '\0';
+    g_progressFileIndex = 0;
+    g_progressFileCount = 1;
+    ResetDownloadCancel();
+
+    unsigned long long tuNeeded = 0, tuFree = 0;
+    if (DownloadTitleUpdate(update, game.titleId, contentBasePath, authHeader, dprintf, DlcProgressCallback))
+    {
+        ShowMessageUI("TITLE UPDATE INSTALLED", update.filename,
+                      "Restart your dashboard to pick up the update.");
+    }
+    else if (g_progressCancelled)
+    {
+        // Stopped on purpose - back to the picker with nothing to report.
+    }
+    else if (ArchiveOrgKeysRejected())
+    {
+        // Not "archive.org may not serve this file" - that sends someone to
+        // try a different update, which will be refused the same way.
+        ShowKeysRejected();
+        return false;
+    }
+    else if (ArchiveOrgDiskFull(&tuNeeded, &tuFree))
+    {
+        ShowNotEnoughSpace(contentBasePath, tuNeeded, tuFree);
+    }
+    else
+    {
+        ShowMessageUI("TITLE UPDATE FAILED", update.filename,
+                      "See the log - archive.org may not serve this file directly.");
+    }
+
+    return true;
 }
 
 // ---------------------------------------------------------------------------
@@ -1188,7 +1197,7 @@ static void ScanLibrary(Library &lib, const char *gamesPath)
     // Sorted here rather than inside EnumerateInstalledGames - that
     // function's job is to walk the filesystem, and leaving presentation order
     // to the caller keeps it that way. Everything downstream (the installed
-    // flags, listSelection) indexes into this array after the sort, so nothing
+    // flags, the library selection) indexes into this array after the sort, so nothing
     // else has to know it happened.
     if (lib.count > 1)
         qsort(lib.games, lib.count, sizeof(InstalledGame), CompareGamesByName);
@@ -1293,80 +1302,84 @@ static void RemoveKeys(SettingsOutcome &outcome)
     ShowMessageUI("KEYS REMOVED", "Your archive.org keys have been removed from this console.", NULL);
 }
 
-// The settings screen: a short list whose second lines show the current
-// state, so it doubles as a summary of how the app is set up. Rebuilt on every
-// pass, since each action changes what it should say.
-static SettingsOutcome RunSettingsUI(Library &lib, char *gamesPath, size_t gamesPathSize)
+// The settings page: a short list whose second lines show the current state,
+// so it doubles as a summary of how the app is set up. Rebuilt whenever
+// something may have changed it, rather than every frame - each rebuild reads
+// the keys file.
+#define MAX_SETTINGS_ROWS 3
+
+struct SettingsPage
+{
+    int count;
+    SettingsRow rows[MAX_SETTINGS_ROWS];
+    const char *labels[MAX_SETTINGS_ROWS];
+    const char *sublabels[MAX_SETTINGS_ROWS];
+    char gamesSub[MAX_TEXT_LENGTH + 64];
+    char keysSub[128];
+
+    int selected;
+    int scroll;
+};
+
+static void BuildSettingsPage(SettingsPage &page, const Library &lib, const char *gamesPath)
+{
+    std::string accessKey, secretKey;
+    const bool haveKeys = LoadSavedKeys(accessKey, secretKey);
+
+    if (lib.count > 0)
+        _snprintf(page.gamesSub, sizeof(page.gamesSub), "%s   -   %d game%s", gamesPath, lib.count,
+                  lib.count == 1 ? "" : "s");
+    else
+        _snprintf(page.gamesSub, sizeof(page.gamesSub), "%s   -   no games found here", gamesPath);
+    page.gamesSub[sizeof(page.gamesSub) - 1] = '\0';
+
+    // Only the start of the access key is shown - enough to tell which keys
+    // are saved. The secret key is never shown anywhere.
+    if (haveKeys)
+    {
+        char shown[5] = "";
+        strncpy(shown, accessKey.c_str(), 4);
+        shown[4] = '\0';
+        _snprintf(page.keysSub, sizeof(page.keysSub), "Saved   -   access key %s...", shown);
+    }
+    else
+    {
+        _snprintf(page.keysSub, sizeof(page.keysSub),
+                  "Not set   -   needed to download. Get them at archive.org/account/s3.php");
+    }
+    page.keysSub[sizeof(page.keysSub) - 1] = '\0';
+
+    page.count = 0;
+
+    page.labels[page.count] = "Games folder";
+    page.sublabels[page.count] = page.gamesSub;
+    page.rows[page.count++] = SETTINGS_ROW_GAMES_FOLDER;
+
+    page.labels[page.count] = haveKeys ? "Change archive.org keys" : "Add archive.org keys";
+    page.sublabels[page.count] = page.keysSub;
+    page.rows[page.count++] = SETTINGS_ROW_KEYS;
+
+    // Only offered when there's something to remove.
+    if (haveKeys)
+    {
+        page.labels[page.count] = "Remove archive.org keys";
+        page.sublabels[page.count] = "Deletes the saved keys from this console";
+        page.rows[page.count++] = SETTINGS_ROW_REMOVE_KEYS;
+    }
+
+    if (page.selected > page.count - 1)
+        page.selected = page.count - 1; // the Remove row just went away
+}
+
+static SettingsOutcome RunSettingsRow(SettingsRow row, Library &lib, char *gamesPath, size_t gamesPathSize)
 {
     SettingsOutcome outcome = {false, false};
-    int selection = 0;
 
-    for (;;)
+    switch (row)
     {
-        std::string accessKey, secretKey;
-        const bool haveKeys = LoadSavedKeys(accessKey, secretKey);
-
-        char gamesSub[MAX_TEXT_LENGTH + 64];
-        if (lib.count > 0)
-            _snprintf(gamesSub, sizeof(gamesSub), "%s   -   %d game%s", gamesPath, lib.count,
-                      lib.count == 1 ? "" : "s");
-        else
-            _snprintf(gamesSub, sizeof(gamesSub), "%s   -   no games found here", gamesPath);
-        gamesSub[sizeof(gamesSub) - 1] = '\0';
-
-        // Only the start of the access key is shown - enough to tell which
-        // keys are saved. The secret key is never shown anywhere.
-        char keysSub[128];
-        if (haveKeys)
-        {
-            char shown[5] = "";
-            strncpy(shown, accessKey.c_str(), 4);
-            shown[4] = '\0';
-            _snprintf(keysSub, sizeof(keysSub), "Saved   -   access key %s...", shown);
-        }
-        else
-        {
-            _snprintf(keysSub, sizeof(keysSub),
-                      "Not set   -   needed to download. Get them at archive.org/account/s3.php");
-        }
-        keysSub[sizeof(keysSub) - 1] = '\0';
-
-        const char *labels[3];
-        const char *sublabels[3];
-        SettingsRow rows[3];
-        int rowCount = 0;
-
-        labels[rowCount] = "Games folder";
-        sublabels[rowCount] = gamesSub;
-        rows[rowCount++] = SETTINGS_ROW_GAMES_FOLDER;
-
-        labels[rowCount] = haveKeys ? "Change archive.org keys" : "Add archive.org keys";
-        sublabels[rowCount] = keysSub;
-        rows[rowCount++] = SETTINGS_ROW_KEYS;
-
-        // Only offered when there's something to remove.
-        if (haveKeys)
-        {
-            labels[rowCount] = "Remove archive.org keys";
-            sublabels[rowCount] = "Deletes the saved keys from this console";
-            rows[rowCount++] = SETTINGS_ROW_REMOVE_KEYS;
-        }
-
-        if (selection > rowCount - 1)
-            selection = rowCount - 1; // the Remove row just went away
-
-        int choice = ShowChoiceUI("SETTINGS", labels, sublabels, rowCount, selection, "Select", false);
-        if (choice < 0)
-            break; // B, back to the game list
-
-        selection = choice;
-
-        switch (rows[choice])
-        {
-        case SETTINGS_ROW_GAMES_FOLDER: ChangeGamesFolder(lib, gamesPath, gamesPathSize, outcome); break;
-        case SETTINGS_ROW_KEYS:         ChangeKeys(outcome); break;
-        case SETTINGS_ROW_REMOVE_KEYS:  RemoveKeys(outcome); break;
-        }
+    case SETTINGS_ROW_GAMES_FOLDER: ChangeGamesFolder(lib, gamesPath, gamesPathSize, outcome); break;
+    case SETTINGS_ROW_KEYS:         ChangeKeys(outcome); break;
+    case SETTINGS_ROW_REMOVE_KEYS:  RemoveKeys(outcome); break;
     }
 
     return outcome;
@@ -1774,6 +1787,130 @@ static void WaitForExit()
     }
 }
 
+// ---------------------------------------------------------------------------
+// The shell: a sidebar of pages, and one loop driving it
+// ---------------------------------------------------------------------------
+
+struct Shell
+{
+    ShellPage page;
+    bool sidebarFocused;
+
+    int librarySelected;
+    int libraryScroll; // -1 until placed - see LibraryPageView
+
+    SettingsPage settings;
+    Picker picker; // open over the library while picker.kind != PICKER_NONE
+
+    // What takes a file read or a drive query to find out, so it's refreshed
+    // only when something may have changed it - on the way back from any
+    // action - rather than on every frame.
+    bool stale;
+    bool keysSaved;
+    char freeSpace[96];
+};
+
+// Static rather than on main's stack: the picker's match arrays alone are
+// several KB.
+static Shell g_shell;
+
+// Store is a placeholder, and Queue has nothing to choose yet - on those, the
+// sidebar keeps focus.
+static bool PageTakesFocus(ShellPage page)
+{
+    return page == SHELL_PAGE_LIBRARY || page == SHELL_PAGE_SETTINGS;
+}
+
+static void RefreshShell(Shell &shell, Library &lib, const char *contentBasePath, const char *gamesPath)
+{
+    // Which titles already have DLC, and which already have a title update,
+    // on the console - so a marker appears the moment a download finishes
+    // rather than on the next launch.
+    RefreshInstalledFlags(contentBasePath, lib.games, lib.count, lib.dlcInstalled, lib.updateInstalled);
+
+    // The banner goes as soon as keys are added in Settings, and comes back
+    // if they're removed.
+    std::string savedAccess, savedSecret;
+    shell.keysSaved = LoadSavedKeys(savedAccess, savedSecret);
+
+    // Where DLC and title updates install, not where the games are - that's
+    // the drive that fills up.
+    FormatFreeSpaceStatus(contentBasePath, shell.freeSpace, sizeof(shell.freeSpace));
+
+    BuildSettingsPage(shell.settings, lib, gamesPath);
+
+    shell.stale = false;
+}
+
+// Every frame, so the blocking screens a download draws show the sidebar as
+// it was when the download started.
+static void PublishSidebar(const Shell &shell, const Library &lib)
+{
+    ShellSidebar sidebar;
+    sidebar.page = shell.page;
+    sidebar.focused = shell.sidebarFocused;
+    sidebar.libraryCount = lib.count;
+    sidebar.queueCount = 0;
+    strncpy(sidebar.storageText, shell.freeSpace, sizeof(sidebar.storageText) - 1);
+    sidebar.storageText[sizeof(sidebar.storageText) - 1] = '\0';
+
+    SetShellSidebar(sidebar);
+}
+
+static LibraryPageView MakeLibraryView(const Shell &shell, const Library &lib, const char *gamesPath)
+{
+    LibraryPageView view;
+    view.games = lib.games;
+    view.count = lib.count;
+    view.selected = shell.librarySelected;
+    view.scroll = shell.libraryScroll;
+    view.hasDlcInstalled = lib.dlcInstalled;
+    view.hasUpdateInstalled = lib.updateInstalled;
+    view.gamesPath = gamesPath;
+    view.bannerText = shell.keysSaved ? NULL : "Add your archive.org keys in Settings to start downloading.";
+    view.focused = !shell.sidebarFocused;
+    return view;
+}
+
+// One row up or down for an up/down nav, clamped to the list.
+static void StepSelection(WORD nav, int count, int &selected)
+{
+    if (nav == XINPUT_GAMEPAD_DPAD_UP && selected > 0)
+        selected--;
+    else if (nav == XINPUT_GAMEPAD_DPAD_DOWN && selected < count - 1)
+        selected++;
+}
+
+static int AddHint(UiHint *hints, int count, UiButton button, const WCHAR *label, const WCHAR *shortLabel = NULL)
+{
+    hints[count].button = button;
+    hints[count].label = label;
+    hints[count].shortLabel = shortLabel;
+    return count + 1;
+}
+
+// The auth header is built once and kept, and only rebuilt after the keys
+// change or archive.org refuses them.
+static bool EnsureAuthHeader(bool &haveAuth, char *authHeader, unsigned long long authHeaderSize,
+                             const char *gameName)
+{
+    if (haveAuth)
+        return true;
+
+    // The keyboard prompt inside here draws its own system UI, so this frame
+    // is only what sits behind it on a run where the keys are already saved
+    // and nothing is prompted at all.
+    RenderStatusFrame("SIGNING IN", "Using your saved archive.org keys", gameName);
+
+    // GetArchiveOrgAuthHeader explains its own failures on screen, so nothing
+    // more is shown here - a second message would only repeat it.
+    if (!GetArchiveOrgAuthHeader(authHeader, authHeaderSize))
+        return false;
+
+    haveAuth = true;
+    return true;
+}
+
 int main()
 {
     remove(LOG_FILE_PATH);
@@ -1847,109 +1984,305 @@ int main()
     // empty, names the folder it searched, and offers Settings.
     ScanLibrary(lib, gamesPath);
 
-    // Session loop. The game list is the app's root screen, and B steps BACK a
-    // screen everywhere else - out of the pack picker to here, out of here to
-    // the dashboard. Previously every B unwound straight out of main(), so
-    // finishing one download, or changing your mind at any point, dropped you
-    // out of the app entirely and made you relaunch to fetch a second pack.
+    // The shell loop: read the controller, act on it, draw a frame.
+    //
+    // It starts on the library, with focus in the list, since that's where
+    // almost every visit is headed. B steps back a level everywhere - out of a
+    // picker to the library, out of a page to the sidebar - and only B on the
+    // sidebar leaves the app.
+    //
+    // Anything that takes over the screen - a search, a download, the
+    // keyboard, a message - still blocks inside this loop for now and draws
+    // its own frames. When it returns, the input is resynced so the button
+    // that ended it can't also act here, and everything the action may have
+    // changed is refreshed before the next frame.
     //
     // The library is scanned once (and again only if Settings changes the
-    // folder) and the auth header is built once; both are held across the loop
-    // so returning here costs nothing.
+    // folder) and the auth header is built once; both are held across the
+    // loop, so coming back from anything costs nothing.
+    Shell &shell = g_shell;
+    shell.page = SHELL_PAGE_LIBRARY;
+    shell.sidebarFocused = false;
+    shell.librarySelected = 0;
+    shell.libraryScroll = -1;
+    shell.settings.selected = 0;
+    shell.settings.scroll = -1;
+    shell.picker.kind = PICKER_NONE;
+    shell.stale = true;
+
     char authHeader[IAS3_AUTH_HEADER_MAX];
     bool haveAuth = false;
-    int listSelection = 0;
+
+    ResyncUiInput();
 
     for (;;)
     {
-        // Which titles already have DLC, and which already have a title
-        // update, on the console. Refreshed on every pass rather than only at
-        // startup, so the markers appear the moment someone comes back from a
-        // download instead of on the next launch.
-        RefreshInstalledFlags(contentBasePath, lib.games, lib.count, lib.dlcInstalled, lib.updateInstalled);
+        if (shell.stale)
+            RefreshShell(shell, lib, contentBasePath, gamesPath);
 
-        // Checked on every pass, not once at startup, so the banner goes away
-        // as soon as keys are added in Settings - and comes back if they're
-        // removed. One small file read per return to this screen.
-        std::string savedAccess, savedSecret;
-        const bool keysSaved = LoadSavedKeys(savedAccess, savedSecret);
+        PublishSidebar(shell, lib);
 
-        // Read here, on every return to the list, so it reflects the download
-        // that just finished. Where DLC and title updates install, not where
-        // the games are - that's the drive that fills up.
-        char freeSpaceStatus[96];
-        FormatFreeSpaceStatus(contentBasePath, freeSpaceStatus, sizeof(freeSpaceStatus));
+        UiInput input = PollUiInput();
+        const WORD pressed = input.pressed;
 
-        GameListUIResult pick = ShowGameListUI(lib.games, lib.count, listSelection,
-                                               lib.dlcInstalled, lib.updateInstalled, gamesPath,
-                                               keysSaved ? NULL : "Add your archive.org keys in Settings to start downloading.",
-                                               freeSpaceStatus);
+        bool acted = false; // something ran that took over the screen
+        bool exitRequested = false;
 
-        if (pick.action == GAMELIST_EXIT)
+        if (shell.sidebarFocused)
+        {
+            if (input.nav == XINPUT_GAMEPAD_DPAD_UP && shell.page > 0)
+                shell.page = (ShellPage)(shell.page - 1);
+            else if (input.nav == XINPUT_GAMEPAD_DPAD_DOWN && shell.page < SHELL_PAGE_COUNT - 1)
+                shell.page = (ShellPage)(shell.page + 1);
+            else if ((input.nav == XINPUT_GAMEPAD_DPAD_RIGHT || (pressed & XINPUT_GAMEPAD_A)) &&
+                     PageTakesFocus(shell.page))
+                shell.sidebarFocused = false;
+            else if (pressed & XINPUT_GAMEPAD_B)
+                exitRequested = true;
+        }
+        else if (shell.page == SHELL_PAGE_LIBRARY && shell.picker.kind != PICKER_NONE)
+        {
+            Picker &picker = shell.picker;
+            StepSelection(input.nav, picker.count, picker.selected);
+
+            if (pressed & XINPUT_GAMEPAD_A)
+            {
+                const InstalledGame &game = lib.games[picker.gameIndex];
+
+                // False means archive.org refused the keys - every other row
+                // would be refused too, so back to the library, where the fix
+                // (Settings) is a step away.
+                bool keepOpen = (picker.kind == PICKER_DLC)
+                                    ? DownloadOnePack(picker.packs[picker.selected], contentBasePath, authHeader)
+                                    : InstallOneTitleUpdate(picker.updates[picker.selected], game,
+                                                            contentBasePath, authHeader);
+                if (!keepOpen)
+                    picker.kind = PICKER_NONE;
+
+                // Refused keys: rebuild the header from the file next time,
+                // so keys fixed outside Settings - by replacing
+                // ArchiveOrgKeys.txt over FTP - are picked up without
+                // restarting the app.
+                if (ArchiveOrgKeysRejected())
+                    haveAuth = false;
+
+                acted = true;
+            }
+            else if (pressed & XINPUT_GAMEPAD_B)
+            {
+                picker.kind = PICKER_NONE;
+            }
+        }
+        else if (shell.page == SHELL_PAGE_LIBRARY)
+        {
+            StepSelection(input.nav, lib.count, shell.librarySelected);
+
+            // Shoulder buttons jump a full page - the fast way through a large
+            // library even with auto-repeat. Skipped for an empty library,
+            // where the upper clamp would land on -1.
+            if (lib.count > 0 && (pressed & (XINPUT_GAMEPAD_LEFT_SHOULDER | XINPUT_GAMEPAD_RIGHT_SHOULDER)))
+            {
+                int pageRows = LibraryPageVisibleRows(MakeLibraryView(shell, lib, gamesPath));
+                if (pressed & XINPUT_GAMEPAD_LEFT_SHOULDER)
+                    shell.librarySelected -= pageRows;
+                if (pressed & XINPUT_GAMEPAD_RIGHT_SHOULDER)
+                    shell.librarySelected += pageRows;
+                if (shell.librarySelected > lib.count - 1) shell.librarySelected = lib.count - 1;
+                if (shell.librarySelected < 0) shell.librarySelected = 0;
+            }
+
+            if (input.nav == XINPUT_GAMEPAD_DPAD_LEFT || (pressed & XINPUT_GAMEPAD_B))
+            {
+                shell.sidebarFocused = true;
+            }
+            else if ((pressed & (XINPUT_GAMEPAD_A | XINPUT_GAMEPAD_X)) && lib.count > 0)
+            {
+                const InstalledGame &chosen = lib.games[shell.librarySelected];
+                dprintf("Selected: %s (Title ID %08lX)\n", chosen.displayName, chosen.titleId);
+
+                if (EnsureAuthHeader(haveAuth, authHeader, sizeof(authHeader), chosen.displayName))
+                {
+                    bool found = (pressed & XINPUT_GAMEPAD_A) ? FindDlcForPicker(chosen, shell.picker)
+                                                              : FindTitleUpdatesForPicker(chosen, shell.picker);
+                    if (found)
+                    {
+                        shell.picker.gameIndex = shell.librarySelected;
+                        shell.picker.selected = 0;
+                        shell.picker.scroll = -1;
+                    }
+                }
+
+                acted = true;
+            }
+            else if (pressed & XINPUT_GAMEPAD_Y)
+            {
+                // A shortcut, for the keys banner and the empty library, which
+                // both send you to Settings with a Y badge.
+                shell.page = SHELL_PAGE_SETTINGS;
+            }
+            else if (pressed & XINPUT_GAMEPAD_START)
+            {
+                // No archive.org keys needed: nothing here touches the network.
+                InstallDiscAsGame(lib, gamesPath, shell.librarySelected);
+                shell.libraryScroll = -1; // it may have moved to the game just installed
+                acted = true;
+            }
+        }
+        else if (shell.page == SHELL_PAGE_SETTINGS)
+        {
+            SettingsPage &settings = shell.settings;
+            StepSelection(input.nav, settings.count, settings.selected);
+
+            if (input.nav == XINPUT_GAMEPAD_DPAD_LEFT || (pressed & XINPUT_GAMEPAD_B))
+            {
+                shell.sidebarFocused = true;
+            }
+            else if ((pressed & XINPUT_GAMEPAD_A) && settings.count > 0)
+            {
+                SettingsOutcome changed = RunSettingsRow(settings.rows[settings.selected],
+                                                         lib, gamesPath, sizeof(gamesPath));
+
+                // A different library makes the old row number meaningless.
+                if (changed.libraryChanged)
+                {
+                    shell.librarySelected = 0;
+                    shell.libraryScroll = -1;
+                }
+
+                // The cached header was built from the old keys - or from
+                // keys that no longer exist.
+                if (changed.keysChanged)
+                    haveAuth = false;
+
+                acted = true;
+            }
+        }
+        else
+        {
+            // A page that never takes focus. Nothing should land here, but if
+            // it does, hand focus back rather than leave the pad doing nothing.
+            shell.sidebarFocused = true;
+        }
+
+        if (exitRequested)
         {
             dprintf("Exiting\n");
-            break; // B on the root screen is the way out
+            break;
         }
 
-        if (pick.action == GAMELIST_SETTINGS)
+        if (acted)
         {
-            if (pick.selectedIndex >= 0)
-                listSelection = pick.selectedIndex;
-
-            SettingsOutcome changed = RunSettingsUI(lib, gamesPath, sizeof(gamesPath));
-
-            // A different library makes the old row number meaningless.
-            if (changed.libraryChanged)
-                listSelection = 0;
-
-            // The cached header was built from the old keys - or from keys
-            // that no longer exist.
-            if (changed.keysChanged)
-                haveAuth = false;
-
-            continue;
+            ResyncUiInput();
+            shell.stale = true;
+            continue; // refresh first, then draw
         }
 
-        if (pick.action == GAMELIST_INSTALL_DISC)
+        // --- Draw ---
+        UiHint hints[8];
+        int hintCount = 0;
+
+        if (shell.sidebarFocused)
         {
-            if (pick.selectedIndex >= 0)
-                listSelection = pick.selectedIndex;
-
-            // No archive.org keys needed: nothing here touches the network.
-            InstallDiscAsGame(lib, gamesPath, listSelection);
-            continue;
+            if (PageTakesFocus(shell.page))
+                hintCount = AddHint(hints, hintCount, UI_BUTTON_A, L"Select");
+            hintCount = AddHint(hints, hintCount, UI_BUTTON_B, L"Exit");
         }
 
-        listSelection = pick.selectedIndex; // return them to the same row afterwards
-
-        const InstalledGame &chosen = lib.games[pick.selectedIndex];
-        dprintf("Selected: %s (Title ID %08lX)\n", chosen.displayName, chosen.titleId);
-
-        if (!haveAuth)
+        switch (shell.page)
         {
-            // The keyboard prompt inside here draws its own system UI, so this
-            // frame is only what sits behind it on a run where the keys are
-            // already cached and nothing is prompted at all.
-            RenderStatusFrame("SIGNING IN", "Using your saved archive.org keys", chosen.displayName);
+        case SHELL_PAGE_LIBRARY:
+            if (shell.picker.kind != PICKER_NONE)
+            {
+                hintCount = AddHint(hints, hintCount, UI_BUTTON_A, L"Download");
+                hintCount = AddHint(hints, hintCount, UI_BUTTON_B, L"Back");
 
-            // GetArchiveOrgAuthHeader explains its own failures on screen, so
-            // nothing more is shown here - a second message would only repeat it.
-            if (!GetArchiveOrgAuthHeader(authHeader, sizeof(authHeader)))
-                continue; // back to the list, so they can fix it and retry rather than being thrown out
+                ListPageView view;
+                view.heading = (shell.picker.kind == PICKER_DLC) ? "CHOOSE A DLC PACK" : "CHOOSE A TITLE UPDATE";
+                view.labels = shell.picker.labels;
+                view.sublabels = shell.picker.sublabels;
+                view.count = shell.picker.count;
+                view.selected = shell.picker.selected;
+                view.scroll = shell.picker.scroll;
+                view.focused = true;
+                view.showCounter = true;
 
-            haveAuth = true;
+                RenderListFrame(view, hints, hintCount);
+
+                shell.picker.selected = view.selected;
+                shell.picker.scroll = view.scroll;
+            }
+            else
+            {
+                LibraryPageView view = MakeLibraryView(shell, lib, gamesPath);
+
+                if (!shell.sidebarFocused)
+                {
+                    // The console's own A, X, B order, with START - installing
+                    // a disc, which works on an empty library too - ahead of
+                    // them. The row actions drop out for an empty library.
+                    hintCount = AddHint(hints, hintCount, UI_BUTTON_START, L"Install disc", L"Disc");
+                    if (lib.count > 0)
+                    {
+                        hintCount = AddHint(hints, hintCount, UI_BUTTON_A, L"Search for DLC", L"DLC");
+                        hintCount = AddHint(hints, hintCount, UI_BUTTON_X, L"Search for title updates", L"Updates");
+                    }
+                    hintCount = AddHint(hints, hintCount, UI_BUTTON_B, L"Back");
+                    if (lib.count > LibraryPageVisibleRows(view))
+                        hintCount = AddHint(hints, hintCount, UI_BUTTON_LBRB, L"Page");
+                }
+
+                RenderLibraryFrame(view, hints, hintCount);
+
+                shell.librarySelected = view.selected;
+                shell.libraryScroll = view.scroll;
+            }
+            break;
+
+        case SHELL_PAGE_STORE:
+            RenderPlaceholderFrame("STORE", "Coming soon",
+                                   "Installing games straight from archive.org is on the way.",
+                                   hints, hintCount);
+            break;
+
+        case SHELL_PAGE_QUEUE:
+            RenderPlaceholderFrame("QUEUE", "Nothing is downloading",
+                                   "DLC and title updates you choose will show here while they download.",
+                                   hints, hintCount);
+            break;
+
+        case SHELL_PAGE_SETTINGS:
+        {
+            if (!shell.sidebarFocused)
+            {
+                hintCount = AddHint(hints, hintCount, UI_BUTTON_A, L"Select");
+                hintCount = AddHint(hints, hintCount, UI_BUTTON_B, L"Back");
+            }
+
+            ListPageView view;
+            view.heading = "SETTINGS";
+            view.labels = shell.settings.labels;
+            view.sublabels = shell.settings.sublabels;
+            view.count = shell.settings.count;
+            view.selected = shell.settings.selected;
+            view.scroll = shell.settings.scroll;
+            view.focused = !shell.sidebarFocused;
+            view.showCounter = false;
+
+            RenderListFrame(view, hints, hintCount);
+
+            shell.settings.selected = view.selected;
+            shell.settings.scroll = view.scroll;
+            break;
         }
 
-        if (pick.action == GAMELIST_TITLE_UPDATES)
-            InstallTitleUpdatesForGame(chosen, contentBasePath, authHeader);
-        else
-            DownloadDlcForGame(chosen, contentBasePath, authHeader);
+        default:
+            break;
+        }
 
-        // Refused keys: rebuild the header from the file next time, so keys
-        // fixed outside Settings - by replacing ArchiveOrgKeys.txt over FTP -
-        // are picked up without restarting the app.
-        if (ArchiveOrgKeysRejected())
-            haveAuth = false;
+        // Device is created with D3DPRESENT_INTERVAL_IMMEDIATE (no vsync), so
+        // pace the loop by hand instead of hammering Present() as fast as the
+        // CPU can spin. Not a real vsync wait - just ~60fps.
+        Sleep(16);
     }
 
     free(lib.games);

@@ -39,7 +39,7 @@ A standalone native `.xex` was the only remaining option with full control over 
 ## How it works
 
 1. Walks `Content\0000000000000000\{TitleID}\{ContentType}\*` and reads each installed title's Title ID / display name / box-art icon straight out of its STFS package header (`StfsParser.cpp`) — entirely offline.
-2. Shows that list as an icon grid (`GameListUI.cpp`) — D-pad or left stick to move, A for DLC, X for title updates, Y for Settings, B to go back.
+2. Shows that list as the Your Library page (`GameListUI.cpp`), beside a sidebar of pages — Your Library, Store, Queue, Settings. D-pad or left stick to move, left to reach the sidebar; on the library, A for DLC, X for title updates, Start to install a disc, Y as a shortcut to Settings. B steps back a level, and B on the sidebar exits.
 3. Sends your IAS3 key pair as an `Authorization: LOW <access>:<secret>` header (`ArchiveOrgDLC.cpp`) and looks up the chosen game against the relevant item's public metadata — `msx360gcdlc` for DLC, `microsoft_xbox360_title-updates` for updates. Name-matching is soft, so a game with several separate DLC packs — e.g. Call of Duty 2's Bonus/Invasion/Skirmish Packs — picks up all of them.
 4. For each matched archive, reads its internal file table via a handful of small `Range` requests. RAR interleaves headers with each file's data, so that walks the chain one entry at a time; ZIP keeps a central directory at the tail, so one request covers it.
 5. Downloads each real file through archive.org's `/download/{item}/{archive}/{urlencoded/internal/path}` URL form, which serves the member **already extracted server-side** — no RAR or ZIP decompression is implemented or needed on our end.

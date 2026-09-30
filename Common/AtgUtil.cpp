@@ -670,8 +670,14 @@ VOID RenderBackground( DWORD dwTopColor, DWORD dwBottomColor )
     g_pd3dDevice->GetRenderState( D3DRS_ZFUNC, &dwZFunc );
 
     // Set state
-    g_pd3dDevice->SetRenderState( D3DRS_ZENABLE, TRUE );
-    g_pd3dDevice->SetRenderState( D3DRS_ZWRITEENABLE, TRUE );
+    //
+    // Omni360: depth off. This used to enable the depth test and write, with
+    // ZFUNC ALWAYS - so all it ever did was write the far plane into the depth
+    // buffer, which nothing in this app reads. At 1080p the device has no
+    // depth buffer at all (see Console::Create), and enabling depth against a
+    // missing one is not something to leave to chance on hardware.
+    g_pd3dDevice->SetRenderState( D3DRS_ZENABLE, FALSE );
+    g_pd3dDevice->SetRenderState( D3DRS_ZWRITEENABLE, FALSE );
     g_pd3dDevice->SetRenderState( D3DRS_ZFUNC, D3DCMP_ALWAYS );
     g_pd3dDevice->SetRenderState( D3DRS_ALPHABLENDENABLE, FALSE );
     g_pd3dDevice->SetRenderState( D3DRS_ALPHATESTENABLE, FALSE );

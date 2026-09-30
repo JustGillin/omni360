@@ -99,8 +99,34 @@ HRESULT Console::Create( LPCSTR strFontFileName, D3DCOLOR colBackColor,
 
     BOOL bEnable720p = VideoMode.dwDisplayWidth >= 1280;
 
-    m_d3dpp.BackBufferWidth = bEnable720p ? SCREEN_SIZE_X_720p : SCREEN_SIZE_X_DEFAULT;
-    m_d3dpp.BackBufferHeight = bEnable720p ? SCREEN_SIZE_Y_720p : SCREEN_SIZE_Y_DEFAULT;
+    // Omni360: render at 1080p when the console outputs it, rather than at
+    // 720p for the hardware scaler to stretch - text and edges stay sharp
+    // instead of being scaled up 1.5x. (VGA modes such as 1680x1050 stay on
+    // the 720p path; only a real 1080-line output takes this.)
+    //
+    // Only possible with NO depth buffer. The back buffer lives in the GPU's
+    // 10MB of EDRAM: 1920x1080 colour is ~8.3MB, and a D24S8 depth buffer
+    // beside it would take the pair to ~16.6MB. Nothing in this app draws
+    // with depth - the UI and fonts all turn the depth test off, and see
+    // RenderBackground in AtgUtil.cpp for the one thing that didn't.
+    //
+    // Set to FALSE to go back to 720p everywhere if 1080p ever misbehaves.
+    static const BOOL ALLOW_1080P = TRUE;
+    BOOL bEnable1080p = ALLOW_1080P &&
+                        VideoMode.dwDisplayWidth >= SCREEN_SIZE_X_1080p &&
+                        VideoMode.dwDisplayHeight >= SCREEN_SIZE_Y_1080p;
+
+    if( bEnable1080p )
+    {
+        m_d3dpp.BackBufferWidth = SCREEN_SIZE_X_1080p;
+        m_d3dpp.BackBufferHeight = SCREEN_SIZE_Y_1080p;
+        m_d3dpp.EnableAutoDepthStencil = FALSE;
+    }
+    else
+    {
+        m_d3dpp.BackBufferWidth = bEnable720p ? SCREEN_SIZE_X_720p : SCREEN_SIZE_X_DEFAULT;
+        m_d3dpp.BackBufferHeight = bEnable720p ? SCREEN_SIZE_Y_720p : SCREEN_SIZE_Y_DEFAULT;
+    }
 
     // Calculate the safe area
     UINT uiSafeAreaPct = bEnable720p ? SAFE_AREA_PCT_HDTV : SAFE_AREA_PCT_4x3;

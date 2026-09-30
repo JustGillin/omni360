@@ -21,9 +21,10 @@ a plain textured quad needs its own compiled vertex/pixel shader pair.
 
 Confirmed rendering correctly on real hardware (icon grid, selection
 highlight, D-pad navigation, per-row text) - the staged diagnostic render
-scaffolding that proved it out has since been removed. The render loop in
-ShowGameListUI is a genuine per-frame Resume/Clear/draw/Present/Suspend loop
-hand-paced to ~60fps, so per-frame animation is viable here.
+scaffolding that proved it out has since been removed. main.cpp runs one
+loop that draws a frame per pass through the Render*Frame calls here -
+Resume/Clear/draw/Present/Suspend, hand-paced to ~60fps - so per-frame
+animation is viable.
 */
 
 #include "stdafx.h"
@@ -557,22 +558,36 @@ static void Utf8ToWide(const char *in, WCHAR *out, int outSize)
 #define COL_NOTICE_EDGE    0xFFF0BE12 // solid strip down the left edge
 #define COL_NOTICE_TEXT    0xFFF6E9C0 // warm off-white, legible over the amber
 
+// The sidebar: a flat panel, darker than the page behind it, with a hairline
+// down its right edge.
+#define COL_SIDEBAR        0xD9070B08
+#define COL_SIDEBAR_EDGE   0x14FFFFFF
+#define COL_SIDEBAR_RULE   0x1FFFFFFF // the divider between the two groups of pages
+
+// The selected row of whichever side does NOT have focus: still marked, so
+// you can see where you'll land, but without the green bar - that is kept for
+// the one place A would act right now.
+#define COL_PANEL_SEL_IDLE 0x2EFFFFFF
+
 // ---------------------------------------------------------------------------
 // Layout metrics
 // ---------------------------------------------------------------------------
 
 // Everything below is derived from the real back buffer size rather than
-// hardcoded, because it genuinely varies: AtgConsole creates a 1280x720 back
-// buffer on an HD display but 640x480 otherwise (AtgConsole.cpp's
-// bEnable720p check). The previous layout's fixed 900px-wide rows and 80px
+// hardcoded, because it genuinely varies: AtgConsole creates 1920x1080 when
+// the console outputs 1080p, 1280x720 on other HD modes and 640x480 otherwise
+// (see Console::Create). The previous layout's fixed 900px-wide rows and 80px
 // margins silently ran off the right edge of a 640-wide buffer.
 struct UiMetrics
 {
     float screenW, screenH;
-    float scale;        // 1.0 at 720p, ~0.67 at 480p - multiplies spacing and layout
+    float scale;        // 1.0 at 720p, 1.5 at 1080p, ~0.67 at 480p - multiplies spacing and layout
     float textScale;    // scale, corrected for the loaded font's strike height (see ComputeUiMetrics)
-    float contentX;     // title-safe left edge
-    float contentW;     // title-safe width
+    float sidebarW;     // the sidebar panel, from the left edge of the screen
+    float navTextX;     // title-safe left edge, where the sidebar's text starts
+    float navTextRight; // where the sidebar's right-aligned counts end
+    float contentX;     // left edge of the page, right of the sidebar
+    float contentW;     // page width, out to the title-safe right edge
     float headerTextY;
     float headerRuleY;
     float listY;
@@ -586,18 +601,19 @@ static UiMetrics g_M;
 
 static bool ComputeUiMetrics()
 {
-    // Mirrors AtgConsole::Create()'s own video-mode check exactly, rather
-    // than querying the device, so this cannot disagree with the back buffer
-    // that was actually created.
-    XVIDEO_MODE VideoMode;
-    ZeroMemory(&VideoMode, sizeof(VideoMode));
-    XGetVideoMode(&VideoMode);
+    // Read from the parameters the device was actually created with. This
+    // used to repeat Console::Create's video-mode check instead, which kept
+    // the two in step only as long as nobody changed one of them - and adding
+    // 1080p changed it.
+    const D3DPRESENT_PARAMETERS *pParams = Console::GetPresentParams();
+    if (pParams == NULL || pParams->BackBufferHeight == 0)
+        return false;
 
-    bool is720p = (VideoMode.dwDisplayWidth >= 1280);
-
-    g_M.screenW = is720p ? 1280.0f : 640.0f;
-    g_M.screenH = is720p ? 720.0f : 480.0f;
+    g_M.screenW = (float)pParams->BackBufferWidth;
+    g_M.screenH = (float)pParams->BackBufferHeight;
     g_M.scale = g_M.screenH / 720.0f;
+
+    const bool isHD = (pParams->BackBufferWidth >= 1280);
 
     // Every type size in this file is a multiple of g_M.textScale, and those
     // multipliers were chosen against a 22px design height.
@@ -617,12 +633,20 @@ static bool ComputeUiMetrics()
 
     // Title-safe inset, matching AtgConsole's percentages (90% of the screen
     // on HD, 85% on 4:3) - a real TV can and does crop the rest.
-    float safePct = is720p ? 0.90f : 0.85f;
+    float safePct = isHD ? 0.90f : 0.85f;
     float safeX = g_M.screenW * (1.0f - safePct) * 0.5f;
     float safeY = g_M.screenH * (1.0f - safePct) * 0.5f;
 
-    g_M.contentX = safeX;
-    g_M.contentW = g_M.screenW - safeX * 2.0f;
+    // The sidebar's panel runs from the very edge of the screen, but its text
+    // starts at the title-safe inset like everything else. The page takes the
+    // rest - which is why every screen, blocking ones included, lays itself
+    // out from contentX/contentW: they all moved right together.
+    g_M.sidebarW = 240.0f * g_M.scale;
+    g_M.navTextX = safeX;
+    g_M.navTextRight = g_M.sidebarW - 18.0f * g_M.scale;
+
+    g_M.contentX = g_M.sidebarW + 32.0f * g_M.scale;
+    g_M.contentW = g_M.screenW - safeX - g_M.contentX;
 
     g_M.headerTextY = safeY;
     g_M.headerRuleY = safeY + 40.0f * g_M.scale;
@@ -778,6 +802,199 @@ static void DrawButtonHintText(const ButtonHint *hints, int count, float centerY
 static void DrawBackground()
 {
     DrawGradientRect(0.0f, 0.0f, g_M.screenW, g_M.screenH, COL_BG_TOP, COL_BG_BOTTOM, true);
+}
+
+// ---------------------------------------------------------------------------
+// Sidebar
+// ---------------------------------------------------------------------------
+//
+// Drawn by every frame, in the same two passes as the rest of it - quads with
+// the frame's quads, text inside the frame's one Font Begin/End. Only one
+// Begin/End per frame has ever been tried on hardware, so the sidebar fits
+// into that rather than bringing a batch of its own.
+
+static ShellSidebar g_sidebar = {SHELL_PAGE_LIBRARY, false, 0, 0, ""};
+
+void SetShellSidebar(const ShellSidebar &sidebar)
+{
+    g_sidebar = sidebar;
+    g_sidebar.storageText[sizeof(g_sidebar.storageText) - 1] = '\0';
+}
+
+static const WCHAR *const kShellPageNames[SHELL_PAGE_COUNT] =
+{
+    L"Your Library",
+    L"Store",
+    L"Queue",
+    L"Settings"
+};
+
+static float NavItemHeight()
+{
+    return 52.0f * g_M.scale;
+}
+
+// Where each page's row starts. The divider sits in the gap before Queue,
+// splitting the things you browse from the things you manage.
+static float NavItemY(int page)
+{
+    float y = g_M.listY + page * NavItemHeight();
+    if (page >= SHELL_PAGE_QUEUE)
+        y += 18.0f * g_M.scale;
+    return y;
+}
+
+// focused is passed separately from g_sidebar.focused so the blocking screens
+// can draw it unfocused without changing what main.cpp set.
+static void DrawSidebarQuads(bool focused)
+{
+    DrawRect(0.0f, 0.0f, g_M.sidebarW, g_M.screenH, COL_SIDEBAR);
+    DrawRect(g_M.sidebarW - 1.0f, 0.0f, 1.0f, g_M.screenH, COL_SIDEBAR_EDGE);
+
+    float ruleY = NavItemY(SHELL_PAGE_QUEUE) - 9.0f * g_M.scale;
+    DrawRect(g_M.navTextX, ruleY, g_M.navTextRight - g_M.navTextX, 1.0f, COL_SIDEBAR_RULE);
+
+    const float itemY = NavItemY(g_sidebar.page);
+    const float itemH = NavItemHeight() - 4.0f * g_M.scale;
+    const float barW = g_M.sidebarW - 1.0f;
+
+    if (focused)
+    {
+        float pulse = SelectionPulse();
+        DrawGradientRect(0.0f, itemY, barW, itemH,
+                         ScaleColorBrightness(COL_PANEL_SEL_A, pulse),
+                         ScaleColorBrightness(COL_PANEL_SEL_B, pulse), true);
+    }
+    else
+    {
+        // The page you're on, while you're working inside it: a quiet plate,
+        // with an accent strip against the page it names.
+        DrawRect(0.0f, itemY, barW, itemH, COL_PANEL_SEL_IDLE);
+        DrawRect(barW - 4.0f * g_M.scale, itemY, 4.0f * g_M.scale, itemH, COL_ACCENT);
+    }
+}
+
+static void DrawSidebarText(bool focused)
+{
+    g_UiFont.SetScaleFactors(1.25f * g_M.textScale, 1.25f * g_M.textScale);
+    g_UiFont.DrawText(g_M.navTextX, g_M.headerTextY, COL_ACCENT, L"OMNI360");
+
+    const float nameScale = 1.0f * g_M.textScale;
+    const float itemH = NavItemHeight() - 4.0f * g_M.scale;
+
+    for (int page = 0; page < SHELL_PAGE_COUNT; ++page)
+    {
+        bool isSelected = (page == g_sidebar.page);
+        float centerY = NavItemY(page) + itemH * 0.5f;
+
+        D3DCOLOR color = COL_TEXT_SECONDARY;
+        if (isSelected)
+            color = focused ? COL_SEL_TEXT : COL_TEXT_PRIMARY;
+
+        int count = 0;
+        if (page == SHELL_PAGE_LIBRARY) count = g_sidebar.libraryCount;
+        if (page == SHELL_PAGE_QUEUE) count = g_sidebar.queueCount;
+
+        // The count goes first so the name can be truncated short of it.
+        float nameMaxW = g_M.navTextRight - g_M.navTextX;
+
+        g_UiFont.SetScaleFactors(0.85f * g_M.textScale, 0.85f * g_M.textScale);
+        if (count > 0)
+        {
+            char countText[16];
+            _snprintf(countText, sizeof(countText), "%d", count);
+            countText[sizeof(countText) - 1] = '\0';
+
+            WCHAR wideCount[16];
+            Utf8ToWide(countText, wideCount, 16);
+
+            float countW = g_UiFont.GetTextWidth(wideCount);
+            g_UiFont.DrawText(g_M.navTextRight, TextTopForCenter(centerY, 0.85f * g_M.textScale),
+                              isSelected && focused ? COL_SEL_SUBTEXT : COL_TEXT_DIM,
+                              wideCount, ATGFONT_RIGHT);
+            nameMaxW -= countW + 10.0f * g_M.scale;
+        }
+
+        g_UiFont.SetScaleFactors(nameScale, nameScale);
+        g_UiFont.DrawText(g_M.navTextX, TextTopForCenter(centerY, nameScale), color,
+                          kShellPageNames[page], ATGFONT_TRUNCATED, nameMaxW);
+    }
+
+    // Free space on the drive content installs to, at the foot of the sidebar
+    // - this used to sit at the right end of the library's footer.
+    if (g_sidebar.storageText[0] != '\0')
+    {
+        WCHAR wideStorage[96];
+        Utf8ToWide(g_sidebar.storageText, wideStorage, 96);
+
+        const float valueScale = HINT_LABEL_SCALE * g_M.textScale;
+        const float valueY = TextTopForCenter(g_M.footerY + 9.0f * g_M.scale, valueScale);
+
+        g_UiFont.SetScaleFactors(0.85f * g_M.textScale, 0.85f * g_M.textScale);
+        g_UiFont.DrawText(g_M.navTextX, valueY - 24.0f * g_M.scale, COL_TEXT_SECONDARY, L"Storage");
+
+        g_UiFont.SetScaleFactors(valueScale, valueScale);
+        g_UiFont.DrawText(g_M.navTextX, valueY, COL_TEXT_DIM, wideStorage,
+                          ATGFONT_TRUNCATED, g_M.navTextRight - g_M.navTextX);
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Footer, from main.cpp's hints
+// ---------------------------------------------------------------------------
+
+#define MAX_FOOTER_HINTS 8
+
+// UiButton is the public face of BUTTON_SPRITE_*, which lives in the generated
+// ButtonAtlas.h alongside the atlas's pixel data and so can't be included
+// anywhere else. The two lists are in the same order.
+static int SpriteForButton(UiButton button)
+{
+    switch (button)
+    {
+    case UI_BUTTON_A:     return BUTTON_SPRITE_A;
+    case UI_BUTTON_B:     return BUTTON_SPRITE_B;
+    case UI_BUTTON_X:     return BUTTON_SPRITE_X;
+    case UI_BUTTON_Y:     return BUTTON_SPRITE_Y;
+    case UI_BUTTON_LBRB:  return BUTTON_SPRITE_LBRB;
+    case UI_BUTTON_START: return BUTTON_SPRITE_START;
+    }
+    return BUTTON_SPRITE_A;
+}
+
+// Fills out[] from hints and lays it out along the page's footer. Tries the
+// full labels first and falls back to the short ones, all together, if they
+// run past the page - mixing the two would read as inconsistent. Returns the
+// number of hints laid out.
+static int LayoutFooter(const UiHint *hints, int hintCount, ButtonHint *out)
+{
+    if (hints == NULL || hintCount <= 0)
+        return 0;
+    if (hintCount > MAX_FOOTER_HINTS)
+        hintCount = MAX_FOOTER_HINTS;
+
+    for (int i = 0; i < hintCount; ++i)
+    {
+        out[i].sprite = SpriteForButton(hints[i].button);
+        out[i].label = hints[i].label;
+    }
+
+    if (LayoutButtonHints(out, hintCount, g_M.contentX) <= g_M.contentW)
+        return hintCount;
+
+    for (int i = 0; i < hintCount; ++i)
+    {
+        if (hints[i].shortLabel != NULL)
+            out[i].label = hints[i].shortLabel;
+    }
+
+    LayoutButtonHints(out, hintCount, g_M.contentX);
+    return hintCount;
+}
+
+static float FooterCenterY()
+{
+    return g_M.footerY + 9.0f * g_M.scale;
 }
 
 bool InitGameListUI()
@@ -1072,520 +1289,360 @@ static void EnsureIconsLoaded(const InstalledGame *games, int gameCount)
     dprintf("Cover art: %d from package metadata, %d placeholder\n", fromStfs, placeholders);
 }
 
-GameListUIResult ShowGameListUI(const InstalledGame *games, int gameCount, int initialSelection,
-                                const bool *hasDlcInstalled, const bool *hasUpdateInstalled,
-                                const char *gamesPath, const char *bannerText,
-                                const char *footerStatus)
+// Clamps the selection into the list and moves scroll just far enough to keep
+// it on screen. scroll < 0 means "not placed yet" and centres the selection,
+// so a page opened on row 20 doesn't start scrolled to the top and snap.
+static void KeepSelectionVisible(int count, int visibleRows, int &selected, int &scroll)
 {
-    GameListUIResult result = {GAMELIST_EXIT, -1};
+    // Upper clamp before lower: with an empty list the upper bound is -1, and
+    // the row has to end up at 0, not -1.
+    if (selected > count - 1) selected = count - 1;
+    if (selected < 0) selected = 0;
 
+    if (scroll < 0) scroll = selected - visibleRows / 2;
+    if (selected < scroll) scroll = selected;
+    if (selected >= scroll + visibleRows) scroll = selected - visibleRows + 1;
+    if (scroll > count - visibleRows) scroll = count - visibleRows;
+    if (scroll < 0) scroll = 0;
+}
+
+// The selected row's plate: the pulsing green bar where A would act right now,
+// a quiet plate where the page doesn't have focus.
+static void DrawRowPlate(float x, float y, float w, float h, bool isSelected, bool focused)
+{
+    if (isSelected && focused)
+    {
+        // Vertical, not horizontal - a top-down gradient reads as a lit
+        // surface, where a left-to-right falloff just reads as a highlight
+        // running out of steam.
+        float pulse = SelectionPulse();
+        DrawGradientRect(x, y, w, h,
+                         ScaleColorBrightness(COL_PANEL_SEL_A, pulse),
+                         ScaleColorBrightness(COL_PANEL_SEL_B, pulse), true);
+    }
+    else
+    {
+        DrawRect(x, y, w, h, isSelected ? COL_PANEL_SEL_IDLE : COL_PANEL);
+    }
+}
+
+// Scrollbar - only drawn when something is off-screen. Without it there's no
+// indication the list extends past the visible rows, let alone how far.
+static void DrawScrollbar(float trackY, float trackH, int count, int visibleRows, int scroll)
+{
+    const float scrollW = 5.0f * g_M.scale;
+    const float trackX = g_M.contentX + g_M.contentW - scrollW;
+
+    float thumbH = trackH * ((float)visibleRows / (float)count);
+    float minThumb = 24.0f * g_M.scale;
+    if (thumbH < minThumb) thumbH = minThumb; // stays visible on a very large list
+
+    // Positioned by scroll range, not item count, so the thumb lands flush at
+    // the bottom on the last page.
+    float thumbY = trackY + (trackH - thumbH) * ((float)scroll / (float)(count - visibleRows));
+
+    DrawRect(trackX, trackY, scrollW, trackH, COL_SCROLL_TRACK);
+    DrawGradientRect(trackX, thumbY, scrollW, thumbH, COL_SCROLL_THUMB, COL_ACCENT_DIM, true);
+}
+
+// "3 / 27", right-aligned in the header. Fixed "%d" specifiers into a
+// generously sized buffer, explicitly null-terminated: _snprintf on this
+// toolchain does not null-terminate on truncation, and its dynamic-precision
+// specifiers have caused a real crash in this project before.
+static void DrawPositionCounter(int selected, int count)
+{
+    char counter[64];
+    _snprintf(counter, sizeof(counter), "%d / %d", selected + 1, count);
+    counter[sizeof(counter) - 1] = '\0';
+
+    WCHAR wideCounter[64];
+    Utf8ToWide(counter, wideCounter, 64);
+
+    g_UiFont.SetScaleFactors(0.9f * g_M.textScale, 0.9f * g_M.textScale);
+    g_UiFont.DrawText(g_M.contentX + g_M.contentW, g_M.headerTextY + 6.0f * g_M.scale,
+                      COL_TEXT_DIM, wideCounter, ATGFONT_RIGHT);
+}
+
+// Resume/Clear and Present/Suspend around every frame. Console::Render()
+// (Common/AtgConsole.cpp) always pairs its Present() with Resume() before and
+// Suspend() after - "Take away GPU control so that the Guide can be rendered".
+// Matching that exactly, per frame, is what fixed a GPU deadlock on hardware;
+// an attempt to bracket a whole session instead made things worse.
+static void BeginFrame()
+{
+    g_pd3dDevice->Resume();
+    g_pd3dDevice->Clear(0, NULL, D3DCLEAR_TARGET, COL_BG_BOTTOM, 1.0f, 0);
+}
+
+static void EndFrame()
+{
+    g_pd3dDevice->Present(NULL, NULL, NULL, NULL);
+    g_pd3dDevice->Suspend();
+}
+
+// ---------------------------------------------------------------------------
+// Library page
+// ---------------------------------------------------------------------------
+
+// The banner takes the top of the list area, and the list starts below it -
+// so the row count is worked out here rather than taken from g_M, which
+// assumes the list has the whole space to itself.
+struct LibraryLayout
+{
+    bool showBanner;
+    float bannerH;
+    float listY;
+    int visibleRows;
+};
+
+static LibraryLayout ComputeLibraryLayout(const LibraryPageView &view)
+{
+    LibraryLayout layout;
+    layout.showBanner = (view.bannerText != NULL && view.bannerText[0] != '\0');
+    layout.bannerH = 44.0f * g_M.scale;
+
+    const float bannerGap = 10.0f * g_M.scale;
+    layout.listY = g_M.listY + (layout.showBanner ? layout.bannerH + bannerGap : 0.0f);
+
+    layout.visibleRows = (int)((g_M.footerY - layout.listY - 16.0f * g_M.scale) / g_M.rowH);
+    if (layout.visibleRows < 1) layout.visibleRows = 1;
+
+    return layout;
+}
+
+int LibraryPageVisibleRows(const LibraryPageView &view)
+{
+    return ComputeLibraryLayout(view).visibleRows;
+}
+
+void RenderLibraryFrame(LibraryPageView &view, const UiHint *hints, int hintCount)
+{
     if (!g_Initialized)
-        return result;
+        return;
 
-    if (gameCount < 0)
-        gameCount = 0;
+    const InstalledGame *games = view.games;
+    int gameCount = (games != NULL && view.count > 0) ? view.count : 0;
 
-    // No covers to load for an empty library - and EnsureIconsLoaded would
-    // take a zero-byte allocation coming back NULL as a failure.
+    // Loaded on the first frame and kept - see EnsureIconsLoaded. If the cache
+    // couldn't be allocated the rows still draw, with placeholders.
     Icon *icons = NULL;
     if (gameCount > 0)
     {
         EnsureIconsLoaded(games, gameCount);
-        if (g_icons == NULL)
-            return result;
         icons = g_icons;
     }
 
-    // The banner takes the top of the list area, and the list starts below
-    // it - so the row count is worked out here rather than taken from g_M,
-    // which assumes the list has the whole space to itself.
-    const bool showBanner = (bannerText != NULL && bannerText[0] != '\0');
-    const float bannerH = 44.0f * g_M.scale;
-    const float bannerGap = 10.0f * g_M.scale;
+    const LibraryLayout layout = ComputeLibraryLayout(view);
+    const int visibleRows = layout.visibleRows;
+    const float listY = layout.listY;
 
-    const float listY = g_M.listY + (showBanner ? bannerH + bannerGap : 0.0f);
+    KeepSelectionVisible(gameCount, visibleRows, view.selected, view.scroll);
+    const int selected = view.selected;
+    const int scrollOffset = view.scroll;
 
-    // Converted once, not per frame - it doesn't change while this screen is up.
-    WCHAR wideStatus[96] = L"";
-    if (footerStatus != NULL && footerStatus[0] != '\0')
-        Utf8ToWide(footerStatus, wideStatus, 96);
+    BeginFrame();
 
-    int visibleRows = (int)((g_M.footerY - listY - 16.0f * g_M.scale) / g_M.rowH);
-    if (visibleRows < 1) visibleRows = 1;
+    // Two passes, quads first and then ALL text in a single Font Begin/End.
+    // This isn't just a micro-optimization: Font::Begin() installs the font's
+    // own shaders and render state, which every DrawQuad() here then
+    // overwrites with its own, so interleaving the two (as this used to, with
+    // a Begin/End around every single row's name) meant re-establishing that
+    // state once per row. Text rendering on this hardware is already the
+    // expensive part, so batching it is worth the slightly less obvious
+    // structure.
 
-    // Upper clamp before lower: with an empty library the upper bound is -1,
-    // and the row has to end up at 0, not -1.
-    int selected = initialSelection;
-    if (selected > gameCount - 1) selected = gameCount - 1;
-    if (selected < 0) selected = 0;
+    // --- Pass 1: quads (background, sidebar, plates, icons, scroll indicator) ---
+    DrawBackground();
+    DrawSidebarQuads(g_sidebar.focused);
 
-    // Start the view with the selection already on screen, rather than
-    // scrolled to the top and then snapping once the loop's own clamp runs.
-    int scrollOffset = selected - visibleRows / 2;
-    if (scrollOffset > gameCount - visibleRows) scrollOffset = gameCount - visibleRows;
-    if (scrollOffset < 0) scrollOffset = 0;
-    WORD prevButtons = CurrentButtons(); // see CurrentButtons: a still-held A must not read as a fresh press
+    // Accent rule under the header, fading out to the right so it reads as a
+    // highlight rather than a hard divider.
+    DrawGradientRect(g_M.contentX, g_M.headerRuleY, g_M.contentW, 2.0f * g_M.scale,
+                     COL_HEADER_RULE_A, COL_HEADER_RULE_B, false);
 
-    // D-pad auto-repeat state. Pure edge-triggered input (which this used to
-    // be) means one tap per row - fine for a handful of titles, genuinely
-    // painful for a real 27-game library, where reaching the bottom was 26
-    // discrete presses. Frame counts rather than milliseconds because the
-    // loop below is hand-paced at a fixed ~16ms via Sleep(), so frames ARE
-    // the clock here.
-    WORD heldDirection = 0;    // which of DPAD_UP/DPAD_DOWN is currently held, 0 if neither
-    int repeatCountdown = 0;   // frames until the next auto-repeat move
-    const int REPEAT_DELAY_FRAMES = 24; // ~400ms before auto-repeat kicks in, so single taps stay precise
-    const int REPEAT_RATE_FRAMES = 5;   // ~85ms between repeats once it does
+    const float rowGap = 6.0f * g_M.scale;
+    const float plateH = g_M.rowH - rowGap;
+    const float iconX = g_M.contentX + 16.0f * g_M.scale;
+    const float scrollGutter = 18.0f * g_M.scale;
 
-    for (;;)
+    // Rows stop short of the scrollbar only when one is actually shown, so a
+    // small library uses the full width.
+    bool showScroll = (gameCount > visibleRows);
+    float plateW = g_M.contentW - (showScroll ? scrollGutter : 0.0f);
+
+    // Laid out before either pass, because the badges go down in pass 1 and
+    // their labels in pass 2, and both need identical positions.
+    ButtonHint footer[MAX_FOOTER_HINTS];
+    int footerCount = LayoutFooter(hints, hintCount, footer);
+    const float hintCenterY = FooterCenterY();
+
+    // Banner: a lit amber plate with a solid edge and a Y badge, so it reads
+    // as "press Y for this" before a word of it is read.
+    const float bannerCenterY = g_M.listY + layout.bannerH * 0.5f;
+    const float bannerBadgeX = g_M.contentX + 18.0f * g_M.scale;
+    float bannerTextX = bannerBadgeX;
+
+    if (layout.showBanner)
     {
-        // Console::Render() (Common/AtgConsole.cpp) always pairs its
-        // Present() with Resume() before and Suspend() after - "Take away
-        // GPU control so that the Guide can be rendered". Matching that
-        // exactly, per-frame, is what actually fixed the GPU deadlock this
-        // session (confirmed: reached every diagnostic stage with no crash).
-        // A later attempt to bracket the whole session instead of each
-        // frame was based on an untested guess, not evidence, and made
-        // things worse (stuck with no progress) - reverted. Called below,
-        // after the A/B early-exit checks rather than here, so a `break`
-        // never leaves a Resume() unmatched by its Suspend().
-        // Through CurrentButtons(), not a raw XInputGetState: that helper is
-        // what folds the left thumbstick into the d-pad bits, and reading the
-        // pad directly here would leave the stick working on every screen
-        // except this one.
-        WORD buttons = CurrentButtons();
-        WORD pressed = buttons & ~prevButtons; // edge-triggered: only the frame a button first goes down
-        prevButtons = buttons;
+        DrawGradientRect(g_M.contentX, g_M.listY, g_M.contentW, layout.bannerH,
+                         COL_NOTICE_PLATE_A, COL_NOTICE_PLATE_B, false);
+        DrawRect(g_M.contentX, g_M.listY, 4.0f * g_M.scale, layout.bannerH, COL_NOTICE_EDGE);
 
-        // Auto-repeat: a fresh press moves once immediately and arms the long
-        // initial delay; continuing to hold fires at the faster repeat rate.
-        // Releasing (or switching direction) disarms it, so a tap is still
-        // exactly one row.
-        WORD direction = buttons & (XINPUT_GAMEPAD_DPAD_UP | XINPUT_GAMEPAD_DPAD_DOWN);
-        if (direction != XINPUT_GAMEPAD_DPAD_UP && direction != XINPUT_GAMEPAD_DPAD_DOWN)
-            direction = 0; // neither held, or both at once (a real possibility on a worn d-pad) - treat as no input
-
-        bool moveNow = false;
-
-        if (direction == 0)
-        {
-            heldDirection = 0;
-        }
-        else if (direction != heldDirection)
-        {
-            heldDirection = direction;
-            repeatCountdown = REPEAT_DELAY_FRAMES;
-            moveNow = true;
-        }
-        else if (--repeatCountdown <= 0)
-        {
-            repeatCountdown = REPEAT_RATE_FRAMES;
-            moveNow = true;
-        }
-
-        if (moveNow)
-        {
-            if (heldDirection == XINPUT_GAMEPAD_DPAD_UP && selected > 0)
-                selected--;
-            else if (heldDirection == XINPUT_GAMEPAD_DPAD_DOWN && selected < gameCount - 1)
-                selected++;
-        }
-
-        // Shoulder buttons jump a full page - the fast way through a large
-        // library even with auto-repeat available. Skipped for an empty
-        // library, where the upper clamp would land on -1.
-        if (gameCount > 0)
-        {
-            if (pressed & XINPUT_GAMEPAD_LEFT_SHOULDER)
-            {
-                selected -= visibleRows;
-                if (selected < 0) selected = 0;
-            }
-            if (pressed & XINPUT_GAMEPAD_RIGHT_SHOULDER)
-            {
-                selected += visibleRows;
-                if (selected > gameCount - 1) selected = gameCount - 1;
-            }
-        }
-
-        // A and X act on a row, so they need one. Y and B don't.
-        if ((pressed & XINPUT_GAMEPAD_A) && gameCount > 0)
-        {
-            result.action = GAMELIST_DLC;
-            result.selectedIndex = selected;
-            break;
-        }
-        if ((pressed & XINPUT_GAMEPAD_X) && gameCount > 0)
-        {
-            result.action = GAMELIST_TITLE_UPDATES;
-            result.selectedIndex = selected;
-            break;
-        }
-        if (pressed & XINPUT_GAMEPAD_Y)
-        {
-            // The row is reported anyway, so coming back from Settings can
-            // land on the same game rather than the top of the list.
-            result.action = GAMELIST_SETTINGS;
-            result.selectedIndex = (gameCount > 0) ? selected : -1;
-            break;
-        }
-        if (pressed & XINPUT_GAMEPAD_START)
-        {
-            // Like Settings, available with an empty library - installing a
-            // disc is one way to start one.
-            result.action = GAMELIST_INSTALL_DISC;
-            result.selectedIndex = (gameCount > 0) ? selected : -1;
-            break;
-        }
-        if (pressed & XINPUT_GAMEPAD_B)
-        {
-            result.action = GAMELIST_EXIT;
-            break;
-        }
-
-        if (selected < scrollOffset) scrollOffset = selected;
-        if (selected >= scrollOffset + visibleRows) scrollOffset = selected - visibleRows + 1;
-
-        g_pd3dDevice->Resume();
-        g_pd3dDevice->Clear(0, NULL, D3DCLEAR_TARGET, COL_BG_BOTTOM, 1.0f, 0);
-
-        // Two passes, quads first and then ALL text in a single Font
-        // Begin/End. This isn't just a micro-optimization: Font::Begin()
-        // installs the font's own shaders and render state, which every
-        // DrawQuad() here then overwrites with its own, so interleaving the
-        // two (as this used to, with a Begin/End around every single row's
-        // name) meant re-establishing that state once per row. Text rendering
-        // on this hardware is already the expensive part - each character
-        // costs a MultiByteToWideChar plus a glyph-width measurement, enough
-        // to measurably throttle download throughput elsewhere in this
-        // project - so batching it is worth the slightly less obvious
-        // structure.
-
-        // --- Pass 1: quads (background, plates, icons, scroll indicator) ---
-        DrawBackground();
-
-        // Accent rule under the header, fading out to the right so it reads as
-        // a highlight rather than a hard divider.
-        DrawGradientRect(g_M.contentX, g_M.headerRuleY, g_M.contentW, 2.0f * g_M.scale,
-                         COL_HEADER_RULE_A, COL_HEADER_RULE_B, false);
-
-        const float rowGap = 6.0f * g_M.scale;
-        const float plateH = g_M.rowH - rowGap;
-        const float iconX = g_M.contentX + 16.0f * g_M.scale;
-        const float scrollW = 5.0f * g_M.scale;
-        const float scrollGutter = 18.0f * g_M.scale;
-
-        // Rows stop short of the scrollbar only when one is actually shown,
-        // so a small library uses the full width.
-        bool showScroll = (gameCount > visibleRows);
-        float plateW = g_M.contentW - (showScroll ? scrollGutter : 0.0f);
-
-        // Footer hints. Laid out here rather than next to where they are drawn
-        // because the badges go down in pass 1 and their labels in pass 2, and
-        // both need identical positions - so the layout has to happen before
-        // either. It also has to follow showScroll, which decides whether the
-        // paging hint appears at all.
-        //
-        // In the console's own A, X, Y, B order, with START (install a disc)
-        // after the face buttons it isn't one of. The row actions drop out
-        // for an empty library, leaving Settings - the way to fix it -
-        // Install disc and Exit.
-        //
-        // "Exit", not "Back" - this screen is the root, so it is the one place
-        // B leaves the app rather than stepping back a screen. Every other
-        // screen says Back, which is what makes that distinction readable.
-        ButtonHint hints[6];
-        int hintCount = 0;
-
-        if (gameCount > 0)
-        {
-            hints[hintCount].sprite = BUTTON_SPRITE_A; hints[hintCount].label = L"Search for DLC"; hintCount++;
-            hints[hintCount].sprite = BUTTON_SPRITE_X; hints[hintCount].label = L"Search for title updates"; hintCount++;
-        }
-
-        hints[hintCount].sprite = BUTTON_SPRITE_Y; hints[hintCount].label = L"Settings"; hintCount++;
-
-        hints[hintCount].sprite = BUTTON_SPRITE_START; hints[hintCount].label = L"Install disc"; hintCount++;
-
-        hints[hintCount].sprite = BUTTON_SPRITE_B; hints[hintCount].label = L"Exit"; hintCount++;
-
-        if (showScroll)
-        {
-            hints[hintCount].sprite = BUTTON_SPRITE_LBRB; hints[hintCount].label = L"Page"; hintCount++;
-        }
-
-        float hintsW = LayoutButtonHints(hints, hintCount, g_M.contentX);
-
-        float hintCenterY = g_M.footerY + 9.0f * g_M.scale;
-
-        // Free space, right-aligned against the content edge - the same edge
-        // the "3 / 27" counter above it uses. Dropped rather than overlapped
-        // if the hints ever run long enough to reach it; they're the part
-        // that says what the buttons do. (LayoutButtonHints left the label
-        // scale set, so this measures at the size it's drawn.)
-        bool showStatus = false;
-        if (wideStatus[0] != L'\0')
-        {
-            float statusW = g_UiFont.GetTextWidth(wideStatus);
-            showStatus = (hintsW + 26.0f * g_M.scale + statusW <= g_M.contentW);
-        }
-
-        // Banner: a lit amber plate with a solid edge and a Y badge, so it
-        // reads as "press Y for this" before a word of it is read.
-        const float bannerCenterY = g_M.listY + bannerH * 0.5f;
-        const float bannerBadgeX = g_M.contentX + 18.0f * g_M.scale;
-        float bannerTextX = bannerBadgeX;
-
-        if (showBanner)
-        {
-            DrawGradientRect(g_M.contentX, g_M.listY, g_M.contentW, bannerH,
-                             COL_NOTICE_PLATE_A, COL_NOTICE_PLATE_B, false);
-            DrawRect(g_M.contentX, g_M.listY, 4.0f * g_M.scale, bannerH, COL_NOTICE_EDGE);
-
-            float badgeW = DrawButtonSprite(BUTTON_SPRITE_Y, bannerBadgeX, bannerCenterY);
-            bannerTextX = bannerBadgeX + badgeW + 12.0f * g_M.scale;
-        }
-
-        for (int row = 0; row < visibleRows; ++row)
-        {
-            int index = scrollOffset + row;
-            if (index >= gameCount)
-                break;
-
-            float rowY = listY + row * g_M.rowH;
-            float iconY = rowY + (plateH - g_M.iconSize) * 0.5f; // vertically centred in its plate
-
-            if (index == selected)
-            {
-                // Selected: a green bar, lit from the top and pulsing gently.
-                // Vertical, not horizontal - a top-down gradient reads as a
-                // lit surface, where the old left-to-right falloff just read
-                // as a highlight running out of steam.
-                //
-                // The separate accent strip that used to sit down the left
-                // edge is gone: it existed to get some green into a row that
-                // was otherwise translucent white, and the bar now carries
-                // that itself.
-                float pulse = SelectionPulse();
-                DrawGradientRect(g_M.contentX, rowY, plateW, plateH,
-                                 ScaleColorBrightness(COL_PANEL_SEL_A, pulse),
-                                 ScaleColorBrightness(COL_PANEL_SEL_B, pulse), true);
-            }
-            else
-            {
-                DrawRect(g_M.contentX, rowY, plateW, plateH, COL_PANEL);
-            }
-
-            if (icons[index].texture != NULL)
-                DrawIconFitted(&icons[index], iconX, iconY, g_M.iconSize);
-            else
-                DrawRect(iconX, iconY, g_M.iconSize, g_M.iconSize, COL_ICON_PLACEHLD); // titles with no embedded icon
-        }
-
-        // Scrollbar - only when there's actually something off-screen. Without
-        // it there's no indication the library extends past the visible rows,
-        // let alone how far.
-        if (showScroll)
-        {
-            const float trackX = g_M.contentX + g_M.contentW - scrollW;
-            const float trackY = listY;
-            const float trackH = visibleRows * g_M.rowH - rowGap;
-
-            float thumbH = trackH * ((float)visibleRows / (float)gameCount);
-            float minThumb = 24.0f * g_M.scale;
-            if (thumbH < minThumb) thumbH = minThumb; // stays visible on a very large library
-
-            // Positioned by scroll range, not item count, so the thumb lands
-            // flush at the bottom on the last page.
-            float scrollRange = (float)(gameCount - visibleRows);
-            float thumbY = trackY + (trackH - thumbH) * ((float)scrollOffset / scrollRange);
-
-            DrawRect(trackX, trackY, scrollW, trackH, COL_SCROLL_TRACK);
-            DrawGradientRect(trackX, thumbY, scrollW, thumbH, COL_SCROLL_THUMB, COL_ACCENT_DIM, true);
-        }
-
-        DrawButtonHintShapes(hints, hintCount, hintCenterY);
-
-        // --- Pass 2: all text, one Begin/End ---
-        g_UiFont.Begin();
-
-        // Header. SetScaleFactors is applied per-glyph inside DrawText (see
-        // AtgFont.cpp's m_fXScaleFactor use), not captured at Begin(), so it's
-        // safe to change between calls inside a single batch - which is what
-        // gives this screen an actual type hierarchy rather than one uniform
-        // size everywhere.
-        //
-        // Routed through DrawChromeHeading rather than drawn inline, so this
-        // screen picks up the same "OMNI360" brand every other screen shows
-        // instead of being the one view that omits it.
-        DrawChromeHeading("YOUR LIBRARY");
-
-        // Position readout, right-aligned against the content edge.
-        // Fixed "%d" specifiers into a generously sized buffer, explicitly
-        // null-terminated: _snprintf on this toolchain does not null-terminate
-        // on truncation, and its dynamic-precision specifiers have caused a
-        // real crash in this project before.
-        if (gameCount > 0)
-        {
-            char counter[64];
-            _snprintf(counter, sizeof(counter), "%d / %d", selected + 1, gameCount);
-            counter[sizeof(counter) - 1] = '\0';
-
-            WCHAR wideCounter[64];
-            Utf8ToWide(counter, wideCounter, 64);
-
-            g_UiFont.SetScaleFactors(0.9f * g_M.textScale, 0.9f * g_M.textScale);
-            g_UiFont.DrawText(g_M.contentX + g_M.contentW, g_M.headerTextY + 6.0f * g_M.scale,
-                              COL_TEXT_DIM, wideCounter, ATGFONT_RIGHT);
-        }
-
-        // Footer hint labels. The badges themselves went down in pass 1; see
-        // LayoutButtonHints.
-        DrawButtonHintText(hints, hintCount, hintCenterY);
-
-        if (showStatus)
-        {
-            const float statusScale = HINT_LABEL_SCALE * g_M.textScale;
-            g_UiFont.SetScaleFactors(statusScale, statusScale);
-            g_UiFont.DrawText(g_M.contentX + g_M.contentW, TextTopForCenter(hintCenterY, statusScale),
-                              COL_TEXT_DIM, wideStatus, ATGFONT_RIGHT);
-        }
-
-        if (showBanner)
-        {
-            WCHAR wideBanner[256];
-            Utf8ToWide(bannerText, wideBanner, 256);
-
-            const float bannerScale = 0.9f * g_M.textScale;
-            g_UiFont.SetScaleFactors(bannerScale, bannerScale);
-            g_UiFont.DrawText(bannerTextX, TextTopForCenter(bannerCenterY, bannerScale),
-                              COL_NOTICE_TEXT, wideBanner, ATGFONT_TRUNCATED,
-                              g_M.contentX + g_M.contentW - bannerTextX - 16.0f * g_M.scale);
-        }
-
-        // An empty library says so, and says where it looked - the folder is
-        // almost always the reason, and naming it is what lets someone spot
-        // the typo or the wrong drive.
-        if (gameCount == 0)
-        {
-            WCHAR wideWhere[300];
-            char where[300];
-            _snprintf(where, sizeof(where), "Searched %s", gamesPath != NULL ? gamesPath : "(no folder set)");
-            where[sizeof(where) - 1] = '\0';
-            Utf8ToWide(where, wideWhere, 300);
-
-            const float emptyY = listY + 24.0f * g_M.scale;
-
-            g_UiFont.SetScaleFactors(1.0f * g_M.textScale, 1.0f * g_M.textScale);
-            g_UiFont.DrawText(g_M.contentX, emptyY, COL_TEXT_PRIMARY, L"No games found");
-
-            g_UiFont.SetScaleFactors(0.85f * g_M.textScale, 0.85f * g_M.textScale);
-            g_UiFont.DrawText(g_M.contentX, emptyY + 32.0f * g_M.scale, COL_TEXT_SECONDARY,
-                              wideWhere, ATGFONT_TRUNCATED, g_M.contentW);
-            g_UiFont.DrawText(g_M.contentX, emptyY + 58.0f * g_M.scale, COL_TEXT_DIM,
-                              L"Press Y to choose your games folder in Settings.");
-        }
-
-        // Row text. The name is truncated with an ellipsis rather than
-        // overrunning into the scrollbar - ATGFONT_TRUNCATED plus a max pixel
-        // width is built into Font::DrawText, so this costs nothing to do
-        // properly.
-        float textX = iconX + g_M.iconSize + 18.0f * g_M.scale;
-        float textMaxW = (g_M.contentX + plateW) - textX - 16.0f * g_M.scale;
-
-        for (int row = 0; row < visibleRows; ++row)
-        {
-            int index = scrollOffset + row;
-            if (index >= gameCount)
-                break;
-
-            float rowY = listY + row * g_M.rowH;
-            bool isSelected = (index == selected);
-
-            WCHAR wideName[256];
-            Utf8ToWide(games[index].displayName, wideName, 256);
-
-            g_UiFont.SetScaleFactors(1.0f * g_M.textScale, 1.0f * g_M.textScale);
-            g_UiFont.DrawText(textX, rowY + 14.0f * g_M.scale,
-                              isSelected ? COL_SEL_TEXT : COL_TEXT_SECONDARY,
-                              wideName, ATGFONT_TRUNCATED, textMaxW);
-
-            // Secondary line: the title ID, which is the thing that actually
-            // identifies a title when two share a display name.
-            char idText[32];
-            _snprintf(idText, sizeof(idText), "%08lX", games[index].titleId);
-            idText[sizeof(idText) - 1] = '\0';
-
-            WCHAR wideId[32];
-            Utf8ToWide(idText, wideId, 32);
-
-            // 0.85 rather than the 0.72 this started at. Two reasons, and the
-            // second is the one that actually matters: it is bigger, and it is
-            // closer to 1:1 against the font atlas. A bitmap font is only
-            // truly sharp when drawn at its own strike size, and this line was
-            // landing at 0.72 * textScale - barely over half scale - which
-            // made it by far the mushiest text on screen. Everything else sits
-            // nearer 1.0 and looked fine by comparison.
-            g_UiFont.SetScaleFactors(0.85f * g_M.textScale, 0.85f * g_M.textScale);
-            g_UiFont.DrawText(textX, rowY + 40.0f * g_M.scale,
-                              isSelected ? COL_SEL_SUBTEXT : COL_TEXT_DIM, wideId);
-
-            float idW = g_UiFont.GetTextWidth(wideId);
-
-            // "Already installed" marker, sharing the secondary line with the
-            // title ID. Plain text in the accent colour rather than a tick
-            // glyph: GLYPH_* codepoints render as empty boxes in the embedded
-            // font (see the footer badge comment above), so a checkmark would
-            // come out as a blank square on hardware.
-            //
-            // One combined string rather than two separately positioned
-            // labels, so the common "both installed" case reads as a single
-            // phrase.
-            bool dlcHere    = (hasDlcInstalled != NULL && hasDlcInstalled[index]);
-            bool updateHere = (hasUpdateInstalled != NULL && hasUpdateInstalled[index]);
-
-            if (dlcHere || updateHere)
-            {
-                const WCHAR *marker = L"DLC + UPDATE INSTALLED";
-                if (!updateHere)
-                    marker = L"DLC INSTALLED";
-                else if (!dlcHere)
-                    marker = L"UPDATE INSTALLED";
-
-                // Placed after the measured title ID rather than at a fixed
-                // offset. The old constant was 90px, chosen when this line was
-                // drawn at 0.72 - an eight-character ID at 0.85 can reach past
-                // that and the two would have overlapped.
-                //
-                // Dark on the selected row, accent green everywhere else. This
-                // marker was accent green unconditionally, which was fine
-                // against a translucent white plate and invisible the moment
-                // the selected row became green itself.
-                g_UiFont.DrawText(textX + idW + 18.0f * g_M.scale,
-                                  rowY + 40.0f * g_M.scale,
-                                  isSelected ? COL_SEL_MARKER : COL_ACCENT, marker);
-            }
-        }
-
-        // Leave the font at its default scale - Console keeps its own Font
-        // instance, but anything else reusing g_UiFont shouldn't inherit
-        // whatever scale the last row happened to set.
-        g_UiFont.SetScaleFactors(1.0f, 1.0f);
-
-        g_UiFont.End();
-
-        g_pd3dDevice->Present(NULL, NULL, NULL, NULL);
-        g_pd3dDevice->Suspend();
-
-        // Device is created with D3DPRESENT_INTERVAL_IMMEDIATE (no vsync),
-        // so pace the loop by hand instead of hammering Present() as fast as
-        // the CPU can spin.
-        Sleep(16); // ~60fps pacing, not a real vsync wait, just enough to stop hammering the GPU queue
+        float badgeW = DrawButtonSprite(BUTTON_SPRITE_Y, bannerBadgeX, bannerCenterY);
+        bannerTextX = bannerBadgeX + badgeW + 12.0f * g_M.scale;
     }
 
+    for (int row = 0; row < visibleRows; ++row)
+    {
+        int index = scrollOffset + row;
+        if (index >= gameCount)
+            break;
+
+        float rowY = listY + row * g_M.rowH;
+        float iconY = rowY + (plateH - g_M.iconSize) * 0.5f; // vertically centred in its plate
+
+        DrawRowPlate(g_M.contentX, rowY, plateW, plateH, index == selected, view.focused);
+
+        if (icons != NULL && icons[index].texture != NULL)
+            DrawIconFitted(&icons[index], iconX, iconY, g_M.iconSize);
+        else
+            DrawRect(iconX, iconY, g_M.iconSize, g_M.iconSize, COL_ICON_PLACEHLD); // titles with no embedded icon
+    }
+
+    if (showScroll)
+        DrawScrollbar(listY, visibleRows * g_M.rowH - rowGap, gameCount, visibleRows, scrollOffset);
+
+    DrawButtonHintShapes(footer, footerCount, hintCenterY);
+
+    // --- Pass 2: all text, one Begin/End ---
+    g_UiFont.Begin();
+
+    DrawSidebarText(g_sidebar.focused);
+
+    // SetScaleFactors is applied per-glyph inside DrawText (see AtgFont.cpp's
+    // m_fXScaleFactor use), not captured at Begin(), so it's safe to change
+    // between calls inside a single batch - which is what gives this screen
+    // an actual type hierarchy rather than one uniform size everywhere.
+    DrawChromeHeading("YOUR LIBRARY");
+
+    if (gameCount > 0)
+        DrawPositionCounter(selected, gameCount);
+
+    DrawButtonHintText(footer, footerCount, hintCenterY);
+
+    if (layout.showBanner)
+    {
+        WCHAR wideBanner[256];
+        Utf8ToWide(view.bannerText, wideBanner, 256);
+
+        const float bannerScale = 0.9f * g_M.textScale;
+        g_UiFont.SetScaleFactors(bannerScale, bannerScale);
+        g_UiFont.DrawText(bannerTextX, TextTopForCenter(bannerCenterY, bannerScale),
+                          COL_NOTICE_TEXT, wideBanner, ATGFONT_TRUNCATED,
+                          g_M.contentX + g_M.contentW - bannerTextX - 16.0f * g_M.scale);
+    }
+
+    // An empty library says so, and says where it looked - the folder is
+    // almost always the reason, and naming it is what lets someone spot the
+    // typo or the wrong drive.
+    if (gameCount == 0)
+    {
+        WCHAR wideWhere[300];
+        char where[300];
+        _snprintf(where, sizeof(where), "Searched %s", view.gamesPath != NULL ? view.gamesPath : "(no folder set)");
+        where[sizeof(where) - 1] = '\0';
+        Utf8ToWide(where, wideWhere, 300);
+
+        const float emptyY = listY + 24.0f * g_M.scale;
+
+        g_UiFont.SetScaleFactors(1.0f * g_M.textScale, 1.0f * g_M.textScale);
+        g_UiFont.DrawText(g_M.contentX, emptyY, COL_TEXT_PRIMARY, L"No games found");
+
+        g_UiFont.SetScaleFactors(0.85f * g_M.textScale, 0.85f * g_M.textScale);
+        g_UiFont.DrawText(g_M.contentX, emptyY + 32.0f * g_M.scale, COL_TEXT_SECONDARY,
+                          wideWhere, ATGFONT_TRUNCATED, g_M.contentW);
+        g_UiFont.DrawText(g_M.contentX, emptyY + 58.0f * g_M.scale, COL_TEXT_DIM,
+                          L"Press Y to choose your games folder in Settings.");
+    }
+
+    // Row text. The name is truncated with an ellipsis rather than overrunning
+    // into the scrollbar - ATGFONT_TRUNCATED plus a max pixel width is built
+    // into DrawText, so this costs nothing to do properly.
+    float textX = iconX + g_M.iconSize + 18.0f * g_M.scale;
+    float textMaxW = (g_M.contentX + plateW) - textX - 16.0f * g_M.scale;
+
+    for (int row = 0; row < visibleRows; ++row)
+    {
+        int index = scrollOffset + row;
+        if (index >= gameCount)
+            break;
+
+        float rowY = listY + row * g_M.rowH;
+        bool isSelected = (index == selected);
+        bool onGreen = isSelected && view.focused; // text sitting on the green bar
+
+        WCHAR wideName[256];
+        Utf8ToWide(games[index].displayName, wideName, 256);
+
+        g_UiFont.SetScaleFactors(1.0f * g_M.textScale, 1.0f * g_M.textScale);
+        g_UiFont.DrawText(textX, rowY + 14.0f * g_M.scale,
+                          onGreen ? COL_SEL_TEXT : (isSelected ? COL_TEXT_PRIMARY : COL_TEXT_SECONDARY),
+                          wideName, ATGFONT_TRUNCATED, textMaxW);
+
+        // Secondary line: the title ID, which is the thing that actually
+        // identifies a title when two share a display name.
+        char idText[32];
+        _snprintf(idText, sizeof(idText), "%08lX", games[index].titleId);
+        idText[sizeof(idText) - 1] = '\0';
+
+        WCHAR wideId[32];
+        Utf8ToWide(idText, wideId, 32);
+
+        // 0.85, close to 1:1 against the font's design size - text drawn far
+        // below it came out noticeably soft on hardware.
+        g_UiFont.SetScaleFactors(0.85f * g_M.textScale, 0.85f * g_M.textScale);
+        g_UiFont.DrawText(textX, rowY + 40.0f * g_M.scale,
+                          onGreen ? COL_SEL_SUBTEXT : COL_TEXT_DIM, wideId);
+
+        float idW = g_UiFont.GetTextWidth(wideId);
+
+        // "Already installed" marker, sharing the secondary line with the
+        // title ID. Plain text in the accent colour rather than a tick glyph:
+        // GLYPH_* codepoints render as empty boxes in the embedded font, so a
+        // checkmark would come out as a blank square on hardware.
+        //
+        // One combined string rather than two separately positioned labels,
+        // so the common "both installed" case reads as a single phrase.
+        bool dlcHere    = (view.hasDlcInstalled != NULL && view.hasDlcInstalled[index]);
+        bool updateHere = (view.hasUpdateInstalled != NULL && view.hasUpdateInstalled[index]);
+
+        if (dlcHere || updateHere)
+        {
+            const WCHAR *marker = L"DLC + UPDATE INSTALLED";
+            if (!updateHere)
+                marker = L"DLC INSTALLED";
+            else if (!dlcHere)
+                marker = L"UPDATE INSTALLED";
+
+            // Placed after the measured title ID rather than at a fixed
+            // offset, so the two can't overlap at any text size. Dark on the
+            // green bar, where accent green would vanish into it.
+            g_UiFont.DrawText(textX + idW + 18.0f * g_M.scale,
+                              rowY + 40.0f * g_M.scale,
+                              onGreen ? COL_SEL_MARKER : COL_ACCENT, marker);
+        }
+    }
+
+    // Leave the font at its default scale - anything else reusing g_UiFont
+    // shouldn't inherit whatever scale the last row happened to set.
+    g_UiFont.SetScaleFactors(1.0f, 1.0f);
+
+    g_UiFont.End();
+
+    EndFrame();
+
     // Icons are NOT released here - they live until ShutdownGameListUI, so
-    // coming back to this screen after a download is instant.
-    return result;
+    // this costs no decoding from one frame to the next.
 }
 
 // ---------------------------------------------------------------------------
@@ -1605,11 +1662,7 @@ void RenderProgressFrame(const char *title, const char *statusLine,
     if (fraction0to1 < 0.0f) fraction0to1 = 0.0f;
     if (fraction0to1 > 1.0f) fraction0to1 = 1.0f;
 
-    // Same Resume()/Present()/Suspend() bracketing as ShowGameListUI's loop
-    // and Console::Render() itself - see the comment there for why.
-    g_pd3dDevice->Resume();
-
-    g_pd3dDevice->Clear(0, NULL, D3DCLEAR_TARGET, COL_BG_BOTTOM, 1.0f, 0);
+    BeginFrame();
 
     // Vertically centred block, sized off the same metrics as the list screen
     // so the two read as one app rather than two unrelated screens.
@@ -1617,9 +1670,10 @@ void RenderProgressFrame(const char *title, const char *statusLine,
     const float blockY = g_M.screenH * 0.5f - 60.0f * g_M.scale;
     const float barY = blockY + 52.0f * g_M.scale;
 
-    // Quads before text, for the same batching reason as ShowGameListUI - see
-    // the two-pass comment there.
+    // Quads before text, for the same batching reason as RenderLibraryFrame -
+    // see the two-pass comment there.
     DrawBackground();
+    DrawSidebarQuads(false);
 
     DrawGradientRect(g_M.contentX, g_M.headerRuleY, g_M.contentW, 2.0f * g_M.scale,
                      COL_HEADER_RULE_A, COL_HEADER_RULE_B, false);
@@ -1643,8 +1697,9 @@ void RenderProgressFrame(const char *title, const char *statusLine,
 
     g_UiFont.Begin();
 
-    // Through DrawChromeHeading like every other screen, so the OMNI360 brand
-    // is here too - this is a screen someone can be looking at for minutes.
+    // The sidebar carries the OMNI360 brand, so it's here too - this is a
+    // screen someone can be looking at for minutes.
+    DrawSidebarText(false);
     DrawChromeHeading(heading != NULL ? heading : "DOWNLOADING");
 
     // Pack name truncated rather than overrunning - these are real archive
@@ -1670,13 +1725,13 @@ void RenderProgressFrame(const char *title, const char *statusLine,
     }
 
     g_UiFont.SetScaleFactors(0.8f * g_M.textScale, 0.8f * g_M.textScale);
-    g_UiFont.DrawText(g_M.contentX, barY + barH + 12.0f * g_M.scale, COL_TEXT_DIM, wideDetail);
+    g_UiFont.DrawText(g_M.contentX, barY + barH + 12.0f * g_M.scale, COL_TEXT_DIM, wideDetail,
+                      ATGFONT_TRUNCATED, g_M.contentW);
 
     g_UiFont.SetScaleFactors(1.0f, 1.0f);
     g_UiFont.End();
 
-    g_pd3dDevice->Present(NULL, NULL, NULL, NULL);
-    g_pd3dDevice->Suspend();
+    EndFrame();
 }
 
 // ---------------------------------------------------------------------------
@@ -1684,7 +1739,7 @@ void RenderProgressFrame(const char *title, const char *statusLine,
 // ---------------------------------------------------------------------------
 
 // Background + accent rule. Quads only - text goes in the caller's own Font
-// batch, per the two-pass structure ShowGameListUI explains.
+// batch, per the two-pass structure RenderLibraryFrame explains.
 static void DrawChromeQuads()
 {
     DrawBackground();
@@ -1696,30 +1751,17 @@ static void DrawChromeQuads()
 // read as one app rather than a set of unrelated views. Must be called inside
 // an open Font Begin/End.
 //
-// The app name leads, in the accent colour, with the screen's own heading
-// after it. Putting the brand here rather than only on the root screen means
-// it is present on the progress, picker and message screens too - which are
-// exactly the screens someone might be looking at for several minutes without
-// any other indication of what is running.
-//
-// The heading is positioned by measuring the brand rather than by a fixed
-// offset, because the two are drawn at different sizes and the gap would
-// otherwise drift between 720p and 480p.
+// The OMNI360 brand used to lead this line. It lives at the top of the sidebar
+// now, which every screen draws - so it is still on the progress, picker and
+// message screens, the ones someone may watch for minutes at a time.
 static void DrawChromeHeading(const char *heading)
 {
     WCHAR wide[128];
     Utf8ToWide(heading != NULL ? heading : "", wide, 128);
 
     g_UiFont.SetScaleFactors(1.25f * g_M.textScale, 1.25f * g_M.textScale);
-    float brandW = g_UiFont.GetTextWidth(L"OMNI360");
-    g_UiFont.DrawText(g_M.contentX, g_M.headerTextY, COL_ACCENT, L"OMNI360");
-
-    if (wide[0] != L'\0')
-    {
-        float gap = 14.0f * g_M.scale;
-        g_UiFont.DrawText(g_M.contentX + brandW + gap, g_M.headerTextY,
-                          COL_TEXT_PRIMARY, wide);
-    }
+    g_UiFont.DrawText(g_M.contentX, g_M.headerTextY, COL_TEXT_PRIMARY, wide,
+                      ATGFONT_TRUNCATED, g_M.contentW);
 }
 
 // Seeds edge-triggered input from the CURRENT pad state rather than from zero.
@@ -1729,11 +1771,15 @@ static void DrawChromeHeading(const char *heading)
 // Starting from zero would read that hold as a fresh press on frame one and
 // instantly confirm whatever the new screen defaults to - picking the first
 // DLC pack in the list with no chance to even look at it.
-// It also folds the LEFT THUMBSTICK into the D-pad up/down bits, so both
-// drive navigation and neither needs its own handling. Doing it here rather
-// than at each use is what keeps the auto-repeat, edge detection and
-// held-direction tracking identical for both inputs - they all key off these
-// same two bits and never learn where the input came from.
+// It also folds the LEFT THUMBSTICK into the D-pad bits, so both drive
+// navigation and neither needs its own handling. Doing it here rather than at
+// each use is what keeps the auto-repeat, edge detection and held-direction
+// tracking identical for both inputs - they all key off the same four bits
+// and never learn where the input came from.
+//
+// Only the axis the stick is pushed further along counts. The sidebar made
+// left and right mean something, and a stick pushed down and slightly right
+// would otherwise set two directions at once and be ignored as contradictory.
 //
 // The threshold is deliberately well above XINPUT_GAMEPAD_LEFT_THUMB_DEADZONE
 // (7849): that value exists to reject noise at rest, but a worn 360 stick can
@@ -1752,14 +1798,99 @@ static WORD CurrentButtons()
 
     WORD buttons = state.Gamepad.wButtons;
 
-    const SHORT NAV_THRESHOLD = 16000;
+    const int NAV_THRESHOLD = 16000;
 
-    if (state.Gamepad.sThumbLY > NAV_THRESHOLD)
-        buttons |= XINPUT_GAMEPAD_DPAD_UP;
-    else if (state.Gamepad.sThumbLY < -NAV_THRESHOLD)
-        buttons |= XINPUT_GAMEPAD_DPAD_DOWN;
+    int x = state.Gamepad.sThumbLX;
+    int y = state.Gamepad.sThumbLY;
+    int ax = (x < 0) ? -x : x;
+    int ay = (y < 0) ? -y : y;
+
+    if (ay >= ax)
+    {
+        if (y > NAV_THRESHOLD)
+            buttons |= XINPUT_GAMEPAD_DPAD_UP;
+        else if (y < -NAV_THRESHOLD)
+            buttons |= XINPUT_GAMEPAD_DPAD_DOWN;
+    }
+    else
+    {
+        if (x > NAV_THRESHOLD)
+            buttons |= XINPUT_GAMEPAD_DPAD_RIGHT;
+        else if (x < -NAV_THRESHOLD)
+            buttons |= XINPUT_GAMEPAD_DPAD_LEFT;
+    }
 
     return buttons;
+}
+
+// ---------------------------------------------------------------------------
+// Input for main.cpp's loop - see PollUiInput in GameListUI.h
+// ---------------------------------------------------------------------------
+
+#define NAV_DIRECTIONS (XINPUT_GAMEPAD_DPAD_UP | XINPUT_GAMEPAD_DPAD_DOWN | \
+                        XINPUT_GAMEPAD_DPAD_LEFT | XINPUT_GAMEPAD_DPAD_RIGHT)
+
+// Auto-repeat, in frames: the loop is hand-paced at ~16ms, so frames are the
+// clock. A long first delay keeps single taps precise; the faster rate after
+// it is what makes a 27-game library quick to get through.
+#define NAV_REPEAT_DELAY_FRAMES 24 // ~400ms
+#define NAV_REPEAT_RATE_FRAMES  5  // ~85ms
+
+static WORD g_inputPrev = 0;
+static WORD g_inputHeldDirection = 0;
+static int g_inputRepeatCountdown = 0;
+
+// The one direction held, or 0 for none - or for two at once, which on a worn
+// d-pad is a real possibility and is best read as no clear input.
+static WORD SingleDirection(WORD buttons)
+{
+    WORD direction = buttons & NAV_DIRECTIONS;
+    if (direction != XINPUT_GAMEPAD_DPAD_UP && direction != XINPUT_GAMEPAD_DPAD_DOWN &&
+        direction != XINPUT_GAMEPAD_DPAD_LEFT && direction != XINPUT_GAMEPAD_DPAD_RIGHT)
+        return 0;
+    return direction;
+}
+
+UiInput PollUiInput()
+{
+    UiInput input;
+    input.held = CurrentButtons();
+    input.pressed = input.held & ~g_inputPrev;
+    input.nav = 0;
+    g_inputPrev = input.held;
+
+    // A fresh press moves once immediately and arms the long delay; holding
+    // on fires at the repeat rate. Releasing, or switching direction, starts
+    // over - so a tap is always exactly one step.
+    WORD direction = SingleDirection(input.held);
+
+    if (direction == 0)
+    {
+        g_inputHeldDirection = 0;
+    }
+    else if (direction != g_inputHeldDirection)
+    {
+        g_inputHeldDirection = direction;
+        g_inputRepeatCountdown = NAV_REPEAT_DELAY_FRAMES;
+        input.nav = direction;
+    }
+    else if (--g_inputRepeatCountdown <= 0)
+    {
+        g_inputRepeatCountdown = NAV_REPEAT_RATE_FRAMES;
+        input.nav = direction;
+    }
+
+    return input;
+}
+
+void ResyncUiInput()
+{
+    g_inputPrev = CurrentButtons();
+
+    // A direction still held from before counts as already moved, and waits
+    // out the full delay before repeating - it was pressed for something else.
+    g_inputHeldDirection = SingleDirection(g_inputPrev);
+    g_inputRepeatCountdown = NAV_REPEAT_DELAY_FRAMES;
 }
 
 // ---------------------------------------------------------------------------
@@ -1769,16 +1900,24 @@ static WORD CurrentButtons()
 // hints may be NULL for a frame with no buttons to press, like the scanning
 // and searching screens. They're laid out here, so the caller only fills in
 // sprite and label.
+//
+// asPage is for RenderPlaceholderFrame: a page of the shell, whose text sits
+// at the top of the page like the library's, and whose sidebar has focus if
+// main.cpp says so. Otherwise it's a blocking screen - text centred, sidebar
+// never focused.
 static void RenderStatusFrameInternal(const char *heading, const char *message,
-                                      const char *detailLine, ButtonHint *hints, int hintCount)
+                                      const char *detailLine, ButtonHint *hints, int hintCount,
+                                      bool asPage = false)
 {
     if (!g_Initialized)
         return;
 
-    g_pd3dDevice->Resume();
-    g_pd3dDevice->Clear(0, NULL, D3DCLEAR_TARGET, COL_BG_BOTTOM, 1.0f, 0);
+    const bool sidebarFocused = asPage && g_sidebar.focused;
+
+    BeginFrame();
 
     DrawChromeQuads();
+    DrawSidebarQuads(sidebarFocused);
 
     const float hintCenterY = g_M.footerY + 9.0f * g_M.scale;
     if (hints != NULL && hintCount > 0)
@@ -1787,7 +1926,8 @@ static void RenderStatusFrameInternal(const char *heading, const char *message,
         DrawButtonHintShapes(hints, hintCount, hintCenterY);
     }
 
-    const float blockY = g_M.screenH * 0.5f - 40.0f * g_M.scale;
+    const float blockY = asPage ? g_M.listY + 24.0f * g_M.scale
+                                : g_M.screenH * 0.5f - 40.0f * g_M.scale;
 
     WCHAR wideMessage[256];
     WCHAR wideDetail[256];
@@ -1796,6 +1936,7 @@ static void RenderStatusFrameInternal(const char *heading, const char *message,
 
     g_UiFont.Begin();
 
+    DrawSidebarText(sidebarFocused);
     DrawChromeHeading(heading);
 
     g_UiFont.SetScaleFactors(1.0f * g_M.textScale, 1.0f * g_M.textScale);
@@ -1815,8 +1956,7 @@ static void RenderStatusFrameInternal(const char *heading, const char *message,
     g_UiFont.SetScaleFactors(1.0f, 1.0f);
     g_UiFont.End();
 
-    g_pd3dDevice->Present(NULL, NULL, NULL, NULL);
-    g_pd3dDevice->Suspend();
+    EndFrame();
 }
 
 void RenderStatusFrame(const char *heading, const char *message, const char *detailLine)
@@ -1887,227 +2027,140 @@ bool ShowConfirmUI(const char *heading, const char *message, const char *detailL
 }
 
 // ---------------------------------------------------------------------------
-// Generic list picker
+// List page (Settings, and the pack and title update pickers)
 // ---------------------------------------------------------------------------
 
-int ShowChoiceUI(const char *heading, const char **labels, const char **sublabels,
-                 int count, int initialSelection, const char *actionLabel, bool showCounter)
+// Shorter rows than the library - there's no artwork to make room for, so row
+// height is set by the two text lines alone.
+//
+// Sized, with the two line offsets below, from a 720p hardware screenshot of
+// the XUI-rendered text rather than carried over from the bitmap font these
+// were first tuned for. That font sat higher and smaller: with the old 56px
+// row, XUI's second line ran its descenders 3px past the bottom of the plate,
+// and the lines sat 7px apart. Measured, XUI draws a line's capitals about 5px
+// below the y it's given; the label's capitals are ~15px tall and the second
+// line's ~12px, plus ~4px of descender.
+static float ListRowHeight()
 {
-    if (!g_Initialized || labels == NULL || count <= 0)
-        return -1;
+    return 64.0f * g_M.scale;
+}
 
-    WCHAR wideAction[32];
-    Utf8ToWide(actionLabel != NULL ? actionLabel : "Select", wideAction, 32);
+static int ListVisibleRows()
+{
+    float listSpace = g_M.footerY - g_M.listY - 16.0f * g_M.scale;
+    int visibleRows = (int)(listSpace / ListRowHeight());
+    return (visibleRows < 1) ? 1 : visibleRows;
+}
 
-    // Shorter rows than the game list - there's no artwork to make room for,
-    // so row height is set by the two text lines alone.
-    //
-    // Sized, with the two line offsets below, from a 720p hardware screenshot
-    // of the XUI-rendered text rather than carried over from the bitmap font
-    // these were first tuned for. That font sat higher and smaller: with the
-    // old 56px row, XUI's second line ran its descenders 3px past the bottom
-    // of the plate, and the lines sat 7px apart. Measured, XUI draws a line's
-    // capitals about 5px below the y it's given; the label's capitals are
-    // ~15px tall and the second line's ~12px, plus ~4px of descender.
-    const float rowH = 64.0f * g_M.scale;
-    const float labelY = 6.0f * g_M.scale;    // label capitals ~11px into the 58px plate
+void RenderListFrame(ListPageView &view, const UiHint *hints, int hintCount)
+{
+    if (!g_Initialized)
+        return;
+
+    const int count = (view.labels != NULL && view.count > 0) ? view.count : 0;
+
+    const float rowH = ListRowHeight();
+    const float labelY = 6.0f * g_M.scale;     // label capitals ~11px into the 58px plate
     const float sublabelY = 30.0f * g_M.scale; // 9px under the label's baseline; descenders end ~7px clear of the plate edge
     const float rowGap = 6.0f * g_M.scale;
     const float plateH = rowH - rowGap;
-    const float scrollW = 5.0f * g_M.scale;
     const float scrollGutter = 18.0f * g_M.scale;
 
-    float listSpace = g_M.footerY - g_M.listY - 16.0f * g_M.scale;
-    int visibleRows = (int)(listSpace / rowH);
-    if (visibleRows < 1) visibleRows = 1;
+    const int visibleRows = ListVisibleRows();
 
-    int selected = initialSelection;
-    if (selected < 0) selected = 0;
-    if (selected > count - 1) selected = count - 1;
+    KeepSelectionVisible(count, visibleRows, view.selected, view.scroll);
+    const int selected = view.selected;
+    const int scrollOffset = view.scroll;
 
-    int scrollOffset = selected - visibleRows / 2;
-    if (scrollOffset > count - visibleRows) scrollOffset = count - visibleRows;
-    if (scrollOffset < 0) scrollOffset = 0;
+    BeginFrame();
 
-    WORD prevButtons = CurrentButtons();
-    WORD heldDirection = 0;
-    int repeatCountdown = 0;
-    const int REPEAT_DELAY_FRAMES = 24;
-    const int REPEAT_RATE_FRAMES = 5;
+    // --- Pass 1: quads ---
+    DrawChromeQuads();
+    DrawSidebarQuads(g_sidebar.focused);
 
-    for (;;)
+    bool showScroll = (count > visibleRows);
+    float plateW = g_M.contentW - (showScroll ? scrollGutter : 0.0f);
+
+    ButtonHint footer[MAX_FOOTER_HINTS];
+    int footerCount = LayoutFooter(hints, hintCount, footer);
+    const float hintCenterY = FooterCenterY();
+
+    for (int row = 0; row < visibleRows; ++row)
     {
-        WORD buttons = CurrentButtons();
-        WORD pressed = buttons & ~prevButtons;
-        prevButtons = buttons;
+        int index = scrollOffset + row;
+        if (index >= count)
+            break;
 
-        // Same auto-repeat rules as the game list - see ShowGameListUI.
-        WORD direction = buttons & (XINPUT_GAMEPAD_DPAD_UP | XINPUT_GAMEPAD_DPAD_DOWN);
-        if (direction != XINPUT_GAMEPAD_DPAD_UP && direction != XINPUT_GAMEPAD_DPAD_DOWN)
-            direction = 0;
-
-        bool moveNow = false;
-
-        if (direction == 0)
-        {
-            heldDirection = 0;
-        }
-        else if (direction != heldDirection)
-        {
-            heldDirection = direction;
-            repeatCountdown = REPEAT_DELAY_FRAMES;
-            moveNow = true;
-        }
-        else if (--repeatCountdown <= 0)
-        {
-            repeatCountdown = REPEAT_RATE_FRAMES;
-            moveNow = true;
-        }
-
-        if (moveNow)
-        {
-            if (heldDirection == XINPUT_GAMEPAD_DPAD_UP && selected > 0)
-                selected--;
-            else if (heldDirection == XINPUT_GAMEPAD_DPAD_DOWN && selected < count - 1)
-                selected++;
-        }
-
-        if (pressed & XINPUT_GAMEPAD_A)
-            return selected;
-
-        if (pressed & XINPUT_GAMEPAD_B)
-            return -1;
-
-        if (selected < scrollOffset) scrollOffset = selected;
-        if (selected >= scrollOffset + visibleRows) scrollOffset = selected - visibleRows + 1;
-
-        g_pd3dDevice->Resume();
-        g_pd3dDevice->Clear(0, NULL, D3DCLEAR_TARGET, COL_BG_BOTTOM, 1.0f, 0);
-
-        // --- Pass 1: quads ---
-        DrawChromeQuads();
-
-        bool showScroll = (count > visibleRows);
-        float plateW = g_M.contentW - (showScroll ? scrollGutter : 0.0f);
-
-        // Same badge footer as the game list, for the same reason it is laid
-        // out this early there - see ShowGameListUI. "Back" here, not "Exit":
-        // this screen steps back to the library rather than leaving the app.
-        ButtonHint hints[2];
-        int hintCount = 0;
-
-        hints[hintCount].sprite = BUTTON_SPRITE_A; hints[hintCount].label = wideAction; hintCount++;
-
-        hints[hintCount].sprite = BUTTON_SPRITE_B; hints[hintCount].label = L"Back"; hintCount++;
-
-        LayoutButtonHints(hints, hintCount, g_M.contentX);
-
-        float hintCenterY = g_M.footerY + 9.0f * g_M.scale;
-
-        for (int row = 0; row < visibleRows; ++row)
-        {
-            int index = scrollOffset + row;
-            if (index >= count)
-                break;
-
-            float rowY = g_M.listY + row * rowH;
-
-            if (index == selected)
-            {
-                // Same treatment as the game list - see the comment there.
-                float pulse = SelectionPulse();
-                DrawGradientRect(g_M.contentX, rowY, plateW, plateH,
-                                 ScaleColorBrightness(COL_PANEL_SEL_A, pulse),
-                                 ScaleColorBrightness(COL_PANEL_SEL_B, pulse), true);
-            }
-            else
-            {
-                DrawRect(g_M.contentX, rowY, plateW, plateH, COL_PANEL);
-            }
-        }
-
-        if (showScroll)
-        {
-            const float trackX = g_M.contentX + g_M.contentW - scrollW;
-            const float trackY = g_M.listY;
-            const float trackH = visibleRows * rowH - rowGap;
-
-            float thumbH = trackH * ((float)visibleRows / (float)count);
-            float minThumb = 24.0f * g_M.scale;
-            if (thumbH < minThumb) thumbH = minThumb;
-
-            float thumbY = trackY + (trackH - thumbH) * ((float)scrollOffset / (float)(count - visibleRows));
-
-            DrawRect(trackX, trackY, scrollW, trackH, COL_SCROLL_TRACK);
-            DrawGradientRect(trackX, thumbY, scrollW, thumbH, COL_SCROLL_THUMB, COL_ACCENT_DIM, true);
-        }
-
-        DrawButtonHintShapes(hints, hintCount, hintCenterY);
-
-        // --- Pass 2: all text, one Begin/End ---
-        g_UiFont.Begin();
-
-        DrawChromeHeading(heading);
-
-        if (showCounter)
-        {
-            char counter[64];
-            _snprintf(counter, sizeof(counter), "%d / %d", selected + 1, count);
-            counter[sizeof(counter) - 1] = '\0';
-
-            WCHAR wideCounter[64];
-            Utf8ToWide(counter, wideCounter, 64);
-
-            g_UiFont.SetScaleFactors(0.9f * g_M.textScale, 0.9f * g_M.textScale);
-            g_UiFont.DrawText(g_M.contentX + g_M.contentW, g_M.headerTextY + 6.0f * g_M.scale,
-                              COL_TEXT_DIM, wideCounter, ATGFONT_RIGHT);
-        }
-
-        DrawButtonHintText(hints, hintCount, hintCenterY);
-
-        float textX = g_M.contentX + 18.0f * g_M.scale;
-        float textMaxW = (g_M.contentX + plateW) - textX - 16.0f * g_M.scale;
-
-        for (int row = 0; row < visibleRows; ++row)
-        {
-            int index = scrollOffset + row;
-            if (index >= count)
-                break;
-
-            float rowY = g_M.listY + row * rowH;
-            bool isSelected = (index == selected);
-
-            // Scene release filenames are long and the interesting part is at
-            // the front, so these rely on DrawText's own ellipsis truncation
-            // rather than wrapping onto a second line.
-            WCHAR wideLabel[256];
-            Utf8ToWide(labels[index] != NULL ? labels[index] : "", wideLabel, 256);
-
-            g_UiFont.SetScaleFactors(0.95f * g_M.textScale, 0.95f * g_M.textScale);
-            g_UiFont.DrawText(textX, rowY + labelY,
-                              isSelected ? COL_SEL_TEXT : COL_TEXT_SECONDARY,
-                              wideLabel, ATGFONT_TRUNCATED, textMaxW);
-
-            if (sublabels != NULL && sublabels[index] != NULL)
-            {
-                WCHAR wideSub[128];
-                Utf8ToWide(sublabels[index], wideSub, 128);
-
-                // Matches the game list's secondary line - same 0.72 -> 0.85
-                // bump, for the same sharpness reason.
-                g_UiFont.SetScaleFactors(0.85f * g_M.textScale, 0.85f * g_M.textScale);
-                g_UiFont.DrawText(textX, rowY + sublabelY,
-                                  isSelected ? COL_SEL_SUBTEXT : COL_TEXT_DIM,
-                                  wideSub, ATGFONT_TRUNCATED, textMaxW);
-            }
-        }
-
-        g_UiFont.SetScaleFactors(1.0f, 1.0f);
-        g_UiFont.End();
-
-        g_pd3dDevice->Present(NULL, NULL, NULL, NULL);
-        g_pd3dDevice->Suspend();
-
-        Sleep(16);
+        DrawRowPlate(g_M.contentX, g_M.listY + row * rowH, plateW, plateH,
+                     index == selected, view.focused);
     }
+
+    if (showScroll)
+        DrawScrollbar(g_M.listY, visibleRows * rowH - rowGap, count, visibleRows, scrollOffset);
+
+    DrawButtonHintShapes(footer, footerCount, hintCenterY);
+
+    // --- Pass 2: all text, one Begin/End ---
+    g_UiFont.Begin();
+
+    DrawSidebarText(g_sidebar.focused);
+    DrawChromeHeading(view.heading);
+
+    if (view.showCounter && count > 0)
+        DrawPositionCounter(selected, count);
+
+    DrawButtonHintText(footer, footerCount, hintCenterY);
+
+    float textX = g_M.contentX + 18.0f * g_M.scale;
+    float textMaxW = (g_M.contentX + plateW) - textX - 16.0f * g_M.scale;
+
+    for (int row = 0; row < visibleRows; ++row)
+    {
+        int index = scrollOffset + row;
+        if (index >= count)
+            break;
+
+        float rowY = g_M.listY + row * rowH;
+        bool isSelected = (index == selected);
+        bool onGreen = isSelected && view.focused;
+
+        // Scene release filenames are long and the interesting part is at the
+        // front, so these rely on DrawText's own ellipsis truncation rather
+        // than wrapping onto a second line.
+        WCHAR wideLabel[256];
+        Utf8ToWide(view.labels[index] != NULL ? view.labels[index] : "", wideLabel, 256);
+
+        g_UiFont.SetScaleFactors(0.95f * g_M.textScale, 0.95f * g_M.textScale);
+        g_UiFont.DrawText(textX, rowY + labelY,
+                          onGreen ? COL_SEL_TEXT : (isSelected ? COL_TEXT_PRIMARY : COL_TEXT_SECONDARY),
+                          wideLabel, ATGFONT_TRUNCATED, textMaxW);
+
+        if (view.sublabels != NULL && view.sublabels[index] != NULL)
+        {
+            WCHAR wideSub[128];
+            Utf8ToWide(view.sublabels[index], wideSub, 128);
+
+            g_UiFont.SetScaleFactors(0.85f * g_M.textScale, 0.85f * g_M.textScale);
+            g_UiFont.DrawText(textX, rowY + sublabelY,
+                              onGreen ? COL_SEL_SUBTEXT : COL_TEXT_DIM,
+                              wideSub, ATGFONT_TRUNCATED, textMaxW);
+        }
+    }
+
+    g_UiFont.SetScaleFactors(1.0f, 1.0f);
+    g_UiFont.End();
+
+    EndFrame();
+}
+
+void RenderPlaceholderFrame(const char *heading, const char *message, const char *detailLine,
+                            const UiHint *hints, int hintCount)
+{
+    if (!g_Initialized)
+        return;
+
+    ButtonHint footer[MAX_FOOTER_HINTS];
+    int footerCount = LayoutFooter(hints, hintCount, footer);
+
+    RenderStatusFrameInternal(heading, message, detailLine, footer, footerCount, true);
 }
