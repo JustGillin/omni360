@@ -59,6 +59,14 @@ bool DriveFreeSpace(const std::string &path, unsigned long long *outFree);
 // so, how much the file needed and how much the drive had. Cleared on entry to
 // each. A full drive used to surface only as a disk write error in the log,
 // under a generic "download failed" on screen.
+//
+// Threading: both of these are plain module state, not per-call results. That
+// is safe only because ListDlcMembers, DownloadDlcMember and
+// DownloadTitleUpdate are all called from ONE thread - the one doing the
+// downloads - and that thread reads the answer straight after its own call.
+// The searches (FindDlcRarFilenames, FindTitleUpdates) never touch either, so
+// they're fine to run on another thread. Calling any of the three keyed
+// functions from a second thread would break this.
 bool ArchiveOrgDiskFull(unsigned long long *outNeeded, unsigned long long *outFree);
 
 enum KeyCheckResult
@@ -136,7 +144,11 @@ int FindDlcRarFilenames(const std::string &gameName, DlcRarMatch *outMatches, in
 //   avatarItemsSkipped - files found so far that are avatar items (clothing
 //                  and props for an Xbox avatar, not game content) and so
 //                  won't be - counted separately so the screen can say so
-typedef void (*ListMembersProgressFn)(unsigned long long bytesScanned, unsigned long long archiveSize,
+//
+// Return true to carry on, false to cancel - ListDlcMembers then returns -1.
+// It is only asked between headers, so a cancel lands once the request in
+// flight has come back.
+typedef bool (*ListMembersProgressFn)(unsigned long long bytesScanned, unsigned long long archiveSize,
                                       int filesToInstall, int avatarItemsSkipped);
 
 int ListDlcMembers(const std::string &rarFilename, unsigned long long archiveSize,

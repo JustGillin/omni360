@@ -63,7 +63,6 @@
 // Xbox 360-specific socket option required for direct outbound sockets that do
 // not tunnel through Microsoft's service stack.
 #define XBOX_SO_BYPASS_SECURITY 0x5801
-static br_hmac_drbg_context g_drbg;
 
 extern "C" void XeCryptRandom(BYTE* pb, DWORD cb);
 
@@ -71,9 +70,17 @@ extern "C" void XeCryptRandom(BYTE* pb, DWORD cb);
 /*
  * Custom entropy seeder for XboxTLS.
  *
- * This function provides entropy to the BearSSL HMAC-DRBG (Deterministic Random Bit Generator)
- * using the Xbox 360's internal XeCryptRandom function. It seeds the global HMAC-DRBG instance
- * `g_drbg` with a 32-byte random seed and sets the context pointer for use in TLS operations.
+ * ctx is the TLS engine's OWN HMAC-DRBG, which BearSSL has already created
+ * with an empty seed (rng_init in ssl_engine.c). The seeder's job is to feed
+ * entropy into that instance through its update() method, the same way the
+ * stock seeders in SSL/rand/sysrng.c do.
+ *
+ * This used to seed a separate global DRBG and only copy its vtable pointer
+ * into *ctx - which is the same vtable the engine's DRBG already had, so it
+ * changed nothing. The engine's DRBG was never seeded, yet this returned 1,
+ * so BearSSL treated it as properly seeded: every connection's client random
+ * and ECDHE private key came out of an unseeded DRBG. It also meant two
+ * handshakes on different threads raced on that global.
  *
  * Returns:
  *   1 on success (as required by BearSSL API).
@@ -81,8 +88,7 @@ extern "C" void XeCryptRandom(BYTE* pb, DWORD cb);
 static int XboxTLS_CustomSeeder(const br_prng_class **ctx) {
     unsigned char seed[32];
     XeCryptRandom(seed, sizeof(seed));
-    br_hmac_drbg_init(&g_drbg, &br_sha256_vtable, seed, sizeof(seed));
-    *ctx = g_drbg.vtable;
+    (*ctx)->update(ctx, seed, sizeof(seed));
     return 1;
 }
 br_prng_seeder

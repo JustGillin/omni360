@@ -664,8 +664,8 @@ int ListDlcMembers(const std::string &rarFilename, unsigned long long archiveSiz
 
     std::string url = ARCHIVE_DOWNLOAD_BASE + rarFilename;
 
-    if (progressFn != NULL)
-        progressFn(0, archiveSize, 0, 0);
+    if (progressFn != NULL && !progressFn(0, archiveSize, 0, 0))
+        return -1; // cancelled
 
     // Generous per-request chunk: real header fixed part is 32 bytes, and
     // observed filenames are well under this; this is NOT the whole archive,
@@ -857,8 +857,11 @@ int ListDlcMembers(const std::string &rarFilename, unsigned long long archiveSiz
         // necessarily correct) member.
         pos = pos + nextPos;
 
-        if (progressFn != NULL)
-            progressFn(pos < archiveSize ? pos : archiveSize, archiveSize, count, skippedAvatar);
+        if (progressFn != NULL && !progressFn(pos < archiveSize ? pos : archiveSize, archiveSize, count, skippedAvatar))
+        {
+            printFunction("  Reading the file list was cancelled\n");
+            return -1;
+        }
     }
 
     if (skippedAvatar > 0)
@@ -911,7 +914,7 @@ bool DlcMemberIsInstalled(const DlcMember &member, const std::string &contentBas
         return false;
 
     // Size has to match, not just existence. A download cancelled partway
-    // through (Start pauses, B cancels - both reachable mid-transfer) leaves a
+    // through (B, confirmed, stops it mid-transfer) can leave a
     // short file behind, and treating that as installed would skip it forever
     // while the game stayed broken. unpSize is the real uncompressed size
     // straight from the RAR header, so this is a genuine check rather than a
@@ -1096,7 +1099,8 @@ static int DownloadUrlToFile(const std::string &url, const std::string &destPath
             httpStatus = -1;
         }
 
-        if (httpStatus == 401 || httpStatus == 403 || httpStatus == 404)
+        // A cancel is the caller asking to stop - trying again would ignore it.
+        if (httpStatus == 401 || httpStatus == 403 || httpStatus == 404 || httpStatus == HTTP_STATUS_CANCELLED)
             break;
 
         // Ran out of space mid-transfer - something else filled the drive, or

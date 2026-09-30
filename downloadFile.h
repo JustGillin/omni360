@@ -22,10 +22,21 @@ enum HttpMethod
 /// the 2-3 second throttle on the text progress prints, so a bar animates
 /// smoothly. Keep implementations cheap: this runs between socket reads, and
 /// anything slow here directly costs download throughput.
-typedef void (*DownloadProgressFn)(unsigned long long bytesDone,
+///
+/// Return true to carry on, false to cancel the download. A cancelled request
+/// returns HTTP_STATUS_CANCELLED rather than a failure status, so callers that
+/// retry failed transfers know not to. This is the only way to cancel: the
+/// read loop no longer polls the controller itself, since downloads are
+/// moving onto a worker thread and only the UI thread should read the pad.
+typedef bool (*DownloadProgressFn)(unsigned long long bytesDone,
                                    unsigned long long bytesTotal,
                                    unsigned long long bytesPerSec,
                                    unsigned long long secondsRemaining);
+
+/// What httpRequestHTTPS returns when its DownloadProgressFn asked to stop.
+/// Negative, like its other failures, so "not 200/206" checks still treat it
+/// as not-a-success - but distinct, so it isn't retried or reported as an error.
+#define HTTP_STATUS_CANCELLED (-3)
 
 /// @brief Formats a byte count as a human-readable string ("12.4 MB"). Already
 /// used internally for the text progress lines; declared here so UI code can

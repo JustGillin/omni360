@@ -700,16 +700,67 @@ static char g_progressTitle[256] = "";
 static int g_progressFileIndex = 0;
 static int g_progressFileCount = 0;
 
+// Set once the user confirms stopping, so the code that started the download
+// can tell a cancel apart from a failure - and stays set until the next
+// download resets it, so every callback after the first refusal keeps
+// refusing rather than asking again.
+static bool g_progressCancelled = false;
+static WORD g_progressPrevButtons = 0;
+
+static WORD AnyPadButtons(); // below, with the disc install
+
+// Call before each pack or title update. Seeds the button state from the pad
+// as it is now, so the A that started the download can't count as a press.
+static void ResetDownloadCancel()
+{
+    g_progressCancelled = false;
+    g_progressPrevButtons = AnyPadButtons();
+}
+
+// B asks before stopping, as the disc install does. Returns false once the
+// user has confirmed.
+//
+// While the question is up nothing reads from the connection, so a long pause
+// before answering "no" can leave the server to give up on it - the same as
+// the old Start-to-pause had. This goes away once downloads run on their own
+// thread and the UI asks without holding them up.
+static bool KeepDownloading()
+{
+    if (g_progressCancelled)
+        return false;
+
+    WORD buttons = AnyPadButtons();
+    WORD pressed = buttons & ~g_progressPrevButtons;
+    g_progressPrevButtons = buttons;
+
+    if (pressed & XINPUT_GAMEPAD_B)
+    {
+        if (ShowConfirmUI("STOP DOWNLOADING?", g_progressTitle,
+                          "Files that already finished stay installed.", "Stop"))
+        {
+            dprintf("Download cancelled by the user\n");
+            g_progressCancelled = true;
+            return false;
+        }
+        g_progressPrevButtons = AnyPadButtons(); // the B that answered "no" isn't a fresh press
+    }
+
+    return true;
+}
+
 // Called from inside downloadFile.cpp's read loop, roughly every 100ms, with
 // live byte counts for the file currently downloading. This replaces the old
 // behaviour where the progress bar only advanced once per completed member -
 // meaning it sat frozen for the entire duration of each actual download while
 // the real numbers scrolled past in the debug console.
-static void DlcProgressCallback(unsigned long long bytesDone,
+static bool DlcProgressCallback(unsigned long long bytesDone,
                                 unsigned long long bytesTotal,
                                 unsigned long long bytesPerSec,
                                 unsigned long long secondsRemaining)
 {
+    if (!KeepDownloading())
+        return false;
+
     // Fixed format specifiers and explicit null-termination throughout: this
     // toolchain's _snprintf does not null-terminate on truncation, and its
     // dynamic-precision specifier ("%.*s") has caused a real, near-undebuggable
@@ -734,14 +785,14 @@ static void DlcProgressCallback(unsigned long long bytesDone,
         int minutesLeft = (int)(secondsRemaining / 60);
         int secsLeft = (int)(secondsRemaining % 60);
 
-        _snprintf(detail, sizeof(detail), "%s / %s   %s/s   %d:%02d left",
+        _snprintf(detail, sizeof(detail), "%s / %s   %s/s   %d:%02d left   -   B to stop",
                   done, total, speed, minutesLeft, secsLeft);
     }
     else
     {
         // No Content-Length and no size hint - report what we can rather than
         // implying a percentage we don't have.
-        _snprintf(detail, sizeof(detail), "%s   %s/s", done, speed);
+        _snprintf(detail, sizeof(detail), "%s   %s/s   -   B to stop", done, speed);
     }
     detail[sizeof(detail) - 1] = '\0';
 
@@ -756,6 +807,7 @@ static void DlcProgressCallback(unsigned long long bytesDone,
     }
 
     RenderProgressFrame(g_progressTitle, status, detail, fraction);
+    return true;
 }
 
 // Drawn after each header ListDlcMembers reads. That walk is one network round
@@ -766,9 +818,12 @@ static void DlcProgressCallback(unsigned long long bytesDone,
 // jumps - each step skips over a whole member's data - so the counts under it
 // are what show it's still going between jumps. The screen can't animate
 // during a request itself: each one blocks until archive.org answers.
-static void ListMembersProgressCallback(unsigned long long bytesScanned, unsigned long long archiveSize,
+static bool ListMembersProgressCallback(unsigned long long bytesScanned, unsigned long long archiveSize,
                                         int filesToInstall, int avatarItemsSkipped)
 {
+    if (!KeepDownloading())
+        return false;
+
     char detail[160];
     if (filesToInstall == 0 && avatarItemsSkipped == 0)
         _snprintf(detail, sizeof(detail), "Connecting...");
@@ -786,6 +841,7 @@ static void ListMembersProgressCallback(unsigned long long bytesScanned, unsigne
     float fraction = (archiveSize > 0) ? (float)((double)bytesScanned / (double)archiveSize) : -1.0f;
 
     RenderProgressFrame(g_progressTitle, "Reading the file list", detail, fraction, "READING PACK");
+    return true;
 }
 
 // Downloads every file inside one chosen pack.
@@ -800,9 +856,16 @@ static bool DownloadOnePack(const DlcRarMatch &pack, const char *contentBasePath
     strncpy(g_progressTitle, pack.filename, sizeof(g_progressTitle) - 1);
     g_progressTitle[sizeof(g_progressTitle) - 1] = '\0';
 
+    ResetDownloadCancel();
+
     DlcMember members[MAX_DLC_MEMBERS];
     int memberCount = ListDlcMembers(pack.filename, pack.size, members, MAX_DLC_MEMBERS, authHeader, dprintf,
                                      ListMembersProgressCallback);
+
+    // Stopped on purpose - straight back to the pack picker. The confirmation
+    // already said what happens, so there's nothing to add.
+    if (g_progressCancelled)
+        return true;
 
     if (memberCount <= 0)
     {
@@ -873,6 +936,9 @@ static bool DownloadOnePack(const DlcRarMatch &pack, const char *contentBasePath
         if (!DownloadDlcMember(pack.filename, members[f], contentBasePath,
                                authHeader, dprintf, DlcProgressCallback))
         {
+            if (g_progressCancelled)
+                return true; // not a failure - see the file-list check above
+
             dprintf("  Failed: %s\n", members[f].internalPath);
 
             // Stop at the first refusal instead of trying the rest - they'd
@@ -997,6 +1063,7 @@ static void InstallTitleUpdatesForGame(const InstalledGame &game, const char *co
         g_progressTitle[sizeof(g_progressTitle) - 1] = '\0';
         g_progressFileIndex = 0;
         g_progressFileCount = 1;
+        ResetDownloadCancel();
 
         unsigned long long tuNeeded = 0, tuFree = 0;
         if (DownloadTitleUpdate(updates[choice], game.titleId, contentBasePath,
@@ -1004,6 +1071,10 @@ static void InstallTitleUpdatesForGame(const InstalledGame &game, const char *co
         {
             ShowMessageUI("TITLE UPDATE INSTALLED", updates[choice].filename,
                           "Restart your dashboard to pick up the update.");
+        }
+        else if (g_progressCancelled)
+        {
+            // Stopped on purpose - back to the picker with nothing to report.
         }
         else if (ArchiveOrgKeysRejected())
         {

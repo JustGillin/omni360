@@ -17,6 +17,18 @@ ATG::Console g_console;// console for output
 // See SetConsoleQuiet in OutputConsole.h for why this exists.
 static bool g_consoleQuiet = false;
 
+// dprintf and log_printf format into the shared buf below and append to the
+// same log file, and downloads are moving onto a worker thread - so two lines
+// logged at once from different threads would otherwise overwrite each
+// other's text mid-format. A static object rather than lazy setup, so the
+// lock exists before main() and before any thread could reach it.
+struct LogLock
+{
+	CRITICAL_SECTION cs;
+	LogLock() { InitializeCriticalSection(&cs); }
+};
+static LogLock g_logLock;
+
 void SetConsoleQuiet(int quiet)
 {
 	g_consoleQuiet = (quiet != 0);
@@ -32,6 +44,7 @@ void  __cdecl dprintf(const char* strFormat, ...)
 {
 	FILE* flog;
 	va_list pArglist;
+	EnterCriticalSection(&g_logLock.cs);
 	va_start(pArglist, strFormat);
 #ifdef USE_UNICODE
 	_vsnwprintf_s(buf, TEXTBUFFER_SIZE, strFormat, pArglist);
@@ -93,6 +106,7 @@ void  __cdecl dprintf(const char* strFormat, ...)
 	}
 
 #endif
+	LeaveCriticalSection(&g_logLock.cs);
 }
 
 void MakeConsole(const char* font, unsigned long BackgroundColor, unsigned long TextColor)
@@ -108,6 +122,7 @@ void ClearConsole()
 
 void __cdecl log_printf(const char* strFormat, ...) {
 	va_list pArglist;
+	EnterCriticalSection(&g_logLock.cs);
 	va_start(pArglist, strFormat);
 #ifdef USE_UNICODE
 	_vsnwprintf_s(buf, TEXTBUFFER_SIZE, strFormat, pArglist);
@@ -125,4 +140,5 @@ void __cdecl log_printf(const char* strFormat, ...) {
         fclose(fp);
     }
 
+	LeaveCriticalSection(&g_logLock.cs);
 }
