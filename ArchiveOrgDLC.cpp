@@ -109,11 +109,14 @@ static int FetchToBuffer(HttpsSession *session, const std::string &url, const ch
 
 // session is optional: pass one to make a run of these calls share
 // connections (ListDlcMembers does), or NULL for a connection per request.
-static int HttpGetFollowRedirect(const std::string &url, char *dataBuffer, unsigned long long *dataBufferSize,
-                                 const char *extraHeaderLines, const char *authHeader,
-                                 void printFunction(const char *_format, ...),
-                                 std::string *ioCachedRedirectUrl = NULL,
-                                 HttpsSession *session = NULL)
+//
+// This one leaves the keys-rejected flag alone - see HttpGetFollowRedirect,
+// below, for the version that records it.
+static int HttpGetFollowRedirectRaw(const std::string &url, char *dataBuffer, unsigned long long *dataBufferSize,
+                                    const char *extraHeaderLines, const char *authHeader,
+                                    void printFunction(const char *_format, ...),
+                                    std::string *ioCachedRedirectUrl = NULL,
+                                    HttpsSession *session = NULL)
 {
     char combinedHeaders[IAS3_AUTH_HEADER_MAX + 96] = "";
     if (authHeader != NULL && authHeader[0] != '\0')
@@ -165,8 +168,20 @@ static int HttpGetFollowRedirect(const std::string &url, char *dataBuffer, unsig
                                dataBuffer, dataBufferSize, printFunction);
     }
 
-    // Only the final answer counts. A failed attempt on the cached datanode
-    // above is retried from scratch, so it says nothing about the keys yet.
+    return status;
+}
+
+// The same, recording a refusal for ArchiveOrgKeysRejected. Only the final
+// answer counts: a failed attempt on the cached datanode is retried from
+// scratch inside, so it says nothing about the keys yet.
+static int HttpGetFollowRedirect(const std::string &url, char *dataBuffer, unsigned long long *dataBufferSize,
+                                 const char *extraHeaderLines, const char *authHeader,
+                                 void printFunction(const char *_format, ...),
+                                 std::string *ioCachedRedirectUrl = NULL,
+                                 HttpsSession *session = NULL)
+{
+    int status = HttpGetFollowRedirectRaw(url, dataBuffer, dataBufferSize, extraHeaderLines, authHeader,
+                                          printFunction, ioCachedRedirectUrl, session);
     return NoteAuthStatus(status, authHeader);
 }
 
@@ -428,8 +443,12 @@ KeyCheckResult CheckArchiveOrgKeys(const char *authHeader, char *outReason, size
     char buffer[4096];
     unsigned long long bufferSize = sizeof(buffer) - 1;
 
-    int status = HttpGetFollowRedirect(ARCHIVE_S3_CHECK_AUTH_URL, buffer, &bufferSize,
-                                       NULL, authHeader, printFunction);
+    // Raw: this reports its verdict through its own return value, and it
+    // runs on the UI thread - recording a refusal here could land in the
+    // middle of a download on the worker and make that download's failure
+    // look like refused keys. See the threading note in ArchiveOrgDLC.h.
+    int status = HttpGetFollowRedirectRaw(ARCHIVE_S3_CHECK_AUTH_URL, buffer, &bufferSize,
+                                          NULL, authHeader, printFunction);
 
     // Anything but a 200 means no verdict was given - offline, a TLS failure,
     // the service down. That is "couldn't check", never "wrong keys": telling

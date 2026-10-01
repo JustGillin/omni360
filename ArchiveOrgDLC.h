@@ -64,9 +64,11 @@ bool DriveFreeSpace(const std::string &path, unsigned long long *outFree);
 // is safe only because ListDlcMembers, DownloadDlcMember and
 // DownloadTitleUpdate are all called from ONE thread - the one doing the
 // downloads - and that thread reads the answer straight after its own call.
-// The searches (FindDlcRarFilenames, FindTitleUpdates) never touch either, so
-// they're fine to run on another thread. Calling any of the three keyed
-// functions from a second thread would break this.
+// The searches (FindDlcRarFilenames, FindTitleUpdates) and CheckArchiveOrgKeys
+// never touch either, so they're fine to run on another thread. Calling any of
+// the three keyed functions from a second thread would break this.
+//
+// In practice that one thread is the download worker (DownloadQueue.cpp).
 bool ArchiveOrgDiskFull(unsigned long long *outNeeded, unsigned long long *outFree);
 
 enum KeyCheckResult

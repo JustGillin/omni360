@@ -569,6 +569,14 @@ static void Utf8ToWide(const char *in, WCHAR *out, int outSize)
 // the one place A would act right now.
 #define COL_PANEL_SEL_IDLE 0x2EFFFFFF
 
+// Failures - a queue row that didn't install, the edge of an error popup.
+// A warm red, bright enough to read as text on the dark background.
+#define COL_ERROR          0xFFEC6F64
+
+// The popup's plate: nearly opaque, so the header rule behind it doesn't
+// show through.
+#define COL_TOAST_PLATE    0xF2141C17
+
 // ---------------------------------------------------------------------------
 // Layout metrics
 // ---------------------------------------------------------------------------
@@ -995,6 +1003,104 @@ static int LayoutFooter(const UiHint *hints, int hintCount, ButtonHint *out)
 static float FooterCenterY()
 {
     return g_M.footerY + 9.0f * g_M.scale;
+}
+
+// ---------------------------------------------------------------------------
+// Popup
+// ---------------------------------------------------------------------------
+//
+// In the header strip, top right, rather than floating over the list: every
+// frame draws all its quads and then all its text, so a plate laid over the
+// rows would have their text drawn straight on top of it. Up here the only
+// text it covers is the "3 / 27" counter, which the pages leave out while a
+// popup shows.
+
+#define TOAST_DURATION_MS 5000
+
+struct ShellToast
+{
+    bool shown;
+    DWORD shownAt;
+    UiToastTone tone;
+    char heading[64];
+    char message[192];
+};
+
+static ShellToast g_toast = {false, 0, UI_TOAST_INFO, "", ""};
+
+void ShowShellToast(const char *heading, const char *message, UiToastTone tone)
+{
+    g_toast.shown = true;
+    g_toast.shownAt = GetTickCount();
+    g_toast.tone = tone;
+    strncpy(g_toast.heading, heading != NULL ? heading : "", sizeof(g_toast.heading) - 1);
+    g_toast.heading[sizeof(g_toast.heading) - 1] = '\0';
+    strncpy(g_toast.message, message != NULL ? message : "", sizeof(g_toast.message) - 1);
+    g_toast.message[sizeof(g_toast.message) - 1] = '\0';
+}
+
+// Asked once per frame, so both passes agree on whether it's there. Elapsed
+// time rather than an end time, which keeps the comparison right across
+// GetTickCount wrapping.
+static bool ToastVisibleThisFrame()
+{
+    if (g_toast.shown && GetTickCount() - g_toast.shownAt >= TOAST_DURATION_MS)
+        g_toast.shown = false;
+    return g_toast.shown;
+}
+
+struct ToastRect
+{
+    float x, y, w, h;
+};
+
+static ToastRect ToastLayout()
+{
+    ToastRect r;
+    r.w = 500.0f * g_M.scale;
+    if (r.w > g_M.contentW * 0.62f)
+        r.w = g_M.contentW * 0.62f; // leaves the heading its room on a narrow page
+    r.x = g_M.contentX + g_M.contentW - r.w;
+    r.y = g_M.headerTextY - 8.0f * g_M.scale;
+    r.h = (g_M.listY - 8.0f * g_M.scale) - r.y;
+    return r;
+}
+
+static D3DCOLOR ToastEdgeColor()
+{
+    switch (g_toast.tone)
+    {
+    case UI_TOAST_SUCCESS: return COL_ACCENT;
+    case UI_TOAST_ERROR:   return COL_ERROR;
+    default:               return COL_TEXT_SECONDARY;
+    }
+}
+
+static void DrawToastQuads()
+{
+    ToastRect r = ToastLayout();
+    DrawRect(r.x, r.y, r.w, r.h, COL_TOAST_PLATE);
+    DrawRect(r.x, r.y, 5.0f * g_M.scale, r.h, ToastEdgeColor());
+}
+
+static void DrawToastText()
+{
+    ToastRect r = ToastLayout();
+    const float textX = r.x + 20.0f * g_M.scale;
+    const float textW = r.x + r.w - textX - 14.0f * g_M.scale;
+
+    WCHAR wideHeading[64];
+    WCHAR wideMessage[192];
+    Utf8ToWide(g_toast.heading, wideHeading, 64);
+    Utf8ToWide(g_toast.message, wideMessage, 192);
+
+    g_UiFont.SetScaleFactors(0.9f * g_M.textScale, 0.9f * g_M.textScale);
+    g_UiFont.DrawText(textX, r.y + 6.0f * g_M.scale, COL_TEXT_PRIMARY, wideHeading,
+                      ATGFONT_TRUNCATED, textW);
+
+    g_UiFont.SetScaleFactors(0.78f * g_M.textScale, 0.78f * g_M.textScale);
+    g_UiFont.DrawText(textX, r.y + 32.0f * g_M.scale, COL_TEXT_SECONDARY, wideMessage,
+                      ATGFONT_TRUNCATED, textW);
 }
 
 bool InitGameListUI()
@@ -1442,6 +1548,9 @@ void RenderLibraryFrame(LibraryPageView &view, const UiHint *hints, int hintCoun
 
     BeginFrame();
 
+    // Once per frame, so both passes agree - see ToastVisibleThisFrame.
+    const bool showToast = ToastVisibleThisFrame();
+
     // Two passes, quads first and then ALL text in a single Font Begin/End.
     // This isn't just a micro-optimization: Font::Begin() installs the font's
     // own shaders and render state, which every DrawQuad() here then
@@ -1514,6 +1623,9 @@ void RenderLibraryFrame(LibraryPageView &view, const UiHint *hints, int hintCoun
 
     DrawButtonHintShapes(footer, footerCount, hintCenterY);
 
+    if (showToast)
+        DrawToastQuads();
+
     // --- Pass 2: all text, one Begin/End ---
     g_UiFont.Begin();
 
@@ -1525,10 +1637,13 @@ void RenderLibraryFrame(LibraryPageView &view, const UiHint *hints, int hintCoun
     // an actual type hierarchy rather than one uniform size everywhere.
     DrawChromeHeading("YOUR LIBRARY");
 
-    if (gameCount > 0)
+    if (gameCount > 0 && !showToast) // the popup sits where the counter goes
         DrawPositionCounter(selected, gameCount);
 
     DrawButtonHintText(footer, footerCount, hintCenterY);
+
+    if (showToast)
+        DrawToastText();
 
     if (layout.showBanner)
     {
@@ -1916,6 +2031,9 @@ static void RenderStatusFrameInternal(const char *heading, const char *message,
 
     BeginFrame();
 
+    // Only on a page - a blocking screen carries its own message.
+    const bool showToast = asPage && ToastVisibleThisFrame();
+
     DrawChromeQuads();
     DrawSidebarQuads(sidebarFocused);
 
@@ -1925,6 +2043,9 @@ static void RenderStatusFrameInternal(const char *heading, const char *message,
         LayoutButtonHints(hints, hintCount, g_M.contentX);
         DrawButtonHintShapes(hints, hintCount, hintCenterY);
     }
+
+    if (showToast)
+        DrawToastQuads();
 
     const float blockY = asPage ? g_M.listY + 24.0f * g_M.scale
                                 : g_M.screenH * 0.5f - 40.0f * g_M.scale;
@@ -1952,6 +2073,9 @@ static void RenderStatusFrameInternal(const char *heading, const char *message,
 
     if (hints != NULL && hintCount > 0)
         DrawButtonHintText(hints, hintCount, hintCenterY);
+
+    if (showToast)
+        DrawToastText();
 
     g_UiFont.SetScaleFactors(1.0f, 1.0f);
     g_UiFont.End();
@@ -2074,6 +2198,9 @@ void RenderListFrame(ListPageView &view, const UiHint *hints, int hintCount)
 
     BeginFrame();
 
+    // Once per frame, so both passes agree - see ToastVisibleThisFrame.
+    const bool showToast = ToastVisibleThisFrame();
+
     // --- Pass 1: quads ---
     DrawChromeQuads();
     DrawSidebarQuads(g_sidebar.focused);
@@ -2100,16 +2227,22 @@ void RenderListFrame(ListPageView &view, const UiHint *hints, int hintCount)
 
     DrawButtonHintShapes(footer, footerCount, hintCenterY);
 
+    if (showToast)
+        DrawToastQuads();
+
     // --- Pass 2: all text, one Begin/End ---
     g_UiFont.Begin();
 
     DrawSidebarText(g_sidebar.focused);
     DrawChromeHeading(view.heading);
 
-    if (view.showCounter && count > 0)
+    if (view.showCounter && count > 0 && !showToast) // the popup sits where the counter goes
         DrawPositionCounter(selected, count);
 
     DrawButtonHintText(footer, footerCount, hintCenterY);
+
+    if (showToast)
+        DrawToastText();
 
     float textX = g_M.contentX + 18.0f * g_M.scale;
     float textMaxW = (g_M.contentX + plateW) - textX - 16.0f * g_M.scale;
@@ -2163,4 +2296,213 @@ void RenderPlaceholderFrame(const char *heading, const char *message, const char
     int footerCount = LayoutFooter(hints, hintCount, footer);
 
     RenderStatusFrameInternal(heading, message, detailLine, footer, footerCount, true);
+}
+
+// ---------------------------------------------------------------------------
+// Queue page
+// ---------------------------------------------------------------------------
+
+// Taller rows than the library's: a cover, three lines of text and a bar.
+static float QueueRowHeight()
+{
+    return 112.0f * g_M.scale;
+}
+
+static D3DCOLOR QueueStatusColor(QueueRowTone tone)
+{
+    switch (tone)
+    {
+    case QUEUE_ROW_ACTIVE: return COL_TEXT_PRIMARY;
+    case QUEUE_ROW_DONE:   return COL_ACCENT;
+    case QUEUE_ROW_FAILED: return COL_ERROR;
+    default:               return COL_TEXT_DIM;
+    }
+}
+
+void RenderQueueFrame(QueuePageView &view, const UiHint *hints, int hintCount)
+{
+    if (!g_Initialized)
+        return;
+
+    const int count = (view.rows != NULL && view.count > 0) ? view.count : 0;
+    const int gameCount = (view.games != NULL && view.gameCount > 0) ? view.gameCount : 0;
+
+    // The library's cover cache - loaded already if the library has been
+    // drawn, and loaded here if the Queue is somehow the first page shown.
+    Icon *icons = NULL;
+    if (gameCount > 0)
+    {
+        EnsureIconsLoaded(view.games, gameCount);
+        icons = g_icons;
+    }
+
+    const float rowH = QueueRowHeight();
+    const float rowGap = 8.0f * g_M.scale;
+    const float plateH = rowH - rowGap;
+    const float coverSize = 84.0f * g_M.scale;
+    const float coverInset = (plateH - coverSize) * 0.5f;
+    const float scrollGutter = 18.0f * g_M.scale;
+
+    int visibleRows = (int)((g_M.footerY - g_M.listY - 16.0f * g_M.scale) / rowH);
+    if (visibleRows < 1) visibleRows = 1;
+
+    KeepSelectionVisible(count, visibleRows, view.selected, view.scroll);
+    const int selected = view.selected;
+    const int scrollOffset = view.scroll;
+
+    BeginFrame();
+
+    // Once per frame, so both passes agree - see ToastVisibleThisFrame.
+    const bool showToast = ToastVisibleThisFrame();
+
+    bool showScroll = (count > visibleRows);
+    float plateW = g_M.contentW - (showScroll ? scrollGutter : 0.0f);
+
+    const float coverX = g_M.contentX + coverInset;
+    const float textX = coverX + coverSize + 20.0f * g_M.scale;
+    const float textRight = g_M.contentX + plateW - 20.0f * g_M.scale;
+    const float barH = 6.0f * g_M.scale;
+    const float barOffsetY = plateH - 18.0f * g_M.scale;
+
+    ButtonHint footer[MAX_FOOTER_HINTS];
+    int footerCount = LayoutFooter(hints, hintCount, footer);
+    const float hintCenterY = FooterCenterY();
+
+    // --- Pass 1: quads ---
+    DrawChromeQuads();
+    DrawSidebarQuads(g_sidebar.focused);
+
+    for (int row = 0; row < visibleRows; ++row)
+    {
+        int index = scrollOffset + row;
+        if (index >= count)
+            break;
+
+        const QueueRowView &r = view.rows[index];
+        const float rowY = g_M.listY + row * rowH;
+        const bool isSelected = (index == selected);
+        const bool onGreen = isSelected && view.focused;
+
+        DrawRowPlate(g_M.contentX, rowY, plateW, plateH, isSelected, view.focused);
+
+        float coverY = rowY + coverInset;
+        if (icons != NULL && r.libraryIndex >= 0 && r.libraryIndex < gameCount &&
+            icons[r.libraryIndex].texture != NULL)
+            DrawIconFitted(&icons[r.libraryIndex], coverX, coverY, coverSize);
+        else
+            DrawRect(coverX, coverY, coverSize, coverSize, COL_ICON_PLACEHLD);
+
+        if (r.showBar)
+        {
+            float barY = rowY + barOffsetY;
+            float barW = textRight - textX;
+
+            // On the green bar the usual trough and fill would vanish into
+            // it, so it's drawn dark-on-green and white-on-dark instead.
+            DrawRect(textX, barY, barW, barH, onGreen ? 0x40000000 : COL_BAR_TROUGH);
+
+            float fraction = r.fraction;
+            if (fraction > 1.0f) fraction = 1.0f;
+            if (fraction > 0.0f)
+            {
+                if (onGreen)
+                    DrawRect(textX, barY, barW * fraction, barH, COL_SEL_TEXT);
+                else
+                    DrawGradientRect(textX, barY, barW * fraction, barH, COL_ACCENT_DIM, COL_ACCENT, false);
+            }
+        }
+    }
+
+    if (showScroll)
+        DrawScrollbar(g_M.listY, visibleRows * rowH - rowGap, count, visibleRows, scrollOffset);
+
+    DrawButtonHintShapes(footer, footerCount, hintCenterY);
+
+    if (showToast)
+        DrawToastQuads();
+
+    // --- Pass 2: all text, one Begin/End ---
+    g_UiFont.Begin();
+
+    DrawSidebarText(g_sidebar.focused);
+    DrawChromeHeading("QUEUE");
+    DrawButtonHintText(footer, footerCount, hintCenterY);
+
+    if (showToast)
+        DrawToastText();
+
+    for (int row = 0; row < visibleRows; ++row)
+    {
+        int index = scrollOffset + row;
+        if (index >= count)
+            break;
+
+        const QueueRowView &r = view.rows[index];
+        const float rowY = g_M.listY + row * rowH;
+        const bool isSelected = (index == selected);
+        const bool onGreen = isSelected && view.focused;
+
+        // The percentage, right-aligned on the title line, while there's a
+        // known fraction to give. The title is truncated short of it.
+        float titleRight = textRight;
+
+        if (r.showBar && r.fraction >= 0.0f)
+        {
+            float fraction = (r.fraction > 1.0f) ? 1.0f : r.fraction;
+
+            char pct[16];
+            _snprintf(pct, sizeof(pct), "%d%%", (int)(fraction * 100.0f));
+            pct[sizeof(pct) - 1] = '\0';
+
+            WCHAR widePct[16];
+            Utf8ToWide(pct, widePct, 16);
+
+            g_UiFont.SetScaleFactors(0.9f * g_M.textScale, 0.9f * g_M.textScale);
+            g_UiFont.DrawText(textRight, rowY + 10.0f * g_M.scale,
+                              onGreen ? COL_SEL_TEXT : COL_ACCENT, widePct, ATGFONT_RIGHT);
+            titleRight -= g_UiFont.GetTextWidth(widePct) + 16.0f * g_M.scale;
+        }
+
+        WCHAR wideTitle[256];
+        Utf8ToWide(r.title != NULL ? r.title : "", wideTitle, 256);
+        g_UiFont.SetScaleFactors(0.95f * g_M.textScale, 0.95f * g_M.textScale);
+        g_UiFont.DrawText(textX, rowY + 8.0f * g_M.scale,
+                          onGreen ? COL_SEL_TEXT : COL_TEXT_PRIMARY, wideTitle,
+                          ATGFONT_TRUNCATED, titleRight - textX);
+
+        WCHAR wideGame[128];
+        Utf8ToWide(r.gameName != NULL ? r.gameName : "", wideGame, 128);
+        g_UiFont.SetScaleFactors(0.8f * g_M.textScale, 0.8f * g_M.textScale);
+        g_UiFont.DrawText(textX, rowY + 34.0f * g_M.scale,
+                          onGreen ? COL_SEL_SUBTEXT : COL_TEXT_DIM, wideGame,
+                          ATGFONT_TRUNCATED, textRight - textX);
+
+        // Status left, live numbers right, sharing a line - the numbers go
+        // first so the status can be truncated short of them.
+        const float statusScale = 0.85f * g_M.textScale;
+        const float statusY = rowY + 56.0f * g_M.scale;
+        float statusRight = textRight;
+
+        if (r.numbers != NULL && r.numbers[0] != '\0')
+        {
+            WCHAR wideNumbers[128];
+            Utf8ToWide(r.numbers, wideNumbers, 128);
+
+            g_UiFont.SetScaleFactors(0.8f * g_M.textScale, 0.8f * g_M.textScale);
+            g_UiFont.DrawText(textRight, statusY + 2.0f * g_M.scale,
+                              onGreen ? COL_SEL_SUBTEXT : COL_TEXT_SECONDARY, wideNumbers, ATGFONT_RIGHT);
+            statusRight -= g_UiFont.GetTextWidth(wideNumbers) + 20.0f * g_M.scale;
+        }
+
+        WCHAR wideStatus[256];
+        Utf8ToWide(r.status != NULL ? r.status : "", wideStatus, 256);
+        g_UiFont.SetScaleFactors(statusScale, statusScale);
+        g_UiFont.DrawText(textX, statusY, onGreen ? COL_SEL_TEXT : QueueStatusColor(r.tone),
+                          wideStatus, ATGFONT_TRUNCATED, statusRight - textX);
+    }
+
+    g_UiFont.SetScaleFactors(1.0f, 1.0f);
+    g_UiFont.End();
+
+    EndFrame();
 }

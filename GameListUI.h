@@ -179,6 +179,64 @@ void RenderListFrame(ListPageView &view, const UiHint *hints, int hintCount);
 void RenderPlaceholderFrame(const char *heading, const char *message, const char *detailLine,
                             const UiHint *hints, int hintCount);
 
+// The download queue. Each row is one pack or title update, with the cover of
+// the game it's for, two lines of text and, while it's waiting or
+// downloading, a progress bar.
+enum QueueRowTone
+{
+    QUEUE_ROW_WAITING,
+    QUEUE_ROW_ACTIVE,
+    QUEUE_ROW_DONE,
+    QUEUE_ROW_FAILED
+};
+
+struct QueueRowView
+{
+    const char *title;    // the pack's or update's filename
+    const char *gameName;
+    const char *status;   // coloured by tone: "Waiting", "File 2 of 5", "Installed - restart your dashboard..."
+    const char *numbers;  // right-aligned beside the status while downloading; may be NULL
+    float fraction;       // the bar, 0..1; negative for no fill (unknown, or not started)
+    bool showBar;
+    int libraryIndex;     // whose cover to draw, into the view's games; -1 for none
+    QueueRowTone tone;
+};
+
+// games/gameCount are the library, for the covers - the same array the
+// library page draws, so they share its cover cache.
+struct QueuePageView
+{
+    const InstalledGame *games;
+    int gameCount;
+    const QueueRowView *rows;
+    int count;
+    int selected;
+    int scroll;
+    bool focused;
+};
+
+void RenderQueueFrame(QueuePageView &view, const UiHint *hints, int hintCount);
+
+// ---------------------------------------------------------------------------
+// Popup
+// ---------------------------------------------------------------------------
+
+// A short notice at the top right of the page - a download finishing or
+// failing, a pack added to the queue - that goes away on its own after a few
+// seconds and never takes input, so it can turn up on any page without
+// getting in the way. A new one replaces whatever is showing.
+//
+// Drawn by the shell's pages (the Render*Frame calls above), not by the
+// blocking screens, which carry their own messages.
+enum UiToastTone
+{
+    UI_TOAST_INFO,
+    UI_TOAST_SUCCESS,
+    UI_TOAST_ERROR
+};
+
+void ShowShellToast(const char *heading, const char *message, UiToastTone tone);
+
 // ---------------------------------------------------------------------------
 // Blocking screens
 // ---------------------------------------------------------------------------

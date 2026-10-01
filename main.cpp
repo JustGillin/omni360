@@ -25,6 +25,7 @@ end-to-end on real hardware against a real 27-game library.
 #include "Keyboard.h"
 #include "StfsParser.h"
 #include "GameListUI.h"
+#include "DownloadQueue.h"
 #include "ArchiveOrgDLC.h"
 #include "downloadFile.h" // DownloadProgressFn + FormatBytes, for the progress callback
 #include "GodConvert.h"
@@ -49,7 +50,6 @@ extern "C" NTSTATUS XexGetModuleHandle(PSZ moduleName, PHANDLE outHandle);
 #define CONTENT_BASE_PATH_DEFAULT "Hdd1:\\Content\\0000000000000000"
 #define GAMES_PATH_DEFAULT CONTENT_BASE_PATH_DEFAULT // where the dashboard itself keeps installed games
 #define MAX_INSTALLED_GAMES 256
-#define MAX_DLC_MEMBERS 128
 
 // (There is deliberately no auto-select threshold here any more - see the
 // comment above the pickers.)
@@ -575,15 +575,6 @@ static KeyEntryOutcome EnterCheckAndSaveKeys(std::string &accessKey, std::string
     }
 }
 
-// For a download that archive.org turned away because of the keys. Separate
-// from the generic failure messages on purpose: those name the pack or the
-// file, which is the wrong thing to go and fix.
-static void ShowKeysRejected()
-{
-    ShowMessageUI("KEYS NOT ACCEPTED", "archive.org turned down your keys for this download.",
-                  "Check them in Settings - press Y on the game list.");
-}
-
 // A full drive, said plainly with both numbers. It used to show up only as a
 // disk write error in the log, under a generic "download failed" - after the
 // download had already filled what space there was.
@@ -688,306 +679,6 @@ static bool GetArchiveOrgAuthHeader(char *authHeader, unsigned long long authHea
 }
 
 // ---------------------------------------------------------------------------
-// DLC lookup + download for one chosen game
-// ---------------------------------------------------------------------------
-
-// DownloadProgressFn is a bare function pointer with no user-data parameter
-// (matching printFunction, the callback convention already used throughout
-// this project), so the "which pack, which file" context the callback needs
-// in order to render a meaningful frame lives here rather than being threaded
-// down through the HTTP layer, which has no business knowing about it.
-static char g_progressTitle[256] = "";
-static int g_progressFileIndex = 0;
-static int g_progressFileCount = 0;
-
-// Set once the user confirms stopping, so the code that started the download
-// can tell a cancel apart from a failure - and stays set until the next
-// download resets it, so every callback after the first refusal keeps
-// refusing rather than asking again.
-static bool g_progressCancelled = false;
-static WORD g_progressPrevButtons = 0;
-
-static WORD AnyPadButtons(); // below, with the disc install
-
-// Call before each pack or title update. Seeds the button state from the pad
-// as it is now, so the A that started the download can't count as a press.
-static void ResetDownloadCancel()
-{
-    g_progressCancelled = false;
-    g_progressPrevButtons = AnyPadButtons();
-}
-
-// B asks before stopping, as the disc install does. Returns false once the
-// user has confirmed.
-//
-// While the question is up nothing reads from the connection, so a long pause
-// before answering "no" can leave the server to give up on it - the same as
-// the old Start-to-pause had. This goes away once downloads run on their own
-// thread and the UI asks without holding them up.
-static bool KeepDownloading()
-{
-    if (g_progressCancelled)
-        return false;
-
-    WORD buttons = AnyPadButtons();
-    WORD pressed = buttons & ~g_progressPrevButtons;
-    g_progressPrevButtons = buttons;
-
-    if (pressed & XINPUT_GAMEPAD_B)
-    {
-        if (ShowConfirmUI("STOP DOWNLOADING?", g_progressTitle,
-                          "Files that already finished stay installed.", "Stop"))
-        {
-            dprintf("Download cancelled by the user\n");
-            g_progressCancelled = true;
-            return false;
-        }
-        g_progressPrevButtons = AnyPadButtons(); // the B that answered "no" isn't a fresh press
-    }
-
-    return true;
-}
-
-// Called from inside downloadFile.cpp's read loop, roughly every 100ms, with
-// live byte counts for the file currently downloading. This replaces the old
-// behaviour where the progress bar only advanced once per completed member -
-// meaning it sat frozen for the entire duration of each actual download while
-// the real numbers scrolled past in the debug console.
-static bool DlcProgressCallback(unsigned long long bytesDone,
-                                unsigned long long bytesTotal,
-                                unsigned long long bytesPerSec,
-                                unsigned long long secondsRemaining)
-{
-    if (!KeepDownloading())
-        return false;
-
-    // Fixed format specifiers and explicit null-termination throughout: this
-    // toolchain's _snprintf does not null-terminate on truncation, and its
-    // dynamic-precision specifier ("%.*s") has caused a real, near-undebuggable
-    // crash in this project before.
-    char status[64];
-    _snprintf(status, sizeof(status), "File %d of %d", g_progressFileIndex + 1, g_progressFileCount);
-    status[sizeof(status) - 1] = '\0';
-
-    char done[64] = "";
-    char speed[64] = "";
-    FormatBytes(bytesDone, done, sizeof(done));
-    FormatBytes(bytesPerSec, speed, sizeof(speed));
-
-    char detail[256];
-    if (bytesTotal > 0)
-    {
-        char total[64] = "";
-        FormatBytes(bytesTotal, total, sizeof(total));
-
-        // Minutes/seconds cast down to int before formatting - they're small
-        // by definition, and it avoids relying on %llu width handling here.
-        int minutesLeft = (int)(secondsRemaining / 60);
-        int secsLeft = (int)(secondsRemaining % 60);
-
-        _snprintf(detail, sizeof(detail), "%s / %s   %s/s   %d:%02d left   -   B to stop",
-                  done, total, speed, minutesLeft, secsLeft);
-    }
-    else
-    {
-        // No Content-Length and no size hint - report what we can rather than
-        // implying a percentage we don't have.
-        _snprintf(detail, sizeof(detail), "%s   %s/s   -   B to stop", done, speed);
-    }
-    detail[sizeof(detail) - 1] = '\0';
-
-    // The bar tracks progress across the whole pack rather than the current
-    // file alone, so it advances monotonically instead of snapping back to
-    // zero on each of a dozen members.
-    float fraction = -1.0f; // negative = indeterminate, see RenderProgressFrame
-    if (g_progressFileCount > 0)
-    {
-        float withinFile = (bytesTotal > 0) ? ((float)bytesDone / (float)bytesTotal) : 0.0f;
-        fraction = ((float)g_progressFileIndex + withinFile) / (float)g_progressFileCount;
-    }
-
-    RenderProgressFrame(g_progressTitle, status, detail, fraction);
-    return true;
-}
-
-// Drawn after each header ListDlcMembers reads. That walk is one network round
-// trip per entry, and on a large pack it went on for a long time behind a
-// single static "Reading the file list" frame, looking hung.
-//
-// The bar is how far through the archive the walk has got. It moves in uneven
-// jumps - each step skips over a whole member's data - so the counts under it
-// are what show it's still going between jumps. The screen can't animate
-// during a request itself: each one blocks until archive.org answers.
-static bool ListMembersProgressCallback(unsigned long long bytesScanned, unsigned long long archiveSize,
-                                        int filesToInstall, int avatarItemsSkipped)
-{
-    if (!KeepDownloading())
-        return false;
-
-    char detail[160];
-    if (filesToInstall == 0 && avatarItemsSkipped == 0)
-        _snprintf(detail, sizeof(detail), "Connecting...");
-    else if (avatarItemsSkipped == 0)
-        _snprintf(detail, sizeof(detail), "%d file%s to install", filesToInstall, filesToInstall == 1 ? "" : "s");
-    else
-        // Named, not just counted: many packs are mostly avatar items (one had
-        // 11 of 12), and "skipping 10 items" with no reason reads as though
-        // part of the DLC is being lost.
-        _snprintf(detail, sizeof(detail), "%d file%s to install   -   %d avatar item%s skipped (outfits and props, not game content)",
-                  filesToInstall, filesToInstall == 1 ? "" : "s",
-                  avatarItemsSkipped, avatarItemsSkipped == 1 ? "" : "s");
-    detail[sizeof(detail) - 1] = '\0';
-
-    float fraction = (archiveSize > 0) ? (float)((double)bytesScanned / (double)archiveSize) : -1.0f;
-
-    RenderProgressFrame(g_progressTitle, "Reading the file list", detail, fraction, "READING PACK");
-    return true;
-}
-
-// Downloads every file inside one chosen pack.
-//
-// Returns false if archive.org refused the keys, so the caller stops offering
-// packs: every one of them would be refused the same way, and the fix is in
-// Settings, back on the game list.
-static bool DownloadOnePack(const DlcRarMatch &pack, const char *contentBasePath, const char *authHeader)
-{
-    // The pack name is the progress frames' title, both for the file-list
-    // walk below and for the downloads after it.
-    strncpy(g_progressTitle, pack.filename, sizeof(g_progressTitle) - 1);
-    g_progressTitle[sizeof(g_progressTitle) - 1] = '\0';
-
-    ResetDownloadCancel();
-
-    DlcMember members[MAX_DLC_MEMBERS];
-    int memberCount = ListDlcMembers(pack.filename, pack.size, members, MAX_DLC_MEMBERS, authHeader, dprintf,
-                                     ListMembersProgressCallback);
-
-    // Stopped on purpose - straight back to the pack picker. The confirmation
-    // already said what happens, so there's nothing to add.
-    if (g_progressCancelled)
-        return true;
-
-    if (memberCount <= 0)
-    {
-        // Reading the file list is the first thing that sends the keys, so
-        // this is where wrong ones usually show up.
-        if (ArchiveOrgKeysRejected())
-        {
-            ShowKeysRejected();
-            return false;
-        }
-
-        ShowMessageUI("COULD NOT READ PACK",
-                      "The file list for this pack could not be read.", pack.filename);
-        return true;
-    }
-
-    // Checked once for the whole pack, before any of it downloads: running out
-    // partway would leave a pack half installed, after a long wait. Files
-    // already on the console don't count - they won't be fetched again.
-    unsigned long long needed = 0;
-    for (int f = 0; f < memberCount; ++f)
-    {
-        if (!DlcMemberIsInstalled(members[f], contentBasePath))
-            needed += members[f].unpSize;
-    }
-
-    unsigned long long freeSpace = 0;
-    if (needed > 0 && DriveFreeSpace(contentBasePath, &freeSpace) && freeSpace < needed + 4ULL * 1024 * 1024)
-    {
-        dprintf("Not enough space for %s: needs %I64u bytes, %I64u free\n", pack.filename, needed, freeSpace);
-        ShowNotEnoughSpace(contentBasePath, needed, freeSpace);
-        return true;
-    }
-
-    // Context for DlcProgressCallback, which the HTTP layer calls with nothing
-    // but byte counts. (g_progressTitle is already the pack name - set above,
-    // for the file-list frames.)
-    g_progressFileCount = memberCount;
-
-    int failures = 0;
-    int alreadyThere = 0;
-
-    for (int f = 0; f < memberCount; ++f)
-    {
-        g_progressFileIndex = f;
-
-        // Already on disk at the right size - skip it. This is what makes
-        // re-opening a pack cheap instead of a full re-download, and it makes
-        // a transfer that was cancelled partway resume from where it stopped
-        // rather than starting over. The size check inside
-        // DlcMemberIsInstalled is what stops a half-written file from being
-        // mistaken for a finished one.
-        if (DlcMemberIsInstalled(members[f], contentBasePath))
-        {
-            alreadyThere++;
-            continue;
-        }
-
-        // One frame up front so the screen reflects the new file immediately,
-        // rather than showing the previous file's numbers until the first
-        // callback fires ~100ms into the transfer.
-        char status[64];
-        _snprintf(status, sizeof(status), "File %d of %d", f + 1, memberCount);
-        status[sizeof(status) - 1] = '\0';
-        RenderProgressFrame(g_progressTitle, status, "Connecting...",
-                            (float)f / (float)memberCount);
-
-        if (!DownloadDlcMember(pack.filename, members[f], contentBasePath,
-                               authHeader, dprintf, DlcProgressCallback))
-        {
-            if (g_progressCancelled)
-                return true; // not a failure - see the file-list check above
-
-            dprintf("  Failed: %s\n", members[f].internalPath);
-
-            // Stop at the first refusal instead of trying the rest - they'd
-            // all be refused, one slow round trip each.
-            if (ArchiveOrgKeysRejected())
-            {
-                ShowKeysRejected();
-                return false;
-            }
-
-            // The rest can't fit either, so stop and say why.
-            unsigned long long fileNeeded = 0, fileFree = 0;
-            if (ArchiveOrgDiskFull(&fileNeeded, &fileFree))
-            {
-                ShowNotEnoughSpace(contentBasePath, fileNeeded, fileFree);
-                return true;
-            }
-
-            failures++;
-        }
-    }
-
-    if (alreadyThere > 0)
-        dprintf("  %d of %d file(s) were already installed\n", alreadyThere, memberCount);
-
-    if (failures == 0 && alreadyThere == memberCount)
-    {
-        // Nothing was transferred. Saying "installed" here would be true but
-        // misleading - it reads as though work happened.
-        ShowMessageUI("ALREADY INSTALLED", pack.filename,
-                      "Every file in this pack is already on the console.");
-    }
-    else if (failures == 0)
-    {
-        ShowMessageUI("INSTALLED", pack.filename,
-                      "Restart your dashboard to pick up the new content.");
-    }
-    else
-    {
-        char detail[128];
-        _snprintf(detail, sizeof(detail), "%d of %d files failed to download.", failures, memberCount);
-        detail[sizeof(detail) - 1] = '\0';
-        ShowMessageUI("FINISHED WITH ERRORS", pack.filename, detail);
-    }
-
-    return true;
-}
-
-// ---------------------------------------------------------------------------
 // The DLC pack and title update pickers
 // ---------------------------------------------------------------------------
 //
@@ -1004,8 +695,9 @@ static bool DownloadOnePack(const DlcRarMatch &pack, const char *contentBasePath
 // is not always what someone wants - a specific version is sometimes needed
 // for mods or for matchmaking compatibility.
 //
-// The picker stays open after a download, so a game with several separate
-// packs - Call of Duty 2 has three - can have them taken one at a time.
+// A in the picker adds the row to the download queue and leaves the picker
+// open, so a game with several separate packs - Call of Duty 2 has three -
+// can have them all queued in one visit.
 
 enum PickerKind
 {
@@ -1123,52 +815,6 @@ static bool FindTitleUpdatesForPicker(const InstalledGame &game, Picker &picker)
     // land on, but still shown rather than assumed.
     picker.kind = PICKER_TITLE_UPDATE;
     picker.count = updateCount;
-    return true;
-}
-
-// Downloads and installs one title update, saying how it went.
-//
-// Returns false if archive.org refused the keys, so the caller closes the
-// picker: every other update would be refused the same way, and the fix is in
-// Settings.
-static bool InstallOneTitleUpdate(const TitleUpdateMatch &update, const InstalledGame &game,
-                                  const char *contentBasePath, const char *authHeader)
-{
-    RenderStatusFrame("TITLE UPDATE", "Reading the update", update.filename);
-
-    strncpy(g_progressTitle, update.filename, sizeof(g_progressTitle) - 1);
-    g_progressTitle[sizeof(g_progressTitle) - 1] = '\0';
-    g_progressFileIndex = 0;
-    g_progressFileCount = 1;
-    ResetDownloadCancel();
-
-    unsigned long long tuNeeded = 0, tuFree = 0;
-    if (DownloadTitleUpdate(update, game.titleId, contentBasePath, authHeader, dprintf, DlcProgressCallback))
-    {
-        ShowMessageUI("TITLE UPDATE INSTALLED", update.filename,
-                      "Restart your dashboard to pick up the update.");
-    }
-    else if (g_progressCancelled)
-    {
-        // Stopped on purpose - back to the picker with nothing to report.
-    }
-    else if (ArchiveOrgKeysRejected())
-    {
-        // Not "archive.org may not serve this file" - that sends someone to
-        // try a different update, which will be refused the same way.
-        ShowKeysRejected();
-        return false;
-    }
-    else if (ArchiveOrgDiskFull(&tuNeeded, &tuFree))
-    {
-        ShowNotEnoughSpace(contentBasePath, tuNeeded, tuFree);
-    }
-    else
-    {
-        ShowMessageUI("TITLE UPDATE FAILED", update.filename,
-                      "See the log - archive.org may not serve this file directly.");
-    }
-
     return true;
 }
 
@@ -1802,22 +1448,37 @@ struct Shell
     SettingsPage settings;
     Picker picker; // open over the library while picker.kind != PICKER_NONE
 
+    // The queue as of this frame, copied out of DownloadQueue at the top of
+    // each pass, and the row text built from it. The selection is held as a
+    // job id as well as a row, because the rows reorder as jobs start and
+    // finish - and pressing X should act on the job you were looking at.
+    QueueJobSnapshot queueJobs[MAX_QUEUE_JOBS];
+    int queueCount;
+    int queueSelected;
+    int queueSelectedId;
+    int queueScroll;
+    QueueRowView queueRows[MAX_QUEUE_JOBS];
+    char queueStatus[MAX_QUEUE_JOBS][256];
+    char queueNumbers[MAX_QUEUE_JOBS][128];
+
     // What takes a file read or a drive query to find out, so it's refreshed
     // only when something may have changed it - on the way back from any
-    // action - rather than on every frame.
+    // action, or when a download finishes - rather than on every frame.
     bool stale;
     bool keysSaved;
     char freeSpace[96];
 };
 
-// Static rather than on main's stack: the picker's match arrays alone are
-// several KB.
+// Static rather than on main's stack: the picker's match arrays and the
+// queue's snapshot are tens of KB between them.
 static Shell g_shell;
 
-// Store is a placeholder, and Queue has nothing to choose yet - on those, the
-// sidebar keeps focus.
-static bool PageTakesFocus(ShellPage page)
+// Store is a placeholder, and an empty Queue has nothing to choose - on
+// those, the sidebar keeps focus.
+static bool PageTakesFocus(const Shell &shell, ShellPage page)
 {
+    if (page == SHELL_PAGE_QUEUE)
+        return shell.queueCount > 0;
     return page == SHELL_PAGE_LIBRARY || page == SHELL_PAGE_SETTINGS;
 }
 
@@ -1842,15 +1503,15 @@ static void RefreshShell(Shell &shell, Library &lib, const char *contentBasePath
     shell.stale = false;
 }
 
-// Every frame, so the blocking screens a download draws show the sidebar as
-// it was when the download started.
+// Every frame, so the blocking screens - a search, a key check - show the
+// sidebar as it was when they started.
 static void PublishSidebar(const Shell &shell, const Library &lib)
 {
     ShellSidebar sidebar;
     sidebar.page = shell.page;
     sidebar.focused = shell.sidebarFocused;
     sidebar.libraryCount = lib.count;
-    sidebar.queueCount = 0;
+    sidebar.queueCount = PendingDownloadCount();
     strncpy(sidebar.storageText, shell.freeSpace, sizeof(sidebar.storageText) - 1);
     sidebar.storageText[sizeof(sidebar.storageText) - 1] = '\0';
 
@@ -1879,6 +1540,194 @@ static void StepSelection(WORD nav, int count, int &selected)
         selected--;
     else if (nav == XINPUT_GAMEPAD_DPAD_DOWN && selected < count - 1)
         selected++;
+}
+
+// ---------------------------------------------------------------------------
+// The queue, from the UI's side
+// ---------------------------------------------------------------------------
+
+// Whose cover a job shows. By title ID rather than a row number, so it still
+// finds the game after the library is rescanned.
+static int LibraryIndexForTitle(const Library &lib, unsigned long titleId)
+{
+    for (int i = 0; i < lib.count; ++i)
+    {
+        if (lib.games[i].titleId == titleId)
+            return i;
+    }
+    return -1;
+}
+
+static QueueRowTone ToneForOutcome(QueueOutcome outcome)
+{
+    switch (outcome)
+    {
+    case QUEUE_OUTCOME_INSTALLED:
+    case QUEUE_OUTCOME_ALREADY_INSTALLED:
+        return QUEUE_ROW_DONE;
+    case QUEUE_OUTCOME_CANCELLED:
+        return QUEUE_ROW_WAITING; // dim - it simply isn't happening
+    default:
+        return QUEUE_ROW_FAILED;
+    }
+}
+
+// "12.4 MB of 48.0 MB   1.2 MB/s   3:21 left", or as much of it as is known.
+// Fixed format specifiers and explicit termination throughout: this
+// toolchain's _snprintf doesn't terminate on truncation, and its
+// dynamic-precision specifier has crashed this project before.
+static void FormatTransferNumbers(const QueueJobSnapshot &job, char *out, size_t outSize)
+{
+    out[0] = '\0';
+    if (job.bytesDone == 0 && job.bytesTotal == 0)
+        return;
+
+    char done[64] = "", speed[64] = "";
+    FormatBytes(job.bytesDone, done, sizeof(done));
+    FormatBytes(job.bytesPerSec, speed, sizeof(speed));
+
+    if (job.bytesTotal > 0)
+    {
+        char total[64] = "";
+        FormatBytes(job.bytesTotal, total, sizeof(total));
+
+        // Minutes/seconds cast down to int before formatting - small by
+        // definition, and it avoids relying on %llu width handling here.
+        int minutesLeft = (int)(job.secondsLeft / 60);
+        int secsLeft = (int)(job.secondsLeft % 60);
+
+        _snprintf(out, outSize, "%s of %s   %s/s   %d:%02d left", done, total, speed, minutesLeft, secsLeft);
+    }
+    else
+    {
+        // No size to go on - say what's known rather than implying a
+        // percentage there isn't.
+        _snprintf(out, outSize, "%s   %s/s", done, speed);
+    }
+    out[outSize - 1] = '\0';
+}
+
+// Copies the queue out and turns it into rows for the Queue page.
+static void SnapshotQueue(Shell &shell, const Library &lib)
+{
+    shell.queueCount = SnapshotDownloadQueue(shell.queueJobs, MAX_QUEUE_JOBS);
+
+    // Follow the selected job to wherever it now sits.
+    for (int i = 0; i < shell.queueCount; ++i)
+    {
+        if (shell.queueJobs[i].id == shell.queueSelectedId)
+        {
+            shell.queueSelected = i;
+            break;
+        }
+    }
+    if (shell.queueSelected > shell.queueCount - 1) shell.queueSelected = shell.queueCount - 1;
+    if (shell.queueSelected < 0) shell.queueSelected = 0;
+    shell.queueSelectedId = (shell.queueCount > 0) ? shell.queueJobs[shell.queueSelected].id : 0;
+
+    for (int i = 0; i < shell.queueCount; ++i)
+    {
+        const QueueJobSnapshot &job = shell.queueJobs[i];
+        QueueRowView &row = shell.queueRows[i];
+        char *status = shell.queueStatus[i];
+        char *numbers = shell.queueNumbers[i];
+        const size_t statusSize = sizeof(shell.queueStatus[i]);
+
+        row.title = job.title;
+        row.gameName = job.gameName;
+        row.status = status;
+        row.numbers = NULL;
+        row.libraryIndex = LibraryIndexForTitle(lib, job.titleId);
+        numbers[0] = '\0';
+
+        if (job.state == QUEUE_WAITING)
+        {
+            _snprintf(status, statusSize, "Waiting");
+            row.tone = QUEUE_ROW_WAITING;
+            row.showBar = true;
+            row.fraction = -1.0f;
+        }
+        else if (job.state == QUEUE_ACTIVE)
+        {
+            _snprintf(status, statusSize, "%s", job.phase[0] != '\0' ? job.phase : "Starting");
+            FormatTransferNumbers(job, numbers, sizeof(shell.queueNumbers[i]));
+            row.numbers = numbers;
+            row.tone = QUEUE_ROW_ACTIVE;
+            row.showBar = true;
+            row.fraction = job.fraction;
+        }
+        else
+        {
+            if (job.resultDetail[0] != '\0')
+                _snprintf(status, statusSize, "%s   -   %s", job.resultText, job.resultDetail);
+            else
+                _snprintf(status, statusSize, "%s", job.resultText);
+            row.tone = ToneForOutcome(job.outcome);
+            row.showBar = false;
+            row.fraction = -1.0f;
+        }
+        status[statusSize - 1] = '\0';
+    }
+}
+
+// Drains the jobs that finished since the last frame. Each one may have
+// changed what's on disk - the installed markers, the free space - so they're
+// refreshed; the ones worth hearing about get a popup.
+static void HandleFinishedDownloads(Shell &shell, bool &haveAuth)
+{
+    QueueJobSnapshot job;
+    while (TakeFinishedQueueJob(&job))
+    {
+        shell.stale = true;
+
+        // Refused keys: rebuild the header from the file next time, so keys
+        // fixed outside Settings - by replacing ArchiveOrgKeys.txt over FTP -
+        // are picked up without restarting the app.
+        if (job.outcome == QUEUE_OUTCOME_KEYS_REJECTED)
+            haveAuth = false;
+
+        if (!job.notify)
+            continue;
+
+        char heading[64];
+        _snprintf(heading, sizeof(heading), "%s", job.resultText);
+        heading[sizeof(heading) - 1] = '\0';
+
+        // The pack's filename says which download this was; the detail is in
+        // the Queue page for anyone who wants it.
+        char message[192];
+        if (job.outcome == QUEUE_OUTCOME_INSTALLED || job.outcome == QUEUE_OUTCOME_ALREADY_INSTALLED)
+            _snprintf(message, sizeof(message), "%s", job.title);
+        else
+            _snprintf(message, sizeof(message), "%s   -   %s", job.title, job.resultDetail);
+        message[sizeof(message) - 1] = '\0';
+
+        ShowShellToast(heading, message,
+                       ToneForOutcome(job.outcome) == QUEUE_ROW_DONE ? UI_TOAST_SUCCESS : UI_TOAST_ERROR);
+    }
+}
+
+// What adding a row from a picker says. Never a blocking message - the point
+// of the queue is that choosing a download doesn't stop you.
+static void ReportEnqueue(EnqueueResult result, const char *filename)
+{
+    switch (result)
+    {
+    case ENQUEUE_ADDED:
+        ShowShellToast("Added to the queue", filename, UI_TOAST_INFO);
+        break;
+    case ENQUEUE_ALREADY_QUEUED:
+        ShowShellToast("Already in the queue", filename, UI_TOAST_INFO);
+        break;
+    case ENQUEUE_FULL:
+        ShowShellToast("The queue is full", "Wait for a download to finish, or remove finished ones from the Queue.",
+                       UI_TOAST_ERROR);
+        break;
+    default:
+        ShowShellToast("Downloads aren't available", "The download worker didn't start - see the log.",
+                       UI_TOAST_ERROR);
+        break;
+    }
 }
 
 static int AddHint(UiHint *hints, int count, UiButton button, const WCHAR *label, const WCHAR *shortLabel = NULL)
@@ -1991,11 +1840,13 @@ int main()
     // picker to the library, out of a page to the sidebar - and only B on the
     // sidebar leaves the app.
     //
-    // Anything that takes over the screen - a search, a download, the
-    // keyboard, a message - still blocks inside this loop for now and draws
-    // its own frames. When it returns, the input is resynced so the button
-    // that ended it can't also act here, and everything the action may have
-    // changed is refreshed before the next frame.
+    // Downloads run on the queue's worker thread, so the loop carries on
+    // while they do - it only reads their progress each frame. What still
+    // takes over the screen - a search, the keyboard, a message, a disc
+    // install - blocks inside this loop and draws its own frames. When it
+    // returns, the input is resynced so the button that ended it can't also
+    // act here, and everything it may have changed is refreshed before the
+    // next frame.
     //
     // The library is scanned once (and again only if Settings changes the
     // folder) and the auth header is built once; both are held across the
@@ -2008,17 +1859,36 @@ int main()
     shell.settings.selected = 0;
     shell.settings.scroll = -1;
     shell.picker.kind = PICKER_NONE;
+    shell.queueCount = 0;
+    shell.queueSelected = 0;
+    shell.queueSelectedId = 0;
+    shell.queueScroll = -1;
     shell.stale = true;
 
     char authHeader[IAS3_AUTH_HEADER_MAX];
     bool haveAuth = false;
 
+    // Not fatal if it fails: everything but downloading still works, and
+    // choosing a download then says why it can't.
+    if (!StartDownloadQueue(contentBasePath))
+        dprintf("ERROR: the download worker didn't start - downloads are unavailable\n");
+
     ResyncUiInput();
 
     for (;;)
     {
+        // Finished downloads first, since they can make the rest stale.
+        HandleFinishedDownloads(shell, haveAuth);
+
         if (shell.stale)
             RefreshShell(shell, lib, contentBasePath, gamesPath);
+
+        SnapshotQueue(shell, lib);
+
+        // Removing the last finished job leaves nothing on the Queue to have
+        // focus.
+        if (shell.page == SHELL_PAGE_QUEUE && !shell.sidebarFocused && shell.queueCount == 0)
+            shell.sidebarFocused = true;
 
         PublishSidebar(shell, lib);
 
@@ -2035,10 +1905,30 @@ int main()
             else if (input.nav == XINPUT_GAMEPAD_DPAD_DOWN && shell.page < SHELL_PAGE_COUNT - 1)
                 shell.page = (ShellPage)(shell.page + 1);
             else if ((input.nav == XINPUT_GAMEPAD_DPAD_RIGHT || (pressed & XINPUT_GAMEPAD_A)) &&
-                     PageTakesFocus(shell.page))
+                     PageTakesFocus(shell, shell.page))
                 shell.sidebarFocused = false;
             else if (pressed & XINPUT_GAMEPAD_B)
-                exitRequested = true;
+            {
+                // Leaving stops the queue, so it asks first when there's
+                // anything in it still to do.
+                int pending = PendingDownloadCount();
+                if (pending == 0)
+                {
+                    exitRequested = true;
+                }
+                else
+                {
+                    char message[96];
+                    _snprintf(message, sizeof(message), "%d download%s still in the queue.",
+                              pending, pending == 1 ? " is" : "s are");
+                    message[sizeof(message) - 1] = '\0';
+
+                    exitRequested = ShowConfirmUI("LEAVE OMNI360?", message,
+                                                  "Leaving stops them. Files that already finished stay installed.",
+                                                  "Leave");
+                    acted = !exitRequested;
+                }
+            }
         }
         else if (shell.page == SHELL_PAGE_LIBRARY && shell.picker.kind != PICKER_NONE)
         {
@@ -2047,26 +1937,23 @@ int main()
 
             if (pressed & XINPUT_GAMEPAD_A)
             {
+                // Queued, not downloaded: this returns at once and the picker
+                // stays open, so the next pack can be queued straight after.
+                // How it goes turns up on the Queue page and as a popup.
                 const InstalledGame &game = lib.games[picker.gameIndex];
 
-                // False means archive.org refused the keys - every other row
-                // would be refused too, so back to the library, where the fix
-                // (Settings) is a step away.
-                bool keepOpen = (picker.kind == PICKER_DLC)
-                                    ? DownloadOnePack(picker.packs[picker.selected], contentBasePath, authHeader)
-                                    : InstallOneTitleUpdate(picker.updates[picker.selected], game,
-                                                            contentBasePath, authHeader);
-                if (!keepOpen)
-                    picker.kind = PICKER_NONE;
-
-                // Refused keys: rebuild the header from the file next time,
-                // so keys fixed outside Settings - by replacing
-                // ArchiveOrgKeys.txt over FTP - are picked up without
-                // restarting the app.
-                if (ArchiveOrgKeysRejected())
-                    haveAuth = false;
-
-                acted = true;
+                if (picker.kind == PICKER_DLC)
+                {
+                    const DlcRarMatch &pack = picker.packs[picker.selected];
+                    ReportEnqueue(EnqueueDlcPack(pack, game.displayName, game.titleId, authHeader),
+                                  pack.filename);
+                }
+                else
+                {
+                    const TitleUpdateMatch &update = picker.updates[picker.selected];
+                    ReportEnqueue(EnqueueTitleUpdate(update, game.displayName, game.titleId, authHeader),
+                                  update.filename);
+                }
             }
             else if (pressed & XINPUT_GAMEPAD_B)
             {
@@ -2128,6 +2015,38 @@ int main()
                 acted = true;
             }
         }
+        else if (shell.page == SHELL_PAGE_QUEUE)
+        {
+            StepSelection(input.nav, shell.queueCount, shell.queueSelected);
+            if (shell.queueCount > 0)
+                shell.queueSelectedId = shell.queueJobs[shell.queueSelected].id;
+
+            if (input.nav == XINPUT_GAMEPAD_DPAD_LEFT || (pressed & XINPUT_GAMEPAD_B))
+            {
+                shell.sidebarFocused = true;
+            }
+            else if ((pressed & XINPUT_GAMEPAD_X) && shell.queueCount > 0)
+            {
+                const QueueJobSnapshot &job = shell.queueJobs[shell.queueSelected];
+
+                if (job.state == QUEUE_FINISHED)
+                {
+                    RemoveQueueJob(job.id);
+                }
+                else
+                {
+                    // Asked, like stopping a disc install: a big pack can be
+                    // most of the way there. The download carries on while the
+                    // question is up - it's on its own thread now.
+                    if (ShowConfirmUI("STOP DOWNLOADING?", job.title,
+                                      job.kind == QUEUE_JOB_DLC_PACK ? "Files that already finished stay installed."
+                                                                     : "The update won't be installed.",
+                                      "Stop"))
+                        CancelQueueJob(job.id);
+                    acted = true;
+                }
+            }
+        }
         else if (shell.page == SHELL_PAGE_SETTINGS)
         {
             SettingsPage &settings = shell.settings;
@@ -2183,7 +2102,7 @@ int main()
 
         if (shell.sidebarFocused)
         {
-            if (PageTakesFocus(shell.page))
+            if (PageTakesFocus(shell, shell.page))
                 hintCount = AddHint(hints, hintCount, UI_BUTTON_A, L"Select");
             hintCount = AddHint(hints, hintCount, UI_BUTTON_B, L"Exit");
         }
@@ -2193,7 +2112,7 @@ int main()
         case SHELL_PAGE_LIBRARY:
             if (shell.picker.kind != PICKER_NONE)
             {
-                hintCount = AddHint(hints, hintCount, UI_BUTTON_A, L"Download");
+                hintCount = AddHint(hints, hintCount, UI_BUTTON_A, L"Add to queue", L"Queue");
                 hintCount = AddHint(hints, hintCount, UI_BUTTON_B, L"Back");
 
                 ListPageView view;
@@ -2245,9 +2164,36 @@ int main()
             break;
 
         case SHELL_PAGE_QUEUE:
-            RenderPlaceholderFrame("QUEUE", "Nothing is downloading",
-                                   "DLC and title updates you choose will show here while they download.",
-                                   hints, hintCount);
+            if (shell.queueCount == 0)
+            {
+                RenderPlaceholderFrame("QUEUE", "Nothing is downloading",
+                                       "DLC and title updates you choose will wait here while they download.",
+                                       hints, hintCount);
+            }
+            else
+            {
+                if (!shell.sidebarFocused)
+                {
+                    bool finished = (shell.queueJobs[shell.queueSelected].state == QUEUE_FINISHED);
+                    hintCount = finished ? AddHint(hints, hintCount, UI_BUTTON_X, L"Remove")
+                                         : AddHint(hints, hintCount, UI_BUTTON_X, L"Stop download", L"Stop");
+                    hintCount = AddHint(hints, hintCount, UI_BUTTON_B, L"Back");
+                }
+
+                QueuePageView view;
+                view.games = lib.games;
+                view.gameCount = lib.count;
+                view.rows = shell.queueRows;
+                view.count = shell.queueCount;
+                view.selected = shell.queueSelected;
+                view.scroll = shell.queueScroll;
+                view.focused = !shell.sidebarFocused;
+
+                RenderQueueFrame(view, hints, hintCount);
+
+                shell.queueSelected = view.selected;
+                shell.queueScroll = view.scroll;
+            }
             break;
 
         case SHELL_PAGE_SETTINGS:
@@ -2284,6 +2230,13 @@ int main()
         // CPU can spin. Not a real vsync wait - just ~60fps.
         Sleep(16);
     }
+
+    // Stop the worker before anything it uses goes away. A transfer stops at
+    // its next progress report; a request already waiting on archive.org
+    // can't be interrupted, so this is bounded rather than waited out.
+    if (PendingDownloadCount() > 0)
+        RenderStatusFrame("STOPPING", "Stopping downloads", "Files that already finished stay installed.");
+    StopDownloadQueue(15000);
 
     free(lib.games);
 

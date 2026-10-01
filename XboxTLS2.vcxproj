@@ -362,6 +362,7 @@
     <ClInclude Include="GodConvert.h" />
     <ClInclude Include="DiscSource.h" />
     <ClInclude Include="ReadAhead.h" />
+    <ClInclude Include="DownloadQueue.h" />
     <ClInclude Include="TitleNames.h" />
     <ClInclude Include="RarHeaders.h" />
     <ClInclude Include="parsing.h" />
@@ -402,6 +403,7 @@
     <ClCompile Include="GodConvert.cpp" />
     <ClCompile Include="DiscSource.cpp" />
     <ClCompile Include="ReadAhead.cpp" />
+    <ClCompile Include="DownloadQueue.cpp" />
     <ClCompile Include="RarHeaders.cpp" />
     <ClCompile Include="parsing.cpp" />
     <ClCompile Include="StfsParser.cpp" />
