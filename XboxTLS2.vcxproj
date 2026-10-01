@@ -374,6 +374,8 @@
     <ClInclude Include="zlib\zlib.h" />
     <ClInclude Include="zlib\zconf.h" />
     <ClInclude Include="zlib\gzguts.h" />
+    <ClInclude Include="GameInstaller.h" />
+    <ClInclude Include="InflateSource.h" />
     <ClInclude Include="DownloadQueue.h" />
     <ClInclude Include="SearchWorker.h" />
     <ClInclude Include="CoverArt.h" />
@@ -424,6 +426,8 @@
     <ClCompile Include="DiscSource.cpp" />
     <ClCompile Include="ReadAhead.cpp" />
     <ClCompile Include="DiscWorker.cpp" />
+    <ClCompile Include="GameInstaller.cpp" />
+    <ClCompile Include="InflateSource.cpp" />
     <ClCompile Include="DownloadQueue.cpp" />
     <ClCompile Include="SearchWorker.cpp" />
     <ClCompile Include="CoverArt.cpp" />

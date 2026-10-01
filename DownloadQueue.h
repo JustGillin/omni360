@@ -29,7 +29,8 @@ enum QueueJobKind
 {
     QUEUE_JOB_DLC_PACK,
     QUEUE_JOB_TITLE_UPDATE,
-    QUEUE_JOB_DISC_INSTALL // not this queue's: DiscWorker's, in the same terms so the Queue page lists both
+    QUEUE_JOB_DISC_INSTALL, // not this queue's: DiscWorker's, in the same terms so the Queue page lists both
+    QUEUE_JOB_GAME_INSTALL  // likewise GameInstaller's
 };
 
 enum QueueJobState

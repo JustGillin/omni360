@@ -83,7 +83,8 @@ DiscInstallResult QueueDiscInstall(unsigned long titleId, unsigned long mediaId,
 #define DISC_JOB_ID_BASE 1000000
 #define MAX_DISC_JOBS 8
 
-inline bool IsDiscJobId(int id) { return id >= DISC_JOB_ID_BASE; }
+// Game installs (GameInstaller.h) number theirs from 2000000, above these.
+inline bool IsDiscJobId(int id) { return id >= DISC_JOB_ID_BASE && id < 2000000; }
 
 // The active one first, then finished ones, most recent first.
 int SnapshotDiscJobs(QueueJobSnapshot *out, int maxJobs);
@@ -99,6 +100,7 @@ bool TakeFinishedDiscJob(QueueJobSnapshot *out);
 // Lines: games folder, title ID, media ID, the finished package's size, and
 // the name.
 #define INSTALL_MARKER_FILE "game:\\InstallInProgress.txt"
+void WriteInstallMarker(const char *gamesPath, const struct GodImageInfo &info, const char *name);
 void ClearInstallMarker();
 
 #endif

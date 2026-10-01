@@ -56,6 +56,7 @@ extern "C" DWORD XamSetDvdSpindleSpeed(DWORD speed);
 
 struct DiscJob
 {
+    bool used;       // the slot holds a job
     QueueJobSnapshot snap;
     bool cancel;
     bool handedOver; // finished, and given to TakeFinishedDiscJob already
@@ -71,8 +72,9 @@ static bool g_shutdown = false;
 static char g_gamesPath[512] = "";
 static DiscInfo g_disc;
 
+// Slots, not a list: a job stays where it is for its whole life, since the
+// worker holds a pointer to the one it's running.
 static DiscJob g_jobs[MAX_DISC_JOBS];
-static int g_jobCount = 0;
 static int g_nextJobId = DISC_JOB_ID_BASE;
 static int g_pendingInstall = -1; // index of a job waiting to start, or -1
 
@@ -86,7 +88,7 @@ static int g_pendingInstall = -1; // index of a job waiting to start, or -1
 // crash - leaves it behind, and the next launch removes the partial package:
 // half a game is never worth keeping, since an install can't be resumed.
 
-static void WriteInstallMarker(const char *gamesPath, const GodImageInfo &info, const char *name)
+void WriteInstallMarker(const char *gamesPath, const GodImageInfo &info, const char *name)
 {
     FILE *f = fopen(INSTALL_MARKER_FILE, "w");
     if (f == NULL)
@@ -527,7 +529,7 @@ bool StopDiscWorker(DWORD timeoutMs)
 
     EnterCriticalSection(&g_lock);
     g_shutdown = true;
-    for (int i = 0; i < g_jobCount; ++i)
+    for (int i = 0; i < MAX_DISC_JOBS; ++i)
         g_jobs[i].cancel = true;
     LeaveCriticalSection(&g_lock);
     SetEvent(g_wake);
@@ -569,44 +571,47 @@ void GetDiscInfo(DiscInfo *out)
     LeaveCriticalSection(&g_lock);
 }
 
+// A free slot for a new job, or -1. Under the lock. Full of finished jobs,
+// the oldest one already handed over makes room. A job never moves once it
+// has a slot - the worker holds a pointer to the one it's running.
+static int FreeJobSlot()
+{
+    int oldest = -1;
+    for (int i = 0; i < MAX_DISC_JOBS; ++i)
+    {
+        if (!g_jobs[i].used)
+            return i;
+        if (g_jobs[i].snap.state == QUEUE_FINISHED && g_jobs[i].handedOver &&
+            (oldest < 0 || g_jobs[i].snap.id < g_jobs[oldest].snap.id))
+            oldest = i;
+    }
+    if (oldest >= 0)
+        g_jobs[oldest].used = false;
+    return oldest;
+}
+
 DiscInstallResult QueueDiscInstall(unsigned long titleId, unsigned long mediaId, const char *name)
 {
     if (!g_running)
         return DISC_INSTALL_UNAVAILABLE;
 
     DiscInstallResult result = DISC_INSTALL_QUEUED;
+    int slot = -1;
 
     EnterCriticalSection(&g_lock);
 
     if (g_disc.installing)
-    {
         result = DISC_INSTALL_BUSY;
-    }
     else if (g_disc.state != DISC_READY || g_disc.titleId != titleId || g_disc.mediaId != mediaId)
-    {
         result = DISC_INSTALL_NO_DISC;
-    }
-    else
-    {
-        // Full of finished jobs: the oldest finished one makes room.
-        if (g_jobCount >= MAX_DISC_JOBS)
-        {
-            int oldest = -1;
-            for (int i = 0; i < g_jobCount; ++i)
-            {
-                if (g_jobs[i].snap.state == QUEUE_FINISHED && (oldest < 0 || g_jobs[i].snap.id < g_jobs[oldest].snap.id))
-                    oldest = i;
-            }
-            if (oldest >= 0)
-            {
-                for (int i = oldest + 1; i < g_jobCount; ++i)
-                    g_jobs[i - 1] = g_jobs[i];
-                g_jobCount--;
-            }
-        }
+    else if ((slot = FreeJobSlot()) < 0)
+        result = DISC_INSTALL_BUSY;
 
-        DiscJob &job = g_jobs[g_jobCount];
+    if (result == DISC_INSTALL_QUEUED)
+    {
+        DiscJob &job = g_jobs[slot];
         memset(&job, 0, sizeof(job));
+        job.used = true;
         job.snap.id = g_nextJobId++;
         job.snap.kind = QUEUE_JOB_DISC_INSTALL;
         job.snap.state = QUEUE_WAITING;
@@ -624,8 +629,7 @@ DiscInstallResult QueueDiscInstall(unsigned long titleId, unsigned long mediaId,
         job.snap.title[sizeof(job.snap.title) - 1] = '\0';
 
         job.mediaId = mediaId;
-        g_pendingInstall = g_jobCount;
-        g_jobCount++;
+        g_pendingInstall = slot;
         g_disc.installing = true;
     }
 
@@ -644,16 +648,28 @@ int SnapshotDiscJobs(QueueJobSnapshot *out, int maxJobs)
     int n = 0;
     EnterCriticalSection(&g_lock);
 
-    // Not finished first (there is at most one), then finished, newest first.
-    for (int i = 0; i < g_jobCount && n < maxJobs; ++i)
+    // Not finished first (there is at most one), then finished, newest
+    // first - by id, since slots aren't in any order.
+    for (int i = 0; i < MAX_DISC_JOBS && n < maxJobs; ++i)
     {
-        if (g_jobs[i].snap.state != QUEUE_FINISHED)
+        if (g_jobs[i].used && g_jobs[i].snap.state != QUEUE_FINISHED)
             out[n++] = g_jobs[i].snap;
     }
-    for (int i = g_jobCount - 1; i >= 0 && n < maxJobs; --i)
+
+    int lastId = 0x7FFFFFFF;
+    for (;;)
     {
-        if (g_jobs[i].snap.state == QUEUE_FINISHED)
-            out[n++] = g_jobs[i].snap;
+        int pick = -1;
+        for (int i = 0; i < MAX_DISC_JOBS; ++i)
+        {
+            if (g_jobs[i].used && g_jobs[i].snap.state == QUEUE_FINISHED && g_jobs[i].snap.id < lastId &&
+                (pick < 0 || g_jobs[i].snap.id > g_jobs[pick].snap.id))
+                pick = i;
+        }
+        if (pick < 0 || n >= maxJobs)
+            break;
+        out[n++] = g_jobs[pick].snap;
+        lastId = g_jobs[pick].snap.id;
     }
 
     LeaveCriticalSection(&g_lock);
@@ -667,9 +683,9 @@ int PendingDiscJobCount()
 
     int n = 0;
     EnterCriticalSection(&g_lock);
-    for (int i = 0; i < g_jobCount; ++i)
+    for (int i = 0; i < MAX_DISC_JOBS; ++i)
     {
-        if (g_jobs[i].snap.state != QUEUE_FINISHED)
+        if (g_jobs[i].used && g_jobs[i].snap.state != QUEUE_FINISHED)
             n++;
     }
     LeaveCriticalSection(&g_lock);
@@ -682,9 +698,9 @@ void CancelDiscJob(int id)
         return;
 
     EnterCriticalSection(&g_lock);
-    for (int i = 0; i < g_jobCount; ++i)
+    for (int i = 0; i < MAX_DISC_JOBS; ++i)
     {
-        if (g_jobs[i].snap.id == id && g_jobs[i].snap.state != QUEUE_FINISHED)
+        if (g_jobs[i].used && g_jobs[i].snap.id == id && g_jobs[i].snap.state != QUEUE_FINISHED)
             g_jobs[i].cancel = true;
     }
     LeaveCriticalSection(&g_lock);
@@ -697,16 +713,12 @@ void RemoveDiscJob(int id)
         return;
 
     EnterCriticalSection(&g_lock);
-    for (int i = 0; i < g_jobCount; ++i)
+    for (int i = 0; i < MAX_DISC_JOBS; ++i)
     {
         // Only once main.cpp has seen it finish, so no popup goes missing.
-        if (g_jobs[i].snap.id == id && g_jobs[i].snap.state == QUEUE_FINISHED && g_jobs[i].handedOver)
-        {
-            for (int j = i + 1; j < g_jobCount; ++j)
-                g_jobs[j - 1] = g_jobs[j];
-            g_jobCount--;
-            break;
-        }
+        if (g_jobs[i].used && g_jobs[i].snap.id == id && g_jobs[i].snap.state == QUEUE_FINISHED &&
+            g_jobs[i].handedOver)
+            g_jobs[i].used = false;
     }
     LeaveCriticalSection(&g_lock);
 }
@@ -718,9 +730,9 @@ bool TakeFinishedDiscJob(QueueJobSnapshot *out)
 
     bool found = false;
     EnterCriticalSection(&g_lock);
-    for (int i = 0; i < g_jobCount; ++i)
+    for (int i = 0; i < MAX_DISC_JOBS; ++i)
     {
-        if (g_jobs[i].snap.state == QUEUE_FINISHED && !g_jobs[i].handedOver)
+        if (g_jobs[i].used && g_jobs[i].snap.state == QUEUE_FINISHED && !g_jobs[i].handedOver)
         {
             g_jobs[i].handedOver = true;
             *out = g_jobs[i].snap;

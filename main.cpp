@@ -29,6 +29,7 @@ end-to-end on real hardware against a real 27-game library.
 #include "SearchWorker.h"
 #include "CoverArt.h"
 #include "DiscWorker.h"
+#include "GameInstaller.h"
 #include "ArchiveOrgDLC.h"
 #include "downloadFile.h" // DownloadProgressFn + FormatBytes, for the progress callback
 #include "GodConvert.h"
@@ -957,7 +958,8 @@ enum SettingsRow
 {
     SETTINGS_ROW_GAMES_FOLDER,
     SETTINGS_ROW_KEYS,
-    SETTINGS_ROW_REMOVE_KEYS
+    SETTINGS_ROW_REMOVE_KEYS,
+    SETTINGS_ROW_GAME_TEST // TEMPORARY - installs one game until the Store can
 };
 
 static void ChangeGamesFolder(Library &lib, char *gamesPath, size_t gamesPathSize, SettingsOutcome &outcome)
@@ -996,6 +998,7 @@ static void ChangeGamesFolder(Library &lib, char *gamesPath, size_t gamesPathSiz
     // exists. Only remembering it is in question if the write failed.
     memcpy(gamesPath, newPath, strlen(newPath) + 1);
     SetDiscWorkerGamesPath(gamesPath);
+    SetGameInstallerGamesPath(gamesPath);
 
     ScanLibrary(lib, gamesPath);
     outcome.libraryChanged = true;
@@ -1039,7 +1042,7 @@ static void RemoveKeys(SettingsOutcome &outcome)
 // so it doubles as a summary of how the app is set up. Rebuilt whenever
 // something may have changed it, rather than every frame - each rebuild reads
 // the keys file.
-#define MAX_SETTINGS_ROWS 3
+#define MAX_SETTINGS_ROWS 4
 
 struct SettingsPage
 {
@@ -1100,6 +1103,11 @@ static void BuildSettingsPage(SettingsPage &page, const Library &lib, const char
         page.rows[page.count++] = SETTINGS_ROW_REMOVE_KEYS;
     }
 
+    // TEMPORARY - installs one game until the Store can.
+    page.labels[page.count] = "Install Blitz: The League (test)";
+    page.sublabels[page.count] = "Downloads it from archive.org and installs it - follow it on the Queue page";
+    page.rows[page.count++] = SETTINGS_ROW_GAME_TEST;
+
     if (page.selected > page.count - 1)
         page.selected = page.count - 1; // the Remove row just went away
 }
@@ -1113,6 +1121,7 @@ static SettingsOutcome RunSettingsRow(SettingsRow row, Library &lib, char *games
     case SETTINGS_ROW_GAMES_FOLDER: ChangeGamesFolder(lib, gamesPath, gamesPathSize, outcome); break;
     case SETTINGS_ROW_KEYS:         ChangeKeys(outcome); break;
     case SETTINGS_ROW_REMOVE_KEYS:  RemoveKeys(outcome); break;
+    case SETTINGS_ROW_GAME_TEST:    break; // run by the caller, which has the keys
     }
 
     return outcome;
@@ -1294,7 +1303,7 @@ static void WaitForExit()
 // ---------------------------------------------------------------------------
 
 // Downloads and disc installs, on one Queue page.
-#define MAX_QUEUE_ROWS (MAX_QUEUE_JOBS + MAX_DISC_JOBS)
+#define MAX_QUEUE_ROWS (MAX_QUEUE_JOBS + MAX_DISC_JOBS + MAX_GAME_JOBS)
 
 struct Shell
 {
@@ -1386,7 +1395,7 @@ static void PublishSidebar(const Shell &shell, const Library &lib)
     sidebar.page = shell.page;
     sidebar.focused = shell.sidebarFocused;
     sidebar.libraryCount = lib.count;
-    sidebar.queueCount = PendingDownloadCount() + PendingDiscJobCount();
+    sidebar.queueCount = PendingDownloadCount() + PendingDiscJobCount() + PendingGameJobCount();
     sidebar.storageUsed = shell.storage.used;
     strncpy(sidebar.storageLabel, shell.storage.label, sizeof(sidebar.storageLabel) - 1);
     sidebar.storageLabel[sizeof(sidebar.storageLabel) - 1] = '\0';
@@ -1659,12 +1668,14 @@ static void FormatTransferNumbers(const QueueJobSnapshot &job, char *out, size_t
 }
 
 // Copies the queue out and turns it into rows for the Queue page: a disc
-// install in progress first, then the downloads as the download queue orders
-// them, then finished disc installs.
+// install and game installs still to do first, then the downloads as the
+// download queue orders them, then finished game and disc installs.
 static void SnapshotQueue(Shell &shell, const Library &lib)
 {
     static QueueJobSnapshot discJobs[MAX_DISC_JOBS];
+    static QueueJobSnapshot gameJobs[MAX_GAME_JOBS];
     const int discCount = SnapshotDiscJobs(discJobs, MAX_DISC_JOBS);
+    const int gameCount = SnapshotGameJobs(gameJobs, MAX_GAME_JOBS);
 
     int n = 0;
     for (int i = 0; i < discCount; ++i)
@@ -1672,7 +1683,17 @@ static void SnapshotQueue(Shell &shell, const Library &lib)
         if (discJobs[i].state != QUEUE_FINISHED)
             shell.queueJobs[n++] = discJobs[i];
     }
+    for (int i = 0; i < gameCount; ++i)
+    {
+        if (gameJobs[i].state != QUEUE_FINISHED)
+            shell.queueJobs[n++] = gameJobs[i];
+    }
     n += SnapshotDownloadQueue(shell.queueJobs + n, MAX_QUEUE_JOBS);
+    for (int i = 0; i < gameCount && n < MAX_QUEUE_ROWS; ++i)
+    {
+        if (gameJobs[i].state == QUEUE_FINISHED)
+            shell.queueJobs[n++] = gameJobs[i];
+    }
     for (int i = 0; i < discCount && n < MAX_QUEUE_ROWS; ++i)
     {
         if (discJobs[i].state == QUEUE_FINISHED)
@@ -1746,8 +1767,8 @@ static void HandleFinishedDownloads(Shell &shell, bool &haveAuth)
 {
     QueueJobSnapshot job;
 
-    // A disc install: the game is new in the library, or it isn't.
-    while (TakeFinishedDiscJob(&job))
+    // A disc or game install: the game is new in the library, or it isn't.
+    while (TakeFinishedDiscJob(&job) || TakeFinishedGameJob(&job))
     {
         shell.stale = true;
         if (job.outcome == QUEUE_OUTCOME_INSTALLED)
@@ -1930,6 +1951,10 @@ int main()
     if (!StartDiscWorker(gamesPath))
         dprintf("ERROR: the disc worker didn't start - discs can't be installed\n");
 
+    // Also clears out what an install interrupted last time left staged.
+    if (!StartGameInstaller(gamesPath))
+        dprintf("ERROR: the game installer didn't start - games can't be installed\n");
+
     ScanLibrary(lib, gamesPath);
 
     // The shell loop: read the controller, act on it, draw a frame.
@@ -2025,7 +2050,7 @@ int main()
             {
                 // Leaving stops the queue, so it asks first when there's
                 // anything in it still to do.
-                int pending = PendingDownloadCount() + PendingDiscJobCount();
+                int pending = PendingDownloadCount() + PendingDiscJobCount() + PendingGameJobCount();
                 if (pending == 0)
                 {
                     exitRequested = true;
@@ -2193,10 +2218,20 @@ int main()
 
                 if (job.state == QUEUE_FINISHED)
                 {
-                    if (IsDiscJobId(job.id))
+                    if (IsGameJobId(job.id))
+                        RemoveGameJob(job.id);
+                    else if (IsDiscJobId(job.id))
                         RemoveDiscJob(job.id);
                     else
                         RemoveQueueJob(job.id);
+                }
+                else if (IsGameJobId(job.id))
+                {
+                    if (ShowConfirmUI("Stop installing?", job.gameName,
+                                      "The game won't be installed. What has been downloaded is removed.",
+                                      "Stop"))
+                        CancelGameJob(job.id);
+                    acted = true;
                 }
                 else if (IsDiscJobId(job.id))
                 {
@@ -2228,6 +2263,36 @@ int main()
             if (input.nav == XINPUT_GAMEPAD_DPAD_LEFT || (pressed & XINPUT_GAMEPAD_B))
             {
                 shell.sidebarFocused = true;
+            }
+            else if ((pressed & XINPUT_GAMEPAD_A) && settings.count > 0 &&
+                     settings.rows[settings.selected] == SETTINGS_ROW_GAME_TEST)
+            {
+                // TEMPORARY - one game, until the Store can choose them.
+                const bool hadAuth = haveAuth;
+                if (EnsureAuthHeader(haveAuth, authHeader, sizeof(authHeader), "Blitz: The League"))
+                {
+                    GameRequest request;
+                    memset(&request, 0, sizeof(request));
+                    strcpy(request.item, "microsoft_xbox360_b_part2");
+                    strcpy(request.zipName, "Blitz - The League (USA).zip");
+                    request.zipSize = 4195916475ULL;
+                    strcpy(request.name, "Blitz: The League");
+
+                    switch (EnqueueGameInstall(request, authHeader))
+                    {
+                    case GAME_QUEUED:
+                        ShowShellToast("Added to the queue", request.name, UI_TOAST_INFO);
+                        break;
+                    case GAME_ALREADY_QUEUED:
+                        ShowShellToast("Already in the queue", request.name, UI_TOAST_INFO);
+                        break;
+                    default:
+                        ShowShellToast("Couldn't add it", "The game installer isn't running.", UI_TOAST_ERROR);
+                        break;
+                    }
+                }
+                if (!hadAuth)
+                    acted = true;
             }
             else if ((pressed & XINPUT_GAMEPAD_A) && settings.count > 0)
             {
@@ -2467,12 +2532,17 @@ int main()
     // Stop the worker before anything it uses goes away. A transfer stops at
     // its next progress report; a request already waiting on archive.org
     // can't be interrupted, so this is bounded rather than waited out.
-    if (PendingDownloadCount() + PendingDiscJobCount() > 0)
+    if (PendingDownloadCount() + PendingDiscJobCount() + PendingGameJobCount() > 0)
         RenderStatusFrame("Stopping", "Stopping downloads and installs", "Files that already finished stay installed.");
     StopDownloadQueue(15000);
 
     // An install stops at its next 816KB and removes what it copied.
     StopDiscWorker(15000);
+
+    // A game install's connections stop at their next progress report, and
+    // the converter at its next 816KB; the staging folder goes next launch
+    // if it can't be removed now.
+    StopGameInstaller(20000);
 
     // A search still out would only be thrown away - a short wait is plenty.
     StopSearchWorker(3000);
