@@ -287,6 +287,7 @@ struct Download
     bool *done;
     unsigned long long doneBytes;
     unsigned long long inFlight[CONNECTIONS];
+    unsigned long long resumedAt[CONNECTIONS]; // what a resumed piece already had
     DWORD threadIds[CONNECTIONS];
     bool failed;
     int failStatus;
@@ -313,11 +314,51 @@ static bool PieceProgress(unsigned long long done, unsigned long long, unsigned 
     for (int i = 0; i < CONNECTIONS; ++i)
     {
         if (d->threadIds[i] == me)
-            d->inFlight[i] = done;
+            d->inFlight[i] = d->resumedAt[i] + done;
     }
     bool keepGoing = !Stopping(d);
     LeaveCriticalSection(&g_lock);
     return keepGoing;
+}
+
+// A file's size, or 0.
+static unsigned long long FileSize(const char *path)
+{
+    WIN32_FILE_ATTRIBUTE_DATA attrs;
+    if (!GetFileAttributesExA(path, GetFileExInfoStandard, &attrs))
+        return 0;
+    return ((unsigned long long)attrs.nFileSizeHigh << 32) | attrs.nFileSizeLow;
+}
+
+// Adds one file's bytes to the end of another.
+static bool AppendFile(const char *path, const char *more)
+{
+    FILE *in = fopen(more, "rb");
+    if (in == NULL)
+        return false;
+    FILE *out = fopen(path, "ab");
+    if (out == NULL)
+    {
+        fclose(in);
+        return false;
+    }
+
+    static const size_t CHUNK = 256 * 1024;
+    char *buffer = (char *)malloc(CHUNK);
+    bool ok = (buffer != NULL);
+    while (ok)
+    {
+        size_t n = fread(buffer, 1, CHUNK, in);
+        if (n == 0)
+            break;
+        ok = (fwrite(buffer, 1, n, out) == n);
+    }
+    ok = ok && !ferror(in);
+    free(buffer);
+    fclose(in);
+    if (fclose(out) != 0)
+        ok = false;
+    return ok;
 }
 
 struct ConnectionArgs
@@ -349,58 +390,88 @@ static DWORD WINAPI ConnectionEntry(LPVOID param)
             to = d->total;
         unsigned long long length = to - from;
 
-        char finalPath[320], tempPath[330];
+        char finalPath[320], tempPath[330], restPath[330];
         d->pieces->PiecePath(index, finalPath, sizeof(finalPath));
         _snprintf(tempPath, sizeof(tempPath), "%s.tmp", finalPath);
         tempPath[sizeof(tempPath) - 1] = '\0';
+        _snprintf(restPath, sizeof(restPath), "%s.rst", finalPath);
+        restPath[sizeof(restPath) - 1] = '\0';
 
-        char headers[AUTH_MAX + 96];
-        _snprintf(headers, sizeof(headers), "%sRange: bytes=%I64u-%I64u\r\n", d->auth, from, to - 1);
-        headers[sizeof(headers) - 1] = '\0';
-
+        // A cut-off piece resumes where it stopped: the rest goes to a second
+        // file, appended to the first - the HTTP client only writes files
+        // from the start. Both connections get cut off together every few
+        // minutes, often well into a piece.
         bool got = false;
         int status = 0;
-        unsigned long long onDisk = 0;
+        unsigned long long have = 0; // bytes of the piece already in tempPath
         DWORD started = GetTickCount();
         for (int attempt = 0; attempt < PIECE_ATTEMPTS && !got && !Stopping(d); ++attempt)
         {
             if (attempt > 0)
             {
-                // A 206 that failed was cut off part way.
-                if (status == 206)
-                    dprintf("[game] piece %lu: cut off after %I64u of %I64u bytes, trying again (%d of %d)\n",
-                            index, onDisk, length, attempt + 1, PIECE_ATTEMPTS);
+                if (have > 0)
+                    dprintf("[game] piece %lu: cut off after %I64u of %I64u bytes, resuming (%d of %d)\n",
+                            index, have, length, attempt + 1, PIECE_ATTEMPTS);
                 else
                     dprintf("[game] piece %lu: HTTP %d, trying again (%d of %d)\n", index, status, attempt + 1, PIECE_ATTEMPTS);
                 Sleep(2000 * attempt);
                 started = GetTickCount();
             }
 
-            unsigned long long size = 0;
-            status = httpRequestHTTPS(d->url, HTTP_GET, NULL, headers, tempPath, NULL, &size, true, NULL, 0,
-                                      QuietPrint, length, PieceProgress);
+            const unsigned long long resumeFrom = have;
+            char headers[AUTH_MAX + 96];
+            _snprintf(headers, sizeof(headers), "%sRange: bytes=%I64u-%I64u\r\n", d->auth, from + resumeFrom, to - 1);
+            headers[sizeof(headers) - 1] = '\0';
 
-            WIN32_FILE_ATTRIBUTE_DATA attrs;
-            onDisk = 0;
-            if (GetFileAttributesExA(tempPath, GetFileExInfoStandard, &attrs))
-                onDisk = ((unsigned long long)attrs.nFileSizeHigh << 32) | attrs.nFileSizeLow;
+            EnterCriticalSection(&g_lock);
+            d->resumedAt[slot] = resumeFrom;
+            d->inFlight[slot] = resumeFrom;
+            LeaveCriticalSection(&g_lock);
+
+            const char *target = (resumeFrom > 0) ? restPath : tempPath;
+            unsigned long long size = 0;
+            status = httpRequestHTTPS(d->url, HTTP_GET, NULL, headers, target, NULL, &size, true, NULL, 0,
+                                      QuietPrint, length - resumeFrom, PieceProgress);
+
+            // Whatever came of the rest, as long as it's the range asked for.
+            bool spoilt = false;
+            if (resumeFrom > 0)
+            {
+                if (status == 206 && !AppendFile(tempPath, restPath))
+                    spoilt = true;
+                DeleteFileA(restPath);
+            }
+            unsigned long long onDisk = FileSize(tempPath);
 
             if (status == 206 && onDisk == length && MoveFileExA(tempPath, finalPath, MOVEFILE_REPLACE_EXISTING))
             {
                 got = true;
                 DWORD ms = GetTickCount() - started;
+                double mb = (length - resumeFrom) / 1048576.0;
                 dprintf("[game] piece %lu on connection %d: %.1f MB in %.1fs, %.2f MB/s\n", index, slot + 1,
-                        length / 1048576.0, ms / 1000.0, ms > 0 ? length / 1048576.0 / (ms / 1000.0) : 0.0);
+                        mb, ms / 1000.0, ms > 0 ? mb / (ms / 1000.0) : 0.0);
+            }
+            else if (!spoilt && status == 206 && onDisk > 0 && onDisk < length)
+            {
+                have = onDisk;
+            }
+            else if (!spoilt && resumeFrom > 0 && status != 401 && status != 403 && onDisk == resumeFrom)
+            {
+                // The rest didn't come at all; what was there still is.
             }
             else
             {
+                have = 0;
                 DeleteFileA(tempPath);
                 if (status == 401 || status == 403)
                     break; // the keys - trying again won't help
             }
         }
+        if (!got)
+            DeleteFileA(tempPath);
 
         EnterCriticalSection(&g_lock);
+        d->resumedAt[slot] = 0;
         d->inFlight[slot] = 0;
         if (got)
         {
@@ -485,6 +556,120 @@ static bool Cancelled(GameJob *job)
     return c;
 }
 
+// The host part of an https:// URL.
+static std::string HostOf(const std::string &url)
+{
+    size_t start = url.find("://");
+    start = (start == std::string::npos) ? 0 : start + 3;
+    size_t end = url.find('/', start);
+    return url.substr(start, end == std::string::npos ? std::string::npos : end - start);
+}
+
+// The "result" of one of archive.org's metadata endpoints: a string, or the
+// strings of an array. Small replies - the endpoints are per field.
+static int MetadataStrings(const char *item, const char *field, std::string *out, int maxOut)
+{
+    std::string u = std::string("https://archive.org/metadata/") + item + "/" + field;
+    char reply[4096];
+    unsigned long long len = 0;
+    if (Get(u, NULL, NULL, reply, sizeof(reply) - 1, &len) != 200)
+        return 0;
+    reply[len < sizeof(reply) ? (size_t)len : sizeof(reply) - 1] = '\0';
+
+    const char *p = strstr(reply, "\"result\"");
+    if (p == NULL)
+        return 0;
+    p += 8;
+
+    int n = 0;
+    while (n < maxOut)
+    {
+        const char *open = strchr(p, '"');
+        if (open == NULL)
+            break;
+        const char *close = strchr(open + 1, '"');
+        if (close == NULL)
+            break;
+        out[n++] = std::string(open + 1, close - open - 1);
+        p = close + 1;
+    }
+    return n;
+}
+
+// archive.org's redirect picks a server, and not always a fast one - a run
+// sent to a European copy got half what its US server gives. So: a few MB
+// from each server that holds the item and from the one the redirect chose,
+// and the rest from the fastest. Falls back to the redirect's.
+static std::string ChooseServer(GameJob *job, const std::string &redirected, const char *item,
+                                const char *encodedZip, const char *auth, unsigned long long zipSize)
+{
+    const unsigned long long PROBE = 4ULL * 1024 * 1024;
+    if (zipSize < PROBE * 2)
+        return redirected;
+
+    std::string dir;
+    std::string servers[4];
+    int serverCount = 0;
+    if (MetadataStrings(item, "dir", &dir, 1) == 1 && !dir.empty())
+        serverCount = MetadataStrings(item, "workable_servers", servers, 4);
+
+    std::string candidates[5];
+    int count = 0;
+    candidates[count++] = redirected;
+    const std::string redirectedHost = HostOf(redirected);
+    for (int i = 0; i < serverCount; ++i)
+    {
+        if (servers[i] != redirectedHost)
+            candidates[count++] = std::string("https://") + servers[i] + dir + "/" + encodedZip;
+    }
+    if (count == 1)
+    {
+        dprintf("[game] no server list from archive.org; using %s\n", redirectedHost.c_str());
+        return redirected;
+    }
+
+    char *buffer = (char *)malloc((size_t)PROBE + 4096);
+    if (buffer == NULL)
+        return redirected;
+
+    // Past the zip's first piece, so a server's cache of the start doesn't
+    // flatter it.
+    char range[96];
+    _snprintf(range, sizeof(range), "Range: bytes=%I64u-%I64u\r\n", PROBE, PROBE * 2 - 1);
+    range[sizeof(range) - 1] = '\0';
+
+    int best = -1;
+    double bestRate = 0.0;
+    for (int i = 0; i < count && !Cancelled(job); ++i)
+    {
+        std::string u = candidates[i];
+        unsigned long long len = 0;
+        DWORD started = GetTickCount();
+        int status = Get(u, auth, range, buffer, PROBE + 4095, &len);
+        DWORD ms = GetTickCount() - started;
+
+        if (status != 206 || len != PROBE)
+        {
+            dprintf("[game] server %s: HTTP %d, %I64u bytes - skipped\n", HostOf(candidates[i]).c_str(), status, len);
+            continue;
+        }
+        double rate = PROBE / 1048576.0 / ((ms > 0 ? ms : 1) / 1000.0);
+        dprintf("[game] server %s: %.2f MB/s\n", HostOf(u).c_str(), rate);
+        if (best < 0 || rate > bestRate)
+        {
+            best = i;
+            bestRate = rate;
+            candidates[i] = u; // where it redirected to, if anywhere
+        }
+    }
+    free(buffer);
+
+    if (best < 0)
+        return redirected;
+    dprintf("[game] downloading from %s\n", HostOf(candidates[best]).c_str());
+    return candidates[best];
+}
+
 static void RunJob(GameJob *job, const char *gamesPath)
 {
     const GameRequest &req = job->request;
@@ -516,6 +701,14 @@ static void RunJob(GameJob *job, const char *gamesPath)
         _snprintf(detail, sizeof(detail), "archive.org answered HTTP %d.", status);
         detail[sizeof(detail) - 1] = '\0';
         FinishLocked(job, QUEUE_OUTCOME_FAILED, "Couldn't reach archive.org", detail, true);
+        return;
+    }
+
+    SetPhase(job, "Finding the fastest server", 0, 0, 0);
+    url = ChooseServer(job, url, req.item, encodedZip, auth, req.zipSize);
+    if (Cancelled(job))
+    {
+        FinishLocked(job, QUEUE_OUTCOME_CANCELLED, "Stopped", "Nothing was installed.", false);
         return;
     }
 
@@ -603,6 +796,7 @@ static void RunJob(GameJob *job, const char *gamesPath)
     for (int i = 0; i < CONNECTIONS; ++i)
     {
         d.inFlight[i] = 0;
+        d.resumedAt[i] = 0;
         d.threadIds[i] = 0;
     }
 
