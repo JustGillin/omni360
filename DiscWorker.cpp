@@ -22,6 +22,26 @@ DESCRIPTION : Watches the disc drive and installs discs as Games on Demand, on
 // xboxkrnl.lib exports it, though no header declares it.
 extern "C" VOID HalSendSMCMessage(LPVOID input, LPVOID output);
 
+// XAM's drive speed control, exported by the XDK's xapilib.lib but declared
+// in no header; one DWORD, by community headers. What the values do isn't
+// documented anywhere reliable, so it was measured on hardware - 48MB read
+// from the inner edge of a game partition after each:
+//
+//   nothing set, 0, 1   about 1.6 MB/s - the drive's quiet range
+//   2                   2.99 MB/s
+//   3                   4.89 MB/s
+//   4                   6.59 MB/s - the XDK's figure for the inner edge at
+//                       full speed is 6.8 MB/s, so this is the top
+//
+// Left alone, a raw read of a game disc runs in that quiet range, which is
+// why installs averaged 2.3 MB/s - slower than the XDK's 2.4x minimum for a
+// game disc, and a third of Aurora's Disc to GOD.
+extern "C" DWORD XamSetDvdSpindleSpeed(DWORD speed);
+
+#define SPINDLE_SPEED_FULL     4
+#define SPINDLE_SPEED_NORMAL   0 // measured the same as never setting it
+#define SPINDLE_SETTLE_MS      3000
+
 #define TRAY_POLL_MS        500
 #define SETTLE_MS           2500   // after the tray moves, before reading the disc
 #define SPIN_UP_TIMEOUT_MS  20000  // how long a disc that won't open yet is retried
@@ -255,6 +275,13 @@ static void RunInstall(DiscJob *job, const char *gamesPath)
         return;
     }
 
+    // Full speed for the copy - about four times what the drive does left
+    // alone - and back to normal afterwards, so a film or a game played next
+    // isn't any louder for it.
+    DWORD spindleResult = XamSetDvdSpindleSpeed(SPINDLE_SPEED_FULL);
+    dprintf("[disc] spindle to full speed -> 0x%08lX\n", (unsigned long)spindleResult);
+    Sleep(SPINDLE_SETTLE_MS);
+
     EnterCriticalSection(&g_lock);
     job->snap.bytesTotal = info.usedSize;
     _snprintf(job->snap.phase, sizeof(job->snap.phase), "Copying from the disc");
@@ -283,6 +310,7 @@ static void RunInstall(DiscJob *job, const char *gamesPath)
 
     ClearInstallMarker();
     disc.Close();
+    XamSetDvdSpindleSpeed(SPINDLE_SPEED_NORMAL);
 
     DWORD seconds = (GetTickCount() - progress.startTick) / 1000;
     dprintf("[disc] install %s after %lu:%02lu: %s\n", GodResultText(result),
