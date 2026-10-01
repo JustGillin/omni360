@@ -364,6 +364,7 @@
     <ClInclude Include="GodConvert.h" />
     <ClInclude Include="DiscSource.h" />
     <ClInclude Include="ReadAhead.h" />
+    <ClInclude Include="DiscWorker.h" />
     <ClInclude Include="DownloadQueue.h" />
     <ClInclude Include="SearchWorker.h" />
     <ClInclude Include="CoverArt.h" />
@@ -407,6 +408,7 @@
     <ClCompile Include="GodConvert.cpp" />
     <ClCompile Include="DiscSource.cpp" />
     <ClCompile Include="ReadAhead.cpp" />
+    <ClCompile Include="DiscWorker.cpp" />
     <ClCompile Include="DownloadQueue.cpp" />
     <ClCompile Include="SearchWorker.cpp" />
     <ClCompile Include="CoverArt.cpp" />

@@ -28,6 +28,7 @@ end-to-end on real hardware against a real 27-game library.
 #include "DownloadQueue.h"
 #include "SearchWorker.h"
 #include "CoverArt.h"
+#include "DiscWorker.h"
 #include "ArchiveOrgDLC.h"
 #include "downloadFile.h" // DownloadProgressFn + FormatBytes, for the progress callback
 #include "GodConvert.h"
@@ -758,7 +759,11 @@ struct Picker
     PickerKind kind;
     PickerStatus status;
     int requestId; // the search it's waiting on, while PICKER_SEARCHING
-    int gameIndex; // into the library
+
+    // The game it's for - copied, since it may be the disc in the drive,
+    // which isn't in the library.
+    char gameName[256];
+    unsigned long titleId;
     int count;
     int selected;
     int scroll;
@@ -776,14 +781,16 @@ struct Picker
 static SearchResult g_searchResult;
 
 // Opens the picker for a game and starts its search.
-static void OpenPicker(Picker &picker, PickerKind kind, int gameIndex, const InstalledGame &game)
+static void OpenPicker(Picker &picker, PickerKind kind, const char *gameName, unsigned long titleId)
 {
     picker.kind = kind;
-    picker.gameIndex = gameIndex;
+    strncpy(picker.gameName, gameName, sizeof(picker.gameName) - 1);
+    picker.gameName[sizeof(picker.gameName) - 1] = '\0';
+    picker.titleId = titleId;
     picker.count = 0;
     picker.selected = 0;
     picker.scroll = -1;
-    picker.requestId = BeginSearch(kind == PICKER_DLC ? SEARCH_DLC : SEARCH_TITLE_UPDATES, game.displayName);
+    picker.requestId = BeginSearch(kind == PICKER_DLC ? SEARCH_DLC : SEARCH_TITLE_UPDATES, picker.gameName);
 
     // 0 means the search worker never started; the log says why.
     picker.status = (picker.requestId != 0) ? PICKER_SEARCHING : PICKER_UNREACHABLE;
@@ -892,6 +899,21 @@ struct Library
     bool updateInstalled[MAX_INSTALLED_GAMES];
 };
 
+// The disc in the drive's title ID, while there's a game disc in it - its
+// box art is asked for ahead of the library's, as it's the first tile.
+static unsigned long g_coverDiscTitleId = 0;
+
+static void RequestLibraryCovers(const Library &lib)
+{
+    static unsigned long titleIds[MAX_INSTALLED_GAMES + 1];
+    int n = 0;
+    if (g_coverDiscTitleId != 0)
+        titleIds[n++] = g_coverDiscTitleId;
+    for (int i = 0; i < lib.count; ++i)
+        titleIds[n++] = lib.games[i].titleId;
+    RequestCoverArt(titleIds, n);
+}
+
 static void ScanLibrary(Library &lib, const char *gamesPath)
 {
     RenderStatusFrame("Scanning", "Reading your installed games", gamesPath);
@@ -918,10 +940,7 @@ static void ScanLibrary(Library &lib, const char *gamesPath)
         dprintf("No installed games found under %s\n", gamesPath);
 
     // Box art, in the library's order so the first screenful comes first.
-    static unsigned long titleIds[MAX_INSTALLED_GAMES];
-    for (int i = 0; i < lib.count; ++i)
-        titleIds[i] = lib.games[i].titleId;
-    RequestCoverArt(titleIds, lib.count);
+    RequestLibraryCovers(lib);
 }
 
 // ---------------------------------------------------------------------------
@@ -976,6 +995,7 @@ static void ChangeGamesFolder(Library &lib, char *gamesPath, size_t gamesPathSiz
     // Used for this session either way - the user asked for it and the folder
     // exists. Only remembering it is in question if the write failed.
     memcpy(gamesPath, newPath, strlen(newPath) + 1);
+    SetDiscWorkerGamesPath(gamesPath);
 
     ScanLibrary(lib, gamesPath);
     outcome.libraryChanged = true;
@@ -1166,94 +1186,6 @@ static WORD AnyPadButtons()
     return buttons;
 }
 
-struct DiscInstallProgress
-{
-    const char *title;
-    DWORD startTick;
-    DWORD lastFrameTick;
-    WORD prevButtons;
-};
-
-// Called by GodConvert after every 816KB. Redraws at most ten times a second
-// - the copy runs at the drive's pace, and a frame costs time the drive could
-// be reading - and offers B to stop.
-static bool DiscInstallProgressCallback(unsigned long long done, unsigned long long total, void *context)
-{
-    DiscInstallProgress *p = (DiscInstallProgress *)context;
-
-    WORD buttons = AnyPadButtons();
-    WORD pressed = buttons & ~p->prevButtons;
-    p->prevButtons = buttons;
-
-    if (pressed & XINPUT_GAMEPAD_B)
-    {
-        if (ShowConfirmUI("Stop installing?", "The game won't be installed.",
-                          "What has been copied so far is removed.", "Stop"))
-            return false;
-        p->prevButtons = AnyPadButtons(); // the B that answered "no" isn't a fresh press
-    }
-
-    DWORD now = GetTickCount();
-    if (now - p->lastFrameTick < 100 && done < total)
-        return true;
-    p->lastFrameTick = now;
-
-    DWORD elapsedMs = now - p->startTick;
-    unsigned long long bytesPerSec = (elapsedMs > 0) ? done * 1000ULL / elapsedMs : 0;
-
-    char doneText[64] = "", totalText[64] = "", speedText[64] = "";
-    FormatBytes(done, doneText, sizeof(doneText));
-    FormatBytes(total, totalText, sizeof(totalText));
-    FormatBytes(bytesPerSec, speedText, sizeof(speedText));
-
-    char detail[256];
-    if (bytesPerSec > 0 && elapsedMs > 3000) // the first seconds' rate is mostly spin-up
-    {
-        unsigned long long secondsLeft = (total - done) / bytesPerSec;
-        _snprintf(detail, sizeof(detail), "%s / %s   %s/s   %d:%02d left   -   B to stop",
-                  doneText, totalText, speedText, (int)(secondsLeft / 60), (int)(secondsLeft % 60));
-    }
-    else
-    {
-        _snprintf(detail, sizeof(detail), "%s / %s   -   B to stop", doneText, totalText);
-    }
-    detail[sizeof(detail) - 1] = '\0';
-
-    RenderProgressFrame(p->title, "Copying from the disc", detail,
-                        (total > 0) ? (float)((double)done / (double)total) : -1.0f, "Installing");
-    return true;
-}
-
-// An install in progress, recorded before the first byte is copied and
-// removed once it has either finished or cleaned up after itself. Anything
-// that ends the app mid-copy without either - the Guide button to the
-// dashboard, the power, a crash - leaves it behind, and the next launch
-// removes the partial package without asking: half a game is never worth
-// keeping, since an install can't be resumed.
-//
-// Lines: games folder, title ID, media ID, the finished package's size, and
-// the name (for the log and the status line).
-#define INSTALL_MARKER_FILE "game:\\InstallInProgress.txt"
-
-static void WriteInstallMarker(const char *gamesPath, const GodImageInfo &info, const char *name)
-{
-    FILE *f = fopen(INSTALL_MARKER_FILE, "w");
-    if (f == NULL)
-    {
-        dprintf("[disc] couldn't write %s - an interrupted install won't be cleaned up automatically\n",
-                INSTALL_MARKER_FILE);
-        return;
-    }
-    fprintf(f, "%s\n%08lX\n%08lX\n%I64u\n%s\n", gamesPath, info.title.titleId, info.title.mediaId,
-            info.outputSize, name);
-    fclose(f);
-}
-
-static void ClearInstallMarker()
-{
-    remove(INSTALL_MARKER_FILE);
-}
-
 // At startup: if the last install never finished, take its partial package
 // away. A package whose files already add up to the full size did finish -
 // the app just ended before it could clear the marker - and is kept.
@@ -1308,178 +1240,35 @@ static void CleanUpInterruptedInstall()
     ClearInstallMarker();
 }
 
-// START on the library: reads the disc in the drive, asks for the name the
-// dashboard should show, and installs it into the games folder - the same
-// place the library is read from, so the game appears there straight after.
-static void InstallDiscAsGame(Library &lib, const char *gamesPath, int &listSelection)
+// The name the dashboard will show for a disc about to be installed. The
+// bundled list only suggests one - its names are community-edited - so when
+// there's no listed name the keyboard asks, with "Title XXXXXXXX" filled in.
+// False if the keyboard was cancelled.
+static bool AskDiscName(const char *suggested, unsigned int discNumber, unsigned int discCount, std::string &name)
 {
-    RenderStatusFrame("Install disc", "Reading the disc", "The drive may take a few seconds to spin up.");
-
-    DiscSource disc;
-    if (!disc.Open(dprintf))
-    {
-        ShowMessageUI("No disc", "Put an Xbox 360 game disc in the drive and try again.",
-                      "If one is in, it couldn't be read - the log says why.");
-        return;
-    }
-    disc.LogProbe(dprintf);
-
-    GodImageInfo info;
-    GodResult result = GodInspect(&disc, &info);
-    if (result != GOD_OK)
-    {
-        dprintf("[disc] not installable: %s\n", GodResultText(result));
-        ShowMessageUI("Can't install this disc", GodResultText(result),
-                      (result == GOD_NOT_A_DISC_IMAGE) ? "Only Xbox 360 game discs can be installed." : NULL);
-        return;
-    }
-
-    dprintf("[disc] %s disc: title %08lX, media %08lX, disc %u of %u, %I64u bytes used, package %I64u bytes in %lu parts\n",
-            info.imageType, info.title.titleId, info.title.mediaId, info.title.discNumber, info.title.discCount,
-            info.usedSize, info.outputSize, info.partCount);
-
-    // The name. The bundled list only suggests it - its names are
-    // community-edited - and the keyboard lets it be fixed before it goes on
-    // the dashboard for good.
-    char fallbackName[32];
-    _snprintf(fallbackName, sizeof(fallbackName), "Title %08lX", info.title.titleId);
-    fallbackName[sizeof(fallbackName) - 1] = '\0';
-
-    const char *listed = LookupTitleName(info.title.titleId);
-    const char *suggested = (listed != NULL) ? listed : fallbackName;
-
     WCHAR wideSuggested[128];
     Utf8ToWideText(suggested, wideSuggested, 128);
 
     WCHAR description[160];
-    if (info.title.discCount > 1)
+    if (discCount > 1)
         swprintf_s(description, 160, L"The name the dashboard and Aurora show. This is disc %u of %u.",
-                   (unsigned)info.title.discNumber, (unsigned)info.title.discCount);
+                   discNumber, discCount);
     else
         swprintf_s(description, 160, L"The name the dashboard and Aurora show.");
 
     std::string typed;
     if (OpenKeyboardToString(XUSER_INDEX_ANY, &typed, L"Game Name", description, wideSuggested) != ERROR_SUCCESS)
-        return; // cancelled
+        return false;
     TrimInPlace(typed);
 
     // Unchanged, the original is kept: the keyboard hands text back one byte
     // per character, which would turn a name like "Modern Warfare® 3" or a
     // Japanese title into question marks.
-    std::string name;
     if (typed.empty() || typed == Utf8AsKeyboardText(suggested))
         name = suggested;
     else
         name = Latin1ToUtf8(typed);
-
-    char headerPath[MAX_TEXT_LENGTH];
-    _snprintf(headerPath, sizeof(headerPath), "%s\\%08lX\\00007000\\%08lX", gamesPath, info.title.titleId, info.title.mediaId);
-    headerPath[sizeof(headerPath) - 1] = '\0';
-
-    FILE *existing = fopen(headerPath, "rb");
-    if (existing != NULL)
-    {
-        fclose(existing);
-        if (!ShowConfirmUI("Already installed", "This disc is already installed.",
-                           "Installing it again replaces the copy on the drive.", "Reinstall"))
-            return;
-    }
-
-    unsigned long long freeSpace = 0;
-    if (DriveFreeSpace(gamesPath, &freeSpace) && freeSpace < info.outputSize + 4ULL * 1024 * 1024)
-    {
-        ShowNotEnoughSpace(gamesPath, info.outputSize, freeSpace);
-        return;
-    }
-
-    char sizeText[64] = "";
-    FormatBytes(info.outputSize, sizeText, sizeof(sizeText));
-
-    char message[200], detail[MAX_TEXT_LENGTH + 64];
-    _snprintf(message, sizeof(message), "Install %s?", name.c_str());
-    message[sizeof(message) - 1] = '\0';
-    _snprintf(detail, sizeof(detail), "%s, to %s", sizeText, gamesPath);
-    detail[sizeof(detail) - 1] = '\0';
-
-    if (!ShowConfirmUI("Install disc", message, detail, "Install"))
-        return;
-
-    DiscInstallProgress progress;
-    progress.title = name.c_str();
-    progress.startTick = GetTickCount();
-    progress.lastFrameTick = 0;
-    progress.prevButtons = AnyPadButtons(); // the A that confirmed is still down
-
-    // From here until GodConvert returns, the marker is what cleans up if
-    // the app is ended mid-copy. GodConvert handles every failure it sees -
-    // cancelling, a read or write error - by removing its own output first,
-    // so once it returns, by any path, there is nothing left to clean.
-    WriteInstallMarker(gamesPath, info, name.c_str());
-
-    char packagePath[MAX_TEXT_LENGTH] = "";
-    GodTimings timings;
-    memset(&timings, 0, sizeof(timings));
-    {
-        // The drive keeps reading while each group is hashed and written -
-        // see ReadAhead.h. 8MB ahead, in 1MB reads. Scoped so its thread has
-        // finished with the drive before the drive is closed.
-        ReadAheadSource ahead(&disc, 1024 * 1024, 8);
-        result = GodConvert(&ahead, info, gamesPath, name.c_str(), NULL, 0,
-                            DiscInstallProgressCallback, &progress, packagePath, sizeof(packagePath), &timings);
-    }
-
-    ClearInstallMarker();
-
-    DWORD seconds = (GetTickCount() - progress.startTick) / 1000;
-    dprintf("[disc] install %s after %lu:%02lu: %s\n", GodResultText(result),
-            (unsigned long)(seconds / 60), (unsigned long)(seconds % 60), packagePath);
-
-    // Which part is the limit: reading the disc, hashing, or writing. With
-    // read-ahead, "waiting for the disc" is only the time the drive couldn't
-    // keep up.
-    if (seconds > 0)
-        dprintf("[disc] %I64u MB at %.2f MB/s - waiting for the disc %.0fs, hashing %.0fs, writing %.0fs, progress screen %.0fs\n",
-                info.usedSize / (1024 * 1024), (double)info.usedSize / (1024.0 * 1024.0) / (double)seconds,
-                timings.readMs / 1000.0, timings.hashMs / 1000.0, timings.writeMs / 1000.0, timings.progressMs / 1000.0);
-
-    disc.Close();
-
-    if (result == GOD_CANCELLED)
-    {
-        ShowMessageUI("Install stopped", "Nothing was installed.", "What had been copied was removed.");
-        return;
-    }
-    if (result != GOD_OK)
-    {
-        const char *hint = (result == GOD_READ_FAILED) ? "The disc may be dirty or scratched - clean it and try again."
-                         : (result == GOD_WRITE_FAILED) ? "Check the drive the games folder is on, then try again."
-                         : NULL;
-        ShowMessageUI("Install failed", GodResultText(result), hint);
-        return;
-    }
-
-    char doneDetail[160];
-    if (info.title.discCount > 1 && info.title.discNumber < info.title.discCount)
-        _snprintf(doneDetail, sizeof(doneDetail), "That was disc %u of %u - put in disc %u and press START to install it.",
-                  (unsigned)info.title.discNumber, (unsigned)info.title.discCount, (unsigned)info.title.discNumber + 1);
-    else
-        _snprintf(doneDetail, sizeof(doneDetail), "Play it from the dashboard or Aurora - the disc isn't needed.");
-    doneDetail[sizeof(doneDetail) - 1] = '\0';
-
-    _snprintf(message, sizeof(message), "%s is installed.", name.c_str());
-    message[sizeof(message) - 1] = '\0';
-    ShowMessageUI("Installed", message, doneDetail);
-
-    // Into the library, and onto its row.
-    ScanLibrary(lib, gamesPath);
-    for (int i = 0; i < lib.count; ++i)
-    {
-        if (lib.games[i].titleId == info.title.titleId)
-        {
-            listSelection = i;
-            break;
-        }
-    }
+    return true;
 }
 
 // ---------------------------------------------------------------------------
@@ -1504,6 +1293,9 @@ static void WaitForExit()
 // The shell: a sidebar of pages, and one loop driving it
 // ---------------------------------------------------------------------------
 
+// Downloads and disc installs, on one Queue page.
+#define MAX_QUEUE_ROWS (MAX_QUEUE_JOBS + MAX_DISC_JOBS)
+
 struct Shell
 {
     ShellPage page;
@@ -1519,14 +1311,26 @@ struct Shell
     // each pass, and the row text built from it. The selection is held as a
     // job id as well as a row, because the rows reorder as jobs start and
     // finish - and pressing X should act on the job you were looking at.
-    QueueJobSnapshot queueJobs[MAX_QUEUE_JOBS];
+    QueueJobSnapshot queueJobs[MAX_QUEUE_ROWS];
     int queueCount;
     int queueSelected;
     int queueSelectedId;
     int queueScroll;
-    QueueRowView queueRows[MAX_QUEUE_JOBS];
-    char queueStatus[MAX_QUEUE_JOBS][256];
-    char queueNumbers[MAX_QUEUE_JOBS][128];
+    QueueRowView queueRows[MAX_QUEUE_ROWS];
+    char queueStatus[MAX_QUEUE_ROWS][256];
+    char queueNumbers[MAX_QUEUE_ROWS][128];
+
+    // The disc in the drive, as the library's first tile - see UpdateDisc.
+    // librarySelected counts it: with a disc, 0 is the disc and game i is
+    // item i + 1.
+    DiscInfo disc;
+    bool hasDisc;
+    bool discInstalled;
+    char discName[128];
+
+    // A disc install finished: read the library again at the top of the
+    // next pass, so the game is in it.
+    bool rescanLibrary;
 
     // What takes a file read or a drive query to find out, so it's refreshed
     // only when something may have changed it - on the way back from any
@@ -1565,6 +1369,10 @@ static void RefreshShell(Shell &shell, Library &lib, const char *contentBasePath
     // the drive that fills up.
     ReadStorageStatus(contentBasePath, &shell.storage);
 
+    // An install, or a new games folder, can change whether the disc is in it.
+    if (shell.hasDisc && shell.disc.state == DISC_READY)
+        shell.discInstalled = IsDiscInstalled(gamesPath, shell.disc.titleId, shell.disc.mediaId);
+
     BuildSettingsPage(shell.settings, lib, gamesPath);
 
     shell.stale = false;
@@ -1578,7 +1386,7 @@ static void PublishSidebar(const Shell &shell, const Library &lib)
     sidebar.page = shell.page;
     sidebar.focused = shell.sidebarFocused;
     sidebar.libraryCount = lib.count;
-    sidebar.queueCount = PendingDownloadCount();
+    sidebar.queueCount = PendingDownloadCount() + PendingDiscJobCount();
     sidebar.storageUsed = shell.storage.used;
     strncpy(sidebar.storageLabel, shell.storage.label, sizeof(sidebar.storageLabel) - 1);
     sidebar.storageLabel[sizeof(sidebar.storageLabel) - 1] = '\0';
@@ -1602,7 +1410,178 @@ static LibraryPageView MakeLibraryView(const Shell &shell, const Library &lib, c
     view.gamesPath = gamesPath;
     view.bannerText = shell.keysSaved ? NULL : "Add your archive.org keys in Settings to start downloading.";
     view.focused = !shell.sidebarFocused;
+
+    view.hasDisc = shell.hasDisc;
+    view.discTitleId = (shell.disc.state == DISC_READY) ? shell.disc.titleId : 0;
+    view.discName = shell.discName;
+    view.discProgress = -1.0f;
+    if (shell.disc.state == DISC_READING)
+        view.discTile = DISC_TILE_READING;
+    else if (shell.disc.state == DISC_UNREADABLE)
+        view.discTile = DISC_TILE_UNREADABLE;
+    else if (shell.disc.installing)
+        view.discTile = DISC_TILE_INSTALLING;
+    else if (shell.discInstalled)
+        view.discTile = DISC_TILE_INSTALLED;
+    else
+        view.discTile = DISC_TILE_READY;
+
+    // The bar across an installing disc's tile, from its job on the Queue.
+    for (int i = 0; i < shell.queueCount; ++i)
+    {
+        const QueueJobSnapshot &job = shell.queueJobs[i];
+        if (job.kind == QUEUE_JOB_DISC_INSTALL && job.state == QUEUE_ACTIVE)
+            view.discProgress = job.fraction;
+    }
     return view;
+}
+
+// The disc in the drive, as of this frame. When it changes - in, out, or a
+// different one - its name is looked up, whether it's installed is checked,
+// and its box art is asked for; the selection moves with the games, so the
+// one you were on stays selected as the disc's tile comes and goes.
+static void UpdateDisc(Shell &shell, const Library &lib, const char *gamesPath)
+{
+    DiscInfo now;
+    GetDiscInfo(&now);
+
+    const bool changed = (now.changeCount != shell.disc.changeCount);
+    const bool hadDisc = shell.hasDisc;
+
+    shell.disc = now;
+    shell.hasDisc = (now.state == DISC_READY || now.state == DISC_READING || now.state == DISC_UNREADABLE);
+
+    if (changed)
+    {
+        if (now.state == DISC_READY)
+        {
+            const char *listed = LookupTitleName(now.titleId);
+            if (listed != NULL)
+                _snprintf(shell.discName, sizeof(shell.discName), "%s", listed);
+            else
+                _snprintf(shell.discName, sizeof(shell.discName), "Title %08lX", now.titleId);
+            shell.discInstalled = IsDiscInstalled(gamesPath, now.titleId, now.mediaId);
+        }
+        else if (now.state == DISC_READING)
+        {
+            _snprintf(shell.discName, sizeof(shell.discName), "Reading the disc");
+            shell.discInstalled = false;
+        }
+        else if (now.state == DISC_UNREADABLE)
+        {
+            _snprintf(shell.discName, sizeof(shell.discName), "%s", now.reason);
+            shell.discInstalled = false;
+        }
+        shell.discName[sizeof(shell.discName) - 1] = '\0';
+
+        unsigned long coverTitle = (now.state == DISC_READY) ? now.titleId : 0;
+        if (coverTitle != g_coverDiscTitleId)
+        {
+            g_coverDiscTitleId = coverTitle;
+            RequestLibraryCovers(lib);
+        }
+    }
+
+    if (hadDisc != shell.hasDisc)
+    {
+        if (shell.hasDisc)
+            shell.librarySelected++;
+        else if (shell.librarySelected > 0)
+            shell.librarySelected--;
+    }
+}
+
+// What A, X and START do on the disc's tile. Returns true if it took over
+// the screen (the keyboard, a message), so input is resynced after.
+static bool DiscTileAction(Shell &shell, const Library &lib, const char *gamesPath, WORD pressed)
+{
+    const DiscInfo &disc = shell.disc;
+
+    if (disc.state == DISC_UNREADABLE)
+    {
+        if (pressed & XINPUT_GAMEPAD_A)
+        {
+            ShowMessageUI("Can't install this disc", disc.reason, "Only Xbox 360 game discs can be installed.");
+            return true;
+        }
+        return false;
+    }
+
+    if (disc.state != DISC_READY)
+        return false;
+
+    if (disc.installing)
+    {
+        // It's on the Queue page; A goes there.
+        if (pressed & XINPUT_GAMEPAD_A)
+        {
+            shell.page = SHELL_PAGE_QUEUE;
+            shell.sidebarFocused = false;
+        }
+        return false;
+    }
+
+    // Installed already: A and X are a game's - its DLC and its updates.
+    const bool install = (!shell.discInstalled && (pressed & XINPUT_GAMEPAD_A)) ||
+                         (shell.discInstalled && (pressed & XINPUT_GAMEPAD_START));
+
+    if (!install)
+    {
+        if (pressed & (XINPUT_GAMEPAD_A | XINPUT_GAMEPAD_X))
+        {
+            if (!shell.discInstalled && (pressed & XINPUT_GAMEPAD_A))
+                return false;
+            OpenPicker(shell.picker, (pressed & XINPUT_GAMEPAD_A) ? PICKER_DLC : PICKER_TITLE_UPDATE,
+                       shell.discName, disc.titleId);
+        }
+        return false;
+    }
+
+    if (shell.discInstalled &&
+        !ShowConfirmUI("Install again?", shell.discName,
+                       "Installing it again replaces the copy on the drive.", "Reinstall"))
+        return true;
+
+    unsigned long long freeSpace = 0;
+    if (DriveFreeSpace(gamesPath, &freeSpace) && freeSpace < disc.outputSize + 4ULL * 1024 * 1024)
+    {
+        ShowNotEnoughSpace(gamesPath, disc.outputSize, freeSpace);
+        return true;
+    }
+
+    // A name from the bundled list is used as it is; without one, the
+    // keyboard asks rather than installing it as "Title XXXXXXXX".
+    std::string name = shell.discName;
+    bool tookScreen = shell.discInstalled; // the confirm above
+    if (LookupTitleName(disc.titleId) == NULL)
+    {
+        tookScreen = true;
+        if (!AskDiscName(shell.discName, disc.discNumber, disc.discCount, name))
+            return true;
+    }
+
+    char sizeText[64] = "";
+    FormatBytes(disc.outputSize, sizeText, sizeof(sizeText));
+
+    char detail[160];
+    switch (QueueDiscInstall(disc.titleId, disc.mediaId, name.c_str()))
+    {
+    case DISC_INSTALL_QUEUED:
+        _snprintf(detail, sizeof(detail), "%s" "  \xC2\xB7  " "%s, on the Queue page", name.c_str(), sizeText);
+        detail[sizeof(detail) - 1] = '\0';
+        ShowShellToast("Installing", detail, UI_TOAST_INFO);
+        break;
+    case DISC_INSTALL_BUSY:
+        ShowShellToast("Already installing", "One disc installs at a time.", UI_TOAST_INFO);
+        break;
+    case DISC_INSTALL_NO_DISC:
+        ShowShellToast("Couldn't install", "The disc in the drive changed. Try again in a moment.", UI_TOAST_ERROR);
+        break;
+    default:
+        ShowShellToast("Couldn't install", "The disc worker didn't start - the log says why.", UI_TOAST_ERROR);
+        break;
+    }
+    return tookScreen;
 }
 
 // One row up or down for an up/down nav, clamped to the list.
@@ -1679,10 +1658,27 @@ static void FormatTransferNumbers(const QueueJobSnapshot &job, char *out, size_t
     out[outSize - 1] = '\0';
 }
 
-// Copies the queue out and turns it into rows for the Queue page.
+// Copies the queue out and turns it into rows for the Queue page: a disc
+// install in progress first, then the downloads as the download queue orders
+// them, then finished disc installs.
 static void SnapshotQueue(Shell &shell, const Library &lib)
 {
-    shell.queueCount = SnapshotDownloadQueue(shell.queueJobs, MAX_QUEUE_JOBS);
+    static QueueJobSnapshot discJobs[MAX_DISC_JOBS];
+    const int discCount = SnapshotDiscJobs(discJobs, MAX_DISC_JOBS);
+
+    int n = 0;
+    for (int i = 0; i < discCount; ++i)
+    {
+        if (discJobs[i].state != QUEUE_FINISHED)
+            shell.queueJobs[n++] = discJobs[i];
+    }
+    n += SnapshotDownloadQueue(shell.queueJobs + n, MAX_QUEUE_JOBS);
+    for (int i = 0; i < discCount && n < MAX_QUEUE_ROWS; ++i)
+    {
+        if (discJobs[i].state == QUEUE_FINISHED)
+            shell.queueJobs[n++] = discJobs[i];
+    }
+    shell.queueCount = n;
 
     // Follow the selected job to wherever it now sits.
     for (int i = 0; i < shell.queueCount; ++i)
@@ -1710,6 +1706,7 @@ static void SnapshotQueue(Shell &shell, const Library &lib)
         row.status = status;
         row.numbers = NULL;
         row.libraryIndex = LibraryIndexForTitle(lib, job.titleId);
+        row.titleId = job.titleId;
         numbers[0] = '\0';
 
         if (job.state == QUEUE_WAITING)
@@ -1748,6 +1745,28 @@ static void SnapshotQueue(Shell &shell, const Library &lib)
 static void HandleFinishedDownloads(Shell &shell, bool &haveAuth)
 {
     QueueJobSnapshot job;
+
+    // A disc install: the game is new in the library, or it isn't.
+    while (TakeFinishedDiscJob(&job))
+    {
+        shell.stale = true;
+        if (job.outcome == QUEUE_OUTCOME_INSTALLED)
+            shell.rescanLibrary = true;
+
+        if (!job.notify)
+            continue;
+
+        char message[192];
+        if (job.outcome == QUEUE_OUTCOME_INSTALLED)
+            _snprintf(message, sizeof(message), "%s", job.gameName);
+        else
+            _snprintf(message, sizeof(message), "%s   -   %s", job.gameName, job.resultDetail);
+        message[sizeof(message) - 1] = '\0';
+
+        ShowShellToast(job.resultText, message,
+                       job.outcome == QUEUE_OUTCOME_INSTALLED ? UI_TOAST_SUCCESS : UI_TOAST_ERROR);
+    }
+
     while (TakeFinishedQueueJob(&job))
     {
         shell.stale = true;
@@ -1907,6 +1926,10 @@ int main()
     if (!StartCoverArt())
         dprintf("ERROR: the cover worker didn't start - tiles keep their icons\n");
 
+    // Reads what's in the drive straight away, for the library's first tile.
+    if (!StartDiscWorker(gamesPath))
+        dprintf("ERROR: the disc worker didn't start - discs can't be installed\n");
+
     ScanLibrary(lib, gamesPath);
 
     // The shell loop: read the controller, act on it, draw a frame.
@@ -1960,6 +1983,15 @@ int main()
         // Finished downloads first, since they can make the rest stale.
         HandleFinishedDownloads(shell, haveAuth);
 
+        if (shell.rescanLibrary)
+        {
+            shell.rescanLibrary = false;
+            ScanLibrary(lib, gamesPath);
+            shell.stale = true;
+        }
+
+        UpdateDisc(shell, lib, gamesPath);
+
         if (shell.stale)
             RefreshShell(shell, lib, contentBasePath, gamesPath);
 
@@ -1993,7 +2025,7 @@ int main()
             {
                 // Leaving stops the queue, so it asks first when there's
                 // anything in it still to do.
-                int pending = PendingDownloadCount();
+                int pending = PendingDownloadCount() + PendingDiscJobCount();
                 if (pending == 0)
                 {
                     exitRequested = true;
@@ -2001,12 +2033,13 @@ int main()
                 else
                 {
                     char message[96];
-                    _snprintf(message, sizeof(message), "%d download%s still in the queue.",
+                    _snprintf(message, sizeof(message), "%d job%s still in the queue.",
                               pending, pending == 1 ? " is" : "s are");
                     message[sizeof(message) - 1] = '\0';
 
                     exitRequested = ShowConfirmUI("Leave Omni360?", message,
-                                                  "Leaving stops them. Files that already finished stay installed.",
+                                                  "Leaving stops them. Files that already finished stay installed; "
+                                                  "a disc install is removed.",
                                                   "Leave");
                     acted = !exitRequested;
                 }
@@ -2015,7 +2048,6 @@ int main()
         else if (shell.page == SHELL_PAGE_LIBRARY && shell.picker.kind != PICKER_NONE)
         {
             Picker &picker = shell.picker;
-            const InstalledGame &game = lib.games[picker.gameIndex];
 
             if (picker.status == PICKER_READY)
                 StepSelection(input.nav, picker.count, picker.selected);
@@ -2028,7 +2060,7 @@ int main()
             }
             else if ((pressed & XINPUT_GAMEPAD_A) && picker.status == PICKER_UNREACHABLE)
             {
-                OpenPicker(picker, picker.kind, picker.gameIndex, game); // try again
+                OpenPicker(picker, picker.kind, picker.gameName, picker.titleId); // try again
             }
             else if ((pressed & XINPUT_GAMEPAD_A) && picker.status == PICKER_READY)
             {
@@ -2037,7 +2069,7 @@ int main()
                 // the keyboard, which takes over the screen.
                 // If that took over the screen, resync once it's done.
                 const bool hadAuth = haveAuth;
-                const bool signedIn = EnsureAuthHeader(haveAuth, authHeader, sizeof(authHeader), game.displayName);
+                const bool signedIn = EnsureAuthHeader(haveAuth, authHeader, sizeof(authHeader), picker.gameName);
                 if (!hadAuth)
                     acted = true;
 
@@ -2047,13 +2079,13 @@ int main()
                 if (signedIn && picker.kind == PICKER_DLC)
                 {
                     const DlcRarMatch &pack = picker.packs[picker.selected];
-                    ReportEnqueue(EnqueueDlcPack(pack, game.displayName, game.titleId, authHeader),
+                    ReportEnqueue(EnqueueDlcPack(pack, picker.gameName, picker.titleId, authHeader),
                                   pack.filename);
                 }
                 else if (signedIn)
                 {
                     const TitleUpdateMatch &update = picker.updates[picker.selected];
-                    ReportEnqueue(EnqueueTitleUpdate(update, game.displayName, game.titleId, authHeader),
+                    ReportEnqueue(EnqueueTitleUpdate(update, picker.gameName, picker.titleId, authHeader),
                                   update.filename);
                 }
             }
@@ -2063,7 +2095,13 @@ int main()
             // Left from the first column goes to the sidebar, as B does.
             bool toSidebar = (pressed & XINPUT_GAMEPAD_B) != 0;
 
-            if (lib.count == 0)
+            // The disc's tile, when there is one, is item 0 and the games
+            // follow it.
+            const int discItems = shell.hasDisc ? 1 : 0;
+            const int itemCount = lib.count + discItems;
+            const bool onDisc = shell.hasDisc && shell.librarySelected == 0;
+
+            if (itemCount == 0)
             {
                 if (input.nav == XINPUT_GAMEPAD_DPAD_LEFT)
                     toSidebar = true;
@@ -2082,7 +2120,7 @@ int main()
                 }
                 else if (input.nav == XINPUT_GAMEPAD_DPAD_RIGHT)
                 {
-                    if (sel % cols < cols - 1 && sel + 1 < lib.count)
+                    if (sel % cols < cols - 1 && sel + 1 < itemCount)
                         sel++;
                 }
                 else if (input.nav == XINPUT_GAMEPAD_DPAD_UP)
@@ -2094,10 +2132,10 @@ int main()
                 {
                     // Down from a row with nothing under it lands on the last
                     // game, rather than doing nothing.
-                    if (sel + cols < lib.count)
+                    if (sel + cols < itemCount)
                         sel += cols;
-                    else if (sel / cols < (lib.count - 1) / cols)
-                        sel = lib.count - 1;
+                    else if (sel / cols < (itemCount - 1) / cols)
+                        sel = itemCount - 1;
                 }
 
                 // Shoulder buttons jump a screenful of rows - the fast way
@@ -2109,7 +2147,7 @@ int main()
                         sel -= jump;
                     if (pressed & XINPUT_GAMEPAD_RIGHT_SHOULDER)
                         sel += jump;
-                    if (sel > lib.count - 1) sel = lib.count - 1;
+                    if (sel > itemCount - 1) sel = itemCount - 1;
                     if (sel < 0) sel = 0;
                 }
             }
@@ -2118,28 +2156,25 @@ int main()
             {
                 shell.sidebarFocused = true;
             }
-            else if ((pressed & (XINPUT_GAMEPAD_A | XINPUT_GAMEPAD_X)) && lib.count > 0)
+            else if (onDisc && (pressed & (XINPUT_GAMEPAD_A | XINPUT_GAMEPAD_X | XINPUT_GAMEPAD_START)))
             {
-                const InstalledGame &chosen = lib.games[shell.librarySelected];
+                acted = DiscTileAction(shell, lib, gamesPath, pressed);
+            }
+            else if ((pressed & (XINPUT_GAMEPAD_A | XINPUT_GAMEPAD_X)) && lib.count > 0 && !onDisc)
+            {
+                const InstalledGame &chosen = lib.games[shell.librarySelected - discItems];
                 dprintf("Selected: %s (Title ID %08lX)\n", chosen.displayName, chosen.titleId);
 
                 // No keys needed to look - the listings are public. They're
                 // asked for when something is added to the queue.
                 OpenPicker(shell.picker, (pressed & XINPUT_GAMEPAD_A) ? PICKER_DLC : PICKER_TITLE_UPDATE,
-                           shell.librarySelected, chosen);
+                           chosen.displayName, chosen.titleId);
             }
             else if (pressed & XINPUT_GAMEPAD_Y)
             {
                 // A shortcut, for the keys banner and the empty library, which
                 // both send you to Settings with a Y badge.
                 shell.page = SHELL_PAGE_SETTINGS;
-            }
-            else if (pressed & XINPUT_GAMEPAD_START)
-            {
-                // No archive.org keys needed: nothing here touches the network.
-                InstallDiscAsGame(lib, gamesPath, shell.librarySelected);
-                shell.libraryScroll = -1; // it may have moved to the game just installed
-                acted = true;
             }
         }
         else if (shell.page == SHELL_PAGE_QUEUE)
@@ -2158,7 +2193,18 @@ int main()
 
                 if (job.state == QUEUE_FINISHED)
                 {
-                    RemoveQueueJob(job.id);
+                    if (IsDiscJobId(job.id))
+                        RemoveDiscJob(job.id);
+                    else
+                        RemoveQueueJob(job.id);
+                }
+                else if (IsDiscJobId(job.id))
+                {
+                    if (ShowConfirmUI("Stop installing?", job.gameName,
+                                      "The game won't be installed. What has been copied so far is removed.",
+                                      "Stop"))
+                        CancelDiscJob(job.id);
+                    acted = true;
                 }
                 else
                 {
@@ -2241,7 +2287,7 @@ int main()
             {
                 const Picker &picker = shell.picker;
                 const char *heading = (picker.kind == PICKER_DLC) ? "Choose a DLC pack" : "Choose a title update";
-                const char *gameName = lib.games[picker.gameIndex].displayName;
+                const char *gameName = picker.gameName;
 
                 if (picker.status == PICKER_UNREACHABLE)
                     hintCount = AddHint(hints, hintCount, UI_BUTTON_A, L"Try again");
@@ -2278,7 +2324,7 @@ int main()
 
                 ListPageView view;
                 view.heading = (shell.picker.kind == PICKER_DLC) ? "Choose a DLC pack" : "Choose a title update";
-                view.subheading = lib.games[shell.picker.gameIndex].displayName;
+                view.subheading = shell.picker.gameName;
                 view.labels = shell.picker.labels;
                 view.sublabels = shell.picker.sublabels;
                 view.count = shell.picker.count;
@@ -2298,17 +2344,41 @@ int main()
 
                 if (!shell.sidebarFocused)
                 {
-                    // The console's own A, X, B order, with START - installing
-                    // a disc, which works on an empty library too - ahead of
-                    // them. The row actions drop out for an empty library.
-                    hintCount = AddHint(hints, hintCount, UI_BUTTON_START, L"Install disc", L"Disc");
-                    if (lib.count > 0)
+                    // The console's own A, X, B order. On the disc's tile they
+                    // say what the disc's state allows.
+                    const int itemCount = lib.count + (shell.hasDisc ? 1 : 0);
+                    const bool onDisc = shell.hasDisc && shell.librarySelected == 0;
+
+                    if (onDisc)
+                    {
+                        switch (view.discTile)
+                        {
+                        case DISC_TILE_READY:
+                            hintCount = AddHint(hints, hintCount, UI_BUTTON_A, L"Install to hard drive", L"Install");
+                            hintCount = AddHint(hints, hintCount, UI_BUTTON_X, L"Find title updates", L"Updates");
+                            break;
+                        case DISC_TILE_INSTALLED:
+                            hintCount = AddHint(hints, hintCount, UI_BUTTON_A, L"Find DLC", L"DLC");
+                            hintCount = AddHint(hints, hintCount, UI_BUTTON_X, L"Find title updates", L"Updates");
+                            hintCount = AddHint(hints, hintCount, UI_BUTTON_START, L"Install again", L"Reinstall");
+                            break;
+                        case DISC_TILE_INSTALLING:
+                            hintCount = AddHint(hints, hintCount, UI_BUTTON_A, L"View in the Queue", L"Queue");
+                            break;
+                        case DISC_TILE_UNREADABLE:
+                            hintCount = AddHint(hints, hintCount, UI_BUTTON_A, L"Why?");
+                            break;
+                        default:
+                            break;
+                        }
+                    }
+                    else if (lib.count > 0)
                     {
                         hintCount = AddHint(hints, hintCount, UI_BUTTON_A, L"Find DLC", L"DLC");
                         hintCount = AddHint(hints, hintCount, UI_BUTTON_X, L"Find title updates", L"Updates");
                     }
                     hintCount = AddHint(hints, hintCount, UI_BUTTON_B, L"Back");
-                    if (lib.count > LibraryPageVisibleRows(view) * LibraryGridColumns())
+                    if (itemCount > LibraryPageVisibleRows(view) * LibraryGridColumns())
                         hintCount = AddHint(hints, hintCount, UI_BUTTON_LBRB, L"Page");
                 }
 
@@ -2397,9 +2467,12 @@ int main()
     // Stop the worker before anything it uses goes away. A transfer stops at
     // its next progress report; a request already waiting on archive.org
     // can't be interrupted, so this is bounded rather than waited out.
-    if (PendingDownloadCount() > 0)
-        RenderStatusFrame("Stopping", "Stopping downloads", "Files that already finished stay installed.");
+    if (PendingDownloadCount() + PendingDiscJobCount() > 0)
+        RenderStatusFrame("Stopping", "Stopping downloads and installs", "Files that already finished stay installed.");
     StopDownloadQueue(15000);
+
+    // An install stops at its next 816KB and removes what it copied.
+    StopDiscWorker(15000);
 
     // A search still out would only be thrown away - a short wait is plenty.
     StopSearchWorker(3000);

@@ -2304,6 +2304,165 @@ static float FocusGrowFor(int index, bool focused)
 
 #define MAX_VISIBLE_TILES 64
 
+// The library's tiles, in order: the disc in the drive first when there is
+// one, then the games. Every lookup by item goes through these, so nothing
+// below has to remember the offset.
+struct LibraryItems
+{
+    const LibraryPageView *view;
+    const Icon *icons;  // per game, or NULL
+    int discItems;      // 1 with a disc tile, else 0
+    int count;
+};
+
+static bool ItemIsDisc(const LibraryItems &it, int item)
+{
+    return it.discItems > 0 && item == 0;
+}
+
+static int ItemGameIndex(const LibraryItems &it, int item)
+{
+    return item - it.discItems;
+}
+
+static D3DTexture *ItemBoxArt(const LibraryItems &it, int item)
+{
+    if (ItemIsDisc(it, item))
+        return it.view->discTitleId != 0 ? BoxArtFor(it.view->discTitleId) : NULL;
+    return BoxArtFor(it.view->games[ItemGameIndex(it, item)].titleId);
+}
+
+static const Icon *ItemIcon(const LibraryItems &it, int item)
+{
+    if (ItemIsDisc(it, item) || it.icons == NULL)
+        return NULL;
+    return &it.icons[ItemGameIndex(it, item)];
+}
+
+static const char *ItemName(const LibraryItems &it, int item)
+{
+    if (ItemIsDisc(it, item))
+        return it.view->discName != NULL ? it.view->discName : "";
+    return it.view->games[ItemGameIndex(it, item)].displayName;
+}
+
+// A disc with no box art yet: a disc, drawn from circles, on a dark green tile.
+static void DrawDiscArt(float x, float y, float s, float h)
+{
+    FillRoundGradient(x, y, s, h, g_M.radius, 0xFF2C3A2C, 0xFF141A14, true);
+
+    const float d = s * 0.56f;
+    const float cx = x + s * 0.5f, cy = y + s * 0.46f;
+    if (cy + d * 0.5f > y + h)
+        return; // cut off in the peeking row; the plain tile is enough
+
+    FillRoundGradient(cx - d * 0.5f, cy - d * 0.5f, d, d, d * 0.5f, 0xFFE4E9E4, 0xFF8D988D, true);
+    DrawRing(cx, cy, d * 0.5f, S(2.0f), 1.0f, 0x66FFFFFF, 0x66FFFFFF);
+    FillRound(cx - d * 0.15f, cy - d * 0.15f, d * 0.3f, d * 0.3f, d * 0.15f, 0xFF2A2F2A);
+    FillRound(cx - d * 0.045f, cy - d * 0.045f, d * 0.09f, d * 0.09f, d * 0.045f, 0xFF141A14);
+}
+
+static void DrawItemArt(const LibraryItems &it, int item, float x, float y, float s, float h)
+{
+    D3DTexture *boxArt = ItemBoxArt(it, item);
+    if (ItemIsDisc(it, item) && boxArt == NULL)
+        DrawDiscArt(x, y, s, h);
+    else
+        DrawTileArt(boxArt, ItemIcon(it, item), x, y, s, h);
+}
+
+// The labels in a tile's top-right corner, stacked: what's installed for a
+// game; for the disc, that it's in the drive and what's happening with it.
+#define MAX_TILE_PILLS 2
+
+struct TilePills
+{
+    int count;
+    const char *label[MAX_TILE_PILLS];
+    D3DCOLOR color[MAX_TILE_PILLS];
+    TilePill rect[MAX_TILE_PILLS];
+};
+
+static TilePills PillsFor(const LibraryItems &it, int item, float x, float y, float s)
+{
+    TilePills p;
+    p.count = 0;
+
+    if (ItemIsDisc(it, item))
+    {
+        p.label[p.count] = "IN DRIVE";
+        p.color[p.count++] = COL_GREEN;
+
+        if (it.view->discTile == DISC_TILE_INSTALLED)
+        {
+            p.label[p.count] = "INSTALLED";
+            p.color[p.count++] = COL_PILL;
+        }
+        else if (it.view->discTile == DISC_TILE_INSTALLING)
+        {
+            p.label[p.count] = "INSTALLING";
+            p.color[p.count++] = COL_PILL;
+        }
+    }
+    else
+    {
+        const char *label = InstalledLabel(*it.view, ItemGameIndex(it, item));
+        if (label != NULL)
+        {
+            p.label[p.count] = label;
+            p.color[p.count++] = COL_PILL;
+        }
+    }
+
+    float py = y;
+    for (int i = 0; i < p.count; ++i)
+    {
+        p.rect[i] = PillFor(p.label[i], x, py, s);
+        py += p.rect[i].h + S(6.0f);
+    }
+    return p;
+}
+
+static void DrawPillQuads(const TilePills &p)
+{
+    for (int i = 0; i < p.count; ++i)
+        FillRound(p.rect[i].x, p.rect[i].y, p.rect[i].w, p.rect[i].h, p.rect[i].h * 0.5f, p.color[i]);
+}
+
+static void DrawPillText(const TilePills &p)
+{
+    for (int i = 0; i < p.count; ++i)
+        TextMid(p.rect[i].x + p.rect[i].w * 0.5f, p.rect[i].y + p.rect[i].h * 0.5f, 0.56f, COL_TEXT,
+                p.label[i], ATGFONT_CENTER_X, 0.0f, true);
+}
+
+// An installing disc's progress, as a bar across the foot of its tile -
+// above the name band, when the tile has one.
+static void DrawDiscProgress(const LibraryItems &it, int item, float x, float y, float s, float bottomInset)
+{
+    if (!ItemIsDisc(it, item) || it.view->discTile != DISC_TILE_INSTALLING)
+        return;
+
+    const float barH = S(6.0f);
+    const float barX = x + S(12.0f), barW = s - S(24.0f);
+    const float barY = y + s - bottomInset - S(12.0f) - barH;
+
+    FillRound(barX - S(3.0f), barY - S(3.0f), barW + S(6.0f), barH + S(6.0f), (barH + S(6.0f)) * 0.5f, COL_PILL);
+    FillRound(barX, barY, barW, barH, barH * 0.5f, COL_TRACK);
+    if (it.view->discProgress > 0.0f)
+    {
+        float f = it.view->discProgress > 1.0f ? 1.0f : it.view->discProgress;
+        FillRoundGradient(barX, barY, barW * f, barH, barH * 0.5f, COL_GREEN_HI, COL_GREEN, true);
+    }
+}
+
+// Whether an unfocused tile carries its name: only the disc's, while it has
+// no box art to go by - the art is the name everywhere else.
+static bool ItemNamedUnfocused(const LibraryItems &it, int item)
+{
+    return ItemIsDisc(it, item) && ItemBoxArt(it, item) == NULL;
+}
+
 void RenderLibraryFrame(LibraryPageView &view, const UiHint *hints, int hintCount)
 {
     if (!g_Initialized)
@@ -2319,18 +2478,24 @@ void RenderLibraryFrame(LibraryPageView &view, const UiHint *hints, int hintCoun
         icons = (g_iconCount == gameCount) ? g_icons : NULL;
     }
 
+    LibraryItems items;
+    items.view = &view;
+    items.icons = icons;
+    items.discItems = view.hasDisc ? 1 : 0;
+    items.count = gameCount + items.discItems;
+
     const LibraryLayout L = ComputeLibraryLayout(view);
 
     // Scrolled by whole rows: KeepSelectionVisible works in rows here.
-    const int rowCount = (gameCount + L.cols - 1) / L.cols;
-    if (view.selected > gameCount - 1) view.selected = gameCount - 1;
+    const int rowCount = (items.count + L.cols - 1) / L.cols;
+    if (view.selected > items.count - 1) view.selected = items.count - 1;
     if (view.selected < 0) view.selected = 0;
-    int selectedRow = (gameCount > 0) ? view.selected / L.cols : 0;
+    int selectedRow = (items.count > 0) ? view.selected / L.cols : 0;
     KeepSelectionVisible(rowCount, L.fullRows, selectedRow, view.scroll);
 
     const int selected = view.selected;
     const int firstRow = view.scroll;
-    const float grow = FocusGrowFor(selected, view.focused && gameCount > 0);
+    const float grow = FocusGrowFor(selected, view.focused && items.count > 0);
 
     BeginFrame();
 
@@ -2343,6 +2508,7 @@ void RenderLibraryFrame(LibraryPageView &view, const UiHint *hints, int hintCoun
     DrawFrameBase(g_sidebar.focused);
 
     const float r = g_M.radius;
+    const float bandH = LineHeight(0.8f) * 1.2f + S(22.0f);
 
     if (L.showBanner)
     {
@@ -2353,13 +2519,12 @@ void RenderLibraryFrame(LibraryPageView &view, const UiHint *hints, int hintCoun
         DrawButtonSprite(BUTTON_SPRITE_Y, g_M.contentX + S(22.0f), g_M.listY + L.bannerH * 0.5f);
     }
 
-    // Tiles whose text the second pass draws: their pills, and the focused
-    // tile's name.
-    struct TileText { float x, y, s; int index; };
+    // Tiles whose text the second pass draws: their pills, and a disc's name.
+    struct TileText { float x, y, s; int item; };
     TileText tileText[MAX_VISIBLE_TILES];
     int tileTextCount = 0;
 
-    int focusIndex = -1;
+    int focusItem = -1;
     float focusX = 0.0f, focusY = 0.0f;
 
     for (int row = 0; row <= L.fullRows; ++row)
@@ -2380,45 +2545,42 @@ void RenderLibraryFrame(LibraryPageView &view, const UiHint *hints, int hintCoun
 
         for (int col = 0; col < L.cols; ++col)
         {
-            const int index = gridRow * L.cols + col;
-            if (index >= gameCount)
+            const int item = gridRow * L.cols + col;
+            if (item >= items.count)
                 break;
 
             const float x = g_M.contentX + col * (L.tile + L.gap);
-            const Icon *icon = (icons != NULL) ? &icons[index] : NULL;
 
-            if (!peek && index == selected && view.focused)
+            if (!peek && item == selected && view.focused)
             {
                 // Drawn last, over its neighbours, so it can grow.
-                focusIndex = index;
+                focusItem = item;
                 focusX = x;
                 focusY = y;
                 continue;
             }
 
-            DrawTileArt(BoxArtFor(games[index].titleId), icon, x, y, L.tile, h);
+            DrawItemArt(items, item, x, y, L.tile, h);
 
             if (!peek)
             {
                 // The selected tile while the sidebar has focus: still marked,
                 // so you can see where you'll land.
-                if (index == selected)
+                if (item == selected)
                     StrokeRound(x - S(4.0f), y - S(4.0f), L.tile + S(8.0f), L.tile + S(8.0f),
                                 r > 0.0f ? r + S(4.0f) : 0.0f, S(2.0f), 0x59FFFFFF);
 
-                const char *label = InstalledLabel(view, index);
-                if (label != NULL)
-                {
-                    TilePill p = PillFor(label, x, y, L.tile);
-                    FillRound(p.x, p.y, p.w, p.h, p.h * 0.5f, COL_PILL);
-                }
+                DrawPillQuads(PillsFor(items, item, x, y, L.tile));
+                DrawDiscProgress(items, item, x, y, L.tile, ItemNamedUnfocused(items, item) ? bandH : 0.0f);
+                if (ItemNamedUnfocused(items, item))
+                    FillRoundGradient(x, y + L.tile - bandH, L.tile, bandH, r, 0x00000000, 0xB3000000, true);
 
                 if (tileTextCount < MAX_VISIBLE_TILES)
                 {
                     tileText[tileTextCount].x = x;
                     tileText[tileTextCount].y = y;
                     tileText[tileTextCount].s = L.tile;
-                    tileText[tileTextCount].index = index;
+                    tileText[tileTextCount].item = item;
                     tileTextCount++;
                 }
             }
@@ -2430,31 +2592,24 @@ void RenderLibraryFrame(LibraryPageView &view, const UiHint *hints, int hintCoun
                              COL_PEEK_TOP, COL_BG_BOTTOM, true);
     }
 
-    float focusS = L.tile * grow;
-    float focusOX = focusX - (focusS - L.tile) * 0.5f;
-    float focusOY = focusY - (focusS - L.tile) * 0.5f;
-    float bandH = LineHeight(0.8f) * 1.2f + S(22.0f);
+    const float focusS = L.tile * grow;
+    const float focusOX = focusX - (focusS - L.tile) * 0.5f;
+    const float focusOY = focusY - (focusS - L.tile) * 0.5f;
 
-    if (focusIndex >= 0)
+    if (focusItem >= 0)
     {
-        const Icon *icon = (icons != NULL) ? &icons[focusIndex] : NULL;
-
         ShadowRound(focusOX, focusOY + S(10.0f), focusS, focusS, r, S(26.0f), COL_SHADOW);
-        DrawTileArt(BoxArtFor(games[focusIndex].titleId), icon, focusOX, focusOY, focusS, focusS);
+        DrawItemArt(items, focusItem, focusOX, focusOY, focusS, focusS);
         FocusRing(focusOX, focusOY, focusS, focusS, r);
 
         // The name, on a band that darkens towards the foot of the tile.
         FillRoundGradient(focusOX, focusOY + focusS - bandH, focusS, bandH, r, 0x00000000, 0xD9000000, true);
 
-        const char *label = InstalledLabel(view, focusIndex);
-        if (label != NULL)
-        {
-            TilePill p = PillFor(label, focusOX, focusOY, focusS);
-            FillRound(p.x, p.y, p.w, p.h, p.h * 0.5f, COL_PILL);
-        }
+        DrawPillQuads(PillsFor(items, focusItem, focusOX, focusOY, focusS));
+        DrawDiscProgress(items, focusItem, focusOX, focusOY, focusS, bandH);
     }
 
-    if (gameCount == 0)
+    if (items.count == 0)
         FillRound(g_M.contentX, L.top, g_M.contentW, S(150.0f), r, COL_SURFACE);
 
     DrawButtonHintShapes(footer, footerCount, g_M.footerY);
@@ -2465,12 +2620,18 @@ void RenderLibraryFrame(LibraryPageView &view, const UiHint *hints, int hintCoun
 
     DrawSidebarText(g_sidebar.focused);
 
-    char subtitle[96] = "";
-    if (gameCount > 0)
-        _snprintf(subtitle, sizeof(subtitle), "%d game%s" MIDDOT "%d of %d",
-                  gameCount, gameCount == 1 ? "" : "s", selected + 1, gameCount);
+    char subtitle[128] = "";
+    if (items.count > 0)
+    {
+        if (view.hasDisc)
+            _snprintf(subtitle, sizeof(subtitle), "%d game%s" MIDDOT "a disc in the drive" MIDDOT "%d of %d",
+                      gameCount, gameCount == 1 ? "" : "s", selected + 1, items.count);
+        else
+            _snprintf(subtitle, sizeof(subtitle), "%d game%s" MIDDOT "%d of %d",
+                      gameCount, gameCount == 1 ? "" : "s", selected + 1, items.count);
+    }
     subtitle[sizeof(subtitle) - 1] = '\0';
-    DrawHeaderText("Your Library", gameCount > 0 ? subtitle : NULL, showToast);
+    DrawHeaderText("Your Library", items.count > 0 ? subtitle : NULL, showToast);
 
     DrawButtonHintText(footer, footerCount, g_M.footerY);
 
@@ -2483,27 +2644,22 @@ void RenderLibraryFrame(LibraryPageView &view, const UiHint *hints, int hintCoun
 
     for (int i = 0; i < tileTextCount; ++i)
     {
-        const char *label = InstalledLabel(view, tileText[i].index);
-        if (label == NULL)
-            continue;
-        TilePill p = PillFor(label, tileText[i].x, tileText[i].y, tileText[i].s);
-        TextMid(p.x + p.w * 0.5f, p.y + p.h * 0.5f, 0.56f, COL_TEXT, label, ATGFONT_CENTER_X, 0.0f, true);
+        const TileText &t = tileText[i];
+        DrawPillText(PillsFor(items, t.item, t.x, t.y, t.s));
+
+        if (ItemNamedUnfocused(items, t.item))
+            TextMid(t.x + S(14.0f), t.y + t.s - bandH * 0.5f + S(4.0f), 0.72f, COL_TEXT2,
+                    ItemName(items, t.item), ATGFONT_TRUNCATED, t.s - S(28.0f));
     }
 
-    if (focusIndex >= 0)
+    if (focusItem >= 0)
     {
-        const char *label = InstalledLabel(view, focusIndex);
-        if (label != NULL)
-        {
-            TilePill p = PillFor(label, focusOX, focusOY, focusS);
-            TextMid(p.x + p.w * 0.5f, p.y + p.h * 0.5f, 0.56f, COL_TEXT, label, ATGFONT_CENTER_X, 0.0f, true);
-        }
-
+        DrawPillText(PillsFor(items, focusItem, focusOX, focusOY, focusS));
         TextMid(focusOX + S(14.0f), focusOY + focusS - bandH * 0.5f + S(4.0f), 0.8f, COL_TEXT,
-                games[focusIndex].displayName, ATGFONT_TRUNCATED, focusS - S(28.0f), true);
+                ItemName(items, focusItem), ATGFONT_TRUNCATED, focusS - S(28.0f), true);
     }
 
-    if (gameCount == 0)
+    if (items.count == 0)
     {
         char where[300];
         _snprintf(where, sizeof(where), "Searched %s", view.gamesPath != NULL ? view.gamesPath : "(no folder set)");
@@ -2514,7 +2670,7 @@ void RenderLibraryFrame(LibraryPageView &view, const UiHint *hints, int hintCoun
         TextFit(x, L.top + S(26.0f), 1.1f, COL_TEXT, "No games found", w, true);
         TextFit(x, L.top + S(26.0f) + LineHeight(1.1f) * 1.25f + S(6.0f), 0.85f, COL_TEXT2, where, w);
         TextFit(x, L.top + S(26.0f) + LineHeight(1.1f) * 1.25f + LineHeight(0.85f) * 1.25f + S(12.0f), 0.8f, COL_DIM,
-                "Press Y to choose your games folder in Settings.", w);
+                "Press Y to choose your games folder in Settings, or put a game disc in the drive.", w);
     }
 
     g_UiFont.SetBold(false);
@@ -3077,7 +3233,7 @@ void RenderQueueFrame(QueuePageView &view, const UiHint *hints, int hintCount)
 
         const bool inLibrary = (q.libraryIndex >= 0 && q.libraryIndex < gameCount);
         const Icon *icon = (icons != NULL && inLibrary) ? &icons[q.libraryIndex] : NULL;
-        D3DTexture *boxArt = inLibrary ? BoxArtFor(view.games[q.libraryIndex].titleId) : NULL;
+        D3DTexture *boxArt = (q.titleId != 0) ? BoxArtFor(q.titleId) : NULL;
         DrawCoverSquare(boxArt, icon, coverX, y + coverInset, coverSize);
 
         if (q.showBar)

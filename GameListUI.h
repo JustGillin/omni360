@@ -110,6 +110,16 @@ struct UiHint
 // Pages
 // ---------------------------------------------------------------------------
 
+// What the disc's tile shows.
+enum LibraryDiscTile
+{
+    DISC_TILE_READY,       // a game disc, not installed - A installs it
+    DISC_TILE_INSTALLED,   // already in the games folder
+    DISC_TILE_INSTALLING,  // on the Queue page now
+    DISC_TILE_READING,     // just gone in
+    DISC_TILE_UNREADABLE   // not a disc that can be installed
+};
+
 // The installed library.
 //
 // scroll is the first visible row. It's the caller's to keep between frames,
@@ -143,6 +153,14 @@ struct LibraryPageView
     const char *gamesPath;
     const char *bannerText;
     bool focused; // false while the sidebar has focus
+
+    // The disc in the drive, as the first tile, when hasDisc. selected and
+    // scroll count it: game i is then item i + 1.
+    bool hasDisc;
+    LibraryDiscTile discTile;
+    const char *discName;      // the game's, or what's wrong with the disc
+    unsigned long discTitleId; // for its box art; 0 for none
+    float discProgress;        // DISC_TILE_INSTALLING: 0..1, negative when unknown
 };
 
 // The library is a grid of cover tiles. How many full rows fit - LB/RB page
@@ -214,7 +232,8 @@ struct QueueRowView
     const char *numbers;  // right-aligned beside the status while downloading; may be NULL
     float fraction;       // the bar, 0..1; negative for no fill (unknown, or not started)
     bool showBar;
-    int libraryIndex;     // whose cover to draw, into the view's games; -1 for none
+    int libraryIndex;     // whose icon to draw, into the view's games; -1 for none
+    unsigned long titleId; // whose box art - found even for a game that isn't in the library
     QueueRowTone tone;
 };
 
