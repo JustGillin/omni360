@@ -82,8 +82,20 @@ struct InstalledGame
     unsigned long titleId;
     unsigned long contentType;
     char displayName[256];
-    char packagePath[512]; // the representative package this info was read from - StfsReadTitleInfo(packagePath, ...) again to get the icon on demand
+    char packagePath[512]; // the representative package this info was read from
+
+    // The package's two embedded images, kept from the scan so drawing the
+    // library doesn't read every header a second time. malloc'd PNG bytes,
+    // NULL where the package has none; FreeInstalledGames frees them.
+    unsigned char *titleThumbnail;
+    unsigned long titleThumbnailSize;
+    unsigned char *contentThumbnail;
+    unsigned long contentThumbnailSize;
 };
+
+// Frees the images held by games[0..count). Call before scanning into the
+// same array again.
+void FreeInstalledGames(InstalledGame *games, int count);
 
 // Content types worth listing as "games" in the picker - deliberately
 // excludes Profile/Theme/GamerPicture/SavedGame/Cache/etc, which also live
@@ -92,7 +104,13 @@ bool IsGameContentType(unsigned long contentType);
 
 // Walks contentBasePath (e.g. "Hdd1:\Content\0000000000000000") for
 // TitleID\ContentType\* entries, opens one representative package per
-// title, and fills outGames (caller-allocated, up to maxGames). Known gap:
+// title, and fills outGames (caller-allocated, up to maxGames).
+//
+// Only content-type folders whose name is a game content type are opened -
+// DLC, title updates, avatar items and the rest are passed over by name,
+// without reading a byte of them. The dashboard always installs a package
+// into the folder named for its type, so this finds the same games as
+// opening everything did, at a fraction of the reads. Known gap:
 // Games-on-Demand-style split packages (a folder of numbered parts instead
 // of one file) aren't handled yet - such titles are silently skipped rather
 // than mis-parsed; worth revisiting once tested against a real console

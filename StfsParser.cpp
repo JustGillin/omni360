@@ -476,12 +476,47 @@ bool IsGameContentType(unsigned long contentType)
     }
 }
 
+void FreeInstalledGames(InstalledGame *games, int count)
+{
+    for (int i = 0; i < count; ++i)
+    {
+        if (games[i].titleThumbnail != NULL)
+            free(games[i].titleThumbnail);
+        if (games[i].contentThumbnail != NULL)
+            free(games[i].contentThumbnail);
+
+        games[i].titleThumbnail = NULL;
+        games[i].titleThumbnailSize = 0;
+        games[i].contentThumbnail = NULL;
+        games[i].contentThumbnailSize = 0;
+    }
+}
+
+// A content-type folder's name as the type it holds: eight hex digits, e.g.
+// "00007000". False for anything else.
+static bool ContentTypeFromFolderName(const char *name, unsigned long *outType)
+{
+    if (strlen(name) != 8)
+        return false;
+
+    char *end = NULL;
+    unsigned long type = strtoul(name, &end, 16);
+    if (end == NULL || *end != '\0')
+        return false;
+
+    *outType = type;
+    return true;
+}
+
 int EnumerateInstalledGames(const char *contentBasePath, InstalledGame *outGames, int maxGames,
                             void printFunction(const char *_format, ...))
 {
+    const DWORD startedAt = GetTickCount();
+
     int count = 0;
     int titleFoldersSeen = 0;
     int contentTypeFoldersSeen = 0;
+    int contentTypeFoldersSkipped = 0;
     int packageFilesSeen = 0;
 
     char titleSearchPattern[512];
@@ -528,6 +563,16 @@ int EnumerateInstalledGames(const char *contentBasePath, InstalledGame *outGames
 
             contentTypeFoldersSeen++;
 
+            // DLC, title updates, avatar items, themes... - none of them can
+            // be the game, so don't open them to find that out.
+            unsigned long folderType = 0;
+            if (!ContentTypeFromFolderName(ctFindData.cFileName, &folderType) ||
+                !IsGameContentType(folderType))
+            {
+                contentTypeFoldersSkipped++;
+                continue;
+            }
+
             char contentTypeDir[512];
             _snprintf(contentTypeDir, sizeof(contentTypeDir), "%s\\%s", titleDir, ctFindData.cFileName);
 
@@ -552,9 +597,12 @@ int EnumerateInstalledGames(const char *contentBasePath, InstalledGame *outGames
                 StfsTitleInfo info;
                 if (StfsReadTitleInfo(packagePath, &info))
                 {
-                    printFunction("  %s -> parsed OK, contentType=%08lX, titleId=%08lX, name=\"%s\"%s\n",
-                                 packagePath, info.contentType, info.titleId, info.displayName,
-                                 IsGameContentType(info.contentType) ? "" : " (not a game content type, skipped)");
+                    // Successes aren't logged: each line is a write to the
+                    // log file, and a library is dozens of them. A package in
+                    // a game folder that isn't a game is worth a line.
+                    if (!IsGameContentType(info.contentType))
+                        printFunction("  %s -> contentType=%08lX in a game folder, skipped\n",
+                                      packagePath, info.contentType);
 
                     // Only for titles that came out with no art at all. Three
                     // separate gates can refuse an image and from the outside
@@ -617,6 +665,16 @@ int EnumerateInstalledGames(const char *contentBasePath, InstalledGame *outGames
                         g->displayName[sizeof(g->displayName) - 1] = '\0';
                         strncpy(g->packagePath, packagePath, sizeof(g->packagePath) - 1);
                         g->packagePath[sizeof(g->packagePath) - 1] = '\0';
+
+                        // The images move into the game, so the library
+                        // never has to read this header again.
+                        g->titleThumbnail = info.titleThumbnail;
+                        g->titleThumbnailSize = info.titleThumbnailSize;
+                        g->contentThumbnail = info.contentThumbnail;
+                        g->contentThumbnailSize = info.contentThumbnailSize;
+                        info.titleThumbnail = NULL;
+                        info.contentThumbnail = NULL;
+
                         count++;
                         foundForThisTitle = true;
                     }
@@ -669,8 +727,10 @@ int EnumerateInstalledGames(const char *contentBasePath, InstalledGame *outGames
 
     FindClose(hTitleFind);
 
-    printFunction("Scan summary: %d title folder(s), %d content-type folder(s), %d package file(s) examined, %d matched as games\n",
-                 titleFoldersSeen, contentTypeFoldersSeen, packageFilesSeen, count);
+    printFunction("Scan summary: %d title folder(s), %d content-type folder(s) (%d skipped by name), "
+                  "%d package file(s) read, %d game(s), %lu ms\n",
+                  titleFoldersSeen, contentTypeFoldersSeen, contentTypeFoldersSkipped, packageFilesSeen, count,
+                  (unsigned long)(GetTickCount() - startedAt));
 
     return count;
 }

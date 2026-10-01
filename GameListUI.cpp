@@ -1730,31 +1730,25 @@ static void EnsureIconsLoaded(const InstalledGame *games, int gameCount)
         g_icons[i].average = NULL;
         g_icons[i].aspect = 1.0f;
 
-        // Whether the package carried any artwork at all, kept because info is
-        // freed before the placeholder is reported and the two cases need
-        // opposite responses: no data means the package genuinely has none,
-        // while data that failed means D3DX refused something that was there.
-        bool hadImageData = false;
+        // The images the scan kept, so nothing is read from disk here. No
+        // data means the package genuinely has none, while data that failed
+        // means D3DX refused something that was there - the two need
+        // opposite responses, so the placeholder report says which.
+        const InstalledGame &game = games[i];
+        const bool hadImageData = (game.titleThumbnail != NULL || game.contentThumbnail != NULL);
 
-        StfsTitleInfo info;
-        if (StfsReadTitleInfo(games[i].packagePath, &info))
-        {
-            hadImageData = (info.titleThumbnail != NULL || info.contentThumbnail != NULL);
+        if (game.titleThumbnail != NULL)
+            CreateIconTexture(game.titleThumbnail, game.titleThumbnailSize, &g_icons[i],
+                              "title thumbnail", game.displayName);
 
-            if (info.titleThumbnail != NULL)
-                CreateIconTexture(info.titleThumbnail, info.titleThumbnailSize, &g_icons[i],
-                                  "title thumbnail", games[i].displayName);
+        // Second embedded image - GOD converters frequently leave the title
+        // thumbnail zeroed while this one survives.
+        if (g_icons[i].texture == NULL && game.contentThumbnail != NULL)
+            CreateIconTexture(game.contentThumbnail, game.contentThumbnailSize, &g_icons[i],
+                              "content thumbnail", game.displayName);
 
-            // Second embedded image - GOD converters frequently leave the
-            // title thumbnail zeroed while this one survives.
-            if (g_icons[i].texture == NULL && info.contentThumbnail != NULL)
-                CreateIconTexture(info.contentThumbnail, info.contentThumbnailSize, &g_icons[i],
-                                  "content thumbnail", games[i].displayName);
-
-            if (g_icons[i].texture != NULL)
-                fromStfs++;
-        }
-        StfsFreeTitleInfo(&info);
+        if (g_icons[i].texture != NULL)
+            fromStfs++;
 
         if (g_icons[i].texture == NULL)
         {

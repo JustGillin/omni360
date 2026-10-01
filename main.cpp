@@ -895,6 +895,11 @@ static void ScanLibrary(Library &lib, const char *gamesPath)
 {
     RenderStatusFrame("Scanning", "Reading your installed games", gamesPath);
 
+    // The cover cache was built from the old scan's images - drop both.
+    ReleaseGameListIcons();
+    FreeInstalledGames(lib.games, lib.count);
+    lib.count = 0;
+
     int found = EnumerateInstalledGames(gamesPath, lib.games, MAX_INSTALLED_GAMES, dprintf);
     lib.count = (found > 0) ? found : 0;
 
@@ -905,9 +910,6 @@ static void ScanLibrary(Library &lib, const char *gamesPath)
     // else has to know it happened.
     if (lib.count > 1)
         qsort(lib.games, lib.count, sizeof(InstalledGame), CompareGamesByName);
-
-    // The cover cache belongs to whatever list was there before.
-    ReleaseGameListIcons();
 
     if (lib.count > 0)
         dprintf("Found %d installed games under %s\n", lib.count, gamesPath);
