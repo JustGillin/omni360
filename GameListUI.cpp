@@ -166,6 +166,9 @@ static void ReleaseBanner();
 //   ring    - a circle's band instead of a box, coloured Tint for the share
 //             of a turn given in RingParams.x, clockwise from the top, and
 //             GradB for the rest (the storage ring)
+//   line    - a line from one point to another with round ends, half as
+//             thick as ShapeParams.y either side (the popup's tick - the font
+//             has no tick to draw)
 //
 // Its own vertex shader, a copy of QuadVertexShader that also passes the
 // pixel position through, so the proven quad pipeline is untouched. Where a
@@ -203,8 +206,9 @@ static const char g_strShapeShader[] =
     "uniform float4 GradB : register(c3);\n"
     "uniform float4 GradAxis : register(c4);\n"
     "uniform float4 ShapeRect : register(c5);\n"   // x, y, w, h in pixels
-    "uniform float4 ShapeParams : register(c6);\n" // radius, stroke width (0 fills), blur (0 is crisp), 1 for a ring
+    "uniform float4 ShapeParams : register(c6);\n" // radius, stroke width (0 fills), blur (0 is crisp), 0 box / 1 ring / 2 line
     "uniform float4 RingParams : register(c7);\n"  // x: the ring's filled share of a turn
+    "uniform float4 LineParams : register(c8);\n"  // a line's two ends, in pixels: (ax, ay, bx, by)
     "sampler QuadTexture : register(s0);\n"
     "float4 ShapePixelShader( VS_OUT In ) : COLOR0\n"
     "{\n"
@@ -216,11 +220,16 @@ static const char g_strShapeShader[] =
     "    float boxD = length(max(q, 0.0)) + min(max(q.x, q.y), 0.0) - r;\n"
     "    float len = length(p);\n"
     "    float ringD = max(len - halfSize.x, (halfSize.x - ShapeParams.y) - len);\n"
-    "    float isRing = ShapeParams.w;\n"
-    "    float d = lerp(boxD, ringD, isRing);\n"
+    "    float isLine = step(1.5, ShapeParams.w);\n"
+    "    float isRing = step(0.5, ShapeParams.w) - isLine;\n"
+    "    float2 pa = In.Pixel - LineParams.xy;\n"
+    "    float2 ba = LineParams.zw - LineParams.xy;\n"
+    "    float along = saturate(dot(pa, ba) / max(dot(ba, ba), 0.001));\n"
+    "    float lineD = length(pa - ba * along) - ShapeParams.y * 0.5;\n"
+    "    float d = lerp(lerp(boxD, ringD, isRing), lineD, isLine);\n"
     "    float fill = saturate(0.5 - d);\n"
     "    float stroke = fill * saturate(0.5 + d + ShapeParams.y);\n"
-    "    float cover = lerp(fill, stroke, step(0.001, ShapeParams.y) * (1.0 - isRing));\n"
+    "    float cover = lerp(fill, stroke, step(0.001, ShapeParams.y) * (1.0 - isRing - isLine));\n"
     "    float soft = saturate(1.0 - d / max(ShapeParams.z, 0.001));\n"
     "    cover = lerp(cover, soft * soft, step(0.001, ShapeParams.z));\n"
     "    float t = dot(saturate(local / ShapeRect.zw), GradAxis.xy);\n"
@@ -728,6 +737,8 @@ struct ShapeStyle
     float blur;         // > 0 draws a soft shadow falling off over this many pixels
     bool ring;          // a ring instead of a box - see DrawRing
     float ringFraction;
+    bool line;          // a line instead of a box - see DrawLine
+    float lineAX, lineAY, lineBX, lineBY;
 };
 
 static ShapeStyle Shape(float radius)
@@ -738,6 +749,8 @@ static ShapeStyle Shape(float radius)
     s.blur = 0.0f;
     s.ring = false;
     s.ringFraction = 0.0f;
+    s.line = false;
+    s.lineAX = s.lineAY = s.lineBX = s.lineBY = 0.0f;
     return s;
 }
 
@@ -759,8 +772,9 @@ static void DrawShape(D3DTexture *texture, float x, float y, float w, float h, f
     if (!g_shapesReady)
     {
         // Square, flat, no shadow: the UI without the shader. A stroke is
-        // drawn as four bars so focus still shows; a ring is left out.
-        if (style.blur > 0.0f || style.ring)
+        // drawn as four bars so focus still shows; a ring or a line is left
+        // out.
+        if (style.blur > 0.0f || style.ring || style.line)
             return;
         if (style.stroke > 0.0f)
         {
@@ -786,8 +800,9 @@ static void DrawShape(D3DTexture *texture, float x, float y, float w, float h, f
 
     float axis[4] = {vertical ? 0.0f : 1.0f, vertical ? 1.0f : 0.0f, 0.0f, 0.0f};
     float rect[4] = {x, y, w, h};
-    float params[4] = {radius, style.stroke, style.blur, style.ring ? 1.0f : 0.0f};
+    float params[4] = {radius, style.stroke, style.blur, style.line ? 2.0f : (style.ring ? 1.0f : 0.0f)};
     float ring[4] = {style.ringFraction, 0.0f, 0.0f, 0.0f};
+    float line[4] = {style.lineAX, style.lineAY, style.lineBX, style.lineBY};
 
     g_pd3dDevice->SetPixelShaderConstantF(1, tintF, 1);
     g_pd3dDevice->SetPixelShaderConstantF(2, gradAF, 1);
@@ -796,6 +811,7 @@ static void DrawShape(D3DTexture *texture, float x, float y, float w, float h, f
     g_pd3dDevice->SetPixelShaderConstantF(5, rect, 1);
     g_pd3dDevice->SetPixelShaderConstantF(6, params, 1);
     g_pd3dDevice->SetPixelShaderConstantF(7, ring, 1);
+    g_pd3dDevice->SetPixelShaderConstantF(8, line, 1);
 
     g_pd3dDevice->SetTexture(0, texture != NULL ? texture : g_pWhiteTexture);
     g_pd3dDevice->SetVertexDeclaration(g_pQuadVertexDecl);
@@ -885,6 +901,36 @@ static void DrawRing(float cx, float cy, float outerRadius, float thickness, flo
     s.ringFraction = fraction;
     DrawShape(NULL, cx - outerRadius, cy - outerRadius, outerRadius * 2.0f, outerRadius * 2.0f, 0.0f,
               0, 0, 1, 1, used, track, track, true, s);
+}
+
+// A line from (ax, ay) to (bx, by), `thickness` wide, with round ends. The
+// quad is the line's bounding box, grown to take its ends.
+static void DrawLine(float ax, float ay, float bx, float by, float thickness, D3DCOLOR color)
+{
+    ShapeStyle s = Shape(0.0f);
+    s.line = true;
+    s.stroke = thickness;
+    s.lineAX = ax;
+    s.lineAY = ay;
+    s.lineBX = bx;
+    s.lineBY = by;
+
+    const float grow = thickness * 0.5f + 1.0f;
+    const float x0 = (ax < bx ? ax : bx) - grow, x1 = (ax > bx ? ax : bx) + grow;
+    const float y0 = (ay < by ? ay : by) - grow, y1 = (ay > by ? ay : by) + grow;
+    DrawShape(NULL, x0, y0, x1 - x0, y1 - y0, 0.0f, 0, 0, 1, 1, color, 0xFFFFFFFF, 0xFFFFFFFF, true, s);
+}
+
+// A tick, centred on cx,cy, sized for a disc of diameter d: a short stroke
+// down to the right, then a long one up.
+static void DrawTick(float cx, float cy, float d, D3DCOLOR color)
+{
+    const float thickness = d * 0.11f;
+    const float ax = cx - d * 0.22f, ay = cy + d * 0.01f;
+    const float bx = cx - d * 0.06f, by = cy + d * 0.17f;
+    const float tx = cx + d * 0.23f, ty = cy - d * 0.15f;
+    DrawLine(ax, ay, bx, by, thickness, color);
+    DrawLine(bx, by, tx, ty, thickness, color);
 }
 
 // The focus ring: white, a little outside the thing focused, its corners
@@ -1379,10 +1425,10 @@ static void DrawToastQuads()
                        : (g_toast.tone == UI_TOAST_SUCCESS) ? COL_GREEN : COL_TRACK;
     FillRound(r.iconX, r.iconCY - r.iconD * 0.5f, r.iconD, r.iconD, r.iconD * 0.5f, iconColor);
 
-    // Success is a white ring in the green disc. The font has no tick to
-    // draw, and a ring reads as "done" at a glance.
+    // Success is a white tick in the green disc - drawn, since the font has
+    // none.
     if (g_toast.tone == UI_TOAST_SUCCESS)
-        DrawRing(r.iconX + r.iconD * 0.5f, r.iconCY, r.iconD * 0.26f, S(3.0f), 1.0f, COL_TEXT, COL_TEXT);
+        DrawTick(r.iconX + r.iconD * 0.5f, r.iconCY, r.iconD, COL_TEXT);
 }
 
 static void DrawToastText()
