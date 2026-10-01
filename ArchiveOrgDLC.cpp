@@ -496,35 +496,94 @@ KeyCheckResult CheckArchiveOrgKeys(const char *authHeader, char *outReason, size
 // DLC lookup (metadata)
 // ---------------------------------------------------------------------------
 
-int FindDlcRarFilenames(const std::string &gameName, DlcRarMatch *outMatches, int maxMatches,
-                        void printFunction(const char *_format, ...))
+// ---------------------------------------------------------------------------
+// Collection listings, kept for the session
+// ---------------------------------------------------------------------------
+//
+// Every search used to fetch its collection's whole metadata listing - the
+// same few hundred KB for every game, since a search is a match against all
+// of it - which made it most of the wait. The listings barely change, so
+// each is fetched the first time it's needed and kept until the app exits;
+// every search after the first only has to match.
+//
+// Only the searches use these, and they run on one thread (the search worker
+// in SearchWorker.cpp), so there's nothing to lock.
+
+struct ItemListing
 {
-    const unsigned long long METADATA_BUFFER_SIZE = 2 * 1024 * 1024; // metadata JSON for this item runs ~256KB; generous headroom
-    char *buffer = (char *)malloc(METADATA_BUFFER_SIZE);
+    char *json; // NUL-terminated; NULL until fetched
+    unsigned long long size;
+};
+
+static ItemListing g_dlcListing = {NULL, 0};
+static ItemListing g_titleUpdateListing = {NULL, 0};
+
+// The listing's JSON text, fetching it if it isn't held yet. NULL if it
+// couldn't be fetched - and a failure isn't kept, so the next search tries
+// again rather than failing forever.
+//
+// bufferLimit bounds the response; the buffer is shrunk to fit afterwards.
+static const char *ItemListingJson(ItemListing &listing, const char *url, unsigned long long bufferLimit,
+                                   void printFunction(const char *_format, ...))
+{
+    if (listing.json != NULL)
+    {
+        printFunction("  Using the collection listing fetched earlier (%I64u bytes)\n", listing.size);
+        return listing.json;
+    }
+
+    char *buffer = (char *)malloc((size_t)bufferLimit);
     if (buffer == NULL)
     {
         ERROR_LOG("malloc failed for metadata buffer");
-        return -1;
+        return NULL;
     }
 
-    unsigned long long bufferSize = METADATA_BUFFER_SIZE - 1;
+    unsigned long long bufferSize = bufferLimit - 1;
 
-    // Metadata is public - no cookie needed or sent here.
-    int status = HttpGetFollowRedirect(ARCHIVE_METADATA_URL, buffer, &bufferSize, NULL, NULL, printFunction);
+    // Metadata is public - no keys needed or sent here.
+    int status = HttpGetFollowRedirect(url, buffer, &bufferSize, NULL, NULL, printFunction);
 
     if (status != 200)
     {
         printFunction("ERROR: could not fetch archive.org metadata (status %d)\n", status);
         free(buffer);
-        return -1;
+        return NULL;
     }
 
-    cJSON *json = cJSON_Parse(buffer);
-    free(buffer);
+    // The HTTP layer NUL-terminates the body; this just makes sure of it
+    // before the buffer is trimmed to the body's length.
+    buffer[bufferSize] = '\0';
+    char *trimmed = (char *)realloc(buffer, (size_t)bufferSize + 1);
+    if (trimmed != NULL)
+        buffer = trimmed;
+
+    listing.json = buffer;
+    listing.size = bufferSize;
+    return listing.json;
+}
+
+static void DropItemListing(ItemListing &listing)
+{
+    free(listing.json);
+    listing.json = NULL;
+    listing.size = 0;
+}
+
+int FindDlcRarFilenames(const std::string &gameName, DlcRarMatch *outMatches, int maxMatches,
+                        void printFunction(const char *_format, ...))
+{
+    // The listing for this item runs ~256KB; generous headroom.
+    const char *listing = ItemListingJson(g_dlcListing, ARCHIVE_METADATA_URL, 2 * 1024 * 1024, printFunction);
+    if (listing == NULL)
+        return -1;
+
+    cJSON *json = cJSON_Parse(listing);
 
     if (json == NULL)
     {
         ERROR_LOG("failed to parse archive.org metadata JSON");
+        DropItemListing(g_dlcListing); // fetch it afresh next time rather than fail forever
         return -1;
     }
 
@@ -1372,35 +1431,20 @@ static void ParseTitleUpdateName(const char *filename, int *outVersion, char *ou
 int FindTitleUpdates(const std::string &gameName, TitleUpdateMatch *outMatches, int maxMatches,
                      void printFunction(const char *_format, ...))
 {
-    // Larger than the DLC item's buffer: this listing runs to a thousand-plus
-    // entries where the DLC item is a few hundred.
-    const unsigned long long METADATA_BUFFER_SIZE = 4 * 1024 * 1024;
-    char *buffer = (char *)malloc(METADATA_BUFFER_SIZE);
-    if (buffer == NULL)
-    {
-        ERROR_LOG("malloc failed for title-update metadata buffer");
+    // A larger limit than the DLC item's: this listing runs to a thousand-plus
+    // entries where the DLC item is a few hundred. Metadata is public even
+    // though the files themselves are private - see ItemListingJson.
+    const char *listing = ItemListingJson(g_titleUpdateListing, TITLE_UPDATE_METADATA_URL, 4 * 1024 * 1024,
+                                          printFunction);
+    if (listing == NULL)
         return -1;
-    }
 
-    unsigned long long bufferSize = METADATA_BUFFER_SIZE - 1;
-
-    // Metadata is public even though the files themselves are private, so no
-    // auth header is needed for this request - same as the DLC item.
-    int status = HttpGetFollowRedirect(TITLE_UPDATE_METADATA_URL, buffer, &bufferSize, NULL, NULL, printFunction);
-
-    if (status != 200)
-    {
-        printFunction("ERROR: could not fetch title-update metadata (status %d)\n", status);
-        free(buffer);
-        return -1;
-    }
-
-    cJSON *json = cJSON_Parse(buffer);
-    free(buffer);
+    cJSON *json = cJSON_Parse(listing);
 
     if (json == NULL)
     {
         ERROR_LOG("failed to parse title-update metadata JSON");
+        DropItemListing(g_titleUpdateListing); // fetch it afresh next time rather than fail forever
         return -1;
     }
 

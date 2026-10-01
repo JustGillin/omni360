@@ -26,6 +26,7 @@ end-to-end on real hardware against a real 27-game library.
 #include "StfsParser.h"
 #include "GameListUI.h"
 #include "DownloadQueue.h"
+#include "SearchWorker.h"
 #include "ArchiveOrgDLC.h"
 #include "downloadFile.h" // DownloadProgressFn + FormatBytes, for the progress callback
 #include "GodConvert.h"
@@ -682,8 +683,9 @@ static bool GetArchiveOrgAuthHeader(char *authHeader, unsigned long long authHea
 // The DLC pack and title update pickers
 // ---------------------------------------------------------------------------
 //
-// A on a game searches for its DLC, X for its title updates; either way the
-// results open as a picker in place of the library, and B steps back to it.
+// A on a game searches for its DLC, X for its title updates; either way a
+// picker opens in place of the library straight away, fills in when the
+// search comes back, and B steps back to the library at any point.
 //
 // ALWAYS a picker, even for a single perfectly-scored result. The DLC side
 // briefly auto-selected an unambiguous match and skipped straight to
@@ -706,11 +708,23 @@ enum PickerKind
     PICKER_TITLE_UPDATE
 };
 
+// The picker opens the moment A or X is pressed, while the search runs on the
+// search worker, and fills in when the result arrives.
+enum PickerStatus
+{
+    PICKER_SEARCHING,
+    PICKER_READY,       // results to choose from
+    PICKER_NOTHING,     // the search worked, and matched nothing
+    PICKER_UNREACHABLE  // archive.org couldn't be reached - A tries again
+};
+
 #define MAX_PICKER_ROWS (MAX_DLC_RAR_MATCHES > MAX_TITLE_UPDATE_MATCHES ? MAX_DLC_RAR_MATCHES : MAX_TITLE_UPDATE_MATCHES)
 
 struct Picker
 {
     PickerKind kind;
+    PickerStatus status;
+    int requestId; // the search it's waiting on, while PICKER_SEARCHING
     int gameIndex; // into the library
     int count;
     int selected;
@@ -725,32 +739,29 @@ struct Picker
     char subText[MAX_PICKER_ROWS][96];
 };
 
-// Searches for the game's DLC and fills the picker with what it finds. Says so
-// on screen and returns false if the search failed or found nothing.
-static bool FindDlcForPicker(const InstalledGame &game, Picker &picker)
+// Where SearchResults land - static, as they're 8KB.
+static SearchResult g_searchResult;
+
+// Opens the picker for a game and starts its search.
+static void OpenPicker(Picker &picker, PickerKind kind, int gameIndex, const InstalledGame &game)
 {
-    RenderStatusFrame("SEARCHING", "Looking up DLC on archive.org", game.displayName);
+    picker.kind = kind;
+    picker.gameIndex = gameIndex;
+    picker.count = 0;
+    picker.selected = 0;
+    picker.scroll = -1;
+    picker.requestId = BeginSearch(kind == PICKER_DLC ? SEARCH_DLC : SEARCH_TITLE_UPDATES, game.displayName);
 
-    int matchCount = FindDlcRarFilenames(game.displayName, picker.packs, MAX_DLC_RAR_MATCHES, dprintf);
+    // 0 means the search worker never started; the log says why.
+    picker.status = (picker.requestId != 0) ? PICKER_SEARCHING : PICKER_UNREACHABLE;
+}
 
-    if (matchCount < 0)
-    {
-        ShowMessageUI("SEARCH FAILED", "Could not reach archive.org.",
-                      "Check the console's network connection and try again.");
-        return false;
-    }
-
-    if (matchCount == 0)
-    {
-        ShowMessageUI("NOTHING FOUND", "No DLC in the collection matched this game.",
-                      game.displayName);
-        return false;
-    }
-
-    // The filename is what actually identifies a pack, and the size plus
-    // match confidence are what let someone judge between two
-    // similar-looking entries.
-    for (int i = 0; i < matchCount; ++i)
+// The rows for a DLC search. The filename is what actually identifies a pack,
+// and the size plus match confidence are what let someone judge between two
+// similar-looking entries.
+static void FillDlcRows(Picker &picker)
+{
+    for (int i = 0; i < picker.count; ++i)
     {
         picker.labels[i] = picker.packs[i].filename;
 
@@ -762,32 +773,11 @@ static bool FindDlcForPicker(const InstalledGame &game, Picker &picker)
         picker.subText[i][sizeof(picker.subText[i]) - 1] = '\0';
         picker.sublabels[i] = picker.subText[i];
     }
-
-    picker.kind = PICKER_DLC;
-    picker.count = matchCount;
-    return true;
 }
 
-static bool FindTitleUpdatesForPicker(const InstalledGame &game, Picker &picker)
+static void FillTitleUpdateRows(Picker &picker)
 {
-    RenderStatusFrame("SEARCHING", "Looking up title updates", game.displayName);
-
-    int updateCount = FindTitleUpdates(game.displayName, picker.updates, MAX_TITLE_UPDATE_MATCHES, dprintf);
-
-    if (updateCount < 0)
-    {
-        ShowMessageUI("SEARCH FAILED", "Could not reach archive.org.",
-                      "Check the console's network connection and try again.");
-        return false;
-    }
-
-    if (updateCount == 0)
-    {
-        ShowMessageUI("NOTHING FOUND", "No title update matched this game.", game.displayName);
-        return false;
-    }
-
-    for (int i = 0; i < updateCount; ++i)
+    for (int i = 0; i < picker.count; ++i)
     {
         const TitleUpdateMatch &update = picker.updates[i];
 
@@ -809,13 +799,49 @@ static bool FindTitleUpdatesForPicker(const InstalledGame &game, Picker &picker)
         picker.subText[i][sizeof(picker.subText[i]) - 1] = '\0';
         picker.sublabels[i] = picker.subText[i];
     }
+}
 
-    // Results are sorted score-first then version-descending, so the first row
-    // is the newest update for the best-matching name - the right default to
-    // land on, but still shown rather than assumed.
-    picker.kind = PICKER_TITLE_UPDATE;
-    picker.count = updateCount;
-    return true;
+// Collects the picker's search result, if it has arrived. Called every frame
+// while the picker is searching.
+static void PollPickerSearch(Picker &picker)
+{
+    if (picker.kind == PICKER_NONE || picker.status != PICKER_SEARCHING)
+        return;
+
+    if (!TakeSearchResult(picker.requestId, &g_searchResult))
+        return;
+
+    const SearchResult &result = g_searchResult;
+
+    if (result.count < 0)
+    {
+        picker.status = PICKER_UNREACHABLE;
+        return;
+    }
+
+    if (result.count == 0)
+    {
+        picker.status = PICKER_NOTHING;
+        return;
+    }
+
+    picker.count = result.count;
+
+    if (picker.kind == PICKER_DLC)
+    {
+        memcpy(picker.packs, result.packs, sizeof(picker.packs));
+        FillDlcRows(picker);
+    }
+    else
+    {
+        // Sorted score-first then version-descending, so the first row is the
+        // newest update for the best-matching name - the right default to
+        // land on, but still shown rather than assumed.
+        memcpy(picker.updates, result.updates, sizeof(picker.updates));
+        FillTitleUpdateRows(picker);
+    }
+
+    picker.status = PICKER_READY;
 }
 
 // ---------------------------------------------------------------------------
@@ -1873,6 +1899,10 @@ int main()
     if (!StartDownloadQueue(contentBasePath))
         dprintf("ERROR: the download worker didn't start - downloads are unavailable\n");
 
+    // Likewise: without it, a search says archive.org can't be reached.
+    if (!StartSearchWorker())
+        dprintf("ERROR: the search worker didn't start - searches are unavailable\n");
+
     ResyncUiInput();
 
     for (;;)
@@ -1884,6 +1914,7 @@ int main()
             RefreshShell(shell, lib, contentBasePath, gamesPath);
 
         SnapshotQueue(shell, lib);
+        PollPickerSearch(shell.picker);
 
         // Removing the last finished job leaves nothing on the Queue to have
         // focus.
@@ -1933,31 +1964,47 @@ int main()
         else if (shell.page == SHELL_PAGE_LIBRARY && shell.picker.kind != PICKER_NONE)
         {
             Picker &picker = shell.picker;
-            StepSelection(input.nav, picker.count, picker.selected);
+            const InstalledGame &game = lib.games[picker.gameIndex];
 
-            if (pressed & XINPUT_GAMEPAD_A)
+            if (picker.status == PICKER_READY)
+                StepSelection(input.nav, picker.count, picker.selected);
+
+            if (pressed & XINPUT_GAMEPAD_B)
             {
+                // Backing out of a search that's still running just leaves its
+                // result uncollected.
+                picker.kind = PICKER_NONE;
+            }
+            else if ((pressed & XINPUT_GAMEPAD_A) && picker.status == PICKER_UNREACHABLE)
+            {
+                OpenPicker(picker, picker.kind, picker.gameIndex, game); // try again
+            }
+            else if ((pressed & XINPUT_GAMEPAD_A) && picker.status == PICKER_READY)
+            {
+                // The keys, the first time something is queued. Usually
+                // they're saved and this costs nothing; if they're not, it's
+                // the keyboard, which takes over the screen.
+                // If that took over the screen, resync once it's done.
+                const bool hadAuth = haveAuth;
+                const bool signedIn = EnsureAuthHeader(haveAuth, authHeader, sizeof(authHeader), game.displayName);
+                if (!hadAuth)
+                    acted = true;
+
                 // Queued, not downloaded: this returns at once and the picker
                 // stays open, so the next pack can be queued straight after.
                 // How it goes turns up on the Queue page and as a popup.
-                const InstalledGame &game = lib.games[picker.gameIndex];
-
-                if (picker.kind == PICKER_DLC)
+                if (signedIn && picker.kind == PICKER_DLC)
                 {
                     const DlcRarMatch &pack = picker.packs[picker.selected];
                     ReportEnqueue(EnqueueDlcPack(pack, game.displayName, game.titleId, authHeader),
                                   pack.filename);
                 }
-                else
+                else if (signedIn)
                 {
                     const TitleUpdateMatch &update = picker.updates[picker.selected];
                     ReportEnqueue(EnqueueTitleUpdate(update, game.displayName, game.titleId, authHeader),
                                   update.filename);
                 }
-            }
-            else if (pressed & XINPUT_GAMEPAD_B)
-            {
-                picker.kind = PICKER_NONE;
             }
         }
         else if (shell.page == SHELL_PAGE_LIBRARY)
@@ -1987,19 +2034,10 @@ int main()
                 const InstalledGame &chosen = lib.games[shell.librarySelected];
                 dprintf("Selected: %s (Title ID %08lX)\n", chosen.displayName, chosen.titleId);
 
-                if (EnsureAuthHeader(haveAuth, authHeader, sizeof(authHeader), chosen.displayName))
-                {
-                    bool found = (pressed & XINPUT_GAMEPAD_A) ? FindDlcForPicker(chosen, shell.picker)
-                                                              : FindTitleUpdatesForPicker(chosen, shell.picker);
-                    if (found)
-                    {
-                        shell.picker.gameIndex = shell.librarySelected;
-                        shell.picker.selected = 0;
-                        shell.picker.scroll = -1;
-                    }
-                }
-
-                acted = true;
+                // No keys needed to look - the listings are public. They're
+                // asked for when something is added to the queue.
+                OpenPicker(shell.picker, (pressed & XINPUT_GAMEPAD_A) ? PICKER_DLC : PICKER_TITLE_UPDATE,
+                           shell.librarySelected, chosen);
             }
             else if (pressed & XINPUT_GAMEPAD_Y)
             {
@@ -2110,7 +2148,41 @@ int main()
         switch (shell.page)
         {
         case SHELL_PAGE_LIBRARY:
-            if (shell.picker.kind != PICKER_NONE)
+            if (shell.picker.kind != PICKER_NONE && shell.picker.status != PICKER_READY)
+            {
+                const Picker &picker = shell.picker;
+                const char *heading = (picker.kind == PICKER_DLC) ? "CHOOSE A DLC PACK" : "CHOOSE A TITLE UPDATE";
+                const char *gameName = lib.games[picker.gameIndex].displayName;
+
+                if (picker.status == PICKER_UNREACHABLE)
+                    hintCount = AddHint(hints, hintCount, UI_BUTTON_A, L"Try again");
+                hintCount = AddHint(hints, hintCount, UI_BUTTON_B, L"Back");
+
+                if (picker.status == PICKER_SEARCHING)
+                {
+                    // The dots step about three times a second - something
+                    // has to move, or a slow answer reads as a hang.
+                    static const char *const kSearching[] = {
+                        "Searching archive.org", "Searching archive.org.",
+                        "Searching archive.org..", "Searching archive.org..."};
+                    const char *message = kSearching[(GetTickCount() / 333) % 4];
+                    RenderPlaceholderFrame(heading, message, gameName, hints, hintCount);
+                }
+                else if (picker.status == PICKER_NOTHING)
+                {
+                    RenderPlaceholderFrame(heading,
+                                           picker.kind == PICKER_DLC ? "No DLC in the collection matched this game."
+                                                                     : "No title update matched this game.",
+                                           gameName, hints, hintCount);
+                }
+                else
+                {
+                    RenderPlaceholderFrame(heading, "Could not reach archive.org.",
+                                           "Check the console's network connection and try again.",
+                                           hints, hintCount);
+                }
+            }
+            else if (shell.picker.kind != PICKER_NONE)
             {
                 hintCount = AddHint(hints, hintCount, UI_BUTTON_A, L"Add to queue", L"Queue");
                 hintCount = AddHint(hints, hintCount, UI_BUTTON_B, L"Back");
@@ -2237,6 +2309,9 @@ int main()
     if (PendingDownloadCount() > 0)
         RenderStatusFrame("STOPPING", "Stopping downloads", "Files that already finished stay installed.");
     StopDownloadQueue(15000);
+
+    // A search still out would only be thrown away - a short wait is plenty.
+    StopSearchWorker(3000);
 
     free(lib.games);
 

@@ -363,6 +363,7 @@
     <ClInclude Include="DiscSource.h" />
     <ClInclude Include="ReadAhead.h" />
     <ClInclude Include="DownloadQueue.h" />
+    <ClInclude Include="SearchWorker.h" />
     <ClInclude Include="TitleNames.h" />
     <ClInclude Include="RarHeaders.h" />
     <ClInclude Include="parsing.h" />
@@ -404,6 +405,7 @@
     <ClCompile Include="DiscSource.cpp" />
     <ClCompile Include="ReadAhead.cpp" />
     <ClCompile Include="DownloadQueue.cpp" />
+    <ClCompile Include="SearchWorker.cpp" />
     <ClCompile Include="RarHeaders.cpp" />
     <ClCompile Include="parsing.cpp" />
     <ClCompile Include="StfsParser.cpp" />

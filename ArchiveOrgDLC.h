@@ -69,6 +69,11 @@ bool DriveFreeSpace(const std::string &path, unsigned long long *outFree);
 // the three keyed functions from a second thread would break this.
 //
 // In practice that one thread is the download worker (DownloadQueue.cpp).
+//
+// The searches have a rule of their own: they share a session cache of each
+// collection's listing (see ItemListingJson), unlocked, so FindDlcRarFilenames
+// and FindTitleUpdates must also stay on one thread - the search worker
+// (SearchWorker.cpp).
 bool ArchiveOrgDiskFull(unsigned long long *outNeeded, unsigned long long *outFree);
 
 enum KeyCheckResult
