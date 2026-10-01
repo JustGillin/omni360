@@ -356,6 +356,7 @@
     <ClInclude Include="GameListUI.h" />
     <ClInclude Include="HttpResponse.h" />
     <ClInclude Include="ButtonAtlas.h" />
+    <ClInclude Include="BoxArtBanner.h" />
     <ClInclude Include="SelawikBold.h" />
     <ClInclude Include="Keyboard.h" />
     <ClInclude Include="OutputConsole.h" />

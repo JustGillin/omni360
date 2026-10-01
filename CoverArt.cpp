@@ -19,9 +19,12 @@ DESCRIPTION : Box art from xboxunity.net, looked up and cached on a worker
 #define COVER_INFO_URL     "https://xboxunity.net/Resources/Lib/CoverInfo.php?titleid=%08lX"
 #define COVER_IMAGE_URL    "https://xboxunity.net/Resources/Lib/Cover.php?size=large&cid=%s"
 
-// The cache file: a small header, then the pixels as the UI draws them.
-#define COVER_FILE_MAGIC   0x4F4D4331 // "OMC1"
-#define COVER_PIXEL_BYTES  ((unsigned long)COVER_SIZE * COVER_SIZE * 4)
+// The cache file: a small header, then the front of the case as pixels.
+// Older files read as unusable and are fetched again, once: "OMC1" held the
+// whole square with the cover's own header strip, and "OMC2" fronts were cut
+// close enough to the spine to keep a sliver of it on some covers.
+#define COVER_FILE_MAGIC   0x4F4D4333 // "OMC3"
+#define COVER_PIXEL_BYTES  ((unsigned long)COVER_FRONT_W * COVER_SIZE * 4)
 
 // How long "xboxunity has no cover for this" is believed before asking again.
 #define NONE_RETRY_DAYS    7
@@ -93,7 +96,7 @@ static unsigned char *ReadCachedCover(unsigned long titleId)
     unsigned char *pixels = NULL;
 
     if (fread(&header, sizeof(header), 1, f) == 1 && header.magic == COVER_FILE_MAGIC &&
-        header.width == COVER_SIZE && header.height == COVER_SIZE)
+        header.width == COVER_FRONT_W && header.height == COVER_SIZE)
     {
         pixels = (unsigned char *)malloc(COVER_PIXEL_BYTES);
         if (pixels != NULL && fread(pixels, 1, COVER_PIXEL_BYTES, f) != COVER_PIXEL_BYTES)
@@ -154,7 +157,7 @@ static void WriteCoverFile(unsigned long titleId, const unsigned long *pixels)
     bool ok = true;
     if (pixels != NULL)
     {
-        CoverFileHeader header = {COVER_FILE_MAGIC, COVER_SIZE, COVER_SIZE, 0};
+        CoverFileHeader header = {COVER_FILE_MAGIC, COVER_FRONT_W, COVER_SIZE, 0};
         ok = fwrite(&header, sizeof(header), 1, f) == 1 &&
              fwrite(pixels, 1, COVER_PIXEL_BYTES, f) == COVER_PIXEL_BYTES;
     }
