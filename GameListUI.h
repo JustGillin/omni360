@@ -38,7 +38,13 @@ struct ShellSidebar
     bool focused;         // the sidebar has focus, rather than the page
     int libraryCount;     // shown beside Your Library
     int queueCount;       // shown beside Queue; 0 shows nothing
-    char storageText[96]; // e.g. "Hdd1: 120 GB free"; empty hides it
+
+    // The drive content installs to, at the foot of the sidebar: a ring for
+    // how full it is, its name, and the free space in words.
+    float storageUsed;      // 0..1; negative hides the whole thing
+    char storageLabel[16];  // "Hdd1"
+    char storageDetail[32]; // "402 GB free"
+    char storageTotal[32];  // "of 931 GB"
 };
 
 // What every following frame draws in the sidebar, until it is called again.
@@ -139,8 +145,11 @@ struct LibraryPageView
     bool focused; // false while the sidebar has focus
 };
 
-// How many rows fit - what LB/RB page by.
+// The library is a grid of cover tiles. How many full rows fit - LB/RB page
+// by this many rows - and how many tiles there are across. scroll counts
+// rows, not games.
 int LibraryPageVisibleRows(const LibraryPageView &view);
+int LibraryGridColumns();
 
 void RenderLibraryFrame(LibraryPageView &view, const UiHint *hints, int hintCount);
 
@@ -162,6 +171,7 @@ void ReleaseGameListIcons();
 struct ListPageView
 {
     const char *heading;
+    const char *subheading; // the line under the title; may be NULL
     const char **labels;
     const char **sublabels;
     int count;
@@ -252,11 +262,11 @@ void ShowShellToast(const char *heading, const char *message, UiToastTone tone);
 //   fraction0to1 - bar fill; clamped internally. Pass a negative value for an
 //                indeterminate download (unknown total size), which draws an
 //                empty trough rather than a misleading 0%.
-//   heading    - the screen heading. "DOWNLOADING" for the transfer itself;
+//   heading    - the screen heading. "Downloading" for the transfer itself;
 //                the steps before it name themselves.
 void RenderProgressFrame(const char *title, const char *statusLine,
                          const char *detailLine, float fraction0to1,
-                         const char *heading = "DOWNLOADING");
+                         const char *heading = "Downloading");
 
 // Draws one non-interactive status frame and returns immediately - for the
 // blocking phases between screens (scanning the library, talking to

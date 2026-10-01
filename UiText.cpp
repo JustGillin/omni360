@@ -8,6 +8,7 @@ DESCRIPTION : XUI-backed implementation of the UI's text renderer. See
 #include "stdafx.h"
 #include <xtl.h>
 #include <xui.h>
+#include "SelawikBold.h"
 #include <xuirender.h>
 #include <xuielement.h>
 #include <xuierror.h>
@@ -41,6 +42,17 @@ DESCRIPTION : XUI-backed implementation of the UI's text renderer. See
 #define UITEXT_TYPEFACE_FILE_URI  L"file://game:/selawk.ttf"
 #define UITEXT_TYPEFACE_NAME  L"Selawik"
 
+// The bold face: a separate file, so a separate typeface as far as XUI is
+// concerned, registered under its own name.
+//
+// Not a fourth XEX section like the regular face. With one, the XEX never
+// reached main() on hardware - not a line logged - and taking it out fixed
+// it. So it's compiled in as data instead (SelawikBold.h) and written out
+// beside the XEX for XUI to load as a file.
+#define UITEXT_BOLD_FILE_PATH     "game:\\selawkb.ttf"
+#define UITEXT_BOLD_FILE_URI      L"file://game:/selawkb.ttf"
+#define UITEXT_BOLD_NAME          L"Selawik Bold"
+
 // The text height the layout is written against. Every SetScaleFactors value
 // in the UI is a multiple of this, and GetFontHeight returns it so the
 // resolution-scaling maths in ComputeUiMetrics stays a no-op.
@@ -52,14 +64,15 @@ DESCRIPTION : XUI-backed implementation of the UI's text renderer. See
 // turn if the type comes out uniformly too small or too large.
 #define UITEXT_SIZE_TRIM      1.18f
 
-// Distinct sizes in play are few - six scale factors, and at most two
-// resolutions in a session - so a small fixed cache covers it without ever
-// evicting.
-#define UITEXT_MAX_FONTS      16
+// Distinct sizes in play are few - a dozen scale factors, some in both
+// weights, and one resolution per session - so a small fixed cache covers it
+// without ever evicting.
+#define UITEXT_MAX_FONTS      32
 
 struct CachedFont
 {
     float    pixels;
+    bool     bold;
     HXUIFONT font;
 };
 
@@ -82,9 +95,11 @@ static bool g_renderInited   = false;
 static bool g_dcCreated      = false;
 static bool g_xuiInited      = false;
 static bool g_typefaceLoaded = false;
+static bool g_boldLoaded     = false; // false draws bold text in the regular face
 
 UiFont::UiFont()
     : m_scale(1.0f)
+    , m_bold(false)
     , m_ready(false)
 {
 }
@@ -110,15 +125,23 @@ void UiFont::SetScaleFactors(float scaleX, float /*scaleY*/)
     m_scale = scaleX;
 }
 
-void *UiFont::FontForPixelSize(float pixels)
+void UiFont::SetBold(bool bold)
+{
+    m_bold = bold;
+}
+
+void *UiFont::FontForPixelSize(float pixels, bool bold)
 {
     // Rounded before comparing so scale factors that differ only by floating
     // point noise share one font rather than each creating their own.
     float key = (float)((int)(pixels + 0.5f));
 
+    if (!g_boldLoaded)
+        bold = false;
+
     for (int i = 0; i < g_fontCount; ++i)
     {
-        if (g_fonts[i].pixels == key)
+        if (g_fonts[i].pixels == key && g_fonts[i].bold == bold)
             return g_fonts[i].font;
     }
 
@@ -134,19 +157,84 @@ void *UiFont::FontForPixelSize(float pixels)
     float points = (key / g_pixelsPerPoint) * UITEXT_SIZE_TRIM;
 
     HXUIFONT font = NULL;
-    HRESULT hr = XuiCreateFont(UITEXT_TYPEFACE_NAME, points, XUI_FONT_STYLE_NORMAL, 0, &font);
+    HRESULT hr = XuiCreateFont(bold ? UITEXT_BOLD_NAME : UITEXT_TYPEFACE_NAME, points,
+                               XUI_FONT_STYLE_NORMAL, 0, &font);
     if (FAILED(hr))
     {
-        dprintf("[UiText] XuiCreateFont(%.1fpt for %.0fpx) -> 0x%08lX\n",
-                points, key, (unsigned long)hr);
+        dprintf("[UiText] XuiCreateFont(%s, %.1fpt for %.0fpx) -> 0x%08lX\n",
+                bold ? "bold" : "regular", points, key, (unsigned long)hr);
         return g_fontCount > 0 ? g_fonts[0].font : NULL;
     }
 
     g_fonts[g_fontCount].pixels = key;
+    g_fonts[g_fontCount].bold = bold;
     g_fonts[g_fontCount].font = font;
     g_fontCount++;
 
     return font;
+}
+
+// Makes sure game:\selawkb.ttf is the font compiled into this XEX: written
+// if it's missing or a different size, left alone otherwise, so a normal
+// launch only checks its size. False if it couldn't be written.
+static bool EnsureBoldFontFile()
+{
+    WIN32_FILE_ATTRIBUTE_DATA attrs;
+    if (GetFileAttributesExA(UITEXT_BOLD_FILE_PATH, GetFileExInfoStandard, &attrs) &&
+        attrs.nFileSizeHigh == 0 && attrs.nFileSizeLow == kSelawikBoldTtfSize)
+        return true;
+
+    HANDLE file = CreateFileA(UITEXT_BOLD_FILE_PATH, GENERIC_WRITE, 0, NULL, CREATE_ALWAYS,
+                              FILE_ATTRIBUTE_NORMAL, NULL);
+    if (file == INVALID_HANDLE_VALUE)
+    {
+        dprintf("[UiText] couldn't create %s (%lu)\n", UITEXT_BOLD_FILE_PATH, GetLastError());
+        return false;
+    }
+
+    DWORD written = 0;
+    BOOL ok = WriteFile(file, kSelawikBoldTtf, kSelawikBoldTtfSize, &written, NULL);
+    CloseHandle(file);
+
+    if (!ok || written != kSelawikBoldTtfSize)
+    {
+        dprintf("[UiText] couldn't write %s (%lu of %lu bytes)\n", UITEXT_BOLD_FILE_PATH,
+                written, kSelawikBoldTtfSize);
+        DeleteFileA(UITEXT_BOLD_FILE_PATH);
+        return false;
+    }
+
+    dprintf("[UiText] wrote %s\n", UITEXT_BOLD_FILE_PATH);
+    return true;
+}
+
+// Selawik Bold, from the copy beside the XEX. Optional: without it, bold text
+// draws in the regular face.
+static void RegisterBoldTypeface()
+{
+    if (!EnsureBoldFontFile())
+    {
+        dprintf("[UiText] no bold face; bold text will draw regular\n");
+        return;
+    }
+
+    TypefaceDescriptor desc;
+    ZeroMemory(&desc, sizeof(desc));
+    desc.szTypeface = UITEXT_BOLD_NAME;
+    desc.szLocator = UITEXT_BOLD_FILE_URI;
+    desc.szReserved1 = NULL;
+    desc.fBaselineAdjust = 0.0f;
+    desc.szFallbackTypeface = NULL;
+
+    HRESULT hr = XuiRegisterTypeface(&desc, FALSE);
+    if (FAILED(hr))
+    {
+        dprintf("[UiText] bold face -> 0x%08lX; bold text will draw regular\n", (unsigned long)hr);
+        return;
+    }
+
+    g_boldLoaded = true;
+    dprintf("[UiText] bold face: %S\n", UITEXT_BOLD_FILE_URI);
 }
 
 HRESULT UiFont::Create(const char * /*ignoredLegacyPath*/)
@@ -251,6 +339,8 @@ HRESULT UiFont::Create(const char * /*ignoredLegacyPath*/)
     }
     g_typefaceLoaded = true;
 
+    RegisterBoldTypeface();
+
     // Calibrate points to pixels on this device instead of assuming a DPI.
     // One reference font, one metrics query; every size after this is derived
     // from the ratio.
@@ -316,7 +406,7 @@ float UiFont::GetTextWidth(const WCHAR *strText)
     if (!m_ready || strText == NULL)
         return 0.0f;
 
-    HXUIFONT font = (HXUIFONT)FontForPixelSize(SizeForScale(m_scale));
+    HXUIFONT font = (HXUIFONT)FontForPixelSize(SizeForScale(m_scale), m_bold);
     if (font == NULL)
         return 0.0f;
 
@@ -337,7 +427,7 @@ void UiFont::DrawText(float sx, float sy, DWORD dwColor, const WCHAR *strText,
     if (!m_ready || strText == NULL || strText[0] == L'\0')
         return;
 
-    HXUIFONT font = (HXUIFONT)FontForPixelSize(SizeForScale(m_scale));
+    HXUIFONT font = (HXUIFONT)FontForPixelSize(SizeForScale(m_scale), m_bold);
     if (font == NULL)
         return;
 
@@ -401,8 +491,15 @@ void UiFont::Destroy()
 
         g_fonts[i].font = NULL;
         g_fonts[i].pixels = 0.0f;
+        g_fonts[i].bold = false;
     }
     g_fontCount = 0;
+
+    if (g_boldLoaded)
+    {
+        XuiUnregisterTypeface(UITEXT_BOLD_NAME);
+        g_boldLoaded = false;
+    }
 
     if (g_typefaceLoaded)
     {

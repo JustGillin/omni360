@@ -536,13 +536,13 @@ static KeyEntryOutcome EnterCheckAndSaveKeys(std::string &accessKey, std::string
         char header[IAS3_AUTH_HEADER_MAX];
         if (!BuildIas3AuthHeader(accessKey, secretKey, header, sizeof(header)))
         {
-            if (ShowConfirmUI("KEYS TOO LONG", "Those are too long to be archive.org keys.",
+            if (ShowConfirmUI("Keys too long", "Those are too long to be archive.org keys.",
                               "Copy them again from archive.org/account/s3.php.", "Try again"))
                 continue;
             return KEY_ENTRY_FAILED;
         }
 
-        RenderStatusFrame("CHECKING KEYS", "Asking archive.org whether these keys work", NULL);
+        RenderStatusFrame("Checking keys", "Asking archive.org whether these keys work", NULL);
 
         char reason[160] = "";
         KeyCheckResult check = CheckArchiveOrgKeys(header, reason, sizeof(reason), dprintf);
@@ -551,7 +551,7 @@ static KeyEntryOutcome EnterCheckAndSaveKeys(std::string &accessKey, std::string
         {
             // archive.org's own wording where it gave one - it can say which
             // of the two keys it objects to.
-            if (ShowConfirmUI("KEYS NOT ACCEPTED", "archive.org didn't accept those keys.",
+            if (ShowConfirmUI("Keys not accepted", "archive.org didn't accept those keys.",
                               reason[0] != '\0' ? reason : "Check them at archive.org/account/s3.php.",
                               "Try again"))
                 continue;
@@ -560,16 +560,16 @@ static KeyEntryOutcome EnterCheckAndSaveKeys(std::string &accessKey, std::string
 
         if (!SaveKeys(accessKey, secretKey))
         {
-            ShowMessageUI("KEYS NOT SAVED", "ArchiveOrgKeys.txt could not be written.",
+            ShowMessageUI("Keys not saved", "ArchiveOrgKeys.txt could not be written.",
                           "Your previous keys, if any, are unchanged.");
             return KEY_ENTRY_FAILED;
         }
 
         if (check == KEYS_ACCEPTED)
-            ShowMessageUI("KEYS SAVED", "archive.org accepted your keys.",
+            ShowMessageUI("Keys saved", "archive.org accepted your keys.",
                           "They're saved on this console for your next download.");
         else
-            ShowMessageUI("KEYS SAVED", "Saved, but not checked - archive.org didn't answer.",
+            ShowMessageUI("Keys saved", "Saved, but not checked - archive.org didn't answer.",
                           "If a download fails, check them again in Settings.");
 
         return KEY_ENTRY_SAVED;
@@ -593,22 +593,54 @@ static void DriveLabel(const char *path, char *out, size_t outSize, const char *
     }
 }
 
-// The library footer's "Hdd1: 120 GB free". Empty if the drive can't say, so
-// the footer shows nothing rather than a wrong number.
-static void FormatFreeSpaceStatus(const char *path, char *out, size_t outSize)
+// The sidebar's storage: how full the drive content installs to is, its name
+// ("Hdd1"), "402 GB free" and "of 931 GB" - three short lines, since one
+// long one doesn't fit beside the ring. used stays negative if the drive
+// can't say, which hides it rather than showing a wrong number.
+struct StorageStatus
 {
-    out[0] = '\0';
+    float used;
+    char label[16];
+    char detail[32];
+    char total[32];
+};
 
-    unsigned long long freeSpace = 0;
-    if (!DriveFreeSpace(path, &freeSpace))
+static void ReadStorageStatus(const char *path, StorageStatus *out)
+{
+    out->used = -1.0f;
+    out->label[0] = '\0';
+    out->detail[0] = '\0';
+    out->total[0] = '\0';
+
+    const char *colon = strchr(path, ':');
+    if (colon == NULL)
         return;
 
-    char drive[16], freeText[64] = "";
-    DriveLabel(path, drive, sizeof(drive), "Drive");
-    FormatBytes(freeSpace, freeText, sizeof(freeText));
+    size_t nameLen = (size_t)(colon - path);
+    if (nameLen == 0 || nameLen >= sizeof(out->label) || nameLen + 3 > 32)
+        return;
 
-    _snprintf(out, outSize, "%s %s free", drive, freeText);
-    out[outSize - 1] = '\0';
+    char root[32];
+    memcpy(root, path, nameLen + 1); // through the colon
+    root[nameLen + 1] = '\\';
+    root[nameLen + 2] = '\0';
+
+    ULARGE_INTEGER freeToCaller, total;
+    if (!GetDiskFreeSpaceExA(root, &freeToCaller, &total, NULL) || total.QuadPart == 0)
+        return;
+
+    memcpy(out->label, path, nameLen);
+    out->label[nameLen] = '\0';
+
+    char freeText[64] = "", totalText[64] = "";
+    FormatBytes(freeToCaller.QuadPart, freeText, sizeof(freeText));
+    FormatBytes(total.QuadPart, totalText, sizeof(totalText));
+    _snprintf(out->detail, sizeof(out->detail), "%s free", freeText);
+    out->detail[sizeof(out->detail) - 1] = '\0';
+    _snprintf(out->total, sizeof(out->total), "of %s", totalText);
+    out->total[sizeof(out->total) - 1] = '\0';
+
+    out->used = (float)(1.0 - (double)freeToCaller.QuadPart / (double)total.QuadPart);
 }
 
 static void ShowNotEnoughSpace(const char *path, unsigned long long needed, unsigned long long freeSpace)
@@ -624,7 +656,7 @@ static void ShowNotEnoughSpace(const char *path, unsigned long long needed, unsi
     _snprintf(message, sizeof(message), "This needs %s, but %s has %s free.", neededText, drive, freeText);
     message[sizeof(message) - 1] = '\0';
 
-    ShowMessageUI("NOT ENOUGH SPACE", message, "Free up some space on the drive and try again.");
+    ShowMessageUI("Not enough space", message, "Free up some space on the drive and try again.");
 }
 
 static bool GetArchiveOrgAuthHeader(char *authHeader, unsigned long long authHeaderSize)
@@ -648,7 +680,7 @@ static bool GetArchiveOrgAuthHeader(char *authHeader, unsigned long long authHea
         // the screen (see SetConsoleQuiet), and this is the one piece of
         // guidance the user genuinely cannot act without - it tells them
         // where to get the keys they're about to be asked for.
-        ShowMessageUI("ARCHIVE.ORG KEYS NEEDED",
+        ShowMessageUI("archive.org keys needed",
                       "Get your access and secret key at archive.org/account/s3.php",
                       "Press A to type them in, or put them in ArchiveOrgKeys.txt beforehand.");
 
@@ -657,7 +689,7 @@ static bool GetArchiveOrgAuthHeader(char *authHeader, unsigned long long authHea
         if (entry == KEY_ENTRY_CANCELLED)
         {
             dprintf("ERROR: no keys entered\n");
-            ShowMessageUI("NO KEYS ENTERED", "Both keys are required to download from archive.org.",
+            ShowMessageUI("No keys entered", "Both keys are required to download from archive.org.",
                           "You can add them any time in Settings - press Y on the game list.");
         }
 
@@ -671,7 +703,7 @@ static bool GetArchiveOrgAuthHeader(char *authHeader, unsigned long long authHea
     if (!BuildIas3AuthHeader(accessKey, secretKey, authHeader, authHeaderSize))
     {
         dprintf("ERROR: could not build auth header from saved keys - delete %s and re-enter them\n", CREDENTIALS_FILE);
-        ShowMessageUI("SAVED KEYS UNUSABLE", "The saved keys are too long to be archive.org keys.",
+        ShowMessageUI("Saved keys unusable", "The saved keys are too long to be archive.org keys.",
                       "Re-enter them in Settings - press Y on the game list.");
         return false;
     }
@@ -861,7 +893,7 @@ struct Library
 
 static void ScanLibrary(Library &lib, const char *gamesPath)
 {
-    RenderStatusFrame("SCANNING", "Reading your installed games", gamesPath);
+    RenderStatusFrame("Scanning", "Reading your installed games", gamesPath);
 
     int found = EnumerateInstalledGames(gamesPath, lib.games, MAX_INSTALLED_GAMES, dprintf);
     lib.count = (found > 0) ? found : 0;
@@ -913,7 +945,7 @@ static void ChangeGamesFolder(Library &lib, char *gamesPath, size_t gamesPathSiz
     char newPath[MAX_TEXT_LENGTH];
     if (!NormaliseGamesPath(typed, newPath, sizeof(newPath)) || strlen(newPath) >= gamesPathSize)
     {
-        ShowMessageUI("NOT A FOLDER PATH", "Include the drive, like Hdd1:\\Games or Usb0:\\Games.",
+        ShowMessageUI("Not a folder path", "Include the drive, like Hdd1:\\Games or Usb0:\\Games.",
                       typed.c_str());
         return;
     }
@@ -925,7 +957,7 @@ static void ChangeGamesFolder(Library &lib, char *gamesPath, size_t gamesPathSiz
     // is still in place rather than after it has been overwritten.
     if (!FolderExists(newPath))
     {
-        ShowMessageUI("FOLDER NOT FOUND", "There is no folder at that path.", newPath);
+        ShowMessageUI("Folder not found", "There is no folder at that path.", newPath);
         return;
     }
 
@@ -941,7 +973,7 @@ static void ChangeGamesFolder(Library &lib, char *gamesPath, size_t gamesPathSiz
 
     if (!saved)
     {
-        ShowMessageUI("NOT SAVED", "Using this folder for now, but settings.txt could not be written.",
+        ShowMessageUI("Not saved", "Using this folder for now, but settings.txt could not be written.",
                       "It will go back to the old folder next time Omni360 starts.");
     }
 }
@@ -959,19 +991,19 @@ static void ChangeKeys(SettingsOutcome &outcome)
 
 static void RemoveKeys(SettingsOutcome &outcome)
 {
-    if (!ShowConfirmUI("REMOVE KEYS", "Remove the archive.org keys saved on this console?",
+    if (!ShowConfirmUI("Remove keys", "Remove the archive.org keys saved on this console?",
                        "You'll need to add them again before you can download.", "Remove"))
         return;
 
     if (remove(CREDENTIALS_FILE) != 0)
     {
-        ShowMessageUI("COULD NOT REMOVE", "ArchiveOrgKeys.txt could not be deleted.", NULL);
+        ShowMessageUI("Could not remove", "ArchiveOrgKeys.txt could not be deleted.", NULL);
         return;
     }
 
     dprintf("Saved archive.org keys removed\n");
     outcome.keysChanged = true;
-    ShowMessageUI("KEYS REMOVED", "Your archive.org keys have been removed from this console.", NULL);
+    ShowMessageUI("Keys removed", "Your archive.org keys have been removed from this console.", NULL);
 }
 
 // The settings page: a short list whose second lines show the current state,
@@ -1146,7 +1178,7 @@ static bool DiscInstallProgressCallback(unsigned long long done, unsigned long l
 
     if (pressed & XINPUT_GAMEPAD_B)
     {
-        if (ShowConfirmUI("STOP INSTALLING?", "The game won't be installed.",
+        if (ShowConfirmUI("Stop installing?", "The game won't be installed.",
                           "What has been copied so far is removed.", "Stop"))
             return false;
         p->prevButtons = AnyPadButtons(); // the B that answered "no" isn't a fresh press
@@ -1179,7 +1211,7 @@ static bool DiscInstallProgressCallback(unsigned long long done, unsigned long l
     detail[sizeof(detail) - 1] = '\0';
 
     RenderProgressFrame(p->title, "Copying from the disc", detail,
-                        (total > 0) ? (float)((double)done / (double)total) : -1.0f, "INSTALLING");
+                        (total > 0) ? (float)((double)done / (double)total) : -1.0f, "Installing");
     return true;
 }
 
@@ -1262,7 +1294,7 @@ static void CleanUpInterruptedInstall()
 
     dprintf("[disc] removing the unfinished install of \"%s\" (%08lX, media %08lX) from %s\n",
             name, titleId, mediaId, root);
-    RenderStatusFrame("CLEANING UP", "Removing a game install that didn't finish", name);
+    RenderStatusFrame("Cleaning up", "Removing a game install that didn't finish", name);
     GodRemovePackage(root, titleId, mediaId);
     ClearInstallMarker();
 }
@@ -1272,12 +1304,12 @@ static void CleanUpInterruptedInstall()
 // place the library is read from, so the game appears there straight after.
 static void InstallDiscAsGame(Library &lib, const char *gamesPath, int &listSelection)
 {
-    RenderStatusFrame("INSTALL DISC", "Reading the disc", "The drive may take a few seconds to spin up.");
+    RenderStatusFrame("Install disc", "Reading the disc", "The drive may take a few seconds to spin up.");
 
     DiscSource disc;
     if (!disc.Open(dprintf))
     {
-        ShowMessageUI("NO DISC", "Put an Xbox 360 game disc in the drive and try again.",
+        ShowMessageUI("No disc", "Put an Xbox 360 game disc in the drive and try again.",
                       "If one is in, it couldn't be read - the log says why.");
         return;
     }
@@ -1288,7 +1320,7 @@ static void InstallDiscAsGame(Library &lib, const char *gamesPath, int &listSele
     if (result != GOD_OK)
     {
         dprintf("[disc] not installable: %s\n", GodResultText(result));
-        ShowMessageUI("CAN'T INSTALL THIS DISC", GodResultText(result),
+        ShowMessageUI("Can't install this disc", GodResultText(result),
                       (result == GOD_NOT_A_DISC_IMAGE) ? "Only Xbox 360 game discs can be installed." : NULL);
         return;
     }
@@ -1339,7 +1371,7 @@ static void InstallDiscAsGame(Library &lib, const char *gamesPath, int &listSele
     if (existing != NULL)
     {
         fclose(existing);
-        if (!ShowConfirmUI("ALREADY INSTALLED", "This disc is already installed.",
+        if (!ShowConfirmUI("Already installed", "This disc is already installed.",
                            "Installing it again replaces the copy on the drive.", "Reinstall"))
             return;
     }
@@ -1360,7 +1392,7 @@ static void InstallDiscAsGame(Library &lib, const char *gamesPath, int &listSele
     _snprintf(detail, sizeof(detail), "%s, to %s", sizeText, gamesPath);
     detail[sizeof(detail) - 1] = '\0';
 
-    if (!ShowConfirmUI("INSTALL DISC", message, detail, "Install"))
+    if (!ShowConfirmUI("Install disc", message, detail, "Install"))
         return;
 
     DiscInstallProgress progress;
@@ -1405,7 +1437,7 @@ static void InstallDiscAsGame(Library &lib, const char *gamesPath, int &listSele
 
     if (result == GOD_CANCELLED)
     {
-        ShowMessageUI("INSTALL STOPPED", "Nothing was installed.", "What had been copied was removed.");
+        ShowMessageUI("Install stopped", "Nothing was installed.", "What had been copied was removed.");
         return;
     }
     if (result != GOD_OK)
@@ -1413,7 +1445,7 @@ static void InstallDiscAsGame(Library &lib, const char *gamesPath, int &listSele
         const char *hint = (result == GOD_READ_FAILED) ? "The disc may be dirty or scratched - clean it and try again."
                          : (result == GOD_WRITE_FAILED) ? "Check the drive the games folder is on, then try again."
                          : NULL;
-        ShowMessageUI("INSTALL FAILED", GodResultText(result), hint);
+        ShowMessageUI("Install failed", GodResultText(result), hint);
         return;
     }
 
@@ -1427,7 +1459,7 @@ static void InstallDiscAsGame(Library &lib, const char *gamesPath, int &listSele
 
     _snprintf(message, sizeof(message), "%s is installed.", name.c_str());
     message[sizeof(message) - 1] = '\0';
-    ShowMessageUI("INSTALLED", message, doneDetail);
+    ShowMessageUI("Installed", message, doneDetail);
 
     // Into the library, and onto its row.
     ScanLibrary(lib, gamesPath);
@@ -1492,7 +1524,7 @@ struct Shell
     // action, or when a download finishes - rather than on every frame.
     bool stale;
     bool keysSaved;
-    char freeSpace[96];
+    StorageStatus storage;
 };
 
 // Static rather than on main's stack: the picker's match arrays and the
@@ -1522,7 +1554,7 @@ static void RefreshShell(Shell &shell, Library &lib, const char *contentBasePath
 
     // Where DLC and title updates install, not where the games are - that's
     // the drive that fills up.
-    FormatFreeSpaceStatus(contentBasePath, shell.freeSpace, sizeof(shell.freeSpace));
+    ReadStorageStatus(contentBasePath, &shell.storage);
 
     BuildSettingsPage(shell.settings, lib, gamesPath);
 
@@ -1538,8 +1570,13 @@ static void PublishSidebar(const Shell &shell, const Library &lib)
     sidebar.focused = shell.sidebarFocused;
     sidebar.libraryCount = lib.count;
     sidebar.queueCount = PendingDownloadCount();
-    strncpy(sidebar.storageText, shell.freeSpace, sizeof(sidebar.storageText) - 1);
-    sidebar.storageText[sizeof(sidebar.storageText) - 1] = '\0';
+    sidebar.storageUsed = shell.storage.used;
+    strncpy(sidebar.storageLabel, shell.storage.label, sizeof(sidebar.storageLabel) - 1);
+    sidebar.storageLabel[sizeof(sidebar.storageLabel) - 1] = '\0';
+    strncpy(sidebar.storageDetail, shell.storage.detail, sizeof(sidebar.storageDetail) - 1);
+    sidebar.storageDetail[sizeof(sidebar.storageDetail) - 1] = '\0';
+    strncpy(sidebar.storageTotal, shell.storage.total, sizeof(sidebar.storageTotal) - 1);
+    sidebar.storageTotal[sizeof(sidebar.storageTotal) - 1] = '\0';
 
     SetShellSidebar(sidebar);
 }
@@ -1775,7 +1812,7 @@ static bool EnsureAuthHeader(bool &haveAuth, char *authHeader, unsigned long lon
     // The keyboard prompt inside here draws its own system UI, so this frame
     // is only what sits behind it on a run where the keys are already saved
     // and nothing is prompted at all.
-    RenderStatusFrame("SIGNING IN", "Using your saved archive.org keys", gameName);
+    RenderStatusFrame("Signing in", "Using your saved archive.org keys", gameName);
 
     // GetArchiveOrgAuthHeader explains its own failures on screen, so nothing
     // more is shown here - a second message would only repeat it.
@@ -1954,7 +1991,7 @@ int main()
                               pending, pending == 1 ? " is" : "s are");
                     message[sizeof(message) - 1] = '\0';
 
-                    exitRequested = ShowConfirmUI("LEAVE OMNI360?", message,
+                    exitRequested = ShowConfirmUI("Leave Omni360?", message,
                                                   "Leaving stops them. Files that already finished stay installed.",
                                                   "Leave");
                     acted = !exitRequested;
@@ -2009,23 +2046,61 @@ int main()
         }
         else if (shell.page == SHELL_PAGE_LIBRARY)
         {
-            StepSelection(input.nav, lib.count, shell.librarySelected);
+            // Left from the first column goes to the sidebar, as B does.
+            bool toSidebar = (pressed & XINPUT_GAMEPAD_B) != 0;
 
-            // Shoulder buttons jump a full page - the fast way through a large
-            // library even with auto-repeat. Skipped for an empty library,
-            // where the upper clamp would land on -1.
-            if (lib.count > 0 && (pressed & (XINPUT_GAMEPAD_LEFT_SHOULDER | XINPUT_GAMEPAD_RIGHT_SHOULDER)))
+            if (lib.count == 0)
             {
-                int pageRows = LibraryPageVisibleRows(MakeLibraryView(shell, lib, gamesPath));
-                if (pressed & XINPUT_GAMEPAD_LEFT_SHOULDER)
-                    shell.librarySelected -= pageRows;
-                if (pressed & XINPUT_GAMEPAD_RIGHT_SHOULDER)
-                    shell.librarySelected += pageRows;
-                if (shell.librarySelected > lib.count - 1) shell.librarySelected = lib.count - 1;
-                if (shell.librarySelected < 0) shell.librarySelected = 0;
+                if (input.nav == XINPUT_GAMEPAD_DPAD_LEFT)
+                    toSidebar = true;
+            }
+            else
+            {
+                const int cols = LibraryGridColumns();
+                int &sel = shell.librarySelected;
+
+                if (input.nav == XINPUT_GAMEPAD_DPAD_LEFT)
+                {
+                    if (sel % cols == 0)
+                        toSidebar = true;
+                    else
+                        sel--;
+                }
+                else if (input.nav == XINPUT_GAMEPAD_DPAD_RIGHT)
+                {
+                    if (sel % cols < cols - 1 && sel + 1 < lib.count)
+                        sel++;
+                }
+                else if (input.nav == XINPUT_GAMEPAD_DPAD_UP)
+                {
+                    if (sel >= cols)
+                        sel -= cols;
+                }
+                else if (input.nav == XINPUT_GAMEPAD_DPAD_DOWN)
+                {
+                    // Down from a row with nothing under it lands on the last
+                    // game, rather than doing nothing.
+                    if (sel + cols < lib.count)
+                        sel += cols;
+                    else if (sel / cols < (lib.count - 1) / cols)
+                        sel = lib.count - 1;
+                }
+
+                // Shoulder buttons jump a screenful of rows - the fast way
+                // through a large library even with auto-repeat.
+                if (pressed & (XINPUT_GAMEPAD_LEFT_SHOULDER | XINPUT_GAMEPAD_RIGHT_SHOULDER))
+                {
+                    int jump = LibraryPageVisibleRows(MakeLibraryView(shell, lib, gamesPath)) * cols;
+                    if (pressed & XINPUT_GAMEPAD_LEFT_SHOULDER)
+                        sel -= jump;
+                    if (pressed & XINPUT_GAMEPAD_RIGHT_SHOULDER)
+                        sel += jump;
+                    if (sel > lib.count - 1) sel = lib.count - 1;
+                    if (sel < 0) sel = 0;
+                }
             }
 
-            if (input.nav == XINPUT_GAMEPAD_DPAD_LEFT || (pressed & XINPUT_GAMEPAD_B))
+            if (toSidebar)
             {
                 shell.sidebarFocused = true;
             }
@@ -2076,7 +2151,7 @@ int main()
                     // Asked, like stopping a disc install: a big pack can be
                     // most of the way there. The download carries on while the
                     // question is up - it's on its own thread now.
-                    if (ShowConfirmUI("STOP DOWNLOADING?", job.title,
+                    if (ShowConfirmUI("Stop downloading?", job.title,
                                       job.kind == QUEUE_JOB_DLC_PACK ? "Files that already finished stay installed."
                                                                      : "The update won't be installed.",
                                       "Stop"))
@@ -2151,7 +2226,7 @@ int main()
             if (shell.picker.kind != PICKER_NONE && shell.picker.status != PICKER_READY)
             {
                 const Picker &picker = shell.picker;
-                const char *heading = (picker.kind == PICKER_DLC) ? "CHOOSE A DLC PACK" : "CHOOSE A TITLE UPDATE";
+                const char *heading = (picker.kind == PICKER_DLC) ? "Choose a DLC pack" : "Choose a title update";
                 const char *gameName = lib.games[picker.gameIndex].displayName;
 
                 if (picker.status == PICKER_UNREACHABLE)
@@ -2188,7 +2263,8 @@ int main()
                 hintCount = AddHint(hints, hintCount, UI_BUTTON_B, L"Back");
 
                 ListPageView view;
-                view.heading = (shell.picker.kind == PICKER_DLC) ? "CHOOSE A DLC PACK" : "CHOOSE A TITLE UPDATE";
+                view.heading = (shell.picker.kind == PICKER_DLC) ? "Choose a DLC pack" : "Choose a title update";
+                view.subheading = lib.games[shell.picker.gameIndex].displayName;
                 view.labels = shell.picker.labels;
                 view.sublabels = shell.picker.sublabels;
                 view.count = shell.picker.count;
@@ -2214,11 +2290,11 @@ int main()
                     hintCount = AddHint(hints, hintCount, UI_BUTTON_START, L"Install disc", L"Disc");
                     if (lib.count > 0)
                     {
-                        hintCount = AddHint(hints, hintCount, UI_BUTTON_A, L"Search for DLC", L"DLC");
-                        hintCount = AddHint(hints, hintCount, UI_BUTTON_X, L"Search for title updates", L"Updates");
+                        hintCount = AddHint(hints, hintCount, UI_BUTTON_A, L"Find DLC", L"DLC");
+                        hintCount = AddHint(hints, hintCount, UI_BUTTON_X, L"Find title updates", L"Updates");
                     }
                     hintCount = AddHint(hints, hintCount, UI_BUTTON_B, L"Back");
-                    if (lib.count > LibraryPageVisibleRows(view))
+                    if (lib.count > LibraryPageVisibleRows(view) * LibraryGridColumns())
                         hintCount = AddHint(hints, hintCount, UI_BUTTON_LBRB, L"Page");
                 }
 
@@ -2230,7 +2306,7 @@ int main()
             break;
 
         case SHELL_PAGE_STORE:
-            RenderPlaceholderFrame("STORE", "Coming soon",
+            RenderPlaceholderFrame("Store", "Coming soon",
                                    "Installing games straight from archive.org is on the way.",
                                    hints, hintCount);
             break;
@@ -2238,7 +2314,7 @@ int main()
         case SHELL_PAGE_QUEUE:
             if (shell.queueCount == 0)
             {
-                RenderPlaceholderFrame("QUEUE", "Nothing is downloading",
+                RenderPlaceholderFrame("Queue", "Nothing is downloading",
                                        "DLC and title updates you choose will wait here while they download.",
                                        hints, hintCount);
             }
@@ -2277,7 +2353,8 @@ int main()
             }
 
             ListPageView view;
-            view.heading = "SETTINGS";
+            view.heading = "Settings";
+            view.subheading = NULL;
             view.labels = shell.settings.labels;
             view.sublabels = shell.settings.sublabels;
             view.count = shell.settings.count;
@@ -2307,7 +2384,7 @@ int main()
     // its next progress report; a request already waiting on archive.org
     // can't be interrupted, so this is bounded rather than waited out.
     if (PendingDownloadCount() > 0)
-        RenderStatusFrame("STOPPING", "Stopping downloads", "Files that already finished stay installed.");
+        RenderStatusFrame("Stopping", "Stopping downloads", "Files that already finished stay installed.");
     StopDownloadQueue(15000);
 
     // A search still out would only be thrown away - a short wait is plenty.

@@ -71,6 +71,11 @@ public:
     // caller ever passed different values.
     void SetScaleFactors(float scaleX, float scaleY);
 
+    // Bold or regular for subsequent draws and measurements. Selawik Bold is
+    // a second typeface, loaded beside the regular one; if it couldn't be,
+    // bold quietly draws regular instead.
+    void SetBold(bool bold);
+
     // dwFlags takes UITEXT_* (identical to ATGFONT_*). fMaxPixelWidth bounds
     // the text and, with UITEXT_TRUNCATED, gives it an ellipsis.
     void DrawText(float sx, float sy, DWORD dwColor, const WCHAR *strText,
@@ -92,9 +97,10 @@ public:
 
 private:
     float SizeForScale(float scale) const;
-    void *FontForPixelSize(float pixels); // HXUIFONT, opaque here to keep XUI headers out of this file
+    void *FontForPixelSize(float pixels, bool bold); // HXUIFONT, opaque here to keep XUI headers out of this file
 
     float m_scale;
+    bool  m_bold;
     bool  m_ready;
 };
 

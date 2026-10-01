@@ -39,7 +39,7 @@ animation is viable.
 
 #include <stdio.h>
 #include <string.h>
-#include <math.h> // sinf, for the pulsing selection bar
+#include <math.h>
 
 using namespace ATG;
 
@@ -144,11 +144,133 @@ static bool g_Initialized = false;
 
 static void ReleaseIcons(); // defined with the cover-art cache below; called from ShutdownGameListUI
 
-// Defined further down with the other shared chrome. Forward-declared because
-// the game list draws its header through it, and that screen comes first in
-// this file - the shared chrome sits with the screens that were written to use
-// it rather than being hoisted above everything.
-static void DrawChromeHeading(const char *heading);
+// ---------------------------------------------------------------------------
+// Shape shader: rounded rectangles, outlines, soft shadows and rings
+// ---------------------------------------------------------------------------
+//
+// The dashboard look is built from rounded tiles and cards, a white ring
+// round whatever has focus, a soft shadow under the focused tile and the
+// storage ring - none of which a plain quad can draw. Rather than textures
+// for each, one pixel shader works out how far each pixel is from the shape's
+// edge (a signed distance: negative inside, positive outside) and turns that
+// into coverage:
+//
+//   fill    - inside the shape, with one pixel of anti-aliasing at the edge
+//   stroke  - a band of the given width just inside the edge (focus rings)
+//   blur    - a falloff over that many pixels outside the edge (shadows,
+//             drawn on a quad enlarged by the blur)
+//   ring    - a circle's band instead of a box, coloured Tint for the share
+//             of a turn given in RingParams.x, clockwise from the top, and
+//             GradB for the rest (the storage ring)
+//
+// Its own vertex shader, a copy of QuadVertexShader that also passes the
+// pixel position through, so the proven quad pipeline is untouched. Where a
+// shape is relative to is given as a constant (ShapeRect) rather than read
+// from the texture coordinates, so a texture can be drawn with a cropped UV
+// range and still have its corners rounded in the right place.
+//
+// Everything is lerp/step arithmetic with no branches, so the compiler has no
+// flow control to get wrong; a shape costs a few dozen ALU ops a pixel.
+static const char g_strShapeShader[] =
+    "struct VS_IN\n"
+    "{\n"
+    "    float2 Pos : POSITION;\n"
+    "    float2 Tex : TEXCOORD0;\n"
+    "};\n"
+    "struct VS_OUT\n"
+    "{\n"
+    "    float4 Position : POSITION;\n"
+    "    float2 TexCoord0 : TEXCOORD0;\n"
+    "    float2 Pixel : TEXCOORD1;\n"
+    "};\n"
+    "VS_OUT ShapeVertexShader( VS_IN In )\n"
+    "{\n"
+    "    VS_OUT Out;\n"
+    "    Out.Position.x = In.Pos.x - 0.5;\n"
+    "    Out.Position.y = In.Pos.y - 0.5;\n"
+    "    Out.Position.z = 0.0;\n"
+    "    Out.Position.w = 1.0;\n"
+    "    Out.TexCoord0 = In.Tex;\n"
+    "    Out.Pixel = In.Pos;\n"
+    "    return Out;\n"
+    "}\n"
+    "uniform float4 Tint : register(c1);\n"
+    "uniform float4 GradA : register(c2);\n"
+    "uniform float4 GradB : register(c3);\n"
+    "uniform float4 GradAxis : register(c4);\n"
+    "uniform float4 ShapeRect : register(c5);\n"   // x, y, w, h in pixels
+    "uniform float4 ShapeParams : register(c6);\n" // radius, stroke width (0 fills), blur (0 is crisp), 1 for a ring
+    "uniform float4 RingParams : register(c7);\n"  // x: the ring's filled share of a turn
+    "sampler QuadTexture : register(s0);\n"
+    "float4 ShapePixelShader( VS_OUT In ) : COLOR0\n"
+    "{\n"
+    "    float2 halfSize = ShapeRect.zw * 0.5;\n"
+    "    float2 local = In.Pixel - ShapeRect.xy;\n"
+    "    float2 p = local - halfSize;\n"
+    "    float r = ShapeParams.x;\n"
+    "    float2 q = abs(p) - (halfSize - r);\n"
+    "    float boxD = length(max(q, 0.0)) + min(max(q.x, q.y), 0.0) - r;\n"
+    "    float len = length(p);\n"
+    "    float ringD = max(len - halfSize.x, (halfSize.x - ShapeParams.y) - len);\n"
+    "    float isRing = ShapeParams.w;\n"
+    "    float d = lerp(boxD, ringD, isRing);\n"
+    "    float fill = saturate(0.5 - d);\n"
+    "    float stroke = fill * saturate(0.5 + d + ShapeParams.y);\n"
+    "    float cover = lerp(fill, stroke, step(0.001, ShapeParams.y) * (1.0 - isRing));\n"
+    "    float soft = saturate(1.0 - d / max(ShapeParams.z, 0.001));\n"
+    "    cover = lerp(cover, soft * soft, step(0.001, ShapeParams.z));\n"
+    "    float t = dot(saturate(local / ShapeRect.zw), GradAxis.xy);\n"
+    "    float4 color = tex2D( QuadTexture, In.TexCoord0 ) * Tint * lerp( GradA, GradB, t );\n"
+    "    float turn = frac(atan2(p.x, -p.y) / 6.2831853 + 1.0);\n"
+    "    float used = step(turn, RingParams.x);\n"
+    "    color = lerp(color, lerp(GradB, Tint, used), isRing);\n"
+    "    color.a *= cover;\n"
+    "    return color;\n"
+    "}\n";
+
+static D3DVertexShader *g_pShapeVertexShader = NULL;
+static D3DPixelShader *g_pShapePixelShader = NULL;
+
+// False if the shape shaders didn't compile - shapes then fall back to plain
+// square quads (see DrawShape), so the UI loses its corners rather than
+// failing to start.
+static bool g_shapesReady = false;
+
+static bool CompileShader(const char *entry, const char *profile, ID3DXBuffer **out)
+{
+    ID3DXBuffer *errors = NULL;
+    HRESULT hr = D3DXCompileShader(g_strShapeShader, sizeof(g_strShapeShader) - 1,
+                                   NULL, NULL, entry, profile, 0, out, &errors, NULL);
+    if (FAILED(hr))
+    {
+        dprintf("[ui] %s didn't compile (0x%08lX): %s\n", entry, (unsigned long)hr,
+                errors != NULL ? (const char *)errors->GetBufferPointer() : "no message");
+    }
+    if (errors != NULL)
+        errors->Release();
+    return SUCCEEDED(hr);
+}
+
+static void CreateShapeShaders()
+{
+    ID3DXBuffer *code = NULL;
+
+    if (!CompileShader("ShapeVertexShader", "vs.2.0", &code))
+        return;
+    HRESULT hr = g_pd3dDevice->CreateVertexShader((DWORD *)code->GetBufferPointer(), &g_pShapeVertexShader);
+    code->Release();
+    if (FAILED(hr))
+        return;
+
+    if (!CompileShader("ShapePixelShader", "ps.2.0", &code))
+        return;
+    hr = g_pd3dDevice->CreatePixelShader((DWORD *)code->GetBufferPointer(), &g_pShapePixelShader);
+    code->Release();
+    if (FAILED(hr))
+        return;
+
+    g_shapesReady = true;
+}
 
 static bool CreateQuadResources()
 {
@@ -412,44 +534,6 @@ static void DrawGradientRect(float x, float y, float w, float h,
     DrawQuadEx(NULL, x, y, w, h, 0xFFFFFFFF, colorA, colorB, vertical);
 }
 
-// Scales a colour's RGB while leaving its alpha alone, clamping each channel.
-// Used to brighten and dim the selected row as it pulses.
-static D3DCOLOR ScaleColorBrightness(D3DCOLOR c, float mul)
-{
-    unsigned long a = (c >> 24) & 0xFF;
-    float r = (float)((c >> 16) & 0xFF) * mul;
-    float g = (float)((c >> 8) & 0xFF) * mul;
-    float b = (float)(c & 0xFF) * mul;
-
-    if (r > 255.0f) r = 255.0f;
-    if (g > 255.0f) g = 255.0f;
-    if (b > 255.0f) b = 255.0f;
-
-    return (a << 24) | ((unsigned long)r << 16) | ((unsigned long)g << 8) | (unsigned long)b;
-}
-
-// How far the selected bar brightens and dims as it pulses, and how long one
-// full cycle takes. Deliberately small - this should register as the row being
-// alive, not as something demanding attention while someone reads it.
-#define SEL_PULSE_AMOUNT   0.10f
-#define SEL_PULSE_PERIOD_MS 2200.0f
-
-// Brightness multiplier for the selected row this frame, oscillating gently
-// around 1.0.
-//
-// Driven off GetTickCount rather than a frame counter so the rate is the same
-// regardless of what the renderer is managing - these screens do real work
-// between frames (scanning a library, streaming a download), and a per-frame
-// counter would make the pulse speed up and slow down with the workload.
-//
-// The wrap of GetTickCount after ~49 days is harmless: the modulo simply
-// starts over, which at worst skips the pulse forward once.
-static float SelectionPulse()
-{
-    float phase = (float)(GetTickCount() % (DWORD)SEL_PULSE_PERIOD_MS) / SEL_PULSE_PERIOD_MS;
-    return 1.0f + SEL_PULSE_AMOUNT * sinf(phase * 6.2831853f);
-}
-
 // ---------------------------------------------------------------------------
 // Small helpers
 // ---------------------------------------------------------------------------
@@ -509,73 +593,35 @@ static void Utf8ToWide(const char *in, WCHAR *out, int outSize)
 // Theme
 // ---------------------------------------------------------------------------
 
-// An original dark palette: a near-black background with a slight green cast,
-// one green accent, and a small set of neutral text weights. Chosen for a TV
-// at couch distance - low overall brightness, but high contrast where it
-// matters (selected row, primary text).
-#define COL_BG_TOP         0xFF16231C // subtle wash, lightest at the top
-#define COL_BG_BOTTOM      0xFF050907
-#define COL_HEADER_RULE_A  0xFF5FBF46 // accent rule under the header, fading out to the right
-#define COL_HEADER_RULE_B  0x005FBF46
-#define COL_PANEL          0x12FFFFFF // unselected row plate
+// The Xbox Series dashboard's look: charcoal surfaces with no colour cast,
+// white text, a white ring round whatever has focus, and one green spent only
+// where something is current or in progress - the page you're on, a download
+// bar, the storage ring, a count of waiting downloads. The tokens match the
+// Phase 4 mockup (docs/phase4-mockup.html) one for one.
+#define COL_BG_TOP         0xFF1C1C1C // the page wash, lightest at the top
+#define COL_BG_BOTTOM      0xFF0E0E0E
+#define COL_RAIL           0xFF161616 // the sidebar
+#define COL_SURFACE        0xFF232323 // rows, cards, a tile's backing
+#define COL_SURFACE_HI     0xFF2F2F2F // the current page in the sidebar, the selected row
+#define COL_TRACK          0xFF3A3A3A // progress and storage troughs, the library count
+#define COL_DIVIDER        0xFF2A2A2A
+#define COL_TEXT           0xFFFFFFFF
+#define COL_TEXT2          0xFFC4C4C4 // secondary text
+#define COL_DIM            0xFF8F8F8F // captions; 5.5:1 on the background
+#define COL_GREEN          0xFF107C10 // fills only - too dark to read as text
+#define COL_GREEN_HI       0xFF1FA01F // the top of a green gradient
+#define COL_GREEN_TEXT     0xFF6CC96C // green that has to read as text on charcoal
+#define COL_ERROR          0xFFFF6B61
+#define COL_AMBER          0xFFF0BE12 // the Y button's colour, for the keys notice
+#define COL_FOCUS          0xFFFFFFFF
+#define COL_PILL           0xB8000000 // the DLC/TU labels over artwork
+#define COL_SHADOW         0x99000000
+#define COL_PEEK_TOP       0x590E0E0E // the cut-off row, fading into the background
+#define COL_STORE_GLOW     0xFF17351A // the left end of a placeholder card
 
-// Selected row: a solid green bar with a vertical gradient, light at the top
-// falling to deeper green at the bottom.
-//
-// This used to be translucent white fading horizontally, with the green
-// confined to a thin strip down the left edge - so the palette had an accent
-// colour it barely spent. Putting the green in the bar itself is what makes a
-// selection read from across a room, which is the only distance that matters
-// on a TV.
-#define COL_PANEL_SEL_A    0xFF93E063 // top of the selected bar
-#define COL_PANEL_SEL_B    0xFF4C9A31 // bottom
-
-
-// Text drawn ON the selected green bar. White holds up on mid-green; the
-// dimmer greys used elsewhere do not, and the accent green would disappear
-// into it entirely.
-#define COL_SEL_TEXT       0xFFFFFFFF
-#define COL_SEL_SUBTEXT    0xD9FFFFFF
-#define COL_SEL_MARKER     0xFF0F2A08
-#define COL_ACCENT         0xFF7FD44F // selection marker, progress fill
-#define COL_ACCENT_DIM     0xFF3E8A2E
-#define COL_ICON_PLACEHLD  0xFF2A332C
-#define COL_TEXT_PRIMARY   0xFFFFFFFF
-#define COL_TEXT_SECONDARY 0xFFA8B4AC
-// Lightened from a first pass at 0xFF6E7A72, which measured only ~3.5:1
-// against the background - under the 4.5:1 readability threshold, and this
-// carries the footer hints and per-row title IDs on a TV at couch distance.
-#define COL_TEXT_DIM       0xFF8A968E
-#define COL_SCROLL_TRACK   0x1AFFFFFF
-#define COL_SCROLL_THUMB   0x99FFFFFF
-#define COL_BAR_TROUGH     0x26FFFFFF
-
-// The notice banner above the game list (e.g. "no archive.org keys yet").
-// Amber, the Y button's own colour, because Y is what fixes it - so the badge
-// in the banner and the banner itself read as one thing.
-#define COL_NOTICE_PLATE_A 0x47F0BE12 // translucent amber, stronger at the left
-#define COL_NOTICE_PLATE_B 0x12F0BE12
-#define COL_NOTICE_EDGE    0xFFF0BE12 // solid strip down the left edge
-#define COL_NOTICE_TEXT    0xFFF6E9C0 // warm off-white, legible over the amber
-
-// The sidebar: a flat panel, darker than the page behind it, with a hairline
-// down its right edge.
-#define COL_SIDEBAR        0xD9070B08
-#define COL_SIDEBAR_EDGE   0x14FFFFFF
-#define COL_SIDEBAR_RULE   0x1FFFFFFF // the divider between the two groups of pages
-
-// The selected row of whichever side does NOT have focus: still marked, so
-// you can see where you'll land, but without the green bar - that is kept for
-// the one place A would act right now.
-#define COL_PANEL_SEL_IDLE 0x2EFFFFFF
-
-// Failures - a queue row that didn't install, the edge of an error popup.
-// A warm red, bright enough to read as text on the dark background.
-#define COL_ERROR          0xFFEC6F64
-
-// The popup's plate: nearly opaque, so the header rule behind it doesn't
-// show through.
-#define COL_TOAST_PLATE    0xF2141C17
+// Rounded corners need the shape shader; with it missing they come out square
+// anyway. Turning this off squares them deliberately.
+#define UI_ROUNDED_CORNERS 1
 
 // ---------------------------------------------------------------------------
 // Layout metrics
@@ -584,116 +630,337 @@ static void Utf8ToWide(const char *in, WCHAR *out, int outSize)
 // Everything below is derived from the real back buffer size rather than
 // hardcoded, because it genuinely varies: AtgConsole creates 1920x1080 when
 // the console outputs 1080p, 1280x720 on other HD modes and 640x480 otherwise
-// (see Console::Create). The previous layout's fixed 900px-wide rows and 80px
-// margins silently ran off the right edge of a 640-wide buffer.
+// (see Console::Create). Sizes are written for 720p and multiplied by scale.
 struct UiMetrics
 {
     float screenW, screenH;
-    float scale;        // 1.0 at 720p, 1.5 at 1080p, ~0.67 at 480p - multiplies spacing and layout
-    float textScale;    // scale, corrected for the loaded font's strike height (see ComputeUiMetrics)
-    float sidebarW;     // the sidebar panel, from the left edge of the screen
-    float navTextX;     // title-safe left edge, where the sidebar's text starts
-    float navTextRight; // where the sidebar's right-aligned counts end
-    float contentX;     // left edge of the page, right of the sidebar
-    float contentW;     // page width, out to the title-safe right edge
-    float headerTextY;
-    float headerRuleY;
-    float listY;
-    float rowH;
-    float iconSize;
-    float footerY;
-    int visibleRows;
+    float scale;      // 1.0 at 720p, 1.5 at 1080p, ~0.67 at 480p
+    float textScale;  // scale, corrected for the font's design height (see ComputeUiMetrics)
+    float safeX, safeY;
+    float sidebarW;   // the sidebar, from the left edge of the screen
+    float navX, navW; // the sidebar's page buttons
+    float contentX;   // left edge of the page, right of the sidebar
+    float contentW;   // page width, out to the title-safe right edge
+    float headerY;    // top of the page title
+    float listY;      // top of the page's content
+    float footerY;    // centre line of the button hints and the storage ring
+    float radius;     // corners of tiles, cards and page buttons
+    int gridCols;     // library columns
 };
 
 static UiMetrics g_M;
 
 static bool ComputeUiMetrics()
 {
-    // Read from the parameters the device was actually created with. This
-    // used to repeat Console::Create's video-mode check instead, which kept
-    // the two in step only as long as nobody changed one of them - and adding
-    // 1080p changed it.
+    // Read from the parameters the device was actually created with, so this
+    // can't drift from Console::Create's choice of mode.
     const D3DPRESENT_PARAMETERS *pParams = Console::GetPresentParams();
     if (pParams == NULL || pParams->BackBufferHeight == 0)
         return false;
 
+    const float k = (float)pParams->BackBufferHeight / 720.0f;
+
     g_M.screenW = (float)pParams->BackBufferWidth;
     g_M.screenH = (float)pParams->BackBufferHeight;
-    g_M.scale = g_M.screenH / 720.0f;
+    g_M.scale = k;
 
     const bool isHD = (pParams->BackBufferWidth >= 1280);
 
-    // Every type size in this file is a multiple of g_M.textScale, and those
-    // multipliers were chosen against a 22px design height.
-    //
-    // This correction existed because the bitmap atlas had a strike height of
-    // its own - 28px, where the layout wanted 22 - so every string was
-    // resampled and small text went soft. Dividing the difference back out
-    // fixed the size but could not undo the resampling.
-    //
-    // UiFont renders at whatever size is asked for, so there is no strike to
-    // disagree with: GetFontHeight returns the design height and this becomes
-    // g_M.scale exactly. The arithmetic is kept rather than deleted because it
-    // costs nothing, keeps every call site reading the same, and would
-    // immediately re-correct if the text renderer were ever swapped again.
+    // Every type size here is a multiple of textScale, chosen against a 22px
+    // design height. UiFont reports exactly that height, so this is scale;
+    // the correction stays in case the text renderer is ever swapped again.
     float fontHeight = g_UiFont.GetFontHeight();
-    g_M.textScale = (fontHeight > 1.0f) ? g_M.scale * (22.0f / fontHeight) : g_M.scale;
+    g_M.textScale = (fontHeight > 1.0f) ? k * (22.0f / fontHeight) : k;
 
     // Title-safe inset, matching AtgConsole's percentages (90% of the screen
     // on HD, 85% on 4:3) - a real TV can and does crop the rest.
     float safePct = isHD ? 0.90f : 0.85f;
-    float safeX = g_M.screenW * (1.0f - safePct) * 0.5f;
-    float safeY = g_M.screenH * (1.0f - safePct) * 0.5f;
+    g_M.safeX = g_M.screenW * (1.0f - safePct) * 0.5f;
+    g_M.safeY = g_M.screenH * (1.0f - safePct) * 0.5f;
 
-    // The sidebar's panel runs from the very edge of the screen, but its text
-    // starts at the title-safe inset like everything else. The page takes the
-    // rest - which is why every screen, blocking ones included, lays itself
-    // out from contentX/contentW: they all moved right together.
-    g_M.sidebarW = 240.0f * g_M.scale;
-    g_M.navTextX = safeX;
-    g_M.navTextRight = g_M.sidebarW - 18.0f * g_M.scale;
+    // The sidebar runs from the very edge of the screen; its text starts at
+    // the title-safe inset, and its page buttons reach a little left of that
+    // so the text sits inside them.
+    g_M.sidebarW = 280.0f * k;
+    g_M.navX = g_M.safeX - 16.0f * k;
+    g_M.navW = g_M.sidebarW - g_M.navX - 16.0f * k;
 
-    g_M.contentX = g_M.sidebarW + 32.0f * g_M.scale;
-    g_M.contentW = g_M.screenW - safeX - g_M.contentX;
+    g_M.contentX = g_M.sidebarW + 32.0f * k;
+    g_M.contentW = g_M.screenW - g_M.safeX - g_M.contentX;
 
-    g_M.headerTextY = safeY;
-    g_M.headerRuleY = safeY + 40.0f * g_M.scale;
-    g_M.listY = safeY + 64.0f * g_M.scale;
+    g_M.headerY = g_M.safeY;
+    g_M.listY = g_M.safeY + 92.0f * k;
+    g_M.footerY = g_M.screenH - g_M.safeY - 22.0f * k;
 
-    g_M.rowH = 76.0f * g_M.scale;
-    g_M.iconSize = 60.0f * g_M.scale;
+    g_M.radius = UI_ROUNDED_CORNERS ? 6.0f * k : 0.0f;
 
-    g_M.footerY = g_M.screenH - safeY - 28.0f * g_M.scale;
-
-    // Fit as many rows as the space between the list top and the footer
-    // allows, rather than assuming a fixed six - at 480p six rows of the old
-    // fixed height did not fit, and on HD there's room for more.
-    float listSpace = g_M.footerY - g_M.listY - 16.0f * g_M.scale;
-    g_M.visibleRows = (int)(listSpace / g_M.rowH);
-    if (g_M.visibleRows < 1) g_M.visibleRows = 1;
-    if (g_M.visibleRows > 16) g_M.visibleRows = 16; // sanity clamp; nothing realistic hits this
+    // Five across on HD, as on the dashboard. A 4:3 page is too narrow for
+    // five tiles to show anything.
+    g_M.gridCols = isHD ? 5 : 3;
 
     return true;
+}
+
+// A 720p measurement at this screen's size.
+static float S(float px720)
+{
+    return px720 * g_M.scale;
+}
+
+// Radii for things smaller than a tile, which follow the same switch.
+static float R(float px720)
+{
+    return UI_ROUNDED_CORNERS ? px720 * g_M.scale : 0.0f;
+}
+
+// ---------------------------------------------------------------------------
+// Shapes
+// ---------------------------------------------------------------------------
+
+struct ShapeStyle
+{
+    float radius;
+    float stroke;       // > 0 draws only a band this wide inside the edge
+    float blur;         // > 0 draws a soft shadow falling off over this many pixels
+    bool ring;          // a ring instead of a box - see DrawRing
+    float ringFraction;
+};
+
+static ShapeStyle Shape(float radius)
+{
+    ShapeStyle s;
+    s.radius = radius;
+    s.stroke = 0.0f;
+    s.blur = 0.0f;
+    s.ring = false;
+    s.ringFraction = 0.0f;
+    return s;
+}
+
+// The shape at x,y,w,h, drawn on a quad grown by pad on every side - room for
+// a shadow's falloff. Texture coordinates span the shape itself, so only use
+// pad with an untextured shape.
+//
+// The state setup is DrawQuadUV's, line for line - that list is what took
+// hardware debugging to get right, and the two draws must leave the device in
+// the same condition.
+static void DrawShape(D3DTexture *texture, float x, float y, float w, float h, float pad,
+                      float u0, float v0, float u1, float v1,
+                      D3DCOLOR tint, D3DCOLOR gradA, D3DCOLOR gradB, bool vertical,
+                      const ShapeStyle &style)
+{
+    if (w <= 0.0f || h <= 0.0f)
+        return;
+
+    if (!g_shapesReady)
+    {
+        // Square, flat, no shadow: the UI without the shader. A stroke is
+        // drawn as four bars so focus still shows; a ring is left out.
+        if (style.blur > 0.0f || style.ring)
+            return;
+        if (style.stroke > 0.0f)
+        {
+            float t = style.stroke;
+            DrawQuadUV(NULL, x, y, w, t, 0, 0, 1, 1, tint, gradA, gradB, vertical);
+            DrawQuadUV(NULL, x, y + h - t, w, t, 0, 0, 1, 1, tint, gradA, gradB, vertical);
+            DrawQuadUV(NULL, x, y + t, t, h - 2 * t, 0, 0, 1, 1, tint, gradA, gradB, vertical);
+            DrawQuadUV(NULL, x + w - t, y + t, t, h - 2 * t, 0, 0, 1, 1, tint, gradA, gradB, vertical);
+            return;
+        }
+        DrawQuadUV(texture, x, y, w, h, u0, v0, u1, v1, tint, gradA, gradB, vertical);
+        return;
+    }
+
+    float tintF[4], gradAF[4], gradBF[4];
+    ColorToFloat4(tint, tintF);
+    ColorToFloat4(gradA, gradAF);
+    ColorToFloat4(gradB, gradBF);
+
+    float radius = style.radius;
+    float maxRadius = (w < h ? w : h) * 0.5f;
+    if (radius > maxRadius) radius = maxRadius;
+
+    float axis[4] = {vertical ? 0.0f : 1.0f, vertical ? 1.0f : 0.0f, 0.0f, 0.0f};
+    float rect[4] = {x, y, w, h};
+    float params[4] = {radius, style.stroke, style.blur, style.ring ? 1.0f : 0.0f};
+    float ring[4] = {style.ringFraction, 0.0f, 0.0f, 0.0f};
+
+    g_pd3dDevice->SetPixelShaderConstantF(1, tintF, 1);
+    g_pd3dDevice->SetPixelShaderConstantF(2, gradAF, 1);
+    g_pd3dDevice->SetPixelShaderConstantF(3, gradBF, 1);
+    g_pd3dDevice->SetPixelShaderConstantF(4, axis, 1);
+    g_pd3dDevice->SetPixelShaderConstantF(5, rect, 1);
+    g_pd3dDevice->SetPixelShaderConstantF(6, params, 1);
+    g_pd3dDevice->SetPixelShaderConstantF(7, ring, 1);
+
+    g_pd3dDevice->SetTexture(0, texture != NULL ? texture : g_pWhiteTexture);
+    g_pd3dDevice->SetVertexDeclaration(g_pQuadVertexDecl);
+    g_pd3dDevice->SetVertexShader(g_pShapeVertexShader);
+    g_pd3dDevice->SetPixelShader(g_pShapePixelShader);
+
+    g_pd3dDevice->SetRenderState(D3DRS_ALPHABLENDENABLE, TRUE);
+    g_pd3dDevice->SetRenderState(D3DRS_SRCBLEND, D3DBLEND_SRCALPHA);
+    g_pd3dDevice->SetRenderState(D3DRS_DESTBLEND, D3DBLEND_INVSRCALPHA);
+    g_pd3dDevice->SetRenderState(D3DRS_BLENDOP, D3DBLENDOP_ADD);
+    g_pd3dDevice->SetRenderState(D3DRS_ALPHATESTENABLE, FALSE);
+    g_pd3dDevice->SetRenderState(D3DRS_FILLMODE, D3DFILL_SOLID);
+    g_pd3dDevice->SetRenderState(D3DRS_CULLMODE, D3DCULL_NONE);
+    g_pd3dDevice->SetRenderState(D3DRS_ZENABLE, FALSE);
+    g_pd3dDevice->SetRenderState(D3DRS_STENCILENABLE, FALSE);
+    g_pd3dDevice->SetRenderState(D3DRS_VIEWPORTENABLE, FALSE);
+    g_pd3dDevice->SetRenderState(D3DRS_COLORWRITEENABLE, 0x0000000F);
+    g_pd3dDevice->SetRenderState(D3DRS_SCISSORTESTENABLE, FALSE);
+    g_pd3dDevice->SetSamplerState(0, D3DSAMP_MINFILTER, D3DTEXF_LINEAR);
+    g_pd3dDevice->SetSamplerState(0, D3DSAMP_MAGFILTER, D3DTEXF_LINEAR);
+    g_pd3dDevice->SetSamplerState(0, D3DSAMP_MIPFILTER, D3DTEXF_NONE);
+    g_pd3dDevice->SetSamplerState(0, D3DSAMP_ADDRESSU, D3DTADDRESS_CLAMP);
+    g_pd3dDevice->SetSamplerState(0, D3DSAMP_ADDRESSV, D3DTADDRESS_CLAMP);
+
+    const float qx = x - pad, qy = y - pad, qw = w + pad * 2.0f, qh = h + pad * 2.0f;
+
+    volatile FLOAT *pVertex;
+    if (SUCCEEDED(g_pd3dDevice->BeginVertices(D3DPT_QUADLIST, 4, sizeof(QuadVertex), (VOID **)&pVertex)))
+    {
+        pVertex[0] = qx;        pVertex[1] = qy;        pVertex[2] = u0;  pVertex[3] = v0;  // TL
+        pVertex[4] = qx + qw;   pVertex[5] = qy;        pVertex[6] = u1;  pVertex[7] = v0;  // TR
+        pVertex[8] = qx + qw;   pVertex[9] = qy + qh;   pVertex[10] = u1; pVertex[11] = v1; // BR
+        pVertex[12] = qx;       pVertex[13] = qy + qh;  pVertex[14] = u0; pVertex[15] = v1; // BL
+
+        g_pd3dDevice->EndVertices();
+    }
+
+    g_pd3dDevice->SetTexture(0, NULL);
+    g_pd3dDevice->SetVertexDeclaration(NULL);
+    g_pd3dDevice->SetVertexShader(NULL);
+    g_pd3dDevice->SetPixelShader(NULL);
+}
+
+static void FillRound(float x, float y, float w, float h, float radius, D3DCOLOR color)
+{
+    DrawShape(NULL, x, y, w, h, 0.0f, 0, 0, 1, 1, color, 0xFFFFFFFF, 0xFFFFFFFF, true, Shape(radius));
+}
+
+static void FillRoundGradient(float x, float y, float w, float h, float radius,
+                              D3DCOLOR colorA, D3DCOLOR colorB, bool vertical)
+{
+    DrawShape(NULL, x, y, w, h, 0.0f, 0, 0, 1, 1, 0xFFFFFFFF, colorA, colorB, vertical, Shape(radius));
+}
+
+// A band of `width` just inside the edge of x,y,w,h.
+static void StrokeRound(float x, float y, float w, float h, float radius, float width, D3DCOLOR color)
+{
+    ShapeStyle s = Shape(radius);
+    s.stroke = width;
+    DrawShape(NULL, x, y, w, h, 0.0f, 0, 0, 1, 1, color, 0xFFFFFFFF, 0xFFFFFFFF, true, s);
+}
+
+// A shadow the shape of x,y,w,h, fading out over `blur` beyond its edge.
+static void ShadowRound(float x, float y, float w, float h, float radius, float blur, D3DCOLOR color)
+{
+    ShapeStyle s = Shape(radius);
+    s.blur = blur;
+    DrawShape(NULL, x, y, w, h, blur, 0, 0, 1, 1, color, 0xFFFFFFFF, 0xFFFFFFFF, true, s);
+}
+
+// A texture, or the part of it u0..v1, with rounded corners. gradA/gradB
+// multiply it, top to bottom - white for the texture as it is.
+static void TextureRound(D3DTexture *texture, float x, float y, float w, float h, float radius,
+                         float u0, float v0, float u1, float v1, D3DCOLOR gradA, D3DCOLOR gradB)
+{
+    DrawShape(texture, x, y, w, h, 0.0f, u0, v0, u1, v1, 0xFFFFFFFF, gradA, gradB, true, Shape(radius));
+}
+
+// A ring centred on cx,cy: `used` for `fraction` of a turn clockwise from the
+// top, `track` for the rest.
+static void DrawRing(float cx, float cy, float outerRadius, float thickness, float fraction,
+                     D3DCOLOR used, D3DCOLOR track)
+{
+    ShapeStyle s = Shape(0.0f);
+    s.ring = true;
+    s.stroke = thickness;
+    s.ringFraction = fraction;
+    DrawShape(NULL, cx - outerRadius, cy - outerRadius, outerRadius * 2.0f, outerRadius * 2.0f, 0.0f,
+              0, 0, 1, 1, used, track, track, true, s);
+}
+
+// The focus ring: white, a little outside the thing focused, its corners
+// following the thing's own.
+static void FocusRing(float x, float y, float w, float h, float radius)
+{
+    const float t = S(3.0f), gap = S(3.0f), out = t + gap;
+    StrokeRound(x - out, y - out, w + out * 2.0f, h + out * 2.0f, radius > 0.0f ? radius + out : 0.0f, t, COL_FOCUS);
+}
+
+// ---------------------------------------------------------------------------
+// Text
+// ---------------------------------------------------------------------------
+//
+// One call per string: size as a multiple of the design height, weight, and
+// UTF-8 in. Every page draws all of its text through these, inside the one
+// font Begin/End the frame has.
+
+static float LineHeight(float mul)
+{
+    return 22.0f * g_M.textScale * mul;
+}
+
+// DrawText positions text by its top edge, so centring on a line means
+// subtracting half the rendered line height.
+static float TextTopForCenter(float centerY, float yScale)
+{
+    return centerY - (g_UiFont.GetFontHeight() * yScale) * 0.5f;
+}
+
+static void SetType(float mul, bool bold)
+{
+    g_UiFont.SetBold(bold);
+    g_UiFont.SetScaleFactors(mul * g_M.textScale, mul * g_M.textScale);
+}
+
+static void Text(float x, float y, float mul, D3DCOLOR color, const char *utf8,
+                 DWORD flags = 0, float maxW = 0.0f, bool bold = false)
+{
+    if (utf8 == NULL || utf8[0] == '\0')
+        return;
+
+    WCHAR wide[256];
+    Utf8ToWide(utf8, wide, 256);
+
+    SetType(mul, bold);
+    g_UiFont.DrawText(x, y, color, wide, flags, maxW);
+}
+
+// Truncated to maxW when maxW > 0.
+static void TextFit(float x, float y, float mul, D3DCOLOR color, const char *utf8, float maxW, bool bold = false)
+{
+    Text(x, y, mul, color, utf8, maxW > 0.0f ? ATGFONT_TRUNCATED : 0, maxW, bold);
+}
+
+static void TextMid(float x, float centerY, float mul, D3DCOLOR color, const char *utf8,
+                    DWORD flags = 0, float maxW = 0.0f, bool bold = false)
+{
+    Text(x, TextTopForCenter(centerY, mul * g_M.textScale), mul, color, utf8, flags, maxW, bold);
+}
+
+static float TextWidth(const char *utf8, float mul, bool bold = false)
+{
+    if (utf8 == NULL || utf8[0] == '\0')
+        return 0.0f;
+
+    WCHAR wide[256];
+    Utf8ToWide(utf8, wide, 256);
+
+    SetType(mul, bold);
+    return g_UiFont.GetTextWidth(wide);
 }
 
 // ---------------------------------------------------------------------------
 // Footer button hints
 // ---------------------------------------------------------------------------
 //
-// The controller-button hints at the bottom of the screen: the button's icon,
-// then what it does.
-//
-// The icons are pre-rendered art from ButtonAtlas.h, one textured quad each;
-// tools/make_button_atlas.py says how they are made. They used to be built
-// here from a tinted disc, a ring over its edge and a letter drawn on top in
-// the text pass, which could only ever give a flat badge. The glossy look of
-// the console's own prompts - a crisp highlight across the top, a glow from
-// below, a bold letter in a deep shade of the button's colour - is shading
-// that's easy to author offline and impractical to assemble from primitives.
-//
-// Nothing in the XDK could supply it instead. XUI's default skin carries only
-// blank coloured discs, marked internal-use-only in its .rights file, and the
-// private-use glyphs in the redistributable Xbox font are chat smileys.
+// The controller-button hints at the bottom right: the button's icon, then
+// what it does. The icons are pre-rendered art from ButtonAtlas.h, one
+// textured quad each; tools/make_button_atlas.py says how they are made.
 
 // One hint. Laid out once and then drawn twice - the icon in the quad pass
 // and the label in the font pass - so both read positions from here.
@@ -709,39 +976,27 @@ struct ButtonHint
 
 #define HINT_LABEL_SCALE 0.78f
 
-// A face button's on-screen diameter. One definition rather than a literal in
-// each pass, since the passes silently disagree if one copy changes alone.
+// A face button's on-screen diameter. Every sprite scales by the same factor,
+// so the shoulder buttons keep their size relative to the face buttons.
 static float HintBadgeHeight()
 {
-    return 26.0f * g_M.scale;
+    return S(26.0f);
 }
 
-// Every sprite scales by this one factor, so the shoulder buttons keep the
-// size they were drawn at relative to the face buttons rather than each being
-// fitted to the row separately. On a 720p screen it is 0.5: the atlas is drawn
-// at twice the size it's shown at, so bilinear filtering gets a clean 2:1.
 static float HintSpriteScale()
 {
     return HintBadgeHeight() / (float)BUTTON_ATLAS_FACE_D;
 }
 
-// DrawText positions text by its TOP edge, so centring on a badge means
-// subtracting half the rendered line height - the font's height times
-// whatever Y scale is currently set.
-static float TextTopForCenter(float centerY, float yScale)
-{
-    return centerY - (g_UiFont.GetFontHeight() * yScale) * 0.5f;
-}
-
-// Walks the hints left to right, measuring each label so the spacing follows
-// the text instead of assuming every label is the same length ("DLC" and
-// "Title update" are not). Returns the total width.
+// Walks the hints left to right from startX, measuring each label. Returns
+// the total width.
 static float LayoutButtonHints(ButtonHint *hints, int count, float startX)
 {
     float k = HintSpriteScale();
-    float gapBadgeToLabel = 8.0f * g_M.scale;
-    float gapBetweenHints = 26.0f * g_M.scale;
+    float gapBadgeToLabel = S(8.0f);
+    float gapBetweenHints = S(28.0f);
 
+    g_UiFont.SetBold(false);
     g_UiFont.SetScaleFactors(HINT_LABEL_SCALE * g_M.textScale, HINT_LABEL_SCALE * g_M.textScale);
 
     float x = startX;
@@ -752,17 +1007,21 @@ static float LayoutButtonHints(ButtonHint *hints, int count, float startX)
         hints[i].badgeW = (float)kButtonSprites[hints[i].sprite].boxW * k;
         hints[i].labelX = x + hints[i].badgeW + gapBadgeToLabel;
 
-        float labelW = g_UiFont.GetTextWidth(hints[i].label);
-
-        x = hints[i].labelX + labelW + gapBetweenHints;
+        x = hints[i].labelX + g_UiFont.GetTextWidth(hints[i].label) + gapBetweenHints;
     }
 
-    return x - gapBetweenHints - startX;
+    return (count > 0) ? x - gapBetweenHints - startX : 0.0f;
+}
+
+// Right-aligned to the page's edge, as on the dashboard.
+static void LayoutButtonHintsRight(ButtonHint *hints, int count)
+{
+    float width = LayoutButtonHints(hints, count, g_M.contentX);
+    LayoutButtonHints(hints, count, g_M.contentX + g_M.contentW - width);
 }
 
 // One button icon, its left edge at boxX and centred vertically on centerY.
-// Returns the on-screen width of the button itself (not counting its shadow),
-// for placing whatever follows it.
+// Returns the on-screen width of the button itself (not its shadow).
 static float DrawButtonSprite(int sprite, float boxX, float centerY)
 {
     const float k = HintSpriteScale();
@@ -785,31 +1044,33 @@ static float DrawButtonSprite(int sprite, float boxX, float centerY)
     return (float)s.boxW * k;
 }
 
-// Quad pass: the icons.
 static void DrawButtonHintShapes(const ButtonHint *hints, int count, float centerY)
 {
     for (int i = 0; i < count; ++i)
         DrawButtonSprite(hints[i].sprite, hints[i].badgeX, centerY);
 }
 
-// Font pass: the labels. Must be called inside an open Font Begin/End.
+// Must be called inside an open Font Begin/End.
 static void DrawButtonHintText(const ButtonHint *hints, int count, float centerY)
 {
     float labelScale = HINT_LABEL_SCALE * g_M.textScale;
+    g_UiFont.SetBold(false);
     g_UiFont.SetScaleFactors(labelScale, labelScale);
 
     for (int i = 0; i < count; ++i)
     {
         g_UiFont.DrawText(hints[i].labelX, TextTopForCenter(centerY, labelScale),
-                          COL_TEXT_DIM, hints[i].label);
+                          COL_TEXT2, hints[i].label);
     }
 }
 
-// Full-screen background wash, drawn first every frame. Replaces the flat
-// Clear() color - the Clear itself still happens, this just paints over it.
+// Full-screen wash, drawn first every frame: lightest at the top, settling to
+// the background colour seven tenths of the way down.
 static void DrawBackground()
 {
-    DrawGradientRect(0.0f, 0.0f, g_M.screenW, g_M.screenH, COL_BG_TOP, COL_BG_BOTTOM, true);
+    float split = g_M.screenH * 0.7f;
+    DrawGradientRect(0.0f, 0.0f, g_M.screenW, split, COL_BG_TOP, COL_BG_BOTTOM, true);
+    DrawRect(0.0f, split, g_M.screenW, g_M.screenH - split, COL_BG_BOTTOM);
 }
 
 // ---------------------------------------------------------------------------
@@ -817,133 +1078,174 @@ static void DrawBackground()
 // ---------------------------------------------------------------------------
 //
 // Drawn by every frame, in the same two passes as the rest of it - quads with
-// the frame's quads, text inside the frame's one Font Begin/End. Only one
-// Begin/End per frame has ever been tried on hardware, so the sidebar fits
-// into that rather than bringing a batch of its own.
+// the frame's quads, text inside the frame's one Font Begin/End.
 
-static ShellSidebar g_sidebar = {SHELL_PAGE_LIBRARY, false, 0, 0, ""};
+static ShellSidebar g_sidebar;
+static bool g_sidebarSet = false;
 
 void SetShellSidebar(const ShellSidebar &sidebar)
 {
     g_sidebar = sidebar;
-    g_sidebar.storageText[sizeof(g_sidebar.storageText) - 1] = '\0';
+    g_sidebar.storageLabel[sizeof(g_sidebar.storageLabel) - 1] = '\0';
+    g_sidebar.storageDetail[sizeof(g_sidebar.storageDetail) - 1] = '\0';
+    g_sidebar.storageTotal[sizeof(g_sidebar.storageTotal) - 1] = '\0';
+    g_sidebarSet = true;
 }
 
-static const WCHAR *const kShellPageNames[SHELL_PAGE_COUNT] =
+static const char *const kShellPageNames[SHELL_PAGE_COUNT] =
 {
-    L"Your Library",
-    L"Store",
-    L"Queue",
-    L"Settings"
+    "Your Library",
+    "Store",
+    "Queue",
+    "Settings"
 };
 
 static float NavItemHeight()
 {
-    return 52.0f * g_M.scale;
+    return S(56.0f);
 }
 
-// Where each page's row starts. The divider sits in the gap before Queue,
+// Where each page's button starts. The divider sits in the gap before Queue,
 // splitting the things you browse from the things you manage.
 static float NavItemY(int page)
 {
-    float y = g_M.listY + page * NavItemHeight();
+    float y = g_M.listY + page * S(62.0f);
     if (page >= SHELL_PAGE_QUEUE)
-        y += 18.0f * g_M.scale;
+        y += S(26.0f);
     return y;
+}
+
+static float NavRight()
+{
+    return g_M.navX + g_M.navW - S(18.0f);
+}
+
+// The count beside a page's name, and its pill: grey for the library, green
+// for downloads still to do.
+struct NavCount
+{
+    char text[16];
+    float w, h;
+};
+
+static bool NavCountFor(int page, NavCount *out)
+{
+    int count = 0;
+    if (page == SHELL_PAGE_LIBRARY) count = g_sidebar.libraryCount;
+    if (page == SHELL_PAGE_QUEUE) count = g_sidebar.queueCount;
+    if (count <= 0)
+        return false;
+
+    _snprintf(out->text, sizeof(out->text), "%d", count);
+    out->text[sizeof(out->text) - 1] = '\0';
+
+    out->h = S(26.0f);
+    out->w = TextWidth(out->text, 0.68f, true) + S(16.0f);
+    if (out->w < S(30.0f)) out->w = S(30.0f);
+    return true;
+}
+
+static float StorageRingSize()
+{
+    return S(60.0f);
+}
+
+// Its centre: level with the footer's hints, nudged up so the ring stays
+// inside the title-safe area.
+static float StorageCenterY()
+{
+    return g_M.footerY - S(8.0f);
 }
 
 // focused is passed separately from g_sidebar.focused so the blocking screens
 // can draw it unfocused without changing what main.cpp set.
 static void DrawSidebarQuads(bool focused)
 {
-    DrawRect(0.0f, 0.0f, g_M.sidebarW, g_M.screenH, COL_SIDEBAR);
-    DrawRect(g_M.sidebarW - 1.0f, 0.0f, 1.0f, g_M.screenH, COL_SIDEBAR_EDGE);
+    DrawRect(0.0f, 0.0f, g_M.sidebarW, g_M.screenH, COL_RAIL);
 
-    float ruleY = NavItemY(SHELL_PAGE_QUEUE) - 9.0f * g_M.scale;
-    DrawRect(g_M.navTextX, ruleY, g_M.navTextRight - g_M.navTextX, 1.0f, COL_SIDEBAR_RULE);
+    // The brand's green underline.
+    FillRound(g_M.safeX, g_M.headerY + S(4.0f) + LineHeight(1.1f) * 1.2f + S(8.0f), S(28.0f), S(4.0f), R(2.0f), COL_GREEN);
 
-    const float itemY = NavItemY(g_sidebar.page);
-    const float itemH = NavItemHeight() - 4.0f * g_M.scale;
-    const float barW = g_M.sidebarW - 1.0f;
+    FillRound(g_M.safeX, NavItemY(SHELL_PAGE_QUEUE) - S(15.0f), g_M.navX + g_M.navW - g_M.safeX, S(2.0f), R(1.0f), COL_DIVIDER);
 
-    if (focused)
+    const float itemH = NavItemHeight();
+
+    for (int page = 0; page < SHELL_PAGE_COUNT; ++page)
     {
-        float pulse = SelectionPulse();
-        DrawGradientRect(0.0f, itemY, barW, itemH,
-                         ScaleColorBrightness(COL_PANEL_SEL_A, pulse),
-                         ScaleColorBrightness(COL_PANEL_SEL_B, pulse), true);
+        const float y = NavItemY(page);
+
+        if (page == g_sidebar.page)
+        {
+            FillRound(g_M.navX, y, g_M.navW, itemH, g_M.radius, COL_SURFACE_HI);
+            FillRound(g_M.navX + S(8.0f), y + S(14.0f), S(4.0f), itemH - S(28.0f), R(2.0f), COL_GREEN);
+            if (focused)
+                FocusRing(g_M.navX, y, g_M.navW, itemH, g_M.radius);
+        }
+
+        NavCount count;
+        if (NavCountFor(page, &count))
+        {
+            FillRound(NavRight() - count.w, y + (itemH - count.h) * 0.5f, count.w, count.h, count.h * 0.5f,
+                      page == SHELL_PAGE_QUEUE ? COL_GREEN : COL_TRACK);
+        }
     }
-    else
+
+    // Storage: how full the drive content installs to is, as a ring.
+    if (g_sidebar.storageUsed >= 0.0f)
     {
-        // The page you're on, while you're working inside it: a quiet plate,
-        // with an accent strip against the page it names.
-        DrawRect(0.0f, itemY, barW, itemH, COL_PANEL_SEL_IDLE);
-        DrawRect(barW - 4.0f * g_M.scale, itemY, 4.0f * g_M.scale, itemH, COL_ACCENT);
+        const float ring = StorageRingSize();
+        float used = g_sidebar.storageUsed > 1.0f ? 1.0f : g_sidebar.storageUsed;
+        DrawRing(g_M.safeX + ring * 0.5f, StorageCenterY(), ring * 0.5f, ring * 0.18f, used, COL_GREEN, COL_TRACK);
     }
 }
 
 static void DrawSidebarText(bool focused)
 {
-    g_UiFont.SetScaleFactors(1.25f * g_M.textScale, 1.25f * g_M.textScale);
-    g_UiFont.DrawText(g_M.navTextX, g_M.headerTextY, COL_ACCENT, L"OMNI360");
+    (void)focused; // the focus ring is the whole difference, and it's a quad
 
-    const float nameScale = 1.0f * g_M.textScale;
-    const float itemH = NavItemHeight() - 4.0f * g_M.scale;
+    Text(g_M.safeX, g_M.headerY + S(4.0f), 1.1f, COL_TEXT, "Omni360", 0, 0.0f, true);
+
+    const float itemH = NavItemHeight();
 
     for (int page = 0; page < SHELL_PAGE_COUNT; ++page)
     {
-        bool isSelected = (page == g_sidebar.page);
-        float centerY = NavItemY(page) + itemH * 0.5f;
+        const bool current = (page == g_sidebar.page);
+        const float centerY = NavItemY(page) + itemH * 0.5f;
+        const float textX = g_M.navX + S(26.0f);
+        float nameMaxW = NavRight() - textX;
 
-        D3DCOLOR color = COL_TEXT_SECONDARY;
-        if (isSelected)
-            color = focused ? COL_SEL_TEXT : COL_TEXT_PRIMARY;
-
-        int count = 0;
-        if (page == SHELL_PAGE_LIBRARY) count = g_sidebar.libraryCount;
-        if (page == SHELL_PAGE_QUEUE) count = g_sidebar.queueCount;
-
-        // The count goes first so the name can be truncated short of it.
-        float nameMaxW = g_M.navTextRight - g_M.navTextX;
-
-        g_UiFont.SetScaleFactors(0.85f * g_M.textScale, 0.85f * g_M.textScale);
-        if (count > 0)
+        NavCount count;
+        if (NavCountFor(page, &count))
         {
-            char countText[16];
-            _snprintf(countText, sizeof(countText), "%d", count);
-            countText[sizeof(countText) - 1] = '\0';
-
-            WCHAR wideCount[16];
-            Utf8ToWide(countText, wideCount, 16);
-
-            float countW = g_UiFont.GetTextWidth(wideCount);
-            g_UiFont.DrawText(g_M.navTextRight, TextTopForCenter(centerY, 0.85f * g_M.textScale),
-                              isSelected && focused ? COL_SEL_SUBTEXT : COL_TEXT_DIM,
-                              wideCount, ATGFONT_RIGHT);
-            nameMaxW -= countW + 10.0f * g_M.scale;
+            TextMid(NavRight() - count.w * 0.5f, centerY, 0.68f, COL_TEXT, count.text, ATGFONT_CENTER_X, 0.0f, true);
+            nameMaxW -= count.w + S(12.0f);
         }
 
-        g_UiFont.SetScaleFactors(nameScale, nameScale);
-        g_UiFont.DrawText(g_M.navTextX, TextTopForCenter(centerY, nameScale), color,
-                          kShellPageNames[page], ATGFONT_TRUNCATED, nameMaxW);
+        TextMid(textX, centerY, 0.95f, current ? COL_TEXT : COL_TEXT2, kShellPageNames[page],
+                ATGFONT_TRUNCATED, nameMaxW, current);
     }
 
-    // Free space on the drive content installs to, at the foot of the sidebar
-    // - this used to sit at the right end of the library's footer.
-    if (g_sidebar.storageText[0] != '\0')
+    if (g_sidebar.storageUsed >= 0.0f)
     {
-        WCHAR wideStorage[96];
-        Utf8ToWide(g_sidebar.storageText, wideStorage, 96);
+        const float ring = StorageRingSize();
+        const float ringTop = StorageCenterY() - ring * 0.5f;
 
-        const float valueScale = HINT_LABEL_SCALE * g_M.textScale;
-        const float valueY = TextTopForCenter(g_M.footerY + 9.0f * g_M.scale, valueScale);
+        char pct[16];
+        float used = g_sidebar.storageUsed > 1.0f ? 1.0f : g_sidebar.storageUsed;
+        _snprintf(pct, sizeof(pct), "%d%%", (int)(used * 100.0f + 0.5f));
+        pct[sizeof(pct) - 1] = '\0';
+        TextMid(g_M.safeX + ring * 0.5f, StorageCenterY(), 0.58f, COL_TEXT, pct, ATGFONT_CENTER_X, 0.0f, true);
 
-        g_UiFont.SetScaleFactors(0.85f * g_M.textScale, 0.85f * g_M.textScale);
-        g_UiFont.DrawText(g_M.navTextX, valueY - 24.0f * g_M.scale, COL_TEXT_SECONDARY, L"Storage");
+        const float textX = g_M.safeX + ring + S(14.0f);
+        const float textW = g_M.navX + g_M.navW - textX;
+        const float labelH = LineHeight(0.82f) * 1.2f;
+        const float lineH = LineHeight(0.68f) * 1.2f;
+        const float blockTop = StorageCenterY() - (labelH + lineH * 2.0f) * 0.5f;
+        (void)ringTop;
 
-        g_UiFont.SetScaleFactors(valueScale, valueScale);
-        g_UiFont.DrawText(g_M.navTextX, valueY, COL_TEXT_DIM, wideStorage,
-                          ATGFONT_TRUNCATED, g_M.navTextRight - g_M.navTextX);
+        TextFit(textX, blockTop, 0.82f, COL_TEXT, g_sidebar.storageLabel, textW, true);
+        TextFit(textX, blockTop + labelH, 0.68f, COL_TEXT2, g_sidebar.storageDetail, textW);
+        TextFit(textX, blockTop + labelH + lineH, 0.68f, COL_DIM, g_sidebar.storageTotal, textW);
     }
 }
 
@@ -970,10 +1272,9 @@ static int SpriteForButton(UiButton button)
     return BUTTON_SPRITE_A;
 }
 
-// Fills out[] from hints and lays it out along the page's footer. Tries the
-// full labels first and falls back to the short ones, all together, if they
-// run past the page - mixing the two would read as inconsistent. Returns the
-// number of hints laid out.
+// Fills out[] from hints and lays it out at the foot of the page, right
+// aligned. Tries the full labels first and falls back to the short ones, all
+// together, if they don't fit - mixing the two would read as inconsistent.
 static int LayoutFooter(const UiHint *hints, int hintCount, ButtonHint *out)
 {
     if (hints == NULL || hintCount <= 0)
@@ -987,33 +1288,27 @@ static int LayoutFooter(const UiHint *hints, int hintCount, ButtonHint *out)
         out[i].label = hints[i].label;
     }
 
-    if (LayoutButtonHints(out, hintCount, g_M.contentX) <= g_M.contentW)
-        return hintCount;
-
-    for (int i = 0; i < hintCount; ++i)
+    if (LayoutButtonHints(out, hintCount, g_M.contentX) > g_M.contentW)
     {
-        if (hints[i].shortLabel != NULL)
-            out[i].label = hints[i].shortLabel;
+        for (int i = 0; i < hintCount; ++i)
+        {
+            if (hints[i].shortLabel != NULL)
+                out[i].label = hints[i].shortLabel;
+        }
     }
 
-    LayoutButtonHints(out, hintCount, g_M.contentX);
+    LayoutButtonHintsRight(out, hintCount);
     return hintCount;
-}
-
-static float FooterCenterY()
-{
-    return g_M.footerY + 9.0f * g_M.scale;
 }
 
 // ---------------------------------------------------------------------------
 // Popup
 // ---------------------------------------------------------------------------
 //
-// In the header strip, top right, rather than floating over the list: every
-// frame draws all its quads and then all its text, so a plate laid over the
-// rows would have their text drawn straight on top of it. Up here the only
-// text it covers is the "3 / 27" counter, which the pages leave out while a
-// popup shows.
+// At the top right, where the clock is, rather than floating over the page:
+// every frame draws all its quads and then all its text, so a card laid over
+// the tiles would have their text drawn straight on top of it. Up here the
+// only thing it covers is the clock, which steps aside while it shows.
 
 #define TOAST_DURATION_MS 5000
 
@@ -1052,55 +1347,91 @@ static bool ToastVisibleThisFrame()
 struct ToastRect
 {
     float x, y, w, h;
+    float iconD, iconX, iconCY;
 };
 
 static ToastRect ToastLayout()
 {
     ToastRect r;
-    r.w = 500.0f * g_M.scale;
-    if (r.w > g_M.contentW * 0.62f)
-        r.w = g_M.contentW * 0.62f; // leaves the heading its room on a narrow page
+    r.w = S(520.0f);
+    if (r.w > g_M.contentW * 0.55f)
+        r.w = g_M.contentW * 0.55f; // leaves the page title its room
+    r.h = S(68.0f);
     r.x = g_M.contentX + g_M.contentW - r.w;
-    r.y = g_M.headerTextY - 8.0f * g_M.scale;
-    r.h = (g_M.listY - 8.0f * g_M.scale) - r.y;
+    r.y = g_M.headerY - S(6.0f);
+    r.iconD = S(34.0f);
+    r.iconX = r.x + S(16.0f);
+    r.iconCY = r.y + r.h * 0.5f;
     return r;
-}
-
-static D3DCOLOR ToastEdgeColor()
-{
-    switch (g_toast.tone)
-    {
-    case UI_TOAST_SUCCESS: return COL_ACCENT;
-    case UI_TOAST_ERROR:   return COL_ERROR;
-    default:               return COL_TEXT_SECONDARY;
-    }
 }
 
 static void DrawToastQuads()
 {
     ToastRect r = ToastLayout();
-    DrawRect(r.x, r.y, r.w, r.h, COL_TOAST_PLATE);
-    DrawRect(r.x, r.y, 5.0f * g_M.scale, r.h, ToastEdgeColor());
+    ShadowRound(r.x, r.y + S(6.0f), r.w, r.h, g_M.radius, S(18.0f), COL_SHADOW);
+    FillRound(r.x, r.y, r.w, r.h, g_M.radius, COL_SURFACE_HI);
+
+    D3DCOLOR iconColor = (g_toast.tone == UI_TOAST_ERROR) ? COL_ERROR
+                       : (g_toast.tone == UI_TOAST_SUCCESS) ? COL_GREEN : COL_TRACK;
+    FillRound(r.iconX, r.iconCY - r.iconD * 0.5f, r.iconD, r.iconD, r.iconD * 0.5f, iconColor);
+
+    // Success is a white ring in the green disc. The font has no tick to
+    // draw, and a ring reads as "done" at a glance.
+    if (g_toast.tone == UI_TOAST_SUCCESS)
+        DrawRing(r.iconX + r.iconD * 0.5f, r.iconCY, r.iconD * 0.26f, S(3.0f), 1.0f, COL_TEXT, COL_TEXT);
 }
 
 static void DrawToastText()
 {
     ToastRect r = ToastLayout();
-    const float textX = r.x + 20.0f * g_M.scale;
-    const float textW = r.x + r.w - textX - 14.0f * g_M.scale;
 
-    WCHAR wideHeading[64];
-    WCHAR wideMessage[192];
-    Utf8ToWide(g_toast.heading, wideHeading, 64);
-    Utf8ToWide(g_toast.message, wideMessage, 192);
+    if (g_toast.tone != UI_TOAST_SUCCESS)
+        TextMid(r.iconX + r.iconD * 0.5f, r.iconCY, 0.8f, COL_TEXT,
+                g_toast.tone == UI_TOAST_ERROR ? "!" : "i", ATGFONT_CENTER_X, 0.0f, true);
 
-    g_UiFont.SetScaleFactors(0.9f * g_M.textScale, 0.9f * g_M.textScale);
-    g_UiFont.DrawText(textX, r.y + 6.0f * g_M.scale, COL_TEXT_PRIMARY, wideHeading,
-                      ATGFONT_TRUNCATED, textW);
+    const float textX = r.iconX + r.iconD + S(14.0f);
+    const float textW = r.x + r.w - textX - S(16.0f);
+    TextFit(textX, r.y + S(10.0f), 0.82f, COL_TEXT, g_toast.heading, textW, true);
+    TextFit(textX, r.y + S(10.0f) + LineHeight(0.82f) * 1.2f + S(2.0f), 0.72f, COL_TEXT2, g_toast.message, textW);
+}
 
-    g_UiFont.SetScaleFactors(0.78f * g_M.textScale, 0.78f * g_M.textScale);
-    g_UiFont.DrawText(textX, r.y + 32.0f * g_M.scale, COL_TEXT_SECONDARY, wideMessage,
-                      ATGFONT_TRUNCATED, textW);
+// ---------------------------------------------------------------------------
+// The page header: title, a line under it, and the clock or the popup
+// ---------------------------------------------------------------------------
+
+// Quads: the popup, if one is showing.
+static void DrawHeaderQuads(bool showToast)
+{
+    if (showToast)
+        DrawToastQuads();
+}
+
+// Text. subtitle may be NULL. The clock is the console's local time, the way
+// the dashboard shows it.
+static void DrawHeaderText(const char *title, const char *subtitle, bool showToast)
+{
+    const float right = g_M.contentX + g_M.contentW;
+    const float titleW = showToast ? ToastLayout().x - g_M.contentX - S(24.0f) : g_M.contentW - S(160.0f);
+
+    TextFit(g_M.contentX, g_M.headerY, 1.55f, COL_TEXT, title, titleW, true);
+    if (subtitle != NULL)
+        TextFit(g_M.contentX, g_M.headerY + LineHeight(1.55f) * 1.2f + S(4.0f), 0.8f, COL_DIM, subtitle, titleW);
+
+    if (showToast)
+    {
+        DrawToastText();
+        return;
+    }
+
+    SYSTEMTIME now;
+    GetLocalTime(&now);
+    int hour = now.wHour % 12;
+    if (hour == 0) hour = 12;
+
+    char clock[16];
+    _snprintf(clock, sizeof(clock), "%d:%02d %s", hour, (int)now.wMinute, now.wHour < 12 ? "AM" : "PM");
+    clock[sizeof(clock) - 1] = '\0';
+    Text(right, g_M.headerY + S(4.0f), 0.95f, COL_TEXT, clock, ATGFONT_RIGHT);
 }
 
 bool InitGameListUI()
@@ -1115,14 +1446,25 @@ bool InitGameListUI()
     if (!CreateQuadResources())
         return false;
 
+    // Optional: without them, shapes draw square (see DrawShape).
+    CreateShapeShaders();
+    dprintf("[ui] shape shaders %s\n", g_shapesReady ? "ready" : "unavailable - drawing square corners");
+
     // The path argument is accepted and ignored - UiFont loads selawk.ttf
-    // through XUI. It stays in the signature so this line reads as it always
-    // did, and so the switch stayed a one-line change.
+    // through XUI.
     if (FAILED(g_UiFont.Create(NULL)))
         return false;
 
     if (!ComputeUiMetrics())
         return false;
+
+    if (!g_sidebarSet)
+    {
+        ShellSidebar empty;
+        memset(&empty, 0, sizeof(empty));
+        empty.storageUsed = -1.0f;
+        SetShellSidebar(empty);
+    }
 
     g_Initialized = true;
     return true;
@@ -1133,16 +1475,19 @@ void ShutdownGameListUI()
     if (!g_Initialized)
         return;
 
-    ReleaseIcons(); // cover art is held for the whole session now - see EnsureIconsLoaded
+    ReleaseIcons(); // cover art is held for the whole session - see EnsureIconsLoaded
 
     g_UiFont.Destroy(); // tears XUI down with it
 
     if (g_pWhiteTexture != NULL) { g_pWhiteTexture->Release(); g_pWhiteTexture = NULL; }
     if (g_pButtonAtlas != NULL) { g_pButtonAtlas->Release(); g_pButtonAtlas = NULL; }
+    if (g_pShapePixelShader != NULL) { g_pShapePixelShader->Release(); g_pShapePixelShader = NULL; }
+    if (g_pShapeVertexShader != NULL) { g_pShapeVertexShader->Release(); g_pShapeVertexShader = NULL; }
     if (g_pQuadPixelShader != NULL) { g_pQuadPixelShader->Release(); g_pQuadPixelShader = NULL; }
     if (g_pQuadVertexShader != NULL) { g_pQuadVertexShader->Release(); g_pQuadVertexShader = NULL; }
     if (g_pQuadVertexDecl != NULL) { g_pQuadVertexDecl->Release(); g_pQuadVertexDecl = NULL; }
 
+    g_shapesReady = false;
     g_Initialized = false;
 }
 
@@ -1164,8 +1509,34 @@ static WORD CurrentButtons(); // defined with the other shared screen helpers be
 struct Icon
 {
     D3DTexture *texture;
+    D3DTexture *average; // 1x1: the image's average colour, which fills its tile
     float aspect; // source width / source height
 };
+
+// The average colour as a 1x1 texture, from decoded pixels. Transparent
+// pixels count for nothing, so an icon on a clear background is averaged over
+// the icon alone.
+static D3DTexture *CreateAverageFromArgb(const unsigned long *pixels, unsigned long w, unsigned long h)
+{
+    double r = 0.0, g = 0.0, b = 0.0, weight = 0.0;
+    for (unsigned long i = 0; i < w * h; ++i)
+    {
+        unsigned long c = pixels[i];
+        double a = ((c >> 24) & 0xFF) / 255.0;
+        r += ((c >> 16) & 0xFF) * a;
+        g += ((c >> 8) & 0xFF) * a;
+        b += (c & 0xFF) * a;
+        weight += a;
+    }
+    if (weight <= 0.0)
+        return NULL;
+
+    unsigned long average = 0xFF000000 |
+                            ((unsigned long)(r / weight) << 16) |
+                            ((unsigned long)(g / weight) << 8) |
+                            (unsigned long)(b / weight);
+    return CreateTextureFromArgb(&average, 1, 1);
+}
 
 // Creates a texture from raw PNG/JPEG bytes, recording the source aspect.
 // Leaves out->texture NULL on any failure, so callers can just fall through
@@ -1230,6 +1601,7 @@ static bool CreateIconTexture(const unsigned char *data, unsigned long size, Ico
         if (PngDecodeToArgb(data, size, &pixels, &pngW, &pngH, &pngError))
         {
             texture = CreateTextureFromArgb(pixels, pngW, pngH);
+            D3DTexture *average = (texture != NULL) ? CreateAverageFromArgb(pixels, pngW, pngH) : NULL;
             PngFree(pixels);
 
             if (texture != NULL)
@@ -1241,6 +1613,7 @@ static bool CreateIconTexture(const unsigned char *data, unsigned long size, Ico
                         (unsigned long)hr, pngW, pngH, size > 25 ? (unsigned)data[25] : 0u);
 
                 out->texture = texture;
+                out->average = average;
                 out->aspect = (float)pngW / (float)pngH;
                 return true;
             }
@@ -1268,6 +1641,14 @@ static bool CreateIconTexture(const unsigned char *data, unsigned long size, Ico
 
     out->texture = texture;
     out->aspect = aspect;
+
+    // The average colour: D3DX shrinks the same image to a single texel,
+    // which a triangle filter makes the average of the whole thing. No lock
+    // needed - it's drawn as it is, stretched across the tile.
+    out->average = NULL;
+    D3DXCreateTextureFromFileInMemoryEx(g_pd3dDevice, data, size, 1, 1, 1, 0, D3DFMT_A8R8G8B8,
+                                        D3DPOOL_MANAGED, D3DX_FILTER_TRIANGLE, D3DX_DEFAULT, 0,
+                                        NULL, NULL, &out->average);
     return true;
 }
 
@@ -1309,6 +1690,8 @@ static void ReleaseIcons()
     {
         if (g_icons[i].texture != NULL)
             g_icons[i].texture->Release();
+        if (g_icons[i].average != NULL)
+            g_icons[i].average->Release();
     }
 
     free(g_icons);
@@ -1344,6 +1727,7 @@ static void EnsureIconsLoaded(const InstalledGame *games, int gameCount)
     for (int i = 0; i < gameCount; ++i)
     {
         g_icons[i].texture = NULL;
+        g_icons[i].average = NULL;
         g_icons[i].aspect = 1.0f;
 
         // Whether the package carried any artwork at all, kept because info is
@@ -1412,62 +1796,32 @@ static void KeepSelectionVisible(int count, int visibleRows, int &selected, int 
     if (scroll < 0) scroll = 0;
 }
 
-// The selected row's plate: the pulsing green bar where A would act right now,
-// a quiet plate where the page doesn't have focus.
-static void DrawRowPlate(float x, float y, float w, float h, bool isSelected, bool focused)
-{
-    if (isSelected && focused)
-    {
-        // Vertical, not horizontal - a top-down gradient reads as a lit
-        // surface, where a left-to-right falloff just reads as a highlight
-        // running out of steam.
-        float pulse = SelectionPulse();
-        DrawGradientRect(x, y, w, h,
-                         ScaleColorBrightness(COL_PANEL_SEL_A, pulse),
-                         ScaleColorBrightness(COL_PANEL_SEL_B, pulse), true);
-    }
-    else
-    {
-        DrawRect(x, y, w, h, isSelected ? COL_PANEL_SEL_IDLE : COL_PANEL);
-    }
-}
-
-// Scrollbar - only drawn when something is off-screen. Without it there's no
-// indication the list extends past the visible rows, let alone how far.
+// A thin rounded scrollbar down the right edge of the page - only drawn when
+// something is off-screen.
 static void DrawScrollbar(float trackY, float trackH, int count, int visibleRows, int scroll)
 {
-    const float scrollW = 5.0f * g_M.scale;
-    const float trackX = g_M.contentX + g_M.contentW - scrollW;
+    const float w = S(4.0f);
+    const float x = g_M.contentX + g_M.contentW - w;
 
     float thumbH = trackH * ((float)visibleRows / (float)count);
-    float minThumb = 24.0f * g_M.scale;
-    if (thumbH < minThumb) thumbH = minThumb; // stays visible on a very large list
+    if (thumbH < S(24.0f)) thumbH = S(24.0f);
 
     // Positioned by scroll range, not item count, so the thumb lands flush at
     // the bottom on the last page.
     float thumbY = trackY + (trackH - thumbH) * ((float)scroll / (float)(count - visibleRows));
 
-    DrawRect(trackX, trackY, scrollW, trackH, COL_SCROLL_TRACK);
-    DrawGradientRect(trackX, thumbY, scrollW, thumbH, COL_SCROLL_THUMB, COL_ACCENT_DIM, true);
+    FillRound(x, trackY, w, trackH, w * 0.5f, COL_SURFACE);
+    FillRound(x, thumbY, w, thumbH, w * 0.5f, COL_TEXT2);
 }
 
-// "3 / 27", right-aligned in the header. Fixed "%d" specifiers into a
-// generously sized buffer, explicitly null-terminated: _snprintf on this
-// toolchain does not null-terminate on truncation, and its dynamic-precision
-// specifiers have caused a real crash in this project before.
-static void DrawPositionCounter(int selected, int count)
+// Room the scrollbar takes from the right of a list.
+static float ScrollGutter()
 {
-    char counter[64];
-    _snprintf(counter, sizeof(counter), "%d / %d", selected + 1, count);
-    counter[sizeof(counter) - 1] = '\0';
-
-    WCHAR wideCounter[64];
-    Utf8ToWide(counter, wideCounter, 64);
-
-    g_UiFont.SetScaleFactors(0.9f * g_M.textScale, 0.9f * g_M.textScale);
-    g_UiFont.DrawText(g_M.contentX + g_M.contentW, g_M.headerTextY + 6.0f * g_M.scale,
-                      COL_TEXT_DIM, wideCounter, ATGFONT_RIGHT);
+    return S(18.0f);
 }
+
+// "12 games · 3 of 12"-style counts. "\xC2\xB7" is a middle dot.
+#define MIDDOT "  \xC2\xB7  "
 
 // Resume/Clear and Present/Suspend around every frame. Console::Render()
 // (Common/AtgConsole.cpp) always pairs its Present() with Resume() before and
@@ -1486,40 +1840,163 @@ static void EndFrame()
     g_pd3dDevice->Suspend();
 }
 
+// Background and sidebar - the quads every frame starts with.
+static void DrawFrameBase(bool sidebarFocused)
+{
+    DrawBackground();
+    DrawSidebarQuads(sidebarFocused);
+}
+
+// ---------------------------------------------------------------------------
+// Cover tiles
+// ---------------------------------------------------------------------------
+
+// A game's tile at x,y, s across, cut off at h (less than s for the row that
+// peeks out at the bottom of the grid). Its icon, drawn at about twice its
+// 64px size, sits in the middle of a tile filled with the icon's own average
+// colour - darker towards the bottom - so even a small icon fills the tile
+// with something of the game's.
+static void DrawTileArt(const Icon *icon, float x, float y, float s, float h)
+{
+    const float r = g_M.radius;
+
+    if (icon != NULL && icon->average != NULL)
+        TextureRound(icon->average, x, y, s, h, r, 0.0f, 0.0f, 1.0f, 1.0f, 0xFFFFFFFF, 0xFF808080);
+    else
+        FillRoundGradient(x, y, s, h, r, COL_SURFACE_HI, COL_SURFACE, true);
+
+    if (icon == NULL || icon->texture == NULL)
+        return;
+
+    float iw = s * 0.485f, ih = s * 0.485f;
+    if (icon->aspect > 1.0f) ih = iw / icon->aspect;
+    else if (icon->aspect < 1.0f) iw = ih * icon->aspect;
+
+    const float ix = x + (s - iw) * 0.5f;
+    const float iy = y + (s - ih) * 0.5f;
+
+    // Cropped with the tile, by shortening its texture coordinates.
+    float visibleH = (y + h) - iy;
+    if (visibleH <= 0.0f)
+        return;
+    if (visibleH > ih)
+        visibleH = ih;
+
+    TextureRound(icon->texture, ix, iy, iw, visibleH, R(4.0f), 0.0f, 0.0f, 1.0f, visibleH / ih,
+                 0xFFFFFFFF, 0xFFFFFFFF);
+}
+
+// A small square cover - the queue's. The icon fills it, over its average
+// colour in case it has transparency.
+static void DrawCoverSquare(const Icon *icon, float x, float y, float size)
+{
+    if (icon != NULL && icon->average != NULL)
+        TextureRound(icon->average, x, y, size, size, R(4.0f), 0.0f, 0.0f, 1.0f, 1.0f, 0xFFFFFFFF, 0xFF808080);
+    else
+        FillRound(x, y, size, size, R(4.0f), COL_SURFACE_HI);
+
+    if (icon != NULL && icon->texture != NULL)
+        TextureRound(icon->texture, x, y, size, size, R(4.0f), 0.0f, 0.0f, 1.0f, 1.0f, 0xFFFFFFFF, 0xFFFFFFFF);
+}
+
+// What's installed for a game, as the label in its tile's corner. NULL for
+// nothing.
+static const char *InstalledLabel(const LibraryPageView &view, int index)
+{
+    bool dlc = (view.hasDlcInstalled != NULL && view.hasDlcInstalled[index]);
+    bool tu = (view.hasUpdateInstalled != NULL && view.hasUpdateInstalled[index]);
+    if (dlc && tu) return "DLC  TU";
+    if (dlc) return "DLC";
+    if (tu) return "TU";
+    return NULL;
+}
+
+struct TilePill
+{
+    float x, y, w, h;
+};
+
+static TilePill PillFor(const char *label, float tileX, float tileY, float tileS)
+{
+    TilePill p;
+    p.h = S(24.0f);
+    p.w = TextWidth(label, 0.56f, true) + S(18.0f);
+    p.x = tileX + tileS - p.w - S(10.0f);
+    p.y = tileY + S(10.0f);
+    return p;
+}
+
 // ---------------------------------------------------------------------------
 // Library page
 // ---------------------------------------------------------------------------
 
-// The banner takes the top of the list area, and the list starts below it -
-// so the row count is worked out here rather than taken from g_M, which
-// assumes the list has the whole space to itself.
+// The grid: five square tiles across (three on a 4:3 screen), as many full
+// rows as fit between the header and the footer, and the next row cut off
+// under them so it's clear the library carries on.
 struct LibraryLayout
 {
     bool showBanner;
     float bannerH;
-    float listY;
-    int visibleRows;
+    float top;      // first row's top edge
+    float bottom;   // where the peeking row is cut off
+    float tile;
+    float gap;
+    float pitch;    // one row to the next
+    int cols;
+    int fullRows;
 };
 
 static LibraryLayout ComputeLibraryLayout(const LibraryPageView &view)
 {
-    LibraryLayout layout;
-    layout.showBanner = (view.bannerText != NULL && view.bannerText[0] != '\0');
-    layout.bannerH = 44.0f * g_M.scale;
+    LibraryLayout L;
+    L.showBanner = (view.bannerText != NULL && view.bannerText[0] != '\0');
+    L.bannerH = S(56.0f);
 
-    const float bannerGap = 10.0f * g_M.scale;
-    layout.listY = g_M.listY + (layout.showBanner ? layout.bannerH + bannerGap : 0.0f);
+    L.cols = g_M.gridCols;
+    L.gap = S(18.0f);
+    L.tile = (g_M.contentW - (L.cols - 1) * L.gap) / (float)L.cols;
+    L.pitch = L.tile + L.gap;
 
-    layout.visibleRows = (int)((g_M.footerY - layout.listY - 16.0f * g_M.scale) / g_M.rowH);
-    if (layout.visibleRows < 1) layout.visibleRows = 1;
+    L.top = g_M.listY + (L.showBanner ? L.bannerH + S(18.0f) : 0.0f);
+    L.bottom = g_M.footerY - S(30.0f);
 
-    return layout;
+    L.fullRows = (int)((L.bottom - L.top + L.gap) / L.pitch);
+    if (L.fullRows < 1) L.fullRows = 1;
+
+    return L;
 }
 
 int LibraryPageVisibleRows(const LibraryPageView &view)
 {
-    return ComputeLibraryLayout(view).visibleRows;
+    return ComputeLibraryLayout(view).fullRows;
 }
+
+int LibraryGridColumns()
+{
+    return g_M.gridCols;
+}
+
+// The focused tile grows to 105% over a few frames. Kept here between frames:
+// which tile it's for, and how far it has got.
+#define FOCUS_GROW 1.05f
+static int g_growIndex = -1;
+static float g_grow = 1.0f;
+
+static float FocusGrowFor(int index, bool focused)
+{
+    if (!focused || index != g_growIndex)
+    {
+        g_growIndex = focused ? index : -1;
+        g_grow = 1.0f;
+    }
+    else
+    {
+        g_grow += (FOCUS_GROW - g_grow) * 0.3f;
+    }
+    return g_grow;
+}
+
+#define MAX_VISIBLE_TILES 64
 
 void RenderLibraryFrame(LibraryPageView &view, const UiHint *hints, int hintCount)
 {
@@ -1527,242 +2004,238 @@ void RenderLibraryFrame(LibraryPageView &view, const UiHint *hints, int hintCoun
         return;
 
     const InstalledGame *games = view.games;
-    int gameCount = (games != NULL && view.count > 0) ? view.count : 0;
+    const int gameCount = (games != NULL && view.count > 0) ? view.count : 0;
 
-    // Loaded on the first frame and kept - see EnsureIconsLoaded. If the cache
-    // couldn't be allocated the rows still draw, with placeholders.
     Icon *icons = NULL;
     if (gameCount > 0)
     {
         EnsureIconsLoaded(games, gameCount);
-        icons = g_icons;
+        icons = (g_iconCount == gameCount) ? g_icons : NULL;
     }
 
-    const LibraryLayout layout = ComputeLibraryLayout(view);
-    const int visibleRows = layout.visibleRows;
-    const float listY = layout.listY;
+    const LibraryLayout L = ComputeLibraryLayout(view);
 
-    KeepSelectionVisible(gameCount, visibleRows, view.selected, view.scroll);
+    // Scrolled by whole rows: KeepSelectionVisible works in rows here.
+    const int rowCount = (gameCount + L.cols - 1) / L.cols;
+    if (view.selected > gameCount - 1) view.selected = gameCount - 1;
+    if (view.selected < 0) view.selected = 0;
+    int selectedRow = (gameCount > 0) ? view.selected / L.cols : 0;
+    KeepSelectionVisible(rowCount, L.fullRows, selectedRow, view.scroll);
+
     const int selected = view.selected;
-    const int scrollOffset = view.scroll;
+    const int firstRow = view.scroll;
+    const float grow = FocusGrowFor(selected, view.focused && gameCount > 0);
 
     BeginFrame();
 
-    // Once per frame, so both passes agree - see ToastVisibleThisFrame.
     const bool showToast = ToastVisibleThisFrame();
 
-    // Two passes, quads first and then ALL text in a single Font Begin/End.
-    // This isn't just a micro-optimization: Font::Begin() installs the font's
-    // own shaders and render state, which every DrawQuad() here then
-    // overwrites with its own, so interleaving the two (as this used to, with
-    // a Begin/End around every single row's name) meant re-establishing that
-    // state once per row. Text rendering on this hardware is already the
-    // expensive part, so batching it is worth the slightly less obvious
-    // structure.
-
-    // --- Pass 1: quads (background, sidebar, plates, icons, scroll indicator) ---
-    DrawBackground();
-    DrawSidebarQuads(g_sidebar.focused);
-
-    // Accent rule under the header, fading out to the right so it reads as a
-    // highlight rather than a hard divider.
-    DrawGradientRect(g_M.contentX, g_M.headerRuleY, g_M.contentW, 2.0f * g_M.scale,
-                     COL_HEADER_RULE_A, COL_HEADER_RULE_B, false);
-
-    const float rowGap = 6.0f * g_M.scale;
-    const float plateH = g_M.rowH - rowGap;
-    const float iconX = g_M.contentX + 16.0f * g_M.scale;
-    const float scrollGutter = 18.0f * g_M.scale;
-
-    // Rows stop short of the scrollbar only when one is actually shown, so a
-    // small library uses the full width.
-    bool showScroll = (gameCount > visibleRows);
-    float plateW = g_M.contentW - (showScroll ? scrollGutter : 0.0f);
-
-    // Laid out before either pass, because the badges go down in pass 1 and
-    // their labels in pass 2, and both need identical positions.
     ButtonHint footer[MAX_FOOTER_HINTS];
-    int footerCount = LayoutFooter(hints, hintCount, footer);
-    const float hintCenterY = FooterCenterY();
+    const int footerCount = LayoutFooter(hints, hintCount, footer);
 
-    // Banner: a lit amber plate with a solid edge and a Y badge, so it reads
-    // as "press Y for this" before a word of it is read.
-    const float bannerCenterY = g_M.listY + layout.bannerH * 0.5f;
-    const float bannerBadgeX = g_M.contentX + 18.0f * g_M.scale;
-    float bannerTextX = bannerBadgeX;
+    // --- Pass 1: quads ---
+    DrawFrameBase(g_sidebar.focused);
 
-    if (layout.showBanner)
+    const float r = g_M.radius;
+
+    if (L.showBanner)
     {
-        DrawGradientRect(g_M.contentX, g_M.listY, g_M.contentW, layout.bannerH,
-                         COL_NOTICE_PLATE_A, COL_NOTICE_PLATE_B, false);
-        DrawRect(g_M.contentX, g_M.listY, 4.0f * g_M.scale, layout.bannerH, COL_NOTICE_EDGE);
-
-        float badgeW = DrawButtonSprite(BUTTON_SPRITE_Y, bannerBadgeX, bannerCenterY);
-        bannerTextX = bannerBadgeX + badgeW + 12.0f * g_M.scale;
+        // The keys notice: a card with an amber edge and the Y button that
+        // fixes it - the badge and the edge read as one thing.
+        FillRound(g_M.contentX, g_M.listY, g_M.contentW, L.bannerH, r, COL_SURFACE);
+        FillRound(g_M.contentX, g_M.listY, S(6.0f), L.bannerH, R(3.0f), COL_AMBER);
+        DrawButtonSprite(BUTTON_SPRITE_Y, g_M.contentX + S(22.0f), g_M.listY + L.bannerH * 0.5f);
     }
 
-    for (int row = 0; row < visibleRows; ++row)
+    // Tiles whose text the second pass draws: their pills, and the focused
+    // tile's name.
+    struct TileText { float x, y, s; int index; };
+    TileText tileText[MAX_VISIBLE_TILES];
+    int tileTextCount = 0;
+
+    int focusIndex = -1;
+    float focusX = 0.0f, focusY = 0.0f;
+
+    for (int row = 0; row <= L.fullRows; ++row)
     {
-        int index = scrollOffset + row;
-        if (index >= gameCount)
+        const int gridRow = firstRow + row;
+        if (gridRow >= rowCount)
             break;
 
-        float rowY = listY + row * g_M.rowH;
-        float iconY = rowY + (plateH - g_M.iconSize) * 0.5f; // vertically centred in its plate
+        const float y = L.top + row * L.pitch;
+        const bool peek = (row == L.fullRows);
+        float h = L.tile;
+        if (peek)
+        {
+            h = (L.bottom + S(20.0f)) - y;
+            if (h > L.tile) h = L.tile;
+            if (h < S(30.0f)) break;
+        }
 
-        DrawRowPlate(g_M.contentX, rowY, plateW, plateH, index == selected, view.focused);
+        for (int col = 0; col < L.cols; ++col)
+        {
+            const int index = gridRow * L.cols + col;
+            if (index >= gameCount)
+                break;
 
-        if (icons != NULL && icons[index].texture != NULL)
-            DrawIconFitted(&icons[index], iconX, iconY, g_M.iconSize);
-        else
-            DrawRect(iconX, iconY, g_M.iconSize, g_M.iconSize, COL_ICON_PLACEHLD); // titles with no embedded icon
+            const float x = g_M.contentX + col * (L.tile + L.gap);
+            const Icon *icon = (icons != NULL) ? &icons[index] : NULL;
+
+            if (!peek && index == selected && view.focused)
+            {
+                // Drawn last, over its neighbours, so it can grow.
+                focusIndex = index;
+                focusX = x;
+                focusY = y;
+                continue;
+            }
+
+            DrawTileArt(icon, x, y, L.tile, h);
+
+            if (!peek)
+            {
+                // The selected tile while the sidebar has focus: still marked,
+                // so you can see where you'll land.
+                if (index == selected)
+                    StrokeRound(x - S(4.0f), y - S(4.0f), L.tile + S(8.0f), L.tile + S(8.0f),
+                                r > 0.0f ? r + S(4.0f) : 0.0f, S(2.0f), 0x59FFFFFF);
+
+                const char *label = InstalledLabel(view, index);
+                if (label != NULL)
+                {
+                    TilePill p = PillFor(label, x, y, L.tile);
+                    FillRound(p.x, p.y, p.w, p.h, p.h * 0.5f, COL_PILL);
+                }
+
+                if (tileTextCount < MAX_VISIBLE_TILES)
+                {
+                    tileText[tileTextCount].x = x;
+                    tileText[tileTextCount].y = y;
+                    tileText[tileTextCount].s = L.tile;
+                    tileText[tileTextCount].index = index;
+                    tileTextCount++;
+                }
+            }
+        }
+
+        // The peeking row fades into the background.
+        if (peek)
+            DrawGradientRect(g_M.contentX - S(20.0f), y, g_M.contentW + S(40.0f), h + 2.0f,
+                             COL_PEEK_TOP, COL_BG_BOTTOM, true);
     }
 
-    if (showScroll)
-        DrawScrollbar(listY, visibleRows * g_M.rowH - rowGap, gameCount, visibleRows, scrollOffset);
+    float focusS = L.tile * grow;
+    float focusOX = focusX - (focusS - L.tile) * 0.5f;
+    float focusOY = focusY - (focusS - L.tile) * 0.5f;
+    float bandH = LineHeight(0.8f) * 1.2f + S(22.0f);
 
-    DrawButtonHintShapes(footer, footerCount, hintCenterY);
+    if (focusIndex >= 0)
+    {
+        const Icon *icon = (icons != NULL) ? &icons[focusIndex] : NULL;
 
-    if (showToast)
-        DrawToastQuads();
+        ShadowRound(focusOX, focusOY + S(10.0f), focusS, focusS, r, S(26.0f), COL_SHADOW);
+        DrawTileArt(icon, focusOX, focusOY, focusS, focusS);
+        FocusRing(focusOX, focusOY, focusS, focusS, r);
+
+        // The name, on a band that darkens towards the foot of the tile.
+        FillRoundGradient(focusOX, focusOY + focusS - bandH, focusS, bandH, r, 0x00000000, 0xD9000000, true);
+
+        const char *label = InstalledLabel(view, focusIndex);
+        if (label != NULL)
+        {
+            TilePill p = PillFor(label, focusOX, focusOY, focusS);
+            FillRound(p.x, p.y, p.w, p.h, p.h * 0.5f, COL_PILL);
+        }
+    }
+
+    if (gameCount == 0)
+        FillRound(g_M.contentX, L.top, g_M.contentW, S(150.0f), r, COL_SURFACE);
+
+    DrawButtonHintShapes(footer, footerCount, g_M.footerY);
+    DrawHeaderQuads(showToast);
 
     // --- Pass 2: all text, one Begin/End ---
     g_UiFont.Begin();
 
     DrawSidebarText(g_sidebar.focused);
 
-    // SetScaleFactors is applied per-glyph inside DrawText (see AtgFont.cpp's
-    // m_fXScaleFactor use), not captured at Begin(), so it's safe to change
-    // between calls inside a single batch - which is what gives this screen
-    // an actual type hierarchy rather than one uniform size everywhere.
-    DrawChromeHeading("YOUR LIBRARY");
+    char subtitle[96] = "";
+    if (gameCount > 0)
+        _snprintf(subtitle, sizeof(subtitle), "%d game%s" MIDDOT "%d of %d",
+                  gameCount, gameCount == 1 ? "" : "s", selected + 1, gameCount);
+    subtitle[sizeof(subtitle) - 1] = '\0';
+    DrawHeaderText("Your Library", gameCount > 0 ? subtitle : NULL, showToast);
 
-    if (gameCount > 0 && !showToast) // the popup sits where the counter goes
-        DrawPositionCounter(selected, gameCount);
+    DrawButtonHintText(footer, footerCount, g_M.footerY);
 
-    DrawButtonHintText(footer, footerCount, hintCenterY);
-
-    if (showToast)
-        DrawToastText();
-
-    if (layout.showBanner)
+    if (L.showBanner)
     {
-        WCHAR wideBanner[256];
-        Utf8ToWide(view.bannerText, wideBanner, 256);
-
-        const float bannerScale = 0.9f * g_M.textScale;
-        g_UiFont.SetScaleFactors(bannerScale, bannerScale);
-        g_UiFont.DrawText(bannerTextX, TextTopForCenter(bannerCenterY, bannerScale),
-                          COL_NOTICE_TEXT, wideBanner, ATGFONT_TRUNCATED,
-                          g_M.contentX + g_M.contentW - bannerTextX - 16.0f * g_M.scale);
+        float textX = g_M.contentX + S(22.0f) + HintBadgeHeight() + S(14.0f);
+        TextMid(textX, g_M.listY + L.bannerH * 0.5f, 0.85f, COL_TEXT, view.bannerText,
+                ATGFONT_TRUNCATED, g_M.contentX + g_M.contentW - textX - S(20.0f));
     }
 
-    // An empty library says so, and says where it looked - the folder is
-    // almost always the reason, and naming it is what lets someone spot the
-    // typo or the wrong drive.
+    for (int i = 0; i < tileTextCount; ++i)
+    {
+        const char *label = InstalledLabel(view, tileText[i].index);
+        if (label == NULL)
+            continue;
+        TilePill p = PillFor(label, tileText[i].x, tileText[i].y, tileText[i].s);
+        TextMid(p.x + p.w * 0.5f, p.y + p.h * 0.5f, 0.56f, COL_TEXT, label, ATGFONT_CENTER_X, 0.0f, true);
+    }
+
+    if (focusIndex >= 0)
+    {
+        const char *label = InstalledLabel(view, focusIndex);
+        if (label != NULL)
+        {
+            TilePill p = PillFor(label, focusOX, focusOY, focusS);
+            TextMid(p.x + p.w * 0.5f, p.y + p.h * 0.5f, 0.56f, COL_TEXT, label, ATGFONT_CENTER_X, 0.0f, true);
+        }
+
+        TextMid(focusOX + S(14.0f), focusOY + focusS - bandH * 0.5f + S(4.0f), 0.8f, COL_TEXT,
+                games[focusIndex].displayName, ATGFONT_TRUNCATED, focusS - S(28.0f), true);
+    }
+
     if (gameCount == 0)
     {
-        WCHAR wideWhere[300];
         char where[300];
         _snprintf(where, sizeof(where), "Searched %s", view.gamesPath != NULL ? view.gamesPath : "(no folder set)");
         where[sizeof(where) - 1] = '\0';
-        Utf8ToWide(where, wideWhere, 300);
 
-        const float emptyY = listY + 24.0f * g_M.scale;
-
-        g_UiFont.SetScaleFactors(1.0f * g_M.textScale, 1.0f * g_M.textScale);
-        g_UiFont.DrawText(g_M.contentX, emptyY, COL_TEXT_PRIMARY, L"No games found");
-
-        g_UiFont.SetScaleFactors(0.85f * g_M.textScale, 0.85f * g_M.textScale);
-        g_UiFont.DrawText(g_M.contentX, emptyY + 32.0f * g_M.scale, COL_TEXT_SECONDARY,
-                          wideWhere, ATGFONT_TRUNCATED, g_M.contentW);
-        g_UiFont.DrawText(g_M.contentX, emptyY + 58.0f * g_M.scale, COL_TEXT_DIM,
-                          L"Press Y to choose your games folder in Settings.");
+        const float x = g_M.contentX + S(32.0f);
+        const float w = g_M.contentW - S(64.0f);
+        TextFit(x, L.top + S(26.0f), 1.1f, COL_TEXT, "No games found", w, true);
+        TextFit(x, L.top + S(26.0f) + LineHeight(1.1f) * 1.25f + S(6.0f), 0.85f, COL_TEXT2, where, w);
+        TextFit(x, L.top + S(26.0f) + LineHeight(1.1f) * 1.25f + LineHeight(0.85f) * 1.25f + S(12.0f), 0.8f, COL_DIM,
+                "Press Y to choose your games folder in Settings.", w);
     }
 
-    // Row text. The name is truncated with an ellipsis rather than overrunning
-    // into the scrollbar - ATGFONT_TRUNCATED plus a max pixel width is built
-    // into DrawText, so this costs nothing to do properly.
-    float textX = iconX + g_M.iconSize + 18.0f * g_M.scale;
-    float textMaxW = (g_M.contentX + plateW) - textX - 16.0f * g_M.scale;
-
-    for (int row = 0; row < visibleRows; ++row)
-    {
-        int index = scrollOffset + row;
-        if (index >= gameCount)
-            break;
-
-        float rowY = listY + row * g_M.rowH;
-        bool isSelected = (index == selected);
-        bool onGreen = isSelected && view.focused; // text sitting on the green bar
-
-        WCHAR wideName[256];
-        Utf8ToWide(games[index].displayName, wideName, 256);
-
-        g_UiFont.SetScaleFactors(1.0f * g_M.textScale, 1.0f * g_M.textScale);
-        g_UiFont.DrawText(textX, rowY + 14.0f * g_M.scale,
-                          onGreen ? COL_SEL_TEXT : (isSelected ? COL_TEXT_PRIMARY : COL_TEXT_SECONDARY),
-                          wideName, ATGFONT_TRUNCATED, textMaxW);
-
-        // Secondary line: the title ID, which is the thing that actually
-        // identifies a title when two share a display name.
-        char idText[32];
-        _snprintf(idText, sizeof(idText), "%08lX", games[index].titleId);
-        idText[sizeof(idText) - 1] = '\0';
-
-        WCHAR wideId[32];
-        Utf8ToWide(idText, wideId, 32);
-
-        // 0.85, close to 1:1 against the font's design size - text drawn far
-        // below it came out noticeably soft on hardware.
-        g_UiFont.SetScaleFactors(0.85f * g_M.textScale, 0.85f * g_M.textScale);
-        g_UiFont.DrawText(textX, rowY + 40.0f * g_M.scale,
-                          onGreen ? COL_SEL_SUBTEXT : COL_TEXT_DIM, wideId);
-
-        float idW = g_UiFont.GetTextWidth(wideId);
-
-        // "Already installed" marker, sharing the secondary line with the
-        // title ID. Plain text in the accent colour rather than a tick glyph:
-        // GLYPH_* codepoints render as empty boxes in the embedded font, so a
-        // checkmark would come out as a blank square on hardware.
-        //
-        // One combined string rather than two separately positioned labels,
-        // so the common "both installed" case reads as a single phrase.
-        bool dlcHere    = (view.hasDlcInstalled != NULL && view.hasDlcInstalled[index]);
-        bool updateHere = (view.hasUpdateInstalled != NULL && view.hasUpdateInstalled[index]);
-
-        if (dlcHere || updateHere)
-        {
-            const WCHAR *marker = L"DLC + UPDATE INSTALLED";
-            if (!updateHere)
-                marker = L"DLC INSTALLED";
-            else if (!dlcHere)
-                marker = L"UPDATE INSTALLED";
-
-            // Placed after the measured title ID rather than at a fixed
-            // offset, so the two can't overlap at any text size. Dark on the
-            // green bar, where accent green would vanish into it.
-            g_UiFont.DrawText(textX + idW + 18.0f * g_M.scale,
-                              rowY + 40.0f * g_M.scale,
-                              onGreen ? COL_SEL_MARKER : COL_ACCENT, marker);
-        }
-    }
-
-    // Leave the font at its default scale - anything else reusing g_UiFont
-    // shouldn't inherit whatever scale the last row happened to set.
+    g_UiFont.SetBold(false);
     g_UiFont.SetScaleFactors(1.0f, 1.0f);
-
     g_UiFont.End();
 
     EndFrame();
-
-    // Icons are NOT released here - they live until ShutdownGameListUI, so
-    // this costs no decoding from one frame to the next.
 }
 
 // ---------------------------------------------------------------------------
-// Progress bar
+// Cards: the placeholder pages and the blocking screens
 // ---------------------------------------------------------------------------
+
+// A message card: on a page, at the top of it; on a blocking screen, in the
+// middle of the space between the header and the footer.
+static float CardTop(bool asPage, float cardH)
+{
+    if (asPage)
+        return g_M.listY;
+    return (g_M.listY + g_M.footerY) * 0.5f - cardH * 0.5f - S(20.0f);
+}
+
+static void DrawCardQuads(float y, float h)
+{
+    // Lit from the left, the way the mockup's Store banner is.
+    FillRoundGradient(g_M.contentX, y, g_M.contentW, h, g_M.radius, COL_STORE_GLOW, COL_SURFACE, false);
+}
 
 void RenderProgressFrame(const char *title, const char *statusLine,
                          const char *detailLine, float fraction0to1, const char *heading)
@@ -1773,110 +2246,54 @@ void RenderProgressFrame(const char *title, const char *statusLine,
     // A negative fraction means "total size unknown" - draw the empty trough
     // and let the detail line carry the bytes-so-far, rather than showing a
     // 0% bar that looks stalled.
-    bool indeterminate = (fraction0to1 < 0.0f);
+    const bool indeterminate = (fraction0to1 < 0.0f);
     if (fraction0to1 < 0.0f) fraction0to1 = 0.0f;
     if (fraction0to1 > 1.0f) fraction0to1 = 1.0f;
 
+    const float cardH = S(190.0f);
+    const float cardY = CardTop(false, cardH);
+    const float padX = S(36.0f);
+    const float innerX = g_M.contentX + padX;
+    const float innerW = g_M.contentW - padX * 2.0f;
+    const float statusY = cardY + S(26.0f) + LineHeight(1.0f) * 1.25f + S(4.0f);
+    const float barY = cardY + S(112.0f);
+    const float barH = S(10.0f);
+
     BeginFrame();
 
-    // Vertically centred block, sized off the same metrics as the list screen
-    // so the two read as one app rather than two unrelated screens.
-    const float barH = 22.0f * g_M.scale;
-    const float blockY = g_M.screenH * 0.5f - 60.0f * g_M.scale;
-    const float barY = blockY + 52.0f * g_M.scale;
+    DrawFrameBase(false);
+    DrawCardQuads(cardY, cardH);
 
-    // Quads before text, for the same batching reason as RenderLibraryFrame -
-    // see the two-pass comment there.
-    DrawBackground();
-    DrawSidebarQuads(false);
-
-    DrawGradientRect(g_M.contentX, g_M.headerRuleY, g_M.contentW, 2.0f * g_M.scale,
-                     COL_HEADER_RULE_A, COL_HEADER_RULE_B, false);
-
-    DrawRect(g_M.contentX, barY, g_M.contentW, barH, COL_BAR_TROUGH);
-
+    FillRound(innerX, barY, innerW, barH, barH * 0.5f, COL_TRACK);
     if (!indeterminate && fraction0to1 > 0.0f)
-    {
-        // Gradient along the fill's length, so a nearly-full bar still reads
-        // as having direction rather than as a flat green block.
-        DrawGradientRect(g_M.contentX, barY, g_M.contentW * fraction0to1, barH,
-                         COL_ACCENT_DIM, COL_ACCENT, false);
-    }
-
-    WCHAR wideTitle[256];
-    WCHAR wideStatus[256];
-    WCHAR wideDetail[256];
-    Utf8ToWide(title != NULL ? title : "", wideTitle, 256);
-    Utf8ToWide(statusLine != NULL ? statusLine : "", wideStatus, 256);
-    Utf8ToWide(detailLine != NULL ? detailLine : "", wideDetail, 256);
+        FillRoundGradient(innerX, barY, innerW * fraction0to1, barH, barH * 0.5f, COL_GREEN_HI, COL_GREEN, true);
 
     g_UiFont.Begin();
 
-    // The sidebar carries the OMNI360 brand, so it's here too - this is a
-    // screen someone can be looking at for minutes.
     DrawSidebarText(false);
-    DrawChromeHeading(heading != NULL ? heading : "DOWNLOADING");
+    DrawHeaderText(heading != NULL ? heading : "Downloading", NULL, false);
 
-    // Pack name truncated rather than overrunning - these are real archive
-    // filenames and they get long.
-    g_UiFont.SetScaleFactors(1.0f * g_M.textScale, 1.0f * g_M.textScale);
-    g_UiFont.DrawText(g_M.contentX, blockY, COL_TEXT_PRIMARY, wideTitle,
-                      ATGFONT_TRUNCATED, g_M.contentW);
+    // Pack names are real archive filenames and get long - truncated.
+    TextFit(innerX, cardY + S(26.0f), 1.0f, COL_TEXT, title, innerW, true);
 
-    g_UiFont.SetScaleFactors(0.85f * g_M.textScale, 0.85f * g_M.textScale);
-    g_UiFont.DrawText(g_M.contentX, blockY + 28.0f * g_M.scale, COL_TEXT_SECONDARY, wideStatus);
-
-    // Percentage, right-aligned above the bar opposite the status line.
+    float statusRight = innerX + innerW;
     if (!indeterminate)
     {
         char pct[16];
         _snprintf(pct, sizeof(pct), "%d%%", (int)(fraction0to1 * 100.0f + 0.5f));
         pct[sizeof(pct) - 1] = '\0';
-
-        WCHAR widePct[16];
-        Utf8ToWide(pct, widePct, 16);
-        g_UiFont.DrawText(g_M.contentX + g_M.contentW, blockY + 28.0f * g_M.scale,
-                          COL_ACCENT, widePct, ATGFONT_RIGHT);
+        Text(statusRight, statusY, 0.95f, COL_TEXT, pct, ATGFONT_RIGHT, 0.0f, true);
+        statusRight -= TextWidth(pct, 0.95f, true) + S(20.0f);
     }
+    TextFit(innerX, statusY, 0.85f, COL_TEXT2, statusLine, statusRight - innerX);
 
-    g_UiFont.SetScaleFactors(0.8f * g_M.textScale, 0.8f * g_M.textScale);
-    g_UiFont.DrawText(g_M.contentX, barY + barH + 12.0f * g_M.scale, COL_TEXT_DIM, wideDetail,
-                      ATGFONT_TRUNCATED, g_M.contentW);
+    TextFit(innerX, barY + barH + S(14.0f), 0.8f, COL_DIM, detailLine, innerW);
 
+    g_UiFont.SetBold(false);
     g_UiFont.SetScaleFactors(1.0f, 1.0f);
     g_UiFont.End();
 
     EndFrame();
-}
-
-// ---------------------------------------------------------------------------
-// Shared screen chrome
-// ---------------------------------------------------------------------------
-
-// Background + accent rule. Quads only - text goes in the caller's own Font
-// batch, per the two-pass structure RenderLibraryFrame explains.
-static void DrawChromeQuads()
-{
-    DrawBackground();
-    DrawGradientRect(g_M.contentX, g_M.headerRuleY, g_M.contentW, 2.0f * g_M.scale,
-                     COL_HEADER_RULE_A, COL_HEADER_RULE_B, false);
-}
-
-// The heading, drawn at the same size and position on every screen so they
-// read as one app rather than a set of unrelated views. Must be called inside
-// an open Font Begin/End.
-//
-// The OMNI360 brand used to lead this line. It lives at the top of the sidebar
-// now, which every screen draws - so it is still on the progress, picker and
-// message screens, the ones someone may watch for minutes at a time.
-static void DrawChromeHeading(const char *heading)
-{
-    WCHAR wide[128];
-    Utf8ToWide(heading != NULL ? heading : "", wide, 128);
-
-    g_UiFont.SetScaleFactors(1.25f * g_M.textScale, 1.25f * g_M.textScale);
-    g_UiFont.DrawText(g_M.contentX, g_M.headerTextY, COL_TEXT_PRIMARY, wide,
-                      ATGFONT_TRUNCATED, g_M.contentW);
 }
 
 // Seeds edge-triggered input from the CURRENT pad state rather than from zero.
@@ -2016,10 +2433,9 @@ void ResyncUiInput()
 // and searching screens. They're laid out here, so the caller only fills in
 // sprite and label.
 //
-// asPage is for RenderPlaceholderFrame: a page of the shell, whose text sits
-// at the top of the page like the library's, and whose sidebar has focus if
-// main.cpp says so. Otherwise it's a blocking screen - text centred, sidebar
-// never focused.
+// asPage is for RenderPlaceholderFrame: a page of the shell, whose card sits
+// at the top of the page, and whose sidebar has focus if main.cpp says so.
+// Otherwise it's a blocking screen - the card centred, sidebar never focused.
 static void RenderStatusFrameInternal(const char *heading, const char *message,
                                       const char *detailLine, ButtonHint *hints, int hintCount,
                                       bool asPage = false)
@@ -2028,55 +2444,44 @@ static void RenderStatusFrameInternal(const char *heading, const char *message,
         return;
 
     const bool sidebarFocused = asPage && g_sidebar.focused;
+    const bool hasDetail = (detailLine != NULL && detailLine[0] != '\0');
+
+    const float cardH = hasDetail ? S(150.0f) : S(116.0f);
+    const float cardY = CardTop(asPage, cardH);
+    const float padX = S(36.0f);
+    const float innerX = g_M.contentX + padX;
+    const float innerW = g_M.contentW - padX * 2.0f;
 
     BeginFrame();
 
     // Only on a page - a blocking screen carries its own message.
     const bool showToast = asPage && ToastVisibleThisFrame();
 
-    DrawChromeQuads();
-    DrawSidebarQuads(sidebarFocused);
-
-    const float hintCenterY = g_M.footerY + 9.0f * g_M.scale;
     if (hints != NULL && hintCount > 0)
-    {
-        LayoutButtonHints(hints, hintCount, g_M.contentX);
-        DrawButtonHintShapes(hints, hintCount, hintCenterY);
-    }
+        LayoutButtonHintsRight(hints, hintCount);
 
-    if (showToast)
-        DrawToastQuads();
+    DrawFrameBase(sidebarFocused);
+    DrawCardQuads(cardY, cardH);
 
-    const float blockY = asPage ? g_M.listY + 24.0f * g_M.scale
-                                : g_M.screenH * 0.5f - 40.0f * g_M.scale;
+    if (hints != NULL && hintCount > 0)
+        DrawButtonHintShapes(hints, hintCount, g_M.footerY);
 
-    WCHAR wideMessage[256];
-    WCHAR wideDetail[256];
-    Utf8ToWide(message != NULL ? message : "", wideMessage, 256);
-    Utf8ToWide(detailLine != NULL ? detailLine : "", wideDetail, 256);
+    DrawHeaderQuads(showToast);
 
     g_UiFont.Begin();
 
     DrawSidebarText(sidebarFocused);
-    DrawChromeHeading(heading);
+    DrawHeaderText(heading, NULL, showToast);
 
-    g_UiFont.SetScaleFactors(1.0f * g_M.textScale, 1.0f * g_M.textScale);
-    g_UiFont.DrawText(g_M.contentX, blockY, COL_TEXT_PRIMARY, wideMessage,
-                      ATGFONT_TRUNCATED, g_M.contentW);
-
-    if (detailLine != NULL && detailLine[0] != '\0')
-    {
-        g_UiFont.SetScaleFactors(0.85f * g_M.textScale, 0.85f * g_M.textScale);
-        g_UiFont.DrawText(g_M.contentX, blockY + 32.0f * g_M.scale, COL_TEXT_SECONDARY,
-                          wideDetail, ATGFONT_TRUNCATED, g_M.contentW);
-    }
+    const float messageY = cardY + (hasDetail ? S(34.0f) : (cardH - LineHeight(1.2f)) * 0.5f - S(4.0f));
+    TextFit(innerX, messageY, 1.2f, COL_TEXT, message, innerW, true);
+    if (hasDetail)
+        TextFit(innerX, messageY + LineHeight(1.2f) * 1.25f + S(10.0f), 0.85f, COL_TEXT2, detailLine, innerW);
 
     if (hints != NULL && hintCount > 0)
-        DrawButtonHintText(hints, hintCount, hintCenterY);
+        DrawButtonHintText(hints, hintCount, g_M.footerY);
 
-    if (showToast)
-        DrawToastText();
-
+    g_UiFont.SetBold(false);
     g_UiFont.SetScaleFactors(1.0f, 1.0f);
     g_UiFont.End();
 
@@ -2104,8 +2509,6 @@ void ShowMessageUI(const char *heading, const char *message, const char *detailL
         if (pressed & (XINPUT_GAMEPAD_B | XINPUT_GAMEPAD_A))
             break;
 
-        // Badged like every other footer; this used to be the plain text
-        // "B  Continue".
         ButtonHint hints[1];
         hints[0].sprite = BUTTON_SPRITE_B;
         hints[0].label = L"Continue";
@@ -2154,26 +2557,21 @@ bool ShowConfirmUI(const char *heading, const char *message, const char *detailL
 // List page (Settings, and the pack and title update pickers)
 // ---------------------------------------------------------------------------
 
-// Shorter rows than the library - there's no artwork to make room for, so row
-// height is set by the two text lines alone.
-//
-// Sized, with the two line offsets below, from a 720p hardware screenshot of
-// the XUI-rendered text rather than carried over from the bitmap font these
-// were first tuned for. That font sat higher and smaller: with the old 56px
-// row, XUI's second line ran its descenders 3px past the bottom of the plate,
-// and the lines sat 7px apart. Measured, XUI draws a line's capitals about 5px
-// below the y it's given; the label's capitals are ~15px tall and the second
-// line's ~12px, plus ~4px of descender.
+// A card per row: a bold label and a line under it.
 static float ListRowHeight()
 {
-    return 64.0f * g_M.scale;
+    return S(84.0f);
+}
+
+static float ListRowGap()
+{
+    return S(10.0f);
 }
 
 static int ListVisibleRows()
 {
-    float listSpace = g_M.footerY - g_M.listY - 16.0f * g_M.scale;
-    int visibleRows = (int)(listSpace / ListRowHeight());
-    return (visibleRows < 1) ? 1 : visibleRows;
+    int rows = (int)((g_M.footerY - S(30.0f) - g_M.listY + ListRowGap()) / ListRowHeight());
+    return (rows < 1) ? 1 : rows;
 }
 
 void RenderListFrame(ListPageView &view, const UiHint *hints, int hintCount)
@@ -2184,12 +2582,7 @@ void RenderListFrame(ListPageView &view, const UiHint *hints, int hintCount)
     const int count = (view.labels != NULL && view.count > 0) ? view.count : 0;
 
     const float rowH = ListRowHeight();
-    const float labelY = 6.0f * g_M.scale;     // label capitals ~11px into the 58px plate
-    const float sublabelY = 30.0f * g_M.scale; // 9px under the label's baseline; descenders end ~7px clear of the plate edge
-    const float rowGap = 6.0f * g_M.scale;
-    const float plateH = rowH - rowGap;
-    const float scrollGutter = 18.0f * g_M.scale;
-
+    const float plateH = rowH - ListRowGap();
     const int visibleRows = ListVisibleRows();
 
     KeepSelectionVisible(count, visibleRows, view.selected, view.scroll);
@@ -2198,19 +2591,16 @@ void RenderListFrame(ListPageView &view, const UiHint *hints, int hintCount)
 
     BeginFrame();
 
-    // Once per frame, so both passes agree - see ToastVisibleThisFrame.
     const bool showToast = ToastVisibleThisFrame();
 
-    // --- Pass 1: quads ---
-    DrawChromeQuads();
-    DrawSidebarQuads(g_sidebar.focused);
-
-    bool showScroll = (count > visibleRows);
-    float plateW = g_M.contentW - (showScroll ? scrollGutter : 0.0f);
+    const bool showScroll = (count > visibleRows);
+    const float plateW = g_M.contentW - (showScroll ? ScrollGutter() : 0.0f);
 
     ButtonHint footer[MAX_FOOTER_HINTS];
-    int footerCount = LayoutFooter(hints, hintCount, footer);
-    const float hintCenterY = FooterCenterY();
+    const int footerCount = LayoutFooter(hints, hintCount, footer);
+
+    // --- Pass 1: quads ---
+    DrawFrameBase(g_sidebar.focused);
 
     for (int row = 0; row < visibleRows; ++row)
     {
@@ -2218,34 +2608,43 @@ void RenderListFrame(ListPageView &view, const UiHint *hints, int hintCount)
         if (index >= count)
             break;
 
-        DrawRowPlate(g_M.contentX, g_M.listY + row * rowH, plateW, plateH,
-                     index == selected, view.focused);
+        const float y = g_M.listY + row * rowH;
+        const bool isSelected = (index == selected);
+        FillRound(g_M.contentX, y, plateW, plateH, g_M.radius, isSelected ? COL_SURFACE_HI : COL_SURFACE);
+        if (isSelected && view.focused)
+            FocusRing(g_M.contentX, y, plateW, plateH, g_M.radius);
     }
 
     if (showScroll)
-        DrawScrollbar(g_M.listY, visibleRows * rowH - rowGap, count, visibleRows, scrollOffset);
+        DrawScrollbar(g_M.listY, visibleRows * rowH - ListRowGap(), count, visibleRows, scrollOffset);
 
-    DrawButtonHintShapes(footer, footerCount, hintCenterY);
-
-    if (showToast)
-        DrawToastQuads();
+    DrawButtonHintShapes(footer, footerCount, g_M.footerY);
+    DrawHeaderQuads(showToast);
 
     // --- Pass 2: all text, one Begin/End ---
     g_UiFont.Begin();
 
     DrawSidebarText(g_sidebar.focused);
-    DrawChromeHeading(view.heading);
 
-    if (view.showCounter && count > 0 && !showToast) // the popup sits where the counter goes
-        DrawPositionCounter(selected, count);
+    // The line under the title: what the list is for, and where you are in
+    // it when it's a list of results.
+    char subtitle[200] = "";
+    const char *sub = view.subheading;
+    if (view.showCounter && count > 0)
+    {
+        if (sub != NULL && sub[0] != '\0')
+            _snprintf(subtitle, sizeof(subtitle), "%s" MIDDOT "%d of %d", sub, selected + 1, count);
+        else
+            _snprintf(subtitle, sizeof(subtitle), "%d of %d", selected + 1, count);
+        subtitle[sizeof(subtitle) - 1] = '\0';
+        sub = subtitle;
+    }
+    DrawHeaderText(view.heading, sub, showToast);
 
-    DrawButtonHintText(footer, footerCount, hintCenterY);
+    DrawButtonHintText(footer, footerCount, g_M.footerY);
 
-    if (showToast)
-        DrawToastText();
-
-    float textX = g_M.contentX + 18.0f * g_M.scale;
-    float textMaxW = (g_M.contentX + plateW) - textX - 16.0f * g_M.scale;
+    const float textX = g_M.contentX + S(26.0f);
+    const float textMaxW = (g_M.contentX + plateW) - textX - S(20.0f);
 
     for (int row = 0; row < visibleRows; ++row)
     {
@@ -2253,33 +2652,18 @@ void RenderListFrame(ListPageView &view, const UiHint *hints, int hintCount)
         if (index >= count)
             break;
 
-        float rowY = g_M.listY + row * rowH;
-        bool isSelected = (index == selected);
-        bool onGreen = isSelected && view.focused;
+        const float y = g_M.listY + row * rowH;
 
         // Scene release filenames are long and the interesting part is at the
-        // front, so these rely on DrawText's own ellipsis truncation rather
-        // than wrapping onto a second line.
-        WCHAR wideLabel[256];
-        Utf8ToWide(view.labels[index] != NULL ? view.labels[index] : "", wideLabel, 256);
-
-        g_UiFont.SetScaleFactors(0.95f * g_M.textScale, 0.95f * g_M.textScale);
-        g_UiFont.DrawText(textX, rowY + labelY,
-                          onGreen ? COL_SEL_TEXT : (isSelected ? COL_TEXT_PRIMARY : COL_TEXT_SECONDARY),
-                          wideLabel, ATGFONT_TRUNCATED, textMaxW);
+        // front, so these are truncated rather than wrapped.
+        TextFit(textX, y + S(14.0f), 0.95f, COL_TEXT, view.labels[index], textMaxW, true);
 
         if (view.sublabels != NULL && view.sublabels[index] != NULL)
-        {
-            WCHAR wideSub[128];
-            Utf8ToWide(view.sublabels[index], wideSub, 128);
-
-            g_UiFont.SetScaleFactors(0.85f * g_M.textScale, 0.85f * g_M.textScale);
-            g_UiFont.DrawText(textX, rowY + sublabelY,
-                              onGreen ? COL_SEL_SUBTEXT : COL_TEXT_DIM,
-                              wideSub, ATGFONT_TRUNCATED, textMaxW);
-        }
+            TextFit(textX, y + S(14.0f) + LineHeight(0.95f) * 1.2f + S(4.0f), 0.75f, COL_DIM,
+                    view.sublabels[index], textMaxW);
     }
 
+    g_UiFont.SetBold(false);
     g_UiFont.SetScaleFactors(1.0f, 1.0f);
     g_UiFont.End();
 
@@ -2302,20 +2686,26 @@ void RenderPlaceholderFrame(const char *heading, const char *message, const char
 // Queue page
 // ---------------------------------------------------------------------------
 
-// Taller rows than the library's: a cover, three lines of text and a bar.
+// Three lines - the file, the game and its numbers, then how it's going -
+// with the progress bar under them while it downloads.
 static float QueueRowHeight()
 {
-    return 112.0f * g_M.scale;
+    return S(132.0f);
+}
+
+static float QueueRowGap()
+{
+    return S(12.0f);
 }
 
 static D3DCOLOR QueueStatusColor(QueueRowTone tone)
 {
     switch (tone)
     {
-    case QUEUE_ROW_ACTIVE: return COL_TEXT_PRIMARY;
-    case QUEUE_ROW_DONE:   return COL_ACCENT;
+    case QUEUE_ROW_ACTIVE: return COL_TEXT;
+    case QUEUE_ROW_DONE:   return COL_GREEN_TEXT;
     case QUEUE_ROW_FAILED: return COL_ERROR;
-    default:               return COL_TEXT_DIM;
+    default:               return COL_DIM;
     }
 }
 
@@ -2327,23 +2717,19 @@ void RenderQueueFrame(QueuePageView &view, const UiHint *hints, int hintCount)
     const int count = (view.rows != NULL && view.count > 0) ? view.count : 0;
     const int gameCount = (view.games != NULL && view.gameCount > 0) ? view.gameCount : 0;
 
-    // The library's cover cache - loaded already if the library has been
-    // drawn, and loaded here if the Queue is somehow the first page shown.
     Icon *icons = NULL;
     if (gameCount > 0)
     {
         EnsureIconsLoaded(view.games, gameCount);
-        icons = g_icons;
+        icons = (g_iconCount == gameCount) ? g_icons : NULL;
     }
 
     const float rowH = QueueRowHeight();
-    const float rowGap = 8.0f * g_M.scale;
-    const float plateH = rowH - rowGap;
-    const float coverSize = 84.0f * g_M.scale;
+    const float plateH = rowH - QueueRowGap();
+    const float coverSize = S(84.0f);
     const float coverInset = (plateH - coverSize) * 0.5f;
-    const float scrollGutter = 18.0f * g_M.scale;
 
-    int visibleRows = (int)((g_M.footerY - g_M.listY - 16.0f * g_M.scale) / rowH);
+    int visibleRows = (int)((g_M.footerY - S(30.0f) - g_M.listY + QueueRowGap()) / rowH);
     if (visibleRows < 1) visibleRows = 1;
 
     KeepSelectionVisible(count, visibleRows, view.selected, view.scroll);
@@ -2352,25 +2738,22 @@ void RenderQueueFrame(QueuePageView &view, const UiHint *hints, int hintCount)
 
     BeginFrame();
 
-    // Once per frame, so both passes agree - see ToastVisibleThisFrame.
     const bool showToast = ToastVisibleThisFrame();
 
-    bool showScroll = (count > visibleRows);
-    float plateW = g_M.contentW - (showScroll ? scrollGutter : 0.0f);
+    const bool showScroll = (count > visibleRows);
+    const float plateW = g_M.contentW - (showScroll ? ScrollGutter() : 0.0f);
 
     const float coverX = g_M.contentX + coverInset;
-    const float textX = coverX + coverSize + 20.0f * g_M.scale;
-    const float textRight = g_M.contentX + plateW - 20.0f * g_M.scale;
-    const float barH = 6.0f * g_M.scale;
-    const float barOffsetY = plateH - 18.0f * g_M.scale;
+    const float textX = coverX + coverSize + S(22.0f);
+    const float textRight = g_M.contentX + plateW - S(24.0f);
+    const float barH = S(6.0f);
+    const float barOffsetY = plateH - S(16.0f);
 
     ButtonHint footer[MAX_FOOTER_HINTS];
-    int footerCount = LayoutFooter(hints, hintCount, footer);
-    const float hintCenterY = FooterCenterY();
+    const int footerCount = LayoutFooter(hints, hintCount, footer);
 
     // --- Pass 1: quads ---
-    DrawChromeQuads();
-    DrawSidebarQuads(g_sidebar.focused);
+    DrawFrameBase(g_sidebar.focused);
 
     for (int row = 0; row < visibleRows; ++row)
     {
@@ -2378,58 +2761,61 @@ void RenderQueueFrame(QueuePageView &view, const UiHint *hints, int hintCount)
         if (index >= count)
             break;
 
-        const QueueRowView &r = view.rows[index];
-        const float rowY = g_M.listY + row * rowH;
+        const QueueRowView &q = view.rows[index];
+        const float y = g_M.listY + row * rowH;
         const bool isSelected = (index == selected);
-        const bool onGreen = isSelected && view.focused;
 
-        DrawRowPlate(g_M.contentX, rowY, plateW, plateH, isSelected, view.focused);
+        FillRound(g_M.contentX, y, plateW, plateH, g_M.radius, isSelected ? COL_SURFACE_HI : COL_SURFACE);
+        if (isSelected && view.focused)
+            FocusRing(g_M.contentX, y, plateW, plateH, g_M.radius);
 
-        float coverY = rowY + coverInset;
-        if (icons != NULL && r.libraryIndex >= 0 && r.libraryIndex < gameCount &&
-            icons[r.libraryIndex].texture != NULL)
-            DrawIconFitted(&icons[r.libraryIndex], coverX, coverY, coverSize);
-        else
-            DrawRect(coverX, coverY, coverSize, coverSize, COL_ICON_PLACEHLD);
+        const Icon *icon = (icons != NULL && q.libraryIndex >= 0 && q.libraryIndex < gameCount)
+                         ? &icons[q.libraryIndex] : NULL;
+        DrawCoverSquare(icon, coverX, y + coverInset, coverSize);
 
-        if (r.showBar)
+        if (q.showBar)
         {
-            float barY = rowY + barOffsetY;
-            float barW = textRight - textX;
+            const float barY = y + barOffsetY;
+            const float barW = textRight - textX;
+            FillRound(textX, barY, barW, barH, barH * 0.5f, COL_TRACK);
 
-            // On the green bar the usual trough and fill would vanish into
-            // it, so it's drawn dark-on-green and white-on-dark instead.
-            DrawRect(textX, barY, barW, barH, onGreen ? 0x40000000 : COL_BAR_TROUGH);
-
-            float fraction = r.fraction;
-            if (fraction > 1.0f) fraction = 1.0f;
-            if (fraction > 0.0f)
+            if (q.fraction > 0.0f)
             {
-                if (onGreen)
-                    DrawRect(textX, barY, barW * fraction, barH, COL_SEL_TEXT);
-                else
-                    DrawGradientRect(textX, barY, barW * fraction, barH, COL_ACCENT_DIM, COL_ACCENT, false);
+                float fraction = (q.fraction > 1.0f) ? 1.0f : q.fraction;
+                FillRoundGradient(textX, barY, barW * fraction, barH, barH * 0.5f, COL_GREEN_HI, COL_GREEN, true);
             }
         }
     }
 
     if (showScroll)
-        DrawScrollbar(g_M.listY, visibleRows * rowH - rowGap, count, visibleRows, scrollOffset);
+        DrawScrollbar(g_M.listY, visibleRows * rowH - QueueRowGap(), count, visibleRows, scrollOffset);
 
-    DrawButtonHintShapes(footer, footerCount, hintCenterY);
-
-    if (showToast)
-        DrawToastQuads();
+    DrawButtonHintShapes(footer, footerCount, g_M.footerY);
+    DrawHeaderQuads(showToast);
 
     // --- Pass 2: all text, one Begin/End ---
     g_UiFont.Begin();
 
     DrawSidebarText(g_sidebar.focused);
-    DrawChromeHeading("QUEUE");
-    DrawButtonHintText(footer, footerCount, hintCenterY);
 
-    if (showToast)
-        DrawToastText();
+    int waiting = 0;
+    for (int i = 0; i < count; ++i)
+    {
+        if (view.rows[i].tone == QUEUE_ROW_WAITING || view.rows[i].tone == QUEUE_ROW_ACTIVE)
+            waiting++;
+    }
+
+    char subtitle[96];
+    if (waiting > 0 && waiting < count)
+        _snprintf(subtitle, sizeof(subtitle), "%d to do" MIDDOT "%d finished", waiting, count - waiting);
+    else if (waiting > 0)
+        _snprintf(subtitle, sizeof(subtitle), "%d to do", waiting);
+    else
+        _snprintf(subtitle, sizeof(subtitle), "%d finished", count);
+    subtitle[sizeof(subtitle) - 1] = '\0';
+    DrawHeaderText("Queue", subtitle, showToast);
+
+    DrawButtonHintText(footer, footerCount, g_M.footerY);
 
     for (int row = 0; row < visibleRows; ++row)
     {
@@ -2437,70 +2823,43 @@ void RenderQueueFrame(QueuePageView &view, const UiHint *hints, int hintCount)
         if (index >= count)
             break;
 
-        const QueueRowView &r = view.rows[index];
-        const float rowY = g_M.listY + row * rowH;
-        const bool isSelected = (index == selected);
-        const bool onGreen = isSelected && view.focused;
+        const QueueRowView &q = view.rows[index];
+        const float y = g_M.listY + row * rowH;
+        const float titleY = y + S(16.0f);
+        const float lineY = titleY + LineHeight(0.95f) * 1.2f + S(4.0f);
 
         // The percentage, right-aligned on the title line, while there's a
         // known fraction to give. The title is truncated short of it.
         float titleRight = textRight;
-
-        if (r.showBar && r.fraction >= 0.0f)
+        if (q.showBar && q.fraction >= 0.0f)
         {
-            float fraction = (r.fraction > 1.0f) ? 1.0f : r.fraction;
+            float fraction = (q.fraction > 1.0f) ? 1.0f : q.fraction;
 
             char pct[16];
             _snprintf(pct, sizeof(pct), "%d%%", (int)(fraction * 100.0f));
             pct[sizeof(pct) - 1] = '\0';
 
-            WCHAR widePct[16];
-            Utf8ToWide(pct, widePct, 16);
-
-            g_UiFont.SetScaleFactors(0.9f * g_M.textScale, 0.9f * g_M.textScale);
-            g_UiFont.DrawText(textRight, rowY + 10.0f * g_M.scale,
-                              onGreen ? COL_SEL_TEXT : COL_ACCENT, widePct, ATGFONT_RIGHT);
-            titleRight -= g_UiFont.GetTextWidth(widePct) + 16.0f * g_M.scale;
+            Text(textRight, titleY, 0.95f, COL_TEXT, pct, ATGFONT_RIGHT, 0.0f, true);
+            titleRight -= TextWidth(pct, 0.95f, true) + S(16.0f);
         }
 
-        WCHAR wideTitle[256];
-        Utf8ToWide(r.title != NULL ? r.title : "", wideTitle, 256);
-        g_UiFont.SetScaleFactors(0.95f * g_M.textScale, 0.95f * g_M.textScale);
-        g_UiFont.DrawText(textX, rowY + 8.0f * g_M.scale,
-                          onGreen ? COL_SEL_TEXT : COL_TEXT_PRIMARY, wideTitle,
-                          ATGFONT_TRUNCATED, titleRight - textX);
+        TextFit(textX, titleY, 0.95f, COL_TEXT, q.title, titleRight - textX, true);
 
-        WCHAR wideGame[128];
-        Utf8ToWide(r.gameName != NULL ? r.gameName : "", wideGame, 128);
-        g_UiFont.SetScaleFactors(0.8f * g_M.textScale, 0.8f * g_M.textScale);
-        g_UiFont.DrawText(textX, rowY + 34.0f * g_M.scale,
-                          onGreen ? COL_SEL_SUBTEXT : COL_TEXT_DIM, wideGame,
-                          ATGFONT_TRUNCATED, textRight - textX);
+        // The game and the live numbers, then the status on a line of its
+        // own, coloured by how it went - some of them are a sentence long.
+        char detail[300];
+        if (q.numbers != NULL && q.numbers[0] != '\0')
+            _snprintf(detail, sizeof(detail), "%s" MIDDOT "%s", q.gameName != NULL ? q.gameName : "", q.numbers);
+        else
+            _snprintf(detail, sizeof(detail), "%s", q.gameName != NULL ? q.gameName : "");
+        detail[sizeof(detail) - 1] = '\0';
 
-        // Status left, live numbers right, sharing a line - the numbers go
-        // first so the status can be truncated short of them.
-        const float statusScale = 0.85f * g_M.textScale;
-        const float statusY = rowY + 56.0f * g_M.scale;
-        float statusRight = textRight;
-
-        if (r.numbers != NULL && r.numbers[0] != '\0')
-        {
-            WCHAR wideNumbers[128];
-            Utf8ToWide(r.numbers, wideNumbers, 128);
-
-            g_UiFont.SetScaleFactors(0.8f * g_M.textScale, 0.8f * g_M.textScale);
-            g_UiFont.DrawText(textRight, statusY + 2.0f * g_M.scale,
-                              onGreen ? COL_SEL_SUBTEXT : COL_TEXT_SECONDARY, wideNumbers, ATGFONT_RIGHT);
-            statusRight -= g_UiFont.GetTextWidth(wideNumbers) + 20.0f * g_M.scale;
-        }
-
-        WCHAR wideStatus[256];
-        Utf8ToWide(r.status != NULL ? r.status : "", wideStatus, 256);
-        g_UiFont.SetScaleFactors(statusScale, statusScale);
-        g_UiFont.DrawText(textX, statusY, onGreen ? COL_SEL_TEXT : QueueStatusColor(r.tone),
-                          wideStatus, ATGFONT_TRUNCATED, statusRight - textX);
+        TextFit(textX, lineY, 0.75f, COL_TEXT2, detail, textRight - textX);
+        TextFit(textX, lineY + LineHeight(0.75f) * 1.2f + S(4.0f), 0.78f, QueueStatusColor(q.tone),
+                q.status, textRight - textX, true);
     }
 
+    g_UiFont.SetBold(false);
     g_UiFont.SetScaleFactors(1.0f, 1.0f);
     g_UiFont.End();
 
