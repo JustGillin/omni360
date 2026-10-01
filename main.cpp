@@ -27,6 +27,7 @@ end-to-end on real hardware against a real 27-game library.
 #include "GameListUI.h"
 #include "DownloadQueue.h"
 #include "SearchWorker.h"
+#include "CoverArt.h"
 #include "ArchiveOrgDLC.h"
 #include "downloadFile.h" // DownloadProgressFn + FormatBytes, for the progress callback
 #include "GodConvert.h"
@@ -915,6 +916,12 @@ static void ScanLibrary(Library &lib, const char *gamesPath)
         dprintf("Found %d installed games under %s\n", lib.count, gamesPath);
     else
         dprintf("No installed games found under %s\n", gamesPath);
+
+    // Box art, in the library's order so the first screenful comes first.
+    static unsigned long titleIds[MAX_INSTALLED_GAMES];
+    for (int i = 0; i < lib.count; ++i)
+        titleIds[i] = lib.games[i].titleId;
+    RequestCoverArt(titleIds, lib.count);
 }
 
 // ---------------------------------------------------------------------------
@@ -1896,6 +1903,10 @@ int main()
     // app with a message, which left someone whose games folder was simply
     // wrong no way to fix it from the console - the game list now says it is
     // empty, names the folder it searched, and offers Settings.
+    // Before the first scan, which asks it for the library's box art.
+    if (!StartCoverArt())
+        dprintf("ERROR: the cover worker didn't start - tiles keep their icons\n");
+
     ScanLibrary(lib, gamesPath);
 
     // The shell loop: read the controller, act on it, draw a frame.
@@ -1954,6 +1965,7 @@ int main()
 
         SnapshotQueue(shell, lib);
         PollPickerSearch(shell.picker);
+        PumpCoverArt();
 
         // Removing the last finished job leaves nothing on the Queue to have
         // focus.
@@ -2391,6 +2403,9 @@ int main()
 
     // A search still out would only be thrown away - a short wait is plenty.
     StopSearchWorker(3000);
+
+    // Likewise a cover download: it's fetched again next time.
+    StopCoverArt(3000);
 
     free(lib.games);
 

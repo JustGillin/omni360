@@ -365,6 +365,7 @@
     <ClInclude Include="ReadAhead.h" />
     <ClInclude Include="DownloadQueue.h" />
     <ClInclude Include="SearchWorker.h" />
+    <ClInclude Include="CoverArt.h" />
     <ClInclude Include="TitleNames.h" />
     <ClInclude Include="RarHeaders.h" />
     <ClInclude Include="parsing.h" />
@@ -407,6 +408,7 @@
     <ClCompile Include="ReadAhead.cpp" />
     <ClCompile Include="DownloadQueue.cpp" />
     <ClCompile Include="SearchWorker.cpp" />
+    <ClCompile Include="CoverArt.cpp" />
     <ClCompile Include="RarHeaders.cpp" />
     <ClCompile Include="parsing.cpp" />
     <ClCompile Include="StfsParser.cpp" />

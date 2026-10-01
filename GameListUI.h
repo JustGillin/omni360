@@ -153,6 +153,12 @@ int LibraryGridColumns();
 
 void RenderLibraryFrame(LibraryPageView &view, const UiHint *hints, int hintCount);
 
+// Turns at most one cover that CoverArt.cpp has ready into a texture for the
+// tiles - decoding and cutting it first if it was just downloaded. Call once
+// per frame; a download costs a few tens of milliseconds the first time, a
+// cached cover next to nothing.
+void PumpCoverArt();
+
 // Drops the cached cover art, so the next library frame loads it afresh. Call
 // after rescanning the library: the cache is matched to the game list by count
 // alone, so a new library of the same size would otherwise show the old one's
