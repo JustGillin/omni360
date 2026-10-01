@@ -315,9 +315,16 @@ static void RunInstall(DiscJob *job, const char *gamesPath)
     DWORD seconds = (GetTickCount() - progress.startTick) / 1000;
     dprintf("[disc] install %s after %lu:%02lu: %s\n", GodResultText(result),
             (unsigned long)(seconds / 60), (unsigned long)(seconds % 60), packagePath);
+    // What was actually copied - all of it for a finished install, but only
+    // as far as it got for a stopped or failed one.
+    EnterCriticalSection(&g_lock);
+    const unsigned long long copied = job->snap.bytesDone;
+    LeaveCriticalSection(&g_lock);
+
     if (seconds > 0)
-        dprintf("[disc] %I64u MB at %.2f MB/s - waiting for the disc %.0fs, hashing %.0fs, writing %.0fs\n",
-                info.usedSize / (1024 * 1024), (double)info.usedSize / (1024.0 * 1024.0) / (double)seconds,
+        dprintf("[disc] %I64u of %I64u MB at %.2f MB/s - waiting for the disc %.0fs, hashing %.0fs, writing %.0fs\n",
+                copied / (1024 * 1024), info.usedSize / (1024 * 1024),
+                (double)copied / (1024.0 * 1024.0) / (double)seconds,
                 timings.readMs / 1000.0, timings.hashMs / 1000.0, timings.writeMs / 1000.0);
 
     char detail[160];
