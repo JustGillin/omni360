@@ -44,7 +44,11 @@ extern "C" DWORD XamSetDvdSpindleSpeed(DWORD speed);
 
 #define TRAY_POLL_MS        500
 #define SETTLE_MS           2500   // after the tray moves, before reading the disc
-#define SPIN_UP_TIMEOUT_MS  20000  // how long a disc that won't open yet is retried
+// How long after the tray moves a disc that won't read yet keeps being tried.
+// A disc that has just gone in can read at its start while its game partition
+// still can't be - the console is still checking the disc - so a failure in
+// that time means "not yet", not "can't".
+#define SPIN_UP_TIMEOUT_MS  30000
 #define PROBE_RETRY_MS      2000
 
 // Room for the package beyond its own size, as the install used to check.
@@ -137,12 +141,14 @@ static void SetDiscState(DiscState state)
     g_disc.state = state;
 }
 
-// Reads the disc now in the drive. False if it wouldn't open - nothing there,
-// or still spinning up - which leaves the state alone so it can be retried.
-static bool ProbeDisc(bool logOpenFailure)
+// Reads the disc now in the drive. True once there's an answer: a game disc,
+// or - on the last chance - one that can't be installed. False to try again:
+// nothing would open (no disc, or still spinning up), or the game partition
+// couldn't be read yet.
+static bool ProbeDisc(bool lastChance)
 {
     DiscSource disc;
-    if (!disc.Open(logOpenFailure ? dprintf : NULL))
+    if (!disc.Open(lastChance ? dprintf : NULL))
         return false;
 
     EnterCriticalSection(&g_lock);
@@ -152,6 +158,12 @@ static bool ProbeDisc(bool logOpenFailure)
     GodImageInfo info;
     GodResult result = GodInspect(&disc, &info);
     disc.Close();
+
+    if (result != GOD_OK && !lastChance)
+    {
+        dprintf("[disc] not readable yet (%s); trying again\n", GodResultText(result));
+        return false; // still DISC_READING
+    }
 
     EnterCriticalSection(&g_lock);
     if (result == GOD_OK)
