@@ -1,0 +1,14 @@
+zlib 1.3.2 - decompression only, for installing games from archive.org.
+
+Unmodified files copied from the official release tarball:
+
+  https://github.com/madler/zlib/releases/download/v1.3.2/zlib-1.3.2.tar.gz
+  SHA-256 bb329a0a2cd0274d05519d61c667c062e06990d72e125ee2dfa8de64f0119d16
+  (matches the hash published on https://zlib.net/)
+
+Only inflate and what it needs are here: adler32.c, crc32.c, inffast.c,
+inflate.c, inftrees.c, zutil.c and their headers (gzguts.h only because
+zutil.c includes it). The rest of zlib
+(compression, gzip files, the examples) isn't used.
+
+Licence: the zlib licence, in LICENSE beside this file.

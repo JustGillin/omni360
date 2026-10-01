@@ -60,6 +60,14 @@
 #define MAX_ANCHORS 255
 // #define XBOXTLS_RECV_BUFFER_SIZE (128 * 1024)
 #define XBOXTLS_RECV_BUFFER_SIZE (4 * 1024 * 1024)
+
+// How long a connection may go without sending or receiving anything before
+// it's given up on. Without it, a server that stops answering leaves recv()
+// waiting forever - found when four parallel connections to archive.org all
+// stalled after sending their requests and the app never got control back.
+// Two minutes is far longer than any healthy pause, even archive.org
+// extracting a zip member before its first byte.
+#define XBOXTLS_IO_TIMEOUT_MS (2 * 60 * 1000)
 // Xbox 360-specific socket option required for direct outbound sockets that do
 // not tunnel through Microsoft's service stack.
 #define XBOX_SO_BYPASS_SECURITY 0x5801
@@ -200,6 +208,10 @@ static void XboxTLS_SetSocketOptions(SOCKET sock) {
     setsockopt(sock, SOL_SOCKET, XBOX_SO_BYPASS_SECURITY, (PCSTR)&opt_true, sizeof(opt_true));
     setsockopt(sock, SOL_SOCKET, SO_RCVBUF, (PCSTR)&recvBufferSize, sizeof(recvBufferSize));
     setsockopt(sock, IPPROTO_TCP, TCP_NODELAY, (PCSTR)&opt_true, sizeof(opt_true));
+
+    DWORD timeoutMs = XBOXTLS_IO_TIMEOUT_MS;
+    setsockopt(sock, SOL_SOCKET, SO_RCVTIMEO, (PCSTR)&timeoutMs, sizeof(timeoutMs));
+    setsockopt(sock, SOL_SOCKET, SO_SNDTIMEO, (PCSTR)&timeoutMs, sizeof(timeoutMs));
 }
 
 static void XboxTLS_UseFastDownloadSuites(br_ssl_client_context* sc) {
