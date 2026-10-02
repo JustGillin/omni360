@@ -35,7 +35,7 @@ Omni360 began as a fork of [X-Store](https://github.com/951261/X-Store) by 95126
 
 The sidebar on the left has four pages; left on the D-pad reaches it from any page, and **B** steps back a level (B on the sidebar exits).
 
-- **Your Library** — **A** on a game opens its page. A game disc in the drive is the first tile: **A** installs it to the hard drive, **X** finds its title updates, and once it's installed **A** finds its DLC and **START** installs it again. **Y** is a shortcut to Settings.
+- **Your Library** — **A** on a game opens its page. A game disc in the drive is the first tile: **A** installs it to the hard drive, **X** opens its page, and once it's installed **A** finds its DLC and **START** installs it again. **Y** is a shortcut to Settings.
 - **Store** — three featured games, then A to Z. **A** on a letter shows its games; **A** on a game opens its page. Search, Xbox Live Arcade, Xbox Live Indie Games and Original Xbox are on the way, marked SOON.
 - **A game's page** — **Install** installs the chosen version, every disc of it; choose another version from the list beside the description first. The button shows Queued, Installing, Installed, or Install remaining for a multi-disc game partly installed. **Find DLC** and **Title updates** search archive.org and show what's there to pick from. **Uninstall** appears once something is installed, and removes the game but leaves its DLC and title updates.
 - **Queue** — what's downloading, waiting and done. **X** stops a download or install, or clears a finished one.

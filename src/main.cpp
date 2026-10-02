@@ -2021,21 +2021,22 @@ static bool UninstallStoreVersion(Shell &shell, const Library &lib, const char *
     return removed > 0;
 }
 
-// A on a library game: its page, as the Store has it - on the version that's
-// installed, where it can tell - or, for a game the Store hasn't got (an
-// arcade game, homebrew), a page of its own with no versions to install,
-// from the library's name for it. Find DLC and Title updates work either way.
-static void OpenLibraryGame(Shell &shell, const Library &lib, const InstalledGame &chosen)
+// A game's page over the library, by its title ID: as the Store has it - on
+// the version that's installed, where it can tell - or, for a game the Store
+// hasn't got (an arcade game, homebrew, a disc it lacks), a page of its own
+// under the name given, with no versions to install. Find DLC and Title
+// updates work either way. For a library game, and the disc in the drive.
+static void OpenGameByTitleId(Shell &shell, const Library &lib, unsigned long titleId, const char *name)
 {
-    static char name[256];
+    static char ownName[256];
     StoreGame game;
-    if (!StoreGameByTitleId(chosen.titleId, &game))
+    if (!StoreGameByTitleId(titleId, &game))
     {
-        _snprintf(name, sizeof(name), "%s", chosen.displayName);
-        name[sizeof(name) - 1] = '\0';
+        _snprintf(ownName, sizeof(ownName), "%s", name != NULL ? name : "");
+        ownName[sizeof(ownName) - 1] = '\0';
         memset(&game, 0, sizeof(game));
-        game.name = name;
-        game.titleId = chosen.titleId;
+        game.name = ownName;
+        game.titleId = titleId;
     }
     OpenStoreGame(shell, game);
 
@@ -2049,6 +2050,12 @@ static void OpenLibraryGame(Shell &shell, const Library &lib, const InstalledGam
             break;
         }
     }
+}
+
+// A on a library game.
+static void OpenLibraryGame(Shell &shell, const Library &lib, const InstalledGame &chosen)
+{
+    OpenGameByTitleId(shell, lib, chosen.titleId, chosen.displayName);
 }
 
 static StoreGameView MakeStoreGameView(Shell &shell, const Library &lib)
@@ -2415,19 +2422,21 @@ static bool DiscTileAction(Shell &shell, const Library &lib, const char *gamesPa
         return false;
     }
 
-    // Installed already: A and X are a game's - its DLC and its updates.
+    // X is the game's page, installed or not - its details, versions, DLC
+    // and updates. Once installed, A is its DLC and START installs it again.
+    if (pressed & XINPUT_GAMEPAD_X)
+    {
+        OpenGameByTitleId(shell, lib, disc.titleId, shell.discName);
+        return false;
+    }
+
     const bool install = (!shell.discInstalled && (pressed & XINPUT_GAMEPAD_A)) ||
                          (shell.discInstalled && (pressed & XINPUT_GAMEPAD_START));
 
     if (!install)
     {
-        if (pressed & (XINPUT_GAMEPAD_A | XINPUT_GAMEPAD_X))
-        {
-            if (!shell.discInstalled && (pressed & XINPUT_GAMEPAD_A))
-                return false;
-            OpenPicker(shell.picker, (pressed & XINPUT_GAMEPAD_A) ? PICKER_DLC : PICKER_TITLE_UPDATE,
-                       shell.discName, disc.titleId);
-        }
+        if (shell.discInstalled && (pressed & XINPUT_GAMEPAD_A))
+            OpenPicker(shell.picker, PICKER_DLC, shell.discName, disc.titleId);
         return false;
     }
 
@@ -3454,11 +3463,11 @@ int main()
                         {
                         case DISC_TILE_READY:
                             hintCount = AddHint(hints, hintCount, UI_BUTTON_A, L"Install to hard drive", L"Install");
-                            hintCount = AddHint(hints, hintCount, UI_BUTTON_X, L"Find title updates", L"Updates");
+                            hintCount = AddHint(hints, hintCount, UI_BUTTON_X, L"View game", L"View");
                             break;
                         case DISC_TILE_INSTALLED:
                             hintCount = AddHint(hints, hintCount, UI_BUTTON_A, L"Find DLC", L"DLC");
-                            hintCount = AddHint(hints, hintCount, UI_BUTTON_X, L"Find title updates", L"Updates");
+                            hintCount = AddHint(hints, hintCount, UI_BUTTON_X, L"View game", L"View");
                             hintCount = AddHint(hints, hintCount, UI_BUTTON_START, L"Install again", L"Reinstall");
                             break;
                         case DISC_TILE_INSTALLING:
