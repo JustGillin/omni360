@@ -3795,10 +3795,15 @@ static void StoreFeaturedRect(const StoreLayout &L, int i, float *x, float *y, f
 }
 
 // A button that's coming later: its label and a SOON pill after it, the two
-// centred together in the button. On a narrow screen the label gives way.
+// centred together in the button. A label too long for the room left - as
+// "Original Xbox" is, four to a row on HD - is drawn a little smaller, and
+// only cut short if even that won't fit.
+#define STORE_BUTTON_LABEL_SIZE     0.92f
+#define STORE_BUTTON_LABEL_SMALLEST 0.74f
+
 struct StoreButtonLabel
 {
-    float labelX, labelW;
+    float labelX, labelW, labelSize;
     float pillX, pillW, pillH;
 };
 
@@ -3808,9 +3813,18 @@ static StoreButtonLabel LayOutStoreButtonLabel(const StoreLayout &L, float butto
     b.pillH = S(22.0f);
     b.pillW = TextWidth("SOON", 0.58f, true) + S(16.0f);
 
-    const float gap = S(10.0f);
-    const float room = L.btnW - S(24.0f) - gap - b.pillW;
-    b.labelW = TextWidth(label, 0.92f, true);
+    const float gap = S(8.0f);
+    const float room = L.btnW - S(16.0f) - gap - b.pillW;
+    b.labelSize = STORE_BUTTON_LABEL_SIZE;
+    b.labelW = TextWidth(label, b.labelSize, true);
+    if (b.labelW > room && b.labelW > 0.0f)
+    {
+        // Width scales with size, so the size that just fits is a ratio away.
+        b.labelSize = STORE_BUTTON_LABEL_SIZE * room / b.labelW;
+        if (b.labelSize < STORE_BUTTON_LABEL_SMALLEST)
+            b.labelSize = STORE_BUTTON_LABEL_SMALLEST;
+        b.labelW = TextWidth(label, b.labelSize, true);
+    }
     if (b.labelW > room)
         b.labelW = room > 0.0f ? room : 0.0f;
 
@@ -3986,7 +4000,8 @@ void RenderStoreFrame(StorePageView &view, const UiHint *hints, int hintCount)
         {
             // The label and its SOON pill, centred together.
             const StoreButtonLabel l = LayOutStoreButtonLabel(L, x, b.label);
-            TextMid(l.labelX, cy, 0.92f, COL_DIM, b.label, ATGFONT_TRUNCATED, l.labelW, true);
+            // A little slack, so rounding doesn't cut short a label that fits.
+            TextMid(l.labelX, cy, l.labelSize, COL_DIM, b.label, ATGFONT_TRUNCATED, l.labelW + S(2.0f), true);
             TextMid(l.pillX + l.pillW * 0.5f, cy, 0.58f, COL_TEXT2, "SOON", ATGFONT_CENTER_X, 0.0f, true);
         }
         else
