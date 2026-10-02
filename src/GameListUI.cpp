@@ -45,6 +45,26 @@ animation is viable.
 #include <string.h>
 #include <math.h>
 
+// Milliseconds on the high-resolution counter, for timing the image work done
+// on this thread - covers and Store art are decoded here, between frames, so
+// what they cost is a stall in drawing. Anything at or over
+// IMAGE_TIMING_LOG_MS is logged with "[timing]".
+#define IMAGE_TIMING_LOG_MS 4.0
+
+static double TimerMs()
+{
+    static double msPerTick = 0.0;
+    if (msPerTick == 0.0)
+    {
+        LARGE_INTEGER frequency;
+        QueryPerformanceFrequency(&frequency);
+        msPerTick = 1000.0 / (double)frequency.QuadPart;
+    }
+    LARGE_INTEGER now;
+    QueryPerformanceCounter(&now);
+    return (double)now.QuadPart * msPerTick;
+}
+
 using namespace ATG;
 
 // Set from ATG::Console::GetDevice() in InitGameListUI(). Originally this
@@ -369,12 +389,9 @@ static D3DTexture *CreateTextureFromArgb(const unsigned long *pixels, unsigned l
         return NULL;
     }
 
+    // A row at a time: texture memory takes long sequential writes best.
     for (unsigned long y = 0; y < h; ++y)
-    {
-        DWORD *row = (DWORD *)((BYTE *)lr.pBits + y * lr.Pitch);
-        for (unsigned long x = 0; x < w; ++x)
-            row[x] = (DWORD)pixels[y * w + x];
-    }
+        memcpy((BYTE *)lr.pBits + y * lr.Pitch, pixels + y * w, w * sizeof(DWORD));
 
     tex->UnlockRect(0);
     return tex;
@@ -2094,36 +2111,62 @@ static void ReleaseBoxArt()
     g_boxArtCount = 0;
 }
 
-// One pixel of a linear ARGB image at a fractional position, blended from
-// the four around it.
-static unsigned long SampleBilinear(const BYTE *bits, int pitch, int w, int h, float x, float y)
+// Between two pixels, f/256 of the way from a to b, rounded: red and blue
+// together in one multiply, green in another - no floating point. Alpha is
+// left to the caller.
+static unsigned long LerpRgb(unsigned long a, unsigned long b, unsigned long f)
 {
-    x -= 0.5f;
-    y -= 0.5f;
-    if (x < 0.0f) x = 0.0f;
-    if (y < 0.0f) y = 0.0f;
-    if (x > (float)(w - 1)) x = (float)(w - 1);
-    if (y > (float)(h - 1)) y = (float)(h - 1);
+    const unsigned long g = 256 - f;
+    const unsigned long rb = (((a & 0x00FF00FF) * g + (b & 0x00FF00FF) * f + 0x00800080) >> 8) & 0x00FF00FF;
+    const unsigned long gg = (((a & 0x0000FF00) * g + (b & 0x0000FF00) * f + 0x00008000) >> 8) & 0x0000FF00;
+    return rb | gg;
+}
 
-    int x0 = (int)x, y0 = (int)y;
-    int x1 = (x0 + 1 < w) ? x0 + 1 : x0;
-    int y1 = (y0 + 1 < h) ? y0 + 1 : y0;
-    float fx = x - (float)x0, fy = y - (float)y0;
+// A source rectangle of a linear ARGB image scaled to FW x FH, bilinear, into
+// pixels. The 360's CPU pays dozens of cycles for every conversion between
+// float and integer - each one goes through memory - so they're done once per
+// column and once per row, and each pixel is integer arithmetic. Sampled in
+// floating point per pixel, as it was, a 418x512 front took 124ms; within
+// 2/255 of that result per channel this way, measured on a PC.
+static void ScaleBilinear(const BYTE *bits, int pitch, int w, int h, float srcX, float srcY, float srcW, float srcH,
+                          int FW, int FH, unsigned long *pixels)
+{
+    static int colA[1024], colB[1024], rowA[1024], rowB[1024];
+    static unsigned long colF[1024], rowF[1024];
+    if (FW > 1024 || FH > 1024)
+        return;
 
-    const DWORD *row0 = (const DWORD *)(bits + y0 * pitch);
-    const DWORD *row1 = (const DWORD *)(bits + y1 * pitch);
-    DWORD c00 = row0[x0], c10 = row0[x1], c01 = row1[x0], c11 = row1[x1];
-
-    unsigned long out = 0xFF000000;
-    for (int shift = 0; shift <= 16; shift += 8)
+    // Each output column's and row's two source texels, and how far between
+    // them it falls, in 256ths.
+    for (int i = 0; i < FW + FH; ++i)
     {
-        float a = (float)((c00 >> shift) & 0xFF), b = (float)((c10 >> shift) & 0xFF);
-        float c = (float)((c01 >> shift) & 0xFF), d = (float)((c11 >> shift) & 0xFF);
-        float top = a + (b - a) * fx;
-        float bottom = c + (d - c) * fx;
-        out |= ((unsigned long)(top + (bottom - top) * fy + 0.5f) & 0xFF) << shift;
+        const bool isCol = (i < FW);
+        const int d = isCol ? i : i - FW;
+        const int n = isCol ? FW : FH;
+        const int limit = isCol ? w : h;
+        float s = (isCol ? srcX : srcY) + ((float)d + 0.5f) * (isCol ? srcW : srcH) / (float)n - 0.5f;
+        if (s < 0.0f) s = 0.0f;
+        if (s > (float)(limit - 1)) s = (float)(limit - 1);
+        const int a = (int)s;
+        const int b = (a + 1 < limit) ? a + 1 : a;
+        const unsigned long f = (unsigned long)((s - (float)a) * 256.0f + 0.5f);
+        if (isCol) { colA[d] = a; colB[d] = b; colF[d] = f; }
+        else       { rowA[d] = a; rowB[d] = b; rowF[d] = f; }
     }
-    return out;
+
+    for (int dy = 0; dy < FH; ++dy)
+    {
+        const DWORD *row0 = (const DWORD *)(bits + rowA[dy] * pitch);
+        const DWORD *row1 = (const DWORD *)(bits + rowB[dy] * pitch);
+        const unsigned long fy = rowF[dy];
+        unsigned long *out = pixels + dy * FW;
+        for (int dx = 0; dx < FW; ++dx)
+        {
+            const int a = colA[dx], b = colB[dx];
+            const unsigned long fx = colF[dx];
+            out[dx] = 0xFF000000 | LerpRgb(LerpRgb(row0[a], row0[b], fx), LerpRgb(row1[a], row1[b], fx), fy);
+        }
+    }
 }
 
 // Where the front of the case sits in xboxunity's case inserts, as fractions
@@ -2198,13 +2241,7 @@ static unsigned long *CutCoverFront(const BYTE *bits, int pitch, int w, int h)
         srcY = ((float)h - srcH) * 0.5f;
     }
 
-    for (int dy = 0; dy < FH; ++dy)
-    {
-        const float sy = srcY + ((float)dy + 0.5f) * srcH / (float)FH;
-        for (int dx = 0; dx < FW; ++dx)
-            pixels[dy * FW + dx] = SampleBilinear(bits, pitch, w, h,
-                                                  srcX + ((float)dx + 0.5f) * srcW / (float)FW, sy);
-    }
+    ScaleBilinear(bits, pitch, w, h, srcX, srcY, srcW, srcH, FW, FH, pixels);
     return pixels;
 }
 
@@ -2272,8 +2309,15 @@ static unsigned long *ComposeTile(const unsigned long *front)
 // A downloaded insert, decoded by D3DX into a linear texture - which can be
 // read straight through LockRect - then the front cut out of it. NULL if it
 // wouldn't decode.
+// Where the last cover's time went, for PumpCoverArt's timing line:
+// DecodeCoverInsert's decode and cut, and AddStoreCover's halving and texture.
+static double g_coverDecodeMs = 0.0, g_coverCutMs = 0.0;
+static double g_coverHalveMs = 0.0, g_coverTextureMs = 0.0;
+static unsigned long g_coverW = 0, g_coverH = 0;
+
 static unsigned long *DecodeCoverInsert(const unsigned char *jpeg, unsigned long size, unsigned long titleId)
 {
+    g_coverDecodeMs = g_coverCutMs = 0.0;
     D3DXIMAGE_INFO info;
     ZeroMemory(&info, sizeof(info));
     if (FAILED(D3DXGetImageInfoFromFileInMemory(jpeg, size, &info)) ||
@@ -2282,19 +2326,28 @@ static unsigned long *DecodeCoverInsert(const unsigned char *jpeg, unsigned long
         dprintf("[covers] %08lX: not an image D3DX can read (%lux%lu)\n", titleId, info.Width, info.Height);
         return NULL;
     }
+    g_coverW = info.Width;
+    g_coverH = info.Height;
 
     // Explicit size, format and one level, as for the icons - see
     // CreateIconTexture for why nothing here is left to D3DX to choose.
+    //
+    // In CPU-cached memory: this texture is only ever read by the CPU - the
+    // cut below samples four texels for every pixel it makes - and never drawn.
+    const double started = TimerMs();
     D3DTexture *texture = NULL;
-    HRESULT hr = D3DXCreateTextureFromFileInMemoryEx(g_pd3dDevice, jpeg, size, info.Width, info.Height, 1, 0,
-                                                     D3DFMT_LIN_A8R8G8B8, D3DPOOL_MANAGED, D3DX_FILTER_NONE,
-                                                     D3DX_DEFAULT, 0, NULL, NULL, &texture);
+    HRESULT hr = D3DXCreateTextureFromFileInMemoryEx(g_pd3dDevice, jpeg, size, info.Width, info.Height, 1,
+                                                     D3DUSAGE_CPU_CACHED_MEMORY, D3DFMT_LIN_A8R8G8B8,
+                                                     D3DPOOL_MANAGED, D3DX_FILTER_NONE, D3DX_DEFAULT, 0, NULL, NULL,
+                                                     &texture);
+    g_coverDecodeMs = TimerMs() - started;
     if (FAILED(hr) || texture == NULL)
     {
         dprintf("[covers] %08lX: D3DX refused the cover (0x%08lX)\n", titleId, (unsigned long)hr);
         return NULL;
     }
 
+    const double cutStarted = TimerMs();
     unsigned long *pixels = NULL;
     D3DLOCKED_RECT lr;
     if (SUCCEEDED(texture->LockRect(0, &lr, NULL, D3DLOCK_READONLY)))
@@ -2303,6 +2356,7 @@ static unsigned long *DecodeCoverInsert(const unsigned char *jpeg, unsigned long
         texture->UnlockRect(0);
     }
     texture->Release();
+    g_coverCutMs = TimerMs() - cutStarted;
     return pixels;
 }
 
@@ -2359,21 +2413,23 @@ static unsigned long *HalveSquare(const unsigned long *src, int size)
     unsigned long *out = (unsigned long *)malloc(half * half * 4);
     if (out == NULL)
         return NULL;
+    // All four channels at once: the top six bits of each channel summed,
+    // then the bottom two with the rounding in a word of their own, so nothing
+    // carries from one channel into the next. The same result as averaging
+    // channel by channel, which took 9ms here.
     for (int y = 0; y < half; ++y)
     {
         const unsigned long *r0 = src + (y * 2) * size;
         const unsigned long *r1 = r0 + size;
+        unsigned long *o = out + y * half;
         for (int x = 0; x < half; ++x)
         {
-            unsigned long a = r0[x * 2], b = r0[x * 2 + 1], c = r1[x * 2], d = r1[x * 2 + 1];
-            unsigned long px = 0;
-            for (int shift = 0; shift <= 24; shift += 8)
-            {
-                unsigned long sum = ((a >> shift) & 0xFF) + ((b >> shift) & 0xFF) +
-                                    ((c >> shift) & 0xFF) + ((d >> shift) & 0xFF);
-                px |= ((sum + 2) / 4) << shift;
-            }
-            out[y * half + x] = px;
+            const unsigned long a = r0[x * 2], b = r0[x * 2 + 1], c = r1[x * 2], d = r1[x * 2 + 1];
+            const unsigned long high = ((a >> 2) & 0x3F3F3F3F) + ((b >> 2) & 0x3F3F3F3F) +
+                                       ((c >> 2) & 0x3F3F3F3F) + ((d >> 2) & 0x3F3F3F3F);
+            const unsigned long low = (((a & 0x03030303) + (b & 0x03030303) + (c & 0x03030303) +
+                                        (d & 0x03030303) + 0x02020202) >> 2) & 0x03030303;
+            o[x] = high + low;
         }
     }
     return out;
@@ -2387,11 +2443,15 @@ static void AddStoreCover(unsigned long titleId, const unsigned long *square)
             return;
     }
 
+    const double started = TimerMs();
     unsigned long *half = HalveSquare(square, COVER_SIZE);
     if (half == NULL)
         return;
+    const double halved = TimerMs();
     D3DTexture *texture = CreateTextureFromArgb(half, STORE_COVER_SIZE, STORE_COVER_SIZE);
     free(half);
+    g_coverHalveMs = halved - started;
+    g_coverTextureMs = TimerMs() - halved;
     if (texture == NULL)
         return;
 
@@ -2432,12 +2492,15 @@ void PumpCoverArt()
         return;
     }
 
+    const double started = TimerMs();
     unsigned long *front = NULL;
     const bool fromCache = (data.kind == COVER_DATA_PIXELS);
+    const unsigned long downloaded = fromCache ? 0 : data.size;
 
     if (fromCache)
     {
         front = (unsigned long *)data.bytes;
+        g_coverDecodeMs = g_coverCutMs = 0.0;
     }
     else
     {
@@ -2450,15 +2513,40 @@ void PumpCoverArt()
         }
     }
 
+    const double tileStarted = TimerMs();
     D3DTexture *texture = NULL;
+    g_coverHalveMs = g_coverTextureMs = 0.0;
     unsigned long *square = ComposeTile(front);
+    const double composeMs = TimerMs() - tileStarted;
     if (square != NULL)
     {
         if (forStore)
+        {
             AddStoreCover(data.titleId, square);
+        }
         else
+        {
+            const double textureStarted = TimerMs();
             texture = CreateTextureFromArgb(square, COVER_SIZE, COVER_SIZE);
+            g_coverTextureMs = TimerMs() - textureStarted;
+        }
         free(square);
+    }
+    const double now = TimerMs();
+
+    if (now - started >= IMAGE_TIMING_LOG_MS)
+    {
+        char tile[96];
+        _snprintf(tile, sizeof(tile), "banner %.1f + halve %.1f + texture %.1f", composeMs, g_coverHalveMs,
+                  g_coverTextureMs);
+        tile[sizeof(tile) - 1] = '\0';
+        if (fromCache)
+            dprintf("[timing] cover %08lX (cached, %s): %s = %.1f ms\n", data.titleId,
+                    forStore ? "Store" : "library", tile, now - started);
+        else
+            dprintf("[timing] cover %08lX (%lux%lu, %lu KB, %s): decode %.1f + cut %.1f + %s = %.1f ms\n",
+                    data.titleId, g_coverW, g_coverH, downloaded / 1024, forStore ? "Store" : "library",
+                    g_coverDecodeMs, g_coverCutMs, tile, now - started);
     }
 
     // A fresh front goes back to be cached; a cached one is done with.
@@ -3693,6 +3781,7 @@ void PumpStoreArt()
     // wallpaper at its own size; a screenshot at half, which is still more
     // than its thumbnail on the game page needs.
     const bool screenshot = (data.kind >= STORE_ART_SCREEN);
+    const double started = TimerMs();
     D3DXIMAGE_INFO info;
     ZeroMemory(&info, sizeof(info));
     D3DTexture *texture = NULL;
@@ -3708,6 +3797,10 @@ void PumpStoreArt()
                                                  D3DX_DEFAULT, 0, NULL, NULL, &texture);
     }
     free(data.bytes);
+    const double took = TimerMs() - started;
+    if (took >= IMAGE_TIMING_LOG_MS)
+        dprintf("[timing] %s %08lX (%lux%lu, %lu KB): decode %.1f ms\n", screenshot ? "screenshot" : "wallpaper",
+                data.titleId, info.Width, info.Height, data.size / 1024, took);
 
     if (FAILED(hr) || texture == NULL)
     {

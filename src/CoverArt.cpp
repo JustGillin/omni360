@@ -1,7 +1,7 @@
 /*
 FILE : CoverArt.cpp
 PROJECT : Omni360
-DESCRIPTION : Box art from xboxunity.net, else Xbox Live, looked up and cached on a worker
+DESCRIPTION : Box art from Xbox Live, else xboxunity.net, looked up and cached on a worker
               thread. See CoverArt.h.
 */
 
@@ -40,6 +40,7 @@ DESCRIPTION : Box art from xboxunity.net, else Xbox Live, looked up and cached o
 // Generous: the covers seen are about 530KB, and the listing a few KB.
 #define INFO_BUFFER_BYTES  (64 * 1024)
 #define IMAGE_BUFFER_BYTES (2 * 1024 * 1024)
+#define BOXART_BUFFER_BYTES (512 * 1024) // Xbox Live's box art is about 60KB
 
 #define MAX_REQUESTED      256
 #define MAX_READY          4  // decoded covers are 1MB each - don't run far ahead of the UI
@@ -264,26 +265,27 @@ static bool ChooseCoverId(const char *json, unsigned long long jsonLen, char *ou
     return found;
 }
 
-// Xbox Live's box art, for a game xboxunity has no cover for: the front
-// alone, which GameListUI cuts under its header strip like an insert's.
+// Xbox Live's box art, the first choice: the front alone, which GameListUI
+// cuts under its header strip. A 219x300 JPEG of about 60KB, over plain HTTP,
+// against xboxunity's 900x600 insert of about 530KB over HTTPS - decoding it
+// on the UI thread is a fraction of the work, and at the size tiles are drawn
+// it's near enough as sharp.
 static FetchResult FetchBoxArt(unsigned long titleId, CoverData *out)
 {
     char url[160];
     _snprintf(url, sizeof(url), BOXART_URL, titleId);
     url[sizeof(url) - 1] = '\0';
 
-    // About 60KB; the buffer is the insert's size all the same.
-    char *image = (char *)malloc(IMAGE_BUFFER_BYTES + 1);
+    char *image = (char *)malloc(BOXART_BUFFER_BYTES + 1);
     if (image == NULL)
         return FETCH_FAILED;
 
     unsigned long long imageLen = 0;
-    const int status = HttpGetPlain(url, NULL, image, IMAGE_BUFFER_BYTES, &imageLen);
+    const int status = HttpGetPlain(url, NULL, image, BOXART_BUFFER_BYTES, &imageLen);
     if (status == 404)
     {
-        dprintf("[covers] %08lX: no cover on xboxunity or Xbox Live\n", titleId);
         free(image);
-        return FETCH_NO_COVER;
+        return FETCH_NO_COVER; // xboxunity is asked next
     }
     if (status != 200 || imageLen < 64)
     {
@@ -299,7 +301,9 @@ static FetchResult FetchBoxArt(unsigned long titleId, CoverData *out)
     return FETCH_OK;
 }
 
-static FetchResult FetchCover(unsigned long titleId, CoverData *out)
+// xboxunity's cover, for a game Xbox Live has no box art for - a Japan-only
+// disc, say: the whole case insert, cut to its front by GameListUI.
+static FetchResult FetchXboxUnityCover(unsigned long titleId, CoverData *out)
 {
     char url[256];
     _snprintf(url, sizeof(url), COVER_INFO_URL, titleId);
@@ -324,7 +328,7 @@ static FetchResult FetchCover(unsigned long titleId, CoverData *out)
     free(info);
 
     if (!haveCover)
-        return FetchBoxArt(titleId, out);
+        return FETCH_NO_COVER;
 
     _snprintf(url, sizeof(url), COVER_IMAGE_URL, coverId);
     url[sizeof(url) - 1] = '\0';
@@ -347,6 +351,24 @@ static FetchResult FetchCover(unsigned long titleId, CoverData *out)
     out->bytes = (unsigned char *)image;
     out->size = (unsigned long)imageLen;
     return FETCH_OK;
+}
+
+// Xbox Live's box art, else xboxunity's. No cover only when both answered
+// and had none; a failure to ask either is tried again another time.
+static FetchResult FetchCover(unsigned long titleId, CoverData *out)
+{
+    const FetchResult xboxLive = FetchBoxArt(titleId, out);
+    if (xboxLive == FETCH_OK)
+        return FETCH_OK;
+
+    const FetchResult xboxUnity = FetchXboxUnityCover(titleId, out);
+    if (xboxUnity == FETCH_OK)
+        return FETCH_OK;
+    if (xboxLive == FETCH_FAILED || xboxUnity == FETCH_FAILED)
+        return FETCH_FAILED;
+
+    dprintf("[covers] %08lX: no cover on Xbox Live or xboxunity\n", titleId);
+    return FETCH_NO_COVER;
 }
 
 // ---------------------------------------------------------------------------

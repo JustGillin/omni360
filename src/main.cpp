@@ -3014,8 +3014,19 @@ int main()
 
     ResyncUiInput();
 
+    // For spotting stutter: a frame taking more than this is logged. Screens
+    // that wait on the user - a confirmation, the keyboard - show up here too,
+    // as one long frame; those can be ignored.
+    const DWORD slowFrameMs = 50;
+    DWORD lastFrame = 0;
+
     for (;;)
     {
+        const DWORD frameStart = GetTickCount();
+        if (lastFrame != 0 && frameStart - lastFrame > slowFrameMs)
+            dprintf("[timing] slow frame: %lu ms (page %d)\n", (unsigned long)(frameStart - lastFrame), (int)shell.page);
+        lastFrame = frameStart;
+
         // Finished downloads first, since they can make the rest stale.
         HandleFinishedDownloads(shell, haveAuth);
         PollUpdateCheck(shell);
