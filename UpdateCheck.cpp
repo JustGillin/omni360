@@ -5,16 +5,19 @@ DESCRIPTION : Asks GitHub whether there's a newer release. See UpdateCheck.h.
 */
 
 #include "UpdateCheck.h"
+#include "UpdateKey.h"    // kUpdatePublicKey
 #include "settings.h"     // CURRENT_VERSION
 #include "downloadFile.h" // httpRequestHTTPS
 #include "OutputConsole.h"
 #include "cJSON.h"
+#include "inc\bearssl.h"  // SHA-256 and ECDSA, for the release's signature
 
 #include <xtl.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include <stdarg.h>
+#include <string>
 
 // The newest twenty, newest first - plenty to find the latest that applies.
 // api.github.com chains to USERTrust ECC, in TrustAnchors.h for this.
@@ -253,6 +256,35 @@ static void CopyString(char *out, size_t outSize, const char *in)
     out[outSize - 1] = '\0';
 }
 
+static bool EndsWithNoCase(const char *s, const char *suffix)
+{
+    const size_t n = strlen(s), m = strlen(suffix);
+    return n >= m && _stricmp(s + n - m, suffix) == 0;
+}
+
+// The release's XEX and its signature, from its assets.
+static void FindReleaseFiles(const cJSON *release, UpdateInfo *info)
+{
+    const cJSON *asset = NULL;
+    cJSON_ArrayForEach(asset, cJSON_GetObjectItemCaseSensitive(release, "assets"))
+    {
+        const cJSON *name = cJSON_GetObjectItemCaseSensitive(asset, "name");
+        const cJSON *url = cJSON_GetObjectItemCaseSensitive(asset, "browser_download_url");
+        if (!cJSON_IsString(name) || !cJSON_IsString(url) || strncmp(url->valuestring, "https://", 8) != 0)
+            continue;
+        if (EndsWithNoCase(name->valuestring, ".xex.sig"))
+        {
+            CopyString(info->sigUrl, sizeof(info->sigUrl), url->valuestring);
+        }
+        else if (EndsWithNoCase(name->valuestring, ".xex"))
+        {
+            CopyString(info->xexUrl, sizeof(info->xexUrl), url->valuestring);
+            const cJSON *size = cJSON_GetObjectItemCaseSensitive(asset, "size");
+            info->xexSize = cJSON_IsNumber(size) && size->valuedouble > 0 ? (unsigned long long)size->valuedouble : 0;
+        }
+    }
+}
+
 static DWORD WINAPI CheckEntry(LPVOID)
 {
     char *reply = (char *)malloc(REPLY_MAX + 1);
@@ -305,6 +337,7 @@ static DWORD WINAPI CheckEntry(LPVOID)
                        cJSON_IsString(name) && name->valuestring[0] != '\0' ? name->valuestring : found.version);
             const cJSON *body = cJSON_GetObjectItemCaseSensitive(best, "body");
             PlainNotes(cJSON_IsString(body) ? body->valuestring : "", found.notes, sizeof(found.notes));
+            FindReleaseFiles(best, &found);
             result = UPDATE_AVAILABLE;
         }
         else
@@ -388,4 +421,201 @@ UpdateState GetUpdateState(UpdateInfo *info, unsigned long *changeCount)
         *changeCount = g_changes;
     LeaveCriticalSection(&g_lock);
     return state;
+}
+
+// ---------------------------------------------------------------------------
+// Installing one
+// ---------------------------------------------------------------------------
+
+static UpdateProgressFn g_progress = NULL;
+
+static bool DownloadProgress(unsigned long long done, unsigned long long total, unsigned long long, unsigned long long)
+{
+    if (g_progress != NULL)
+        g_progress(done, total);
+    return true;
+}
+
+// A GET into buffer, following GitHub's redirects to where a release's files
+// are kept. The client hands back a redirect's Location in the buffer.
+static int GetFollowing(const char *url, char *buffer, unsigned long long capacity, unsigned long long *outLen,
+                        DownloadProgressFn progress)
+{
+    std::string at = url;
+    for (int hop = 0; hop < 5; ++hop)
+    {
+        unsigned long long len = capacity;
+        const int status = httpRequestHTTPS(at, HTTP_GET, NULL, "", "", buffer, &len, false, NULL, 0, QuietPrint, 0,
+                                            progress);
+        if (status == 301 || status == 302 || status == 303 || status == 307 || status == 308)
+        {
+            char next[2048];
+            strncpy(next, buffer, sizeof(next) - 1);
+            next[sizeof(next) - 1] = '\0';
+            if (strncmp(next, "https://", 8) != 0)
+                return -1; // only ever on to another HTTPS address
+            at = next;
+            continue;
+        }
+        *outLen = len;
+        return status;
+    }
+    return -1;
+}
+
+// Which XEX in game:\ - the folder Omni360 runs from - is this one: the only
+// one there, or Omni360.xex if there are several.
+static bool FindRunningXex(char *name, size_t nameSize)
+{
+    WIN32_FIND_DATAA found;
+    HANDLE h = FindFirstFileA("game:\\*.xex", &found);
+    if (h == INVALID_HANDLE_VALUE)
+        return false;
+
+    int count = 0;
+    bool haveOmni = false;
+    char only[MAX_PATH] = "";
+    do
+    {
+        if (found.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY)
+            continue;
+        count++;
+        CopyString(only, sizeof(only), found.cFileName);
+        if (_stricmp(found.cFileName, "Omni360.xex") == 0)
+            haveOmni = true;
+    } while (FindNextFileA(h, &found));
+    FindClose(h);
+
+    if (count == 1)
+        CopyString(name, nameSize, only);
+    else if (haveOmni)
+        CopyString(name, nameSize, "Omni360.xex");
+    else
+        return false;
+    return true;
+}
+
+// The signature, as tools/sign_release.py makes it: ECDSA on P-256 over the
+// XEX's SHA-256, DER-encoded, against the key compiled in from UpdateKey.h.
+static bool SignatureChecks(const unsigned char *data, size_t len, const unsigned char *sig, size_t sigLen)
+{
+    unsigned char hash[32];
+    br_sha256_context sha;
+    br_sha256_init(&sha);
+    br_sha256_update(&sha, data, len);
+    br_sha256_out(&sha, hash);
+
+    br_ec_public_key key;
+    key.curve = BR_EC_secp256r1;
+    key.q = (unsigned char *)kUpdatePublicKey;
+    key.qlen = sizeof(kUpdatePublicKey);
+    return br_ecdsa_i31_vrfy_asn1(&br_ec_p256_m31, hash, sizeof(hash), &key, sig, sigLen) == 1;
+}
+
+UpdateInstallResult InstallUpdate(const UpdateInfo &info, UpdateProgressFn progress,
+                                  char *outXexPath, unsigned long outXexPathSize)
+{
+    if (!UpdateInstallable(info))
+        return UPDATE_INSTALL_NOT_SIGNED;
+
+    char name[MAX_PATH];
+    if (!FindRunningXex(name, sizeof(name)))
+        return UPDATE_INSTALL_NO_RUNNING_XEX;
+
+    // The signature first: it's small, and without it there's no point.
+    char sig[512];
+    unsigned long long sigLen = 0;
+    int status = GetFollowing(info.sigUrl, sig, sizeof(sig) - 1, &sigLen, NULL);
+    if (status != 200 || sigLen < 8 || sigLen > 200)
+    {
+        dprintf("[update] signature download: HTTP %d, %I64u bytes\n", status, sigLen);
+        return UPDATE_INSTALL_DOWNLOAD_FAILED;
+    }
+
+    // The XEX, into memory - a few MB. Room for what the release says, and
+    // then some, in case it doesn't say.
+    unsigned long long capacity = info.xexSize > 0 ? info.xexSize + 1024 * 1024 : 32ULL * 1024 * 1024;
+    if (capacity > 64ULL * 1024 * 1024)
+        capacity = 64ULL * 1024 * 1024;
+    char *xex = (char *)malloc((size_t)capacity + 1);
+    if (xex == NULL)
+        return UPDATE_INSTALL_DOWNLOAD_FAILED;
+
+    g_progress = progress;
+    unsigned long long xexLen = 0;
+    status = GetFollowing(info.xexUrl, xex, capacity, &xexLen, DownloadProgress);
+    g_progress = NULL;
+    if (status != 200 || xexLen < 4096 || (info.xexSize > 0 && xexLen != info.xexSize))
+    {
+        dprintf("[update] XEX download: HTTP %d, %I64u bytes (expected %I64u)\n", status, xexLen, info.xexSize);
+        free(xex);
+        return UPDATE_INSTALL_DOWNLOAD_FAILED;
+    }
+    if (memcmp(xex, "XEX2", 4) != 0)
+    {
+        free(xex);
+        return UPDATE_INSTALL_NOT_AN_XEX;
+    }
+    if (!SignatureChecks((const unsigned char *)xex, (size_t)xexLen, (const unsigned char *)sig, (size_t)sigLen))
+    {
+        dprintf("[update] %s's signature doesn't match this app's key - refused\n", info.version);
+        free(xex);
+        return UPDATE_INSTALL_BAD_SIGNATURE;
+    }
+
+    // Beside the running one, then swapped in: the running XEX becomes .old,
+    // and goes back if the new one can't be put in its place.
+    char current[MAX_PATH + 8], fresh[MAX_PATH + 16], old[MAX_PATH + 16];
+    _snprintf(current, sizeof(current), "game:\\%s", name);
+    _snprintf(fresh, sizeof(fresh), "game:\\%s.new", name);
+    _snprintf(old, sizeof(old), "game:\\%s.old", name);
+    current[sizeof(current) - 1] = '\0';
+    fresh[sizeof(fresh) - 1] = '\0';
+    old[sizeof(old) - 1] = '\0';
+
+    FILE *f = fopen(fresh, "wb");
+    bool written = (f != NULL) && fwrite(xex, 1, (size_t)xexLen, f) == (size_t)xexLen;
+    if (f != NULL && fclose(f) != 0)
+        written = false;
+    free(xex);
+    if (!written)
+    {
+        remove(fresh);
+        return UPDATE_INSTALL_WRITE_FAILED;
+    }
+
+    remove(old);
+    if (rename(current, old) != 0)
+    {
+        dprintf("[update] couldn't move %s aside (%lu)\n", current, GetLastError());
+        remove(fresh);
+        return UPDATE_INSTALL_SWAP_FAILED;
+    }
+    if (rename(fresh, current) != 0)
+    {
+        dprintf("[update] couldn't put %s in place (%lu) - restoring\n", fresh, GetLastError());
+        rename(old, current);
+        remove(fresh);
+        return UPDATE_INSTALL_SWAP_FAILED;
+    }
+
+    dprintf("[update] installed %s as %s; the previous one is %s\n", info.version, current, old);
+    CopyString(outXexPath, outXexPathSize, current);
+    return UPDATE_INSTALL_OK;
+}
+
+const char *UpdateInstallResultText(UpdateInstallResult result)
+{
+    switch (result)
+    {
+    case UPDATE_INSTALL_OK:              return "Installed.";
+    case UPDATE_INSTALL_NOT_SIGNED:      return "This release isn't signed, so it can't be installed from here.";
+    case UPDATE_INSTALL_DOWNLOAD_FAILED: return "It couldn't be downloaded from GitHub. Try again later.";
+    case UPDATE_INSTALL_BAD_SIGNATURE:   return "Its signature doesn't match - it may not be a genuine release. Not installed.";
+    case UPDATE_INSTALL_NOT_AN_XEX:      return "What GitHub sent isn't an Xbox 360 program. Not installed.";
+    case UPDATE_INSTALL_NO_RUNNING_XEX:  return "Couldn't tell which file in Omni360's folder is the app.";
+    case UPDATE_INSTALL_WRITE_FAILED:    return "There wasn't room to save it beside the current version.";
+    case UPDATE_INSTALL_SWAP_FAILED:     return "It couldn't replace the current version, which is unchanged.";
+    }
+    return "Something went wrong.";
 }

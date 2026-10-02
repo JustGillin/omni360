@@ -1038,20 +1038,77 @@ static void ChangeKeys(SettingsOutcome &outcome)
         outcome.keysChanged = true;
 }
 
-// The Updates row: what's new in a newer version, or a check now.
+// The download's progress, drawn while InstallUpdate works.
+static char g_updatingTo[32];
+
+static void DrawUpdateProgress(unsigned long long done, unsigned long long total)
+{
+    char message[64], detail[96], doneText[32] = "", totalText[32] = "";
+    _snprintf(message, sizeof(message), "Downloading Omni360 %s", g_updatingTo);
+    message[sizeof(message) - 1] = '\0';
+    FormatBytes(done, doneText, sizeof(doneText));
+    if (total > 0)
+    {
+        FormatBytes(total, totalText, sizeof(totalText));
+        _snprintf(detail, sizeof(detail), "%s of %s", doneText, totalText);
+    }
+    else
+    {
+        _snprintf(detail, sizeof(detail), "%s", doneText);
+    }
+    detail[sizeof(detail) - 1] = '\0';
+    RenderStatusFrame("Updating", message, detail);
+}
+
+// Restarting ends whatever's running, so updating waits for the Queue.
+static bool AnythingQueued()
+{
+    return PendingDownloadCount() > 0 || PendingGameJobCount() > 0 || PendingDiscJobCount() > 0;
+}
+
+// The Updates row: what's new in a newer version - and, for a signed one,
+// installing it and restarting into it - or a check now.
 static void ShowUpdate()
 {
     UpdateInfo info;
-    if (GetUpdateState(&info, NULL) == UPDATE_AVAILABLE)
+    if (GetUpdateState(&info, NULL) != UPDATE_AVAILABLE)
     {
-        char heading[64];
-        _snprintf(heading, sizeof(heading), "Omni360 %s", info.version);
-        heading[sizeof(heading) - 1] = '\0';
-        ShowNotesUI(heading, info.title, info.notes, "Get it from " UPDATE_RELEASES_PAGE);
+        StartUpdateCheck();
+        ShowShellToast("Checking for updates", "Asking GitHub for the latest version", UI_TOAST_INFO);
         return;
     }
-    StartUpdateCheck();
-    ShowShellToast("Checking for updates", "Asking GitHub for the latest version", UI_TOAST_INFO);
+
+    char heading[64];
+    _snprintf(heading, sizeof(heading), "Omni360 %s", info.version);
+    heading[sizeof(heading) - 1] = '\0';
+
+    const bool installable = UpdateInstallable(info);
+    const bool busy = AnythingQueued();
+    const char *foot = !installable ? "Get it from " UPDATE_RELEASES_PAGE
+                     : busy        ? "To update, let what's in the Queue finish, or stop it, first."
+                                   : "Update installs it and restarts Omni360. Your settings, keys and games stay.";
+    if (!ShowNotesUI(heading, info.title, info.notes, foot, installable && !busy ? L"Update" : NULL))
+        return;
+
+    _snprintf(g_updatingTo, sizeof(g_updatingTo), "%s", info.version);
+    g_updatingTo[sizeof(g_updatingTo) - 1] = '\0';
+    DrawUpdateProgress(0, info.xexSize);
+
+    char xexPath[MAX_PATH + 16] = "";
+    const UpdateInstallResult result = InstallUpdate(info, DrawUpdateProgress, xexPath, sizeof(xexPath));
+    if (result != UPDATE_INSTALL_OK)
+    {
+        ShowMessageUI("Couldn't update", UpdateInstallResultText(result), "Omni360 hasn't changed.");
+        return;
+    }
+
+    char message[96];
+    _snprintf(message, sizeof(message), "Omni360 %s is installed.", info.version);
+    message[sizeof(message) - 1] = '\0';
+    ShowMessageUI("Updated", message, "It starts when you continue. The previous version is kept as .old beside it.");
+
+    dprintf("Restarting into %s\n", xexPath);
+    XLaunchNewImage(xexPath, 0);
 }
 
 static void ToggleUpdateChecks()

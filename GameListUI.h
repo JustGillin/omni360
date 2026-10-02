@@ -436,10 +436,12 @@ void RenderStatusFrame(const char *heading, const char *message, const char *det
 // back to a console screen.
 void ShowMessageUI(const char *heading, const char *message, const char *detailLine);
 
-// Draws a title, a few wrapped paragraphs and a line beneath them, and waits
-// for A or B - for an update's release notes. body may hold '\n's; what
-// doesn't fit is cut off.
-void ShowNotesUI(const char *heading, const char *title, const char *body, const char *footLine);
+// Draws a title, a few wrapped paragraphs and a line beneath them - for an
+// update's release notes. body may hold '\n's; what doesn't fit is cut off.
+// With an actionLabel, A does that and returns true; B, or A without one,
+// returns false.
+bool ShowNotesUI(const char *heading, const char *title, const char *body, const char *footLine,
+                 const WCHAR *actionLabel = NULL);
 
 // Draws a message and waits for A (returns true) or B (returns false). For
 // actions that can't be undone, like removing the saved archive.org keys.

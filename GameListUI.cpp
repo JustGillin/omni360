@@ -3433,10 +3433,11 @@ static void RenderNotesFrame(const char *heading, const char *title, const char 
     EndFrame();
 }
 
-void ShowNotesUI(const char *heading, const char *title, const char *body, const char *footLine)
+bool ShowNotesUI(const char *heading, const char *title, const char *body, const char *footLine,
+                 const WCHAR *actionLabel)
 {
     if (!g_Initialized)
-        return;
+        return false;
 
     WORD prevButtons = CurrentButtons();
     for (;;)
@@ -3444,13 +3445,21 @@ void ShowNotesUI(const char *heading, const char *title, const char *body, const
         WORD buttons = CurrentButtons();
         WORD pressed = buttons & ~prevButtons;
         prevButtons = buttons;
+        if ((pressed & XINPUT_GAMEPAD_A) && actionLabel != NULL)
+            return true;
         if (pressed & (XINPUT_GAMEPAD_B | XINPUT_GAMEPAD_A))
-            break;
+            return false;
 
-        ButtonHint hints[1];
-        hints[0].sprite = BUTTON_SPRITE_B;
-        hints[0].label = L"Back";
-        RenderNotesFrame(heading, title, body, footLine, hints, 1);
+        ButtonHint hints[2];
+        int hintCount = 0;
+        if (actionLabel != NULL)
+        {
+            hints[hintCount].sprite = BUTTON_SPRITE_A;
+            hints[hintCount++].label = actionLabel;
+        }
+        hints[hintCount].sprite = BUTTON_SPRITE_B;
+        hints[hintCount++].label = L"Back";
+        RenderNotesFrame(heading, title, body, footLine, hints, hintCount);
         Sleep(16);
     }
 }

@@ -29,7 +29,7 @@ A homebrew Xbox 360 app for getting games and their extras onto a modded console
 
 Omni360 began as a fork of [X-Store](https://github.com/951261/X-Store) by 951261, and still runs on its networking core: the HTTPS client and BearSSL/TLS wrapper, DNS lookups and drive mounting. Everything Vimm's Lair/full-game/ISO/updater-related has been stripped out; the library, the Store, the installers and the interface are new. See `docs/` for X-Store's own original architecture notes (still accurate for the networking layer this fork builds on).
 
-**Status: beta (0.2.1-beta), working on real hardware.** Installs from the Store, DLC, title updates and disc installs have all been run end to end on a modded console with a real library.
+**Status: beta (0.2.2-beta), working on real hardware.** Installs from the Store, DLC, title updates and disc installs have all been run end to end on a modded console with a real library.
 
 ## Using it
 
@@ -39,7 +39,7 @@ The sidebar on the left has four pages; left on the D-pad reaches it from any pa
 - **Store** — three featured games, then A to Z. **A** on a letter shows its games; **A** on a game opens its page. Search, Xbox Live Arcade, Xbox Live Indie Games and Original Xbox are on the way, marked SOON.
 - **A game's page** — **Install** installs the chosen version, every disc of it; choose another version from the list beside the description first. The button shows Queued, Installing, Installed, or Install remaining for a multi-disc game partly installed. **Find DLC** and **Title updates** search archive.org and show what's there to pick from. **Uninstall** appears once something is installed, and removes the game but leaves its DLC and title updates.
 - **Queue** — what's downloading, waiting and done. **X** stops a download or install, or clears a finished one.
-- **Settings** — the games folder, your archive.org keys, and updates: Omni360 checks GitHub for a newer version when it starts (this can be turned off), and shows what's new in it.
+- **Settings** — the games folder, your archive.org keys, and updates: Omni360 checks GitHub for a newer version when it starts (this can be turned off), shows what's new in it, and installs it and restarts when you choose Update. It only installs a release signed with the project's key (`tools/sign_release.py`), keeping the previous version beside it as `.old`.
 
 Nothing downloads without you choosing it, and a popup says when each job finishes or fails.
 
