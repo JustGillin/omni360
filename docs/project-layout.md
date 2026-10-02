@@ -16,6 +16,8 @@ X-Store's other five projects (`user interface`, `7zip`, `xiso extract`, `update
 
 ## App-Owned Source Areas
 
+All of the app's own source - and the headers generated into it by `tools/` - is in `src/`; the files below are there. The repository's top level keeps only the solution, the project files, `xex.xml` and the documentation, with `Common/`, `SSL/`, `zlib/`, `Media/` and `tools/` beside them.
+
 `main.cpp` drives the whole user-facing flow: mounting drive aliases, console setup, the game-list session loop, settings parsing, and the DLC / title-update download paths.
 
 `ArchiveOrgDLC.cpp` / `.h` is the archive.org client — IAS3 authentication, metadata lookup, fuzzy game-name matching (`ScoreDlcMatch`), RAR header-chain and ZIP central-directory walking, avatar-item filtering, already-installed detection, and the destination rules for both DLC and title updates.

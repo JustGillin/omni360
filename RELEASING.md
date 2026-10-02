@@ -12,7 +12,7 @@ The key is made once, ever, and lives outside the repository:
 python tools/sign_release.py --new-key
 ```
 
-That writes the private key to `%USERPROFILE%\.omni360\release-signing-key.pem` and its public half to `UpdateKey.h`, which is compiled into the app. It refuses to replace a key that already exists.
+That writes the private key to `%USERPROFILE%\.omni360\release-signing-key.pem` and its public half to `src/UpdateKey.h`, which is compiled into the app. It refuses to replace a key that already exists.
 
 **Back the key file up** somewhere safe and private — a password manager, or an encrypted USB stick. Never commit it, and never attach it to a release.
 
@@ -28,7 +28,7 @@ That writes the private key to `%USERPROFILE%\.omni360\release-signing-key.pem` 
 
 ### 1. Set the version
 
-- `CURRENT_VERSION` in `settings.h`, e.g. `"0.2.4-beta"`.
+- `CURRENT_VERSION` in `src/settings.h`, e.g. `"0.2.4-beta"`.
 - The **Status** line in `README.md`.
 
 Versions are compared as `MAJOR.MINOR.PATCH`, then an optional suffix after a `-`: `0.3.0` is newer than `0.3.0-beta`, which is newer than `0.2.9`, and `beta.10` is newer than `beta.2`. The tag is the version with a `v` in front: `v0.2.4-beta`.

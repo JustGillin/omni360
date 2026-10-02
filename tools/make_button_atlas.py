@@ -34,7 +34,7 @@ from PIL import Image, ImageDraw, ImageFont
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 FONT = os.path.join(ROOT, "Media", "Fonts", "selawkb.ttf")
 OUT_PNG = os.path.join(ROOT, "Media", "ButtonAtlas.png")
-OUT_HEADER = os.path.join(ROOT, "ButtonAtlas.h")
+OUT_HEADER = os.path.join(ROOT, "src", "ButtonAtlas.h")
 
 SS = 8              # supersampling factor
 CELL = 64           # atlas cell, in final pixels

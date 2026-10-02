@@ -40,7 +40,7 @@ import base64, glob, hashlib, os
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 PEM_DIR = os.path.join(ROOT, "tools", "trust-anchors")
-OUT = os.path.join(ROOT, "TrustAnchors.h")
+OUT = os.path.join(ROOT, "src", "TrustAnchors.h")
 
 OID_RSA = bytes.fromhex("2a864886f70d010101")
 CURVES = {  # named-curve OIDs -> BearSSL curve ids (bearssl_ec.h)

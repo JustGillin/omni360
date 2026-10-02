@@ -30,7 +30,7 @@ release notes.
 import argparse, hashlib, os, re, shutil, subprocess, sys, tempfile
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-KEY_HEADER = os.path.join(ROOT, "UpdateKey.h")
+KEY_HEADER = os.path.join(ROOT, "src", "UpdateKey.h")
 DEFAULT_KEY = os.path.join(os.path.expanduser("~"), ".omni360", "release-signing-key.pem")
 
 

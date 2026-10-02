@@ -120,28 +120,28 @@
     <ClInclude Include="SSL\inner.h">
       <Filter>SSL</Filter>
     </ClInclude>
-    <ClInclude Include="Debug.h">
+    <ClInclude Include="src\Debug.h">
       <Filter>Debug</Filter>
     </ClInclude>
-    <ClInclude Include="XboxTLS.h">
+    <ClInclude Include="src\XboxTLS.h">
       <Filter>Source Files</Filter>
     </ClInclude>
-    <ClInclude Include="downloadFile.h">
+    <ClInclude Include="src\downloadFile.h">
       <Filter>Source Files</Filter>
     </ClInclude>
     <ClInclude Include="archiveOrgCert.h">
       <Filter>Source Files</Filter>
     </ClInclude>
-    <ClInclude Include="dns.h">
+    <ClInclude Include="src\dns.h">
       <Filter>Source Files</Filter>
     </ClInclude>
-    <ClInclude Include="parsing.h">
+    <ClInclude Include="src\parsing.h">
       <Filter>Source Files</Filter>
     </ClInclude>
-    <ClInclude Include="driveMount.h">
+    <ClInclude Include="src\driveMount.h">
       <Filter>Source Files</Filter>
     </ClInclude>
-    <ClInclude Include="OutputConsole.h">
+    <ClInclude Include="src\OutputConsole.h">
       <Filter>Source Files</Filter>
     </ClInclude>
     <ClInclude Include="githubCert.h" />
@@ -1026,28 +1026,28 @@
     <ClCompile Include="SSL\x509\x509_minimal_full.c">
       <Filter>SSL\x509</Filter>
     </ClCompile>
-    <ClCompile Include="Debug.cpp">
+    <ClCompile Include="src\Debug.cpp">
       <Filter>Debug</Filter>
     </ClCompile>
-    <ClCompile Include="XboxTLS.cpp">
+    <ClCompile Include="src\XboxTLS.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
-    <ClCompile Include="downloadFile.cpp">
+    <ClCompile Include="src\downloadFile.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
-    <ClCompile Include="main.cpp">
+    <ClCompile Include="src\main.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
-    <ClCompile Include="dns.cpp">
+    <ClCompile Include="src\dns.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
-    <ClCompile Include="parsing.cpp">
+    <ClCompile Include="src\parsing.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
-    <ClCompile Include="driveMount.c">
+    <ClCompile Include="src\driveMount.c">
       <Filter>Source Files</Filter>
     </ClCompile>
-    <ClCompile Include="OutputConsole.cpp">
+    <ClCompile Include="src\OutputConsole.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
     <ClCompile Include="xblaParsing.cpp">

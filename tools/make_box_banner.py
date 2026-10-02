@@ -18,7 +18,7 @@ import struct
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 SOURCE = os.path.join(ROOT, 'Media', 'BoxArtBanner.png')
-OUTPUT = os.path.join(ROOT, 'BoxArtBanner.h')
+OUTPUT = os.path.join(ROOT, 'src', 'BoxArtBanner.h')
 
 EXPECTED = (94, 512)
 

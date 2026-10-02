@@ -116,7 +116,7 @@
       <RuntimeLibrary>MultiThreadedDebug</RuntimeLibrary>
       <PreprocessorDefinitions>_DEBUG;_XBOX</PreprocessorDefinitions>
       <CallAttributedProfiling>Callcap</CallAttributedProfiling>
-      <AdditionalIncludeDirectories>SSL;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+      <AdditionalIncludeDirectories>src;SSL;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
       <CompileAs>Default</CompileAs>
     </ClCompile>
     <Link>
@@ -212,7 +212,7 @@
       <RuntimeLibrary>MultiThreaded</RuntimeLibrary>
       <PreprocessorDefinitions>NDEBUG;_XBOX</PreprocessorDefinitions>
       <CompileAs>Default</CompileAs>
-      <AdditionalIncludeDirectories>$(ProjectDir);$(ProjectDir)\Common;$(ProjectDir)\SSL;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+      <AdditionalIncludeDirectories>$(ProjectDir);$(ProjectDir)src;$(ProjectDir)\Common;$(ProjectDir)\SSL;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
       <WholeProgramOptimization>true</WholeProgramOptimization>
     </ClCompile>
     <Link>
@@ -347,24 +347,24 @@
     <None Include="SSL\x509\x509_minimal.t0" />
   </ItemGroup>
   <ItemGroup>
-    <ClInclude Include="ArchiveOrgDLC.h" />
-    <ClInclude Include="cJSON.h" />
-    <ClInclude Include="driveMount.h" />
-    <ClInclude Include="Debug.h" />
-    <ClInclude Include="dns.h" />
-    <ClInclude Include="downloadFile.h" />
-    <ClInclude Include="GameListUI.h" />
-    <ClInclude Include="HttpResponse.h" />
-    <ClInclude Include="ButtonAtlas.h" />
-    <ClInclude Include="BoxArtBanner.h" />
-    <ClInclude Include="SelawikBold.h" />
-    <ClInclude Include="Keyboard.h" />
-    <ClInclude Include="OutputConsole.h" />
-    <ClInclude Include="PngDecode.h" />
-    <ClInclude Include="GodConvert.h" />
-    <ClInclude Include="DiscSource.h" />
-    <ClInclude Include="ReadAhead.h" />
-    <ClInclude Include="DiscWorker.h" />
+    <ClInclude Include="src\ArchiveOrgDLC.h" />
+    <ClInclude Include="src\cJSON.h" />
+    <ClInclude Include="src\driveMount.h" />
+    <ClInclude Include="src\Debug.h" />
+    <ClInclude Include="src\dns.h" />
+    <ClInclude Include="src\downloadFile.h" />
+    <ClInclude Include="src\GameListUI.h" />
+    <ClInclude Include="src\HttpResponse.h" />
+    <ClInclude Include="src\ButtonAtlas.h" />
+    <ClInclude Include="src\BoxArtBanner.h" />
+    <ClInclude Include="src\SelawikBold.h" />
+    <ClInclude Include="src\Keyboard.h" />
+    <ClInclude Include="src\OutputConsole.h" />
+    <ClInclude Include="src\PngDecode.h" />
+    <ClInclude Include="src\GodConvert.h" />
+    <ClInclude Include="src\DiscSource.h" />
+    <ClInclude Include="src\ReadAhead.h" />
+    <ClInclude Include="src\DiscWorker.h" />
     <ClInclude Include="zlib\crc32.h" />
     <ClInclude Include="zlib\inffast.h" />
     <ClInclude Include="zlib\inffixed.h" />
@@ -374,23 +374,24 @@
     <ClInclude Include="zlib\zlib.h" />
     <ClInclude Include="zlib\zconf.h" />
     <ClInclude Include="zlib\gzguts.h" />
-    <ClInclude Include="GameInstaller.h" />
-    <ClInclude Include="HttpPlain.h" />
-    <ClInclude Include="StoreCatalog.h" />
-    <ClInclude Include="StoreArt.h" />
-    <ClInclude Include="UpdateCheck.h" />
-    <ClInclude Include="StoreTitles.h" />
-    <ClInclude Include="InflateSource.h" />
-    <ClInclude Include="DownloadQueue.h" />
-    <ClInclude Include="SearchWorker.h" />
-    <ClInclude Include="CoverArt.h" />
-    <ClInclude Include="TitleNames.h" />
-    <ClInclude Include="RarHeaders.h" />
-    <ClInclude Include="parsing.h" />
-    <ClInclude Include="settings.h" />
-    <ClInclude Include="StfsParser.h" />
-    <ClInclude Include="TrustAnchors.h" />
-    <ClInclude Include="UiText.h" />
+    <ClInclude Include="src\GameInstaller.h" />
+    <ClInclude Include="src\HttpPlain.h" />
+    <ClInclude Include="src\StoreCatalog.h" />
+    <ClInclude Include="src\StoreArt.h" />
+    <ClInclude Include="src\UpdateCheck.h" />
+    <ClInclude Include="src\UpdateKey.h" />
+    <ClInclude Include="src\StoreTitles.h" />
+    <ClInclude Include="src\InflateSource.h" />
+    <ClInclude Include="src\DownloadQueue.h" />
+    <ClInclude Include="src\SearchWorker.h" />
+    <ClInclude Include="src\CoverArt.h" />
+    <ClInclude Include="src\TitleNames.h" />
+    <ClInclude Include="src\RarHeaders.h" />
+    <ClInclude Include="src\parsing.h" />
+    <ClInclude Include="src\settings.h" />
+    <ClInclude Include="src\StfsParser.h" />
+    <ClInclude Include="src\TrustAnchors.h" />
+    <ClInclude Include="src\UiText.h" />
     <ClInclude Include="SSL\config.h" />
     <ClInclude Include="SSL\inc\bearssl.h" />
     <ClInclude Include="SSL\inc\bearssl_aead.h" />
@@ -406,44 +407,44 @@
     <ClInclude Include="SSL\inc\bearssl_ssl.h" />
     <ClInclude Include="SSL\inc\bearssl_x509.h" />
     <ClInclude Include="SSL\inner.h" />
-    <ClInclude Include="XboxTLS.h" />
+    <ClInclude Include="src\XboxTLS.h" />
   </ItemGroup>
   <ItemGroup>
-    <ClCompile Include="ArchiveOrgDLC.cpp" />
-    <ClCompile Include="cJSON.c" />
+    <ClCompile Include="src\ArchiveOrgDLC.cpp" />
+    <ClCompile Include="src\cJSON.c" />
     <ClCompile Include="zlib\adler32.c" />
     <ClCompile Include="zlib\crc32.c" />
     <ClCompile Include="zlib\inffast.c" />
     <ClCompile Include="zlib\inflate.c" />
     <ClCompile Include="zlib\inftrees.c" />
     <ClCompile Include="zlib\zutil.c" />
-    <ClCompile Include="driveMount.c" />
-    <ClCompile Include="Debug.cpp" />
-    <ClCompile Include="dns.cpp" />
-    <ClCompile Include="downloadFile.cpp" />
-    <ClCompile Include="GameListUI.cpp" />
-    <ClCompile Include="HttpResponse.cpp" />
-    <ClCompile Include="Keyboard.cpp" />
-    <ClCompile Include="main.cpp" />
-    <ClCompile Include="OutputConsole.cpp" />
-    <ClCompile Include="PngDecode.cpp" />
-    <ClCompile Include="GodConvert.cpp" />
-    <ClCompile Include="DiscSource.cpp" />
-    <ClCompile Include="ReadAhead.cpp" />
-    <ClCompile Include="DiscWorker.cpp" />
-    <ClCompile Include="GameInstaller.cpp" />
-    <ClCompile Include="HttpPlain.cpp" />
-    <ClCompile Include="StoreCatalog.cpp" />
-    <ClCompile Include="StoreArt.cpp" />
-    <ClCompile Include="UpdateCheck.cpp" />
-    <ClCompile Include="InflateSource.cpp" />
-    <ClCompile Include="DownloadQueue.cpp" />
-    <ClCompile Include="SearchWorker.cpp" />
-    <ClCompile Include="CoverArt.cpp" />
-    <ClCompile Include="RarHeaders.cpp" />
-    <ClCompile Include="parsing.cpp" />
-    <ClCompile Include="StfsParser.cpp" />
-    <ClCompile Include="UiText.cpp" />
+    <ClCompile Include="src\driveMount.c" />
+    <ClCompile Include="src\Debug.cpp" />
+    <ClCompile Include="src\dns.cpp" />
+    <ClCompile Include="src\downloadFile.cpp" />
+    <ClCompile Include="src\GameListUI.cpp" />
+    <ClCompile Include="src\HttpResponse.cpp" />
+    <ClCompile Include="src\Keyboard.cpp" />
+    <ClCompile Include="src\main.cpp" />
+    <ClCompile Include="src\OutputConsole.cpp" />
+    <ClCompile Include="src\PngDecode.cpp" />
+    <ClCompile Include="src\GodConvert.cpp" />
+    <ClCompile Include="src\DiscSource.cpp" />
+    <ClCompile Include="src\ReadAhead.cpp" />
+    <ClCompile Include="src\DiscWorker.cpp" />
+    <ClCompile Include="src\GameInstaller.cpp" />
+    <ClCompile Include="src\HttpPlain.cpp" />
+    <ClCompile Include="src\StoreCatalog.cpp" />
+    <ClCompile Include="src\StoreArt.cpp" />
+    <ClCompile Include="src\UpdateCheck.cpp" />
+    <ClCompile Include="src\InflateSource.cpp" />
+    <ClCompile Include="src\DownloadQueue.cpp" />
+    <ClCompile Include="src\SearchWorker.cpp" />
+    <ClCompile Include="src\CoverArt.cpp" />
+    <ClCompile Include="src\RarHeaders.cpp" />
+    <ClCompile Include="src\parsing.cpp" />
+    <ClCompile Include="src\StfsParser.cpp" />
+    <ClCompile Include="src\UiText.cpp" />
     <ClCompile Include="SSL\aead\ccm.c" />
     <ClCompile Include="SSL\aead\eax.c" />
     <ClCompile Include="SSL\aead\gcm.c" />
@@ -762,7 +763,7 @@
     <ClCompile Include="SSL\x509\x509_minimal_full.c">
       <CompileAs Condition="'$(Configuration)|$(Platform)'=='Debug|Xbox 360'">CompileAsC</CompileAs>
     </ClCompile>
-    <ClCompile Include="XboxTLS.cpp" />
+    <ClCompile Include="src\XboxTLS.cpp" />
   </ItemGroup>
   <ItemGroup>
     <ProjectReference Include="Common\AtgFramework2010.vcxproj">

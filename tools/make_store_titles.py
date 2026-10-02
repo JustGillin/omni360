@@ -44,8 +44,8 @@ import zipfile
 import xml.etree.ElementTree as ET
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-OUT_HEADER = os.path.join(ROOT, "StoreTitles.h")
-TITLE_NAMES = os.path.join(ROOT, "TitleNames.h")
+OUT_HEADER = os.path.join(ROOT, "src", "StoreTitles.h")
+TITLE_NAMES = os.path.join(ROOT, "src", "TitleNames.h")
 
 DAT_URL = "http://redump.org/datfile/xbox360/serial,version"
 FILES_URL = "https://archive.org/metadata/%s/files"

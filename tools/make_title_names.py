@@ -19,7 +19,7 @@ import os
 import urllib.request
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-OUT_HEADER = os.path.join(ROOT, "TitleNames.h")
+OUT_HEADER = os.path.join(ROOT, "src", "TitleNames.h")
 
 COMMIT = "1ae8591280bacde07c1488be1c26e7d360b157de"
 URL = "https://raw.githubusercontent.com/iliazeus/iso2god-rs/%s/src/game_list/titles.jsonl" % COMMIT

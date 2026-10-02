@@ -18,7 +18,7 @@ import os
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 SOURCE = os.path.join(ROOT, 'Media', 'Fonts', 'selawkb.ttf')
-OUTPUT = os.path.join(ROOT, 'SelawikBold.h')
+OUTPUT = os.path.join(ROOT, 'src', 'SelawikBold.h')
 
 data = open(SOURCE, 'rb').read()
 
