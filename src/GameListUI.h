@@ -251,6 +251,21 @@ int StoreLettersPerRow();
 
 void RenderStoreFrame(StorePageView &view, const UiHint *hints, int hintCount);
 
+// A section of the Store that is only its A-Z tiles - Xbox Live Arcade's -
+// laid out as the front page's are. focus is the letter, 0 to
+// STORE_LETTER_COUNT - 1.
+struct StoreSectionView
+{
+    const char *title;    // the header's
+    const char *subtitle;
+    const char *letters;  // STORE_LETTER_COUNT characters
+    const int *counts;    // the games under each; a letter with none is drawn faded
+    int focus;
+    bool focused;
+};
+
+void RenderStoreSectionFrame(StoreSectionView &view, const UiHint *hints, int hintCount);
+
 // Turns at most one image StoreArt.cpp has ready into a texture. Call once
 // per frame, as PumpCoverArt.
 void PumpStoreArt();
@@ -268,6 +283,7 @@ struct StoreTileView
 struct StoreLetterView
 {
     char letter;
+    const char *section; // before the count in the header - "Xbox Live Arcade"; NULL for none
     const StoreTileView *tiles;
     int count;
     int selected;

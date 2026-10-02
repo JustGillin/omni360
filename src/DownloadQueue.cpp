@@ -237,8 +237,7 @@ static void RunDlcPack(const QueueJob &job, JobResult &result)
 
     SetActivePhase("Reading the file list", 0, 0, -1.0f);
 
-    int memberCount = ListDlcMembers(pack.filename, pack.size, g_members, MAX_DLC_MEMBERS, auth, dprintf,
-                                     WorkerListProgress);
+    int memberCount = ListDlcMembers(pack, g_members, MAX_DLC_MEMBERS, auth, dprintf, WorkerListProgress);
 
     if (ActiveJobCancelled())
     {
@@ -300,7 +299,7 @@ static void RunDlcPack(const QueueJob &job, JobResult &result)
         phase[sizeof(phase) - 1] = '\0';
         SetActivePhase(phase, f, memberCount, (float)f / (float)memberCount);
 
-        if (DownloadDlcMember(pack.filename, g_members[f], g_contentBasePath, auth, dprintf,
+        if (DownloadDlcMember(pack, g_members[f], g_contentBasePath, auth, dprintf,
                               WorkerDownloadProgress))
         {
             installedNow++;
@@ -349,8 +348,11 @@ static void RunDlcPack(const QueueJob &job, JobResult &result)
     }
     else if (failures == 0)
     {
+        // An arcade game shows up in the library straight away; DLC needs
+        // the game to be started again.
         SetResult(result, QUEUE_OUTCOME_INSTALLED, "Installed",
-                  "Restart your dashboard to pick up the new content.");
+                  pack.item[0] != '\0' ? "It's in your library now."
+                                        : "Restart your dashboard to pick up the new content.");
     }
     else
     {

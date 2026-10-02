@@ -106,6 +106,11 @@ KeyCheckResult CheckArchiveOrgKeys(const char *authHeader, char *outReason, size
 
 // One matched DLC file discovered inside an archive.org item's RAR, with the
 // internal member path we want to fetch (see FindDlcMemberPaths).
+//
+// Some archives keep the TitleID\ContentType\ContentID folders under one of
+// their own - every Xbox Live Arcade RAR does, the game's name - so where a
+// member installs is the path from its TitleID folder on: see
+// DlcMemberDestination.
 struct DlcMember
 {
     char internalPath[512]; // e.g. "415607FF/00000002/66632C72BEC2A85B643F365E76BA3B2D68F7D0AF41"
@@ -118,6 +123,7 @@ struct DlcMember
 
 struct DlcRarMatch
 {
+    char item[32];                        // the archive.org item it's in; empty for the DLC collection
     char filename[DLC_RAR_FILENAME_LEN]; // e.g. "007.Legends.DLC.RF.X360-ZTM.rar"
     unsigned long long size;              // whole-archive size in bytes, from the metadata listing
     int score;                            // 0-100 name-match confidence; results come back sorted by this, best first
@@ -132,7 +138,7 @@ struct DlcRarMatch
 int FindDlcRarFilenames(const std::string &gameName, DlcRarMatch *outMatches, int maxMatches,
                         void printFunction(const char *_format, ...));
 
-// Walks rarFilename's header chain (RAR4 or RAR5 - see RarHeaders.h) one entry at a time, each via a small,
+// Walks the pack's header chain (RAR4 or RAR5 - see RarHeaders.h) one entry at a time, each via a small,
 // precisely-targeted Range request (RAR stores headers interleaved with each
 // file's compressed data, not in one central directory, so this is a series
 // of small requests rather than one big peek) - never downloads or
@@ -158,7 +164,7 @@ int FindDlcRarFilenames(const std::string &gameName, DlcRarMatch *outMatches, in
 typedef bool (*ListMembersProgressFn)(unsigned long long bytesScanned, unsigned long long archiveSize,
                                       int filesToInstall, int avatarItemsSkipped);
 
-int ListDlcMembers(const std::string &rarFilename, unsigned long long archiveSize,
+int ListDlcMembers(const DlcRarMatch &pack,
                    DlcMember *outMembers, int maxMembers,
                    const char *authHeader, void printFunction(const char *_format, ...),
                    ListMembersProgressFn progressFn = NULL);
@@ -167,13 +173,13 @@ int ListDlcMembers(const std::string &rarFilename, unsigned long long archiveSiz
 // /download/{item}/{rarfile}/{urlencoded internal path} virtual-path URL,
 // which serves the file already-extracted server-side - no RAR decompression
 // needed on our end) and writes it to contentBasePath + "\" + member's own
-// internal path (which already mirrors the Content\0000000000000000\{TitleID}
-// \{ContentType}\{ContentID} layout).
+// internal path from its TitleID folder on (which mirrors the
+// Content\0000000000000000\{TitleID}\{ContentType}\{ContentID} layout).
 //
 // progressFn, if non-NULL, is forwarded down to the HTTP layer and called
 // periodically with live byte counts for this one member, so the caller can
 // draw a progress bar. See DownloadProgressFn in downloadFile.h.
-bool DownloadDlcMember(const std::string &rarFilename, const DlcMember &member,
+bool DownloadDlcMember(const DlcRarMatch &pack, const DlcMember &member,
                        const std::string &contentBasePath, const char *authHeader,
                        void printFunction(const char *_format, ...),
                        DownloadProgressFn progressFn = NULL);

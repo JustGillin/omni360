@@ -3768,6 +3768,74 @@ void RenderStoreFrame(StorePageView &view, const UiHint *hints, int hintCount)
     EndFrame();
 }
 
+void RenderStoreSectionFrame(StoreSectionView &view, const UiHint *hints, int hintCount)
+{
+    if (!g_Initialized)
+        return;
+
+    g_storeFrame++;
+
+    if (view.focus < 0) view.focus = 0;
+    if (view.focus >= STORE_LETTER_COUNT) view.focus = STORE_LETTER_COUNT - 1;
+
+    // The front page's letters, moved up to the top of the page.
+    StoreLayout L = LayOutStore();
+    const float lift = L.azLabelY - g_M.listY;
+    L.azLabelY -= lift;
+    L.azY -= lift;
+
+    BeginFrame();
+    const bool showToast = ToastVisibleThisFrame();
+
+    ButtonHint footer[MAX_FOOTER_HINTS];
+    const int footerCount = LayoutFooter(hints, hintCount, footer);
+
+    // --- Pass 1: quads ---
+    DrawFrameBase(g_sidebar.focused);
+
+    for (int i = 0; i < STORE_LETTER_COUNT; ++i)
+    {
+        float x, y;
+        StoreLetterRect(L, i, &x, &y);
+        const bool isFocused = view.focused && view.focus == i;
+        D3DCOLOR fill = isFocused ? COL_SURFACE_HI : COL_SURFACE;
+        if (view.counts != NULL && view.counts[i] == 0)
+            fill = (fill & 0x00FFFFFF) | 0x8C000000;
+        FillRound(x, y, L.cell, L.cell, g_M.radius, fill);
+        if (isFocused)
+            FocusRing(x, y, L.cell, L.cell, g_M.radius);
+    }
+
+    DrawButtonHintShapes(footer, footerCount, g_M.footerY);
+    DrawHeaderQuads(showToast);
+    g_pd3dDevice->SetRenderState(D3DRS_SCISSORTESTENABLE, FALSE);
+
+    // --- Pass 2: all text, one Begin/End ---
+    g_UiFont.Begin();
+
+    DrawSidebarText(g_sidebar.focused);
+    DrawHeaderText(view.title, view.subtitle, showToast);
+    DrawButtonHintText(footer, footerCount, g_M.footerY);
+
+    Text(g_M.contentX, L.azLabelY, 0.95f, COL_TEXT, "Games, A to Z", 0, 0.0f, true);
+
+    for (int i = 0; i < STORE_LETTER_COUNT && view.letters != NULL && view.letters[i] != '\0'; ++i)
+    {
+        float x, y;
+        StoreLetterRect(L, i, &x, &y);
+        const bool empty = (view.counts != NULL && view.counts[i] == 0);
+        char letter[2] = { view.letters[i], '\0' };
+        TextMid(x + L.cell * 0.5f, y + L.cell * 0.5f, 1.2f, empty ? COL_DIM : COL_TEXT, letter, ATGFONT_CENTER_X,
+                0.0f, true);
+    }
+
+    g_UiFont.SetBold(false);
+    g_UiFont.SetScaleFactors(1.0f, 1.0f);
+    g_UiFont.End();
+
+    EndFrame();
+}
+
 // A letter's grid: the library's, without its banner.
 struct StoreGridLayout
 {
@@ -4001,8 +4069,8 @@ void RenderStoreLetterFrame(StoreLetterView &view, const UiHint *hints, int hint
     else
         _snprintf(title, sizeof(title), "%c", view.letter);
     title[sizeof(title) - 1] = '\0';
-    _snprintf(subtitle, sizeof(subtitle), "%d game%s" MIDDOT "%d of %d", count, count == 1 ? "" : "s",
-              count > 0 ? selected + 1 : 0, count);
+    _snprintf(subtitle, sizeof(subtitle), "%s%s%d game%s" MIDDOT "%d of %d", view.section != NULL ? view.section : "",
+              view.section != NULL ? MIDDOT : "", count, count == 1 ? "" : "s", count > 0 ? selected + 1 : 0, count);
     subtitle[sizeof(subtitle) - 1] = '\0';
     DrawHeaderText(title, subtitle, showToast);
 

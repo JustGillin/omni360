@@ -400,14 +400,16 @@ bool IsGameContentType(unsigned long contentType)
 {
     switch (contentType)
     {
+    // The last four were written a digit short - 0x0000D000 for Arcade
+    // Title - so arcade games, demos and indie games were never found.
     case 0x00001000: // Xbox 360 Title
     case 0x00004000: // Installed Game
     case 0x00005000: // Xbox Original / Xbox Title
     case 0x00007000: // Game on Demand
-    case 0x00008000: // Game Demo
-    case 0x0000A000: // Game Title
-    case 0x0000D000: // Arcade Title
-    case 0x0000E000: // XNA
+    case 0x00080000: // Game Demo
+    case 0x000A0000: // Game Title
+    case 0x000D0000: // Arcade Title
+    case 0x000E0000: // XNA (Indie Games)
         return true;
     default:
         return false;

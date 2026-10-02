@@ -41,3 +41,6 @@ Media/Fonts/Selawik_*
 
 # Per-user Visual Studio settings (debugger options and the like)
 *.vcxproj.user
+
+# What tools/make_xbla_titles.py learned of each RAR, so reruns are quick
+tools/cache/

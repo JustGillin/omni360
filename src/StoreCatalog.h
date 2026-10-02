@@ -28,4 +28,18 @@ const StoreRelease *StoreReleaseOf(const StoreGame *game, int version);
 // A version's discs, in disc order; NULL out of range.
 const StoreDisc *StoreReleaseDisc(const StoreRelease *release, int disc);
 
+// The Xbox Live Arcade games, from XblaTitles.h (tools/make_xbla_titles.py):
+// one RAR each in archive.org's XBOX_360_XBLA, sorted by name.
+#include "XblaTitles.h" // XblaGame, XBLA_GAME_COUNT
+
+// The archive.org item a game's RAR is in.
+const char *XblaItemOf(const XblaGame *game);
+
+// The games under one letter tile ('A' to 'Z', or '#'), in the order shown.
+// Returns how many were written.
+int XblaGamesForLetter(char letter, const XblaGame **out, int maxGames);
+
+// The first game with this title ID, or NULL.
+const XblaGame *XblaGameByTitleId(unsigned long titleId);
+
 #endif

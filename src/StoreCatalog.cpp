@@ -1,4 +1,5 @@
 #define STORE_TITLES_DATA
+#define XBLA_TITLES_DATA
 #include "StoreCatalog.h"
 
 #include <string.h>
@@ -77,4 +78,35 @@ const StoreDisc *StoreReleaseDisc(const StoreRelease *release, int disc)
         return NULL;
     const int index = kStoreReleaseDiscs[at];
     return (index < COUNT_OF(kStoreDiscs)) ? &kStoreDiscs[index] : NULL;
+}
+
+const char *XblaItemOf(const XblaGame *game)
+{
+    return (game != NULL && game->item < COUNT_OF(kXblaItems)) ? kXblaItems[game->item] : "";
+}
+
+int XblaGamesForLetter(char letter, const XblaGame **out, int maxGames)
+{
+    if (out == NULL || maxGames <= 0)
+        return 0;
+
+    // The whole table, not just a run: its order is by name, ignoring case,
+    // which keeps a letter's games together - but 743 rows is nothing to read.
+    int count = 0;
+    for (int i = 0; i < XBLA_GAME_COUNT && count < maxGames; ++i)
+    {
+        if (kXblaGames[i].letter == letter)
+            out[count++] = &kXblaGames[i];
+    }
+    return count;
+}
+
+const XblaGame *XblaGameByTitleId(unsigned long titleId)
+{
+    for (int i = 0; i < XBLA_GAME_COUNT; ++i)
+    {
+        if (kXblaGames[i].titleId == titleId)
+            return &kXblaGames[i];
+    }
+    return NULL;
 }

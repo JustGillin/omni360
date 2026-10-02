@@ -36,6 +36,7 @@ rather than a scraped browser login session.
 #define ARCHIVE_ITEM "msx360gcdlc"
 #define ARCHIVE_METADATA_URL "https://archive.org/metadata/" ARCHIVE_ITEM
 #define ARCHIVE_DOWNLOAD_BASE "https://archive.org/download/" ARCHIVE_ITEM "/"
+#define ARCHIVE_DOWNLOAD_ROOT "https://archive.org/download/"
 
 #define ERROR_LOG(s) (printFunction("\nERROR: %s\n", s))
 
@@ -664,6 +665,7 @@ int FindDlcRarFilenames(const std::string &gameName, DlcRarMatch *outMatches, in
         if (slot < 0)
             continue;
 
+        outMatches[slot].item[0] = '\0'; // this collection
         strncpy(outMatches[slot].filename, name->valuestring, DLC_RAR_FILENAME_LEN - 1);
         outMatches[slot].filename[DLC_RAR_FILENAME_LEN - 1] = '\0';
         outMatches[slot].size = fileSize;
@@ -698,14 +700,65 @@ int FindDlcRarFilenames(const std::string &gameName, DlcRarMatch *outMatches, in
 // Header parsing itself lives in RarHeaders.cpp, which handles both RAR4 and
 // RAR5 and is tested on a PC against archives made by rar.exe.
 
+// The pack's URL: its item, then its file name, percent-encoded - the DLC
+// collection's scene names need none, but Xbox Live Arcade's are plain names,
+// "Zuma's Revenge!.rar".
+static std::string PackUrl(const DlcRarMatch &pack)
+{
+    std::string url = ARCHIVE_DOWNLOAD_ROOT;
+    url += (pack.item[0] != '\0') ? pack.item : ARCHIVE_ITEM;
+    url += "/";
+
+    char encoded[DLC_RAR_FILENAME_LEN * 3 + 1];
+    if (UrlEncodeFormValue(pack.filename, encoded, sizeof(encoded)))
+        url += encoded;
+    else
+        url += pack.filename; // can't happen - the buffer fits the longest name
+    return url;
+}
+
+static bool IsHex8(const char *p)
+{
+    for (int i = 0; i < 8; ++i)
+    {
+        const char c = p[i];
+        if (!((c >= '0' && c <= '9') || (c >= 'A' && c <= 'F') || (c >= 'a' && c <= 'f')))
+            return false;
+    }
+    return true;
+}
+
+// A member's path from its TitleID folder on - the part that mirrors the
+// console's Content folder - or NULL if it has no TitleID\ContentType pair
+// of folders. The DLC collection's paths start there; Xbox Live Arcade's have
+// the game's name in front: "Banjo Kazooie\58410954\000D0000\DA78...".
+static const char *ContentRelativePath(const char *internalPath)
+{
+    const char *segment = internalPath;
+    for (;;)
+    {
+        const bool isSep8 = IsHex8(segment) && (segment[8] == '\\' || segment[8] == '/');
+        if (isSep8 && IsHex8(segment + 9) && (segment[17] == '\\' || segment[17] == '/'))
+            return segment;
+
+        const char *next = strpbrk(segment, "\\/");
+        if (next == NULL)
+            return NULL;
+        segment = next + 1;
+    }
+}
+
 // Reads the content-type segment out of a member's internal path.
 //
 // Paths look like "53450848\00000002\CD97F6BE...", so this is the second
-// backslash-separated segment parsed as hex. Returns 0 when the path doesn't
-// have that shape, which callers treat as "unknown, keep it" rather than as a
-// reason to discard something.
+// backslash-separated segment parsed as hex, after any folders in front of
+// the TitleID. Returns 0 when the path doesn't have that shape, which callers
+// treat as "unknown, keep it" rather than as a reason to discard something.
 static unsigned long MemberContentType(const char *internalPath)
 {
+    const char *relative = ContentRelativePath(internalPath);
+    if (relative != NULL)
+        internalPath = relative;
     const char *firstSep = strchr(internalPath, '\\');
     if (firstSep == NULL)
         return 0;
@@ -733,14 +786,15 @@ static unsigned long MemberContentType(const char *internalPath)
     return (digits > 0) ? value : 0;
 }
 
-int ListDlcMembers(const std::string &rarFilename, unsigned long long archiveSize,
+int ListDlcMembers(const DlcRarMatch &pack,
                    DlcMember *outMembers, int maxMembers,
                    const char *authHeader, void printFunction(const char *_format, ...),
                    ListMembersProgressFn progressFn)
 {
     g_keysRejected = false;
 
-    std::string url = ARCHIVE_DOWNLOAD_BASE + rarFilename;
+    const unsigned long long archiveSize = pack.size;
+    std::string url = PackUrl(pack);
 
     if (progressFn != NULL && !progressFn(0, archiveSize, 0, 0))
         return -1; // cancelled
@@ -892,6 +946,14 @@ int ListDlcMembers(const std::string &rarFilename, unsigned long long archiveSiz
             member.unpSize = (unsigned long)entry.unpSize;
         }
 
+        // A file outside any TitleID\ContentType folders - a readme beside
+        // the packages - isn't content, and has nowhere to go on the console.
+        if (isFileEntry && ContentRelativePath(member.internalPath) == NULL)
+        {
+            printFunction("  Skipping a file outside the content folders: %s\n", member.internalPath);
+            isFileEntry = false;
+        }
+
         if (isFileEntry && count < maxMembers)
         {
             unsigned long memberType = MemberContentType(member.internalPath);
@@ -955,15 +1017,17 @@ int ListDlcMembers(const std::string &rarFilename, unsigned long long archiveSiz
 
 // Where a member lands on disk.
 //
-// The RAR's own internal path already mirrors the console's layout
-// ({TitleID}\{ContentType}\{ContentID}), so the destination is just that path
-// under the content root. Shared by the download and the "is it already
+// The RAR's own internal path mirrors the console's layout
+// ({TitleID}\{ContentType}\{ContentID}) from its TitleID folder on, so the
+// destination is that part of it under the content root - any folders in
+// front of it, like an arcade game's name, are left out. Shared by the download and the "is it already
 // there?" check so the two can never disagree about where a file belongs -
 // which is exactly the kind of drift that makes an install check quietly
 // useless.
 static std::string DlcMemberDestination(const DlcMember &member, const std::string &contentBasePath)
 {
-    std::string relativePath = member.internalPath;
+    const char *fromTitle = ContentRelativePath(member.internalPath);
+    std::string relativePath = (fromTitle != NULL) ? fromTitle : member.internalPath;
 
     // A no-op for every archive seen so far - these store '\\' already - but
     // harmless insurance against a differently-packaged one.
@@ -1221,7 +1285,7 @@ static int DownloadUrlToFile(const std::string &url, const std::string &destPath
     return httpStatus;
 }
 
-bool DownloadDlcMember(const std::string &rarFilename, const DlcMember &member,
+bool DownloadDlcMember(const DlcRarMatch &pack, const DlcMember &member,
                        const std::string &contentBasePath, const char *authHeader,
                        void printFunction(const char *_format, ...),
                        DownloadProgressFn progressFn)
@@ -1292,7 +1356,7 @@ bool DownloadDlcMember(const std::string &rarFilename, const DlcMember &member,
     // printing something much shorter and garbled, and the downloads built
     // from it succeeded. It is a logging artifact, not a construction bug;
     // see LogEscapePercent in parsing.h for the cause and the fix.
-    std::string url = ARCHIVE_DOWNLOAD_BASE + rarFilename + "/" + encodedPath;
+    std::string url = PackUrl(pack) + "/" + encodedPath;
 
     // Destination mirrors the RAR's own internal path, e.g.
     // {contentBasePath}\415607FF\00000002\66632C72...  - this already matches
@@ -1573,8 +1637,7 @@ bool ReadTitleUpdateMember(const TitleUpdateMatch &update, const char *authHeade
     if (outUnpackedSize != NULL)
         *outUnpackedSize = 0;
 
-    // Unlike the DLC filenames (dot-separated scene releases with no spaces,
-    // which the existing code drops straight into a URL), title-update names
+    // Like Xbox Live Arcade's RAR names (see PackUrl), title-update names
     // contain spaces and parentheses - "Ace Combat 6 (Europe) (v2).zip" - so
     // the filename itself has to be percent-encoded before it can go in a URL
     // at all. UrlEncodeFormValue encodes a space as %20 rather than '+', which
