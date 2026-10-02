@@ -378,6 +378,7 @@
     <ClInclude Include="HttpPlain.h" />
     <ClInclude Include="StoreCatalog.h" />
     <ClInclude Include="StoreArt.h" />
+    <ClInclude Include="UpdateCheck.h" />
     <ClInclude Include="StoreTitles.h" />
     <ClInclude Include="InflateSource.h" />
     <ClInclude Include="DownloadQueue.h" />
@@ -434,6 +435,7 @@
     <ClCompile Include="HttpPlain.cpp" />
     <ClCompile Include="StoreCatalog.cpp" />
     <ClCompile Include="StoreArt.cpp" />
+    <ClCompile Include="UpdateCheck.cpp" />
     <ClCompile Include="InflateSource.cpp" />
     <ClCompile Include="DownloadQueue.cpp" />
     <ClCompile Include="SearchWorker.cpp" />

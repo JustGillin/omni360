@@ -3385,6 +3385,76 @@ void ShowMessageUI(const char *heading, const char *message, const char *detailL
     }
 }
 
+// A heading, a title line, a paragraph or few wrapped beneath it, and one line
+// under that - for release notes. The card fills the space down to the footer.
+static void RenderNotesFrame(const char *heading, const char *title, const char *body, const char *footLine,
+                             ButtonHint *hints, int hintCount)
+{
+    if (!g_Initialized)
+        return;
+
+    const float cardY = g_M.listY;
+    const float cardH = g_M.footerY - S(36.0f) - cardY;
+    const float padX = S(36.0f);
+    const float innerX = g_M.contentX + padX;
+    const float innerW = g_M.contentW - padX * 2.0f;
+
+    const float titleY = cardY + S(30.0f);
+    const float bodyY = titleY + LineHeight(1.2f) * 1.25f + S(14.0f);
+    const float lineH = LineHeight(0.86f) * 1.35f;
+    const bool hasFoot = (footLine != NULL && footLine[0] != '\0');
+    const float footY = cardY + cardH - S(28.0f) - LineHeight(0.8f) * 1.2f;
+    const float bodyBottom = (hasFoot ? footY - S(14.0f) : cardY + cardH - S(24.0f));
+    int bodyLines = (int)((bodyBottom - bodyY) / lineH);
+    if (bodyLines < 1)
+        bodyLines = 1;
+
+    BeginFrame();
+    LayoutButtonHintsRight(hints, hintCount);
+    DrawFrameBase(false);
+    DrawCardQuads(cardY, cardH);
+    DrawButtonHintShapes(hints, hintCount, g_M.footerY);
+    DrawHeaderQuads(false);
+
+    g_UiFont.Begin();
+    DrawSidebarText(false);
+    DrawHeaderText(heading, NULL, false);
+
+    TextFit(innerX, titleY, 1.2f, COL_TEXT, title, innerW, true);
+    if (body != NULL && body[0] != '\0')
+        TextWrapped(innerX, bodyY, 0.86f, COL_TEXT2, body, innerW, lineH, bodyLines);
+    if (hasFoot)
+        TextFit(innerX, footY, 0.8f, COL_DIM, footLine, innerW);
+
+    DrawButtonHintText(hints, hintCount, g_M.footerY);
+    g_UiFont.SetBold(false);
+    g_UiFont.SetScaleFactors(1.0f, 1.0f);
+    g_UiFont.End();
+    EndFrame();
+}
+
+void ShowNotesUI(const char *heading, const char *title, const char *body, const char *footLine)
+{
+    if (!g_Initialized)
+        return;
+
+    WORD prevButtons = CurrentButtons();
+    for (;;)
+    {
+        WORD buttons = CurrentButtons();
+        WORD pressed = buttons & ~prevButtons;
+        prevButtons = buttons;
+        if (pressed & (XINPUT_GAMEPAD_B | XINPUT_GAMEPAD_A))
+            break;
+
+        ButtonHint hints[1];
+        hints[0].sprite = BUTTON_SPRITE_B;
+        hints[0].label = L"Back";
+        RenderNotesFrame(heading, title, body, footLine, hints, 1);
+        Sleep(16);
+    }
+}
+
 bool ShowConfirmUI(const char *heading, const char *message, const char *detailLine,
                    const char *confirmLabel)
 {

@@ -22,6 +22,15 @@ archive.org, its US storage nodes and s3.us.archive.org chain to Go Daddy G2;
 its Canadian nodes use Let's Encrypt, whose chains lead to ISRG X2 and X1.
 Add a PEM here and re-run if archive.org ever moves to another CA.
 
+And a fourth, for the update check (Oct 2026):
+  - USERTrust_ECC.pem: USERTrust ECC Certification Authority, exported from
+    the Windows root store (SHA-256 4FF460D5...D2A9AD7A, as Mozilla's store
+    lists it). api.github.com chains to it through Sectigo's Public Server
+    Authentication Root E46 cross-certificate; the whole chain the server
+    sends verified against this root alone with `openssl verify`. GitHub's
+    release downloads (objects/release-assets.githubusercontent.com) chain to
+    ISRG X1, already here.
+
 For each certificate this emits what BearSSL's br_x509_trust_anchor needs:
 the subject DN, exactly as DER-encoded in the certificate (BearSSL compares
 DNs byte for byte against each issuer), and the public key - an RSA modulus

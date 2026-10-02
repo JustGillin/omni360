@@ -32,6 +32,7 @@ end-to-end on real hardware against a real 27-game library.
 #include "StoreCatalog.h"
 #include "DiscWorker.h"
 #include "GameInstaller.h"
+#include "UpdateCheck.h"
 #include "ArchiveOrgDLC.h"
 #include "downloadFile.h" // DownloadProgressFn + FormatBytes, for the progress callback
 #include "GodConvert.h"
@@ -52,6 +53,7 @@ extern "C" NTSTATUS XexGetModuleHandle(PSZ moduleName, PHANDLE outHandle);
 #define SETTINGS_FILE "game:\\settings.txt"
 #define SETTINGS_TEMP_FILE "game:\\settings.tmp"
 #define GAMES_PATH_KEY "games-path: "
+#define UPDATE_CHECK_KEY "check-updates: " // "off" stops the check at start
 #define CREDENTIALS_FILE "game:\\ArchiveOrgKeys.txt"
 #define CONTENT_BASE_PATH_DEFAULT "Hdd1:\\Content\\0000000000000000"
 #define GAMES_PATH_DEFAULT CONTENT_BASE_PATH_DEFAULT // where the dashboard itself keeps installed games
@@ -194,6 +196,14 @@ static void GetContentBasePath(char *outPath, size_t outPathSize)
 static void GetGamesPath(char *outPath, size_t outPathSize)
 {
     GetSettingsPath(GAMES_PATH_KEY, GAMES_PATH_DEFAULT, outPath, outPathSize);
+}
+
+// Whether to ask GitHub for a newer version at start. On unless turned off.
+static bool UpdateChecksOn()
+{
+    char value[16];
+    GetSettingsPath(UPDATE_CHECK_KEY, "yes", value, sizeof(value));
+    return _stricmp(value, "off") != 0;
 }
 
 // Writes one key into settings.txt - replacing its existing line, or adding
@@ -964,7 +974,9 @@ enum SettingsRow
 {
     SETTINGS_ROW_GAMES_FOLDER,
     SETTINGS_ROW_KEYS,
-    SETTINGS_ROW_REMOVE_KEYS
+    SETTINGS_ROW_REMOVE_KEYS,
+    SETTINGS_ROW_UPDATES,      // the version, and what's newer
+    SETTINGS_ROW_UPDATE_CHECKS // checking at start, on or off
 };
 
 static void ChangeGamesFolder(Library &lib, char *gamesPath, size_t gamesPathSize, SettingsOutcome &outcome)
@@ -1026,6 +1038,29 @@ static void ChangeKeys(SettingsOutcome &outcome)
         outcome.keysChanged = true;
 }
 
+// The Updates row: what's new in a newer version, or a check now.
+static void ShowUpdate()
+{
+    UpdateInfo info;
+    if (GetUpdateState(&info, NULL) == UPDATE_AVAILABLE)
+    {
+        char heading[64];
+        _snprintf(heading, sizeof(heading), "Omni360 %s", info.version);
+        heading[sizeof(heading) - 1] = '\0';
+        ShowNotesUI(heading, info.title, info.notes, "Get it from " UPDATE_RELEASES_PAGE);
+        return;
+    }
+    StartUpdateCheck();
+    ShowShellToast("Checking for updates", "Asking GitHub for the latest version", UI_TOAST_INFO);
+}
+
+static void ToggleUpdateChecks()
+{
+    const bool on = !UpdateChecksOn();
+    if (!SetSettingsValue(UPDATE_CHECK_KEY, on ? "yes" : "off"))
+        ShowMessageUI("Not saved", "settings.txt could not be written.", NULL);
+}
+
 static void RemoveKeys(SettingsOutcome &outcome)
 {
     if (!ShowConfirmUI("Remove keys", "Remove the archive.org keys saved on this console?",
@@ -1047,7 +1082,7 @@ static void RemoveKeys(SettingsOutcome &outcome)
 // so it doubles as a summary of how the app is set up. Rebuilt whenever
 // something may have changed it, rather than every frame - each rebuild reads
 // the keys file.
-#define MAX_SETTINGS_ROWS 4
+#define MAX_SETTINGS_ROWS 6
 
 struct SettingsPage
 {
@@ -1057,6 +1092,7 @@ struct SettingsPage
     const char *sublabels[MAX_SETTINGS_ROWS];
     char gamesSub[MAX_TEXT_LENGTH + 64];
     char keysSub[128];
+    char updatesSub[160];
 
     int selected;
     int scroll;
@@ -1108,6 +1144,42 @@ static void BuildSettingsPage(SettingsPage &page, const Library &lib, const char
         page.rows[page.count++] = SETTINGS_ROW_REMOVE_KEYS;
     }
 
+    // The version, and whether there's a newer one.
+    UpdateInfo update;
+    switch (GetUpdateState(&update, NULL))
+    {
+    case UPDATE_AVAILABLE:
+        _snprintf(page.updatesSub, sizeof(page.updatesSub), "%s is available   -   you have %s. A for what's new",
+                  update.version, CURRENT_VERSION);
+        break;
+    case UPDATE_CHECKING:
+        _snprintf(page.updatesSub, sizeof(page.updatesSub), "Version %s   -   checking for a newer one...",
+                  CURRENT_VERSION);
+        break;
+    case UPDATE_CURRENT:
+        _snprintf(page.updatesSub, sizeof(page.updatesSub), "Version %s   -   up to date", CURRENT_VERSION);
+        break;
+    case UPDATE_FAILED:
+        _snprintf(page.updatesSub, sizeof(page.updatesSub), "Version %s   -   couldn't reach GitHub. A to try again",
+                  CURRENT_VERSION);
+        break;
+    default:
+        _snprintf(page.updatesSub, sizeof(page.updatesSub), "Version %s   -   A to check for a newer one",
+                  CURRENT_VERSION);
+        break;
+    }
+    page.updatesSub[sizeof(page.updatesSub) - 1] = '\0';
+
+    page.labels[page.count] = "Updates";
+    page.sublabels[page.count] = page.updatesSub;
+    page.rows[page.count++] = SETTINGS_ROW_UPDATES;
+
+    const bool checksOn = UpdateChecksOn();
+    page.labels[page.count] = checksOn ? "Check for updates at start: On" : "Check for updates at start: Off";
+    page.sublabels[page.count] = checksOn ? "Asks GitHub for the latest version each time Omni360 starts"
+                                          : "Only when you choose Updates";
+    page.rows[page.count++] = SETTINGS_ROW_UPDATE_CHECKS;
+
     if (page.selected > page.count - 1)
         page.selected = page.count - 1; // the Remove row just went away
 }
@@ -1121,6 +1193,8 @@ static SettingsOutcome RunSettingsRow(SettingsRow row, Library &lib, char *games
     case SETTINGS_ROW_GAMES_FOLDER: ChangeGamesFolder(lib, gamesPath, gamesPathSize, outcome); break;
     case SETTINGS_ROW_KEYS:         ChangeKeys(outcome); break;
     case SETTINGS_ROW_REMOVE_KEYS:  RemoveKeys(outcome); break;
+    case SETTINGS_ROW_UPDATES:      ShowUpdate(); break;
+    case SETTINGS_ROW_UPDATE_CHECKS: ToggleUpdateChecks(); break;
     }
 
     return outcome;
@@ -2514,6 +2588,30 @@ static void SnapshotQueue(Shell &shell, const Library &lib)
     }
 }
 
+// Notices the update check finishing: the Settings row says so, and a newer
+// version gets one popup a session.
+static void PollUpdateCheck(Shell &shell)
+{
+    static unsigned long seen = 0;
+    static bool announced = false;
+    unsigned long changes = 0;
+    UpdateInfo info;
+    const UpdateState state = GetUpdateState(&info, &changes);
+    if (changes == seen)
+        return;
+    seen = changes;
+    shell.stale = true; // the Settings row
+
+    if (state == UPDATE_AVAILABLE && !announced)
+    {
+        announced = true;
+        char title[64];
+        _snprintf(title, sizeof(title), "Omni360 %s is available", info.version);
+        title[sizeof(title) - 1] = '\0';
+        ShowShellToast(title, "See Settings for what's new", UI_TOAST_INFO);
+    }
+}
+
 // Drains the jobs that finished since the last frame. Each one may have
 // changed what's on disk - the installed markers, the free space - so they're
 // refreshed; the ones worth hearing about get a popup.
@@ -2799,6 +2897,11 @@ int main()
 
     ScanLibrary(lib, gamesPath);
 
+    // One request to GitHub, on its own thread; the Settings page says how it
+    // went, and a newer version gets a popup.
+    if (UpdateChecksOn())
+        StartUpdateCheck();
+
     // The shell loop: read the controller, act on it, draw a frame.
     //
     // It starts on the library, with focus in the list, since that's where
@@ -2849,6 +2952,7 @@ int main()
     {
         // Finished downloads first, since they can make the rest stale.
         HandleFinishedDownloads(shell, haveAuth);
+        PollUpdateCheck(shell);
 
         if (shell.rescanLibrary)
         {
