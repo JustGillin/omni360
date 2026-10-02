@@ -8,6 +8,25 @@ A homebrew Xbox 360 app for getting games and their extras onto a modded console
 - **Disc installs** — a game disc in the drive can be copied to the hard drive as Games on Demand.
 - **Queue** — everything downloads and installs in the background while you carry on browsing.
 
+<table>
+  <tr>
+    <td><img src="docs/screenshots/library.png" alt="Your Library: installed games as a grid of covers"></td>
+    <td><img src="docs/screenshots/store.png" alt="The Store: featured games and the A to Z lists"></td>
+  </tr>
+  <tr>
+    <td align="center"><b>Your Library</b> — your installed games, with their DLC and updates marked</td>
+    <td align="center"><b>Store</b> — Xbox 360 games from archive.org</td>
+  </tr>
+  <tr>
+    <td><img src="docs/screenshots/game-page.png" alt="A game's page: Gears of War, installing"></td>
+    <td><img src="docs/screenshots/queue.png" alt="The Queue: a game, its DLC and a title update downloading"></td>
+  </tr>
+  <tr>
+    <td align="center"><b>A game's page</b> — details, screenshots and every version</td>
+    <td align="center"><b>Queue</b> — downloads and installs, in the background</td>
+  </tr>
+</table>
+
 Omni360 began as a fork of [X-Store](https://github.com/951261/X-Store) by 951261, and still runs on its networking core: the HTTPS client and BearSSL/TLS wrapper, DNS lookups and drive mounting. Everything Vimm's Lair/full-game/ISO/updater-related has been stripped out; the library, the Store, the installers and the interface are new. See `docs/` for X-Store's own original architecture notes (still accurate for the networking layer this fork builds on).
 
 **Status: beta (0.2.0-beta), working on real hardware.** Installs from the Store, DLC, title updates and disc installs have all been run end to end on a modded console with a real library.
