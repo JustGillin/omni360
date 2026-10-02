@@ -6,7 +6,7 @@
   Overview:
   ---------
   XboxTLS provides a lightweight TLS 1.2 client implementation designed to run
-  on modded or development Xbox 360 consoles. It is built on top of BearSSL’s 
+  on modded or development Xbox 360 consoles. It is built on top of BearSSLï¿½s 
   minimal TLS and X.509 engine, using platform-specific APIs for networking 
   (Winsock/XNet) and cryptographic randomness (XeCryptRandom).
 
@@ -18,12 +18,12 @@
 
   Features:
   ---------
-    • TLS 1.2 protocol with encrypted socket communication
-    • Minimal X.509 certificate validation (trust anchor only)
-    • EC and RSA root certificate support (manual injection)
-    • SHA-256, SHA-384, SHA-512, SHA-1, SHA-224 support
-    • Works with Let’s Encrypt, Google, Cloudflare, etc.
-    • Fully static, no dynamic BearSSL dependencies
+    ï¿½ TLS 1.2 protocol with encrypted socket communication
+    ï¿½ Minimal X.509 certificate validation (trust anchor only)
+    ï¿½ EC and RSA root certificate support (manual injection)
+    ï¿½ SHA-256, SHA-384, SHA-512, SHA-1, SHA-224 support
+    ï¿½ Works with Letï¿½s Encrypt, Google, Cloudflare, etc.
+    ï¿½ Fully static, no dynamic BearSSL dependencies
 
   Usage Workflow:
   ---------------
@@ -37,15 +37,15 @@
 
   Notes:
   ------
-    • This library targets Xbox 360 environments.
-    • Trust anchors must be embedded manually; no system store is used.
-    • Only TLS 1.2 is supported. TLS 1.3 is not implemented yet.
+    ï¿½ This library targets Xbox 360 environments.
+    ï¿½ Trust anchors must be embedded manually; no system store is used.
+    ï¿½ Only TLS 1.2 is supported. TLS 1.3 is not implemented yet.
 
   Author:
     Jakob Rangel (@jakobrangel)
 
   License:
-    MIT License (MIT) — see LICENSE file for details
+    MIT License (MIT) ï¿½ see LICENSE file for details
 
  ============================================================================
 */
@@ -210,6 +210,19 @@ int XboxTLS_Read(XboxTLSContext* ctx, void* buf, int len);
  * @param ctx TLS context to destroy
  */
 void XboxTLS_Free(XboxTLSContext* ctx);
+
+/**
+ * @brief Sets how long connections made on the calling thread may go without
+ * sending or receiving anything before they're given up on.
+ *
+ * The default is two minutes, for servers that pause a long time before their
+ * first byte. A thread fetching plain byte ranges can ask for less, so a
+ * stalled transfer is noticed quickly. 0 goes back to the default. Applies to
+ * connections opened after the call.
+ *
+ * @param timeoutMs The limit, in milliseconds
+ */
+void XboxTLS_SetThreadIoTimeout(unsigned long timeoutMs);
 
 
 #ifdef __cplusplus

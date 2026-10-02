@@ -1,12 +1,13 @@
 /*
 FILE : CoverArt.cpp
 PROJECT : Omni360
-DESCRIPTION : Box art from xboxunity.net, looked up and cached on a worker
+DESCRIPTION : Box art from xboxunity.net, else Xbox Live, looked up and cached on a worker
               thread. See CoverArt.h.
 */
 
 #include "CoverArt.h"
 #include "downloadFile.h"
+#include "HttpPlain.h"
 #include "OutputConsole.h"
 #include "cJSON.h"
 
@@ -14,10 +15,17 @@ DESCRIPTION : Box art from xboxunity.net, looked up and cached on a worker
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <stdarg.h>
 
 #define COVER_DIR          "game:\\Covers"
 #define COVER_INFO_URL     "https://xboxunity.net/Resources/Lib/CoverInfo.php?titleid=%08lX"
 #define COVER_IMAGE_URL    "https://xboxunity.net/Resources/Lib/Cover.php?size=large&cid=%s"
+#define BOXART_URL         "http://download.xbox.com/content/images/66acd000-77fe-1000-9115-d802%08lx/1033/boxartlg.jpg"
+
+// The marker for a game neither source has a cover for. Renamed from "none",
+// which meant only that xboxunity had none - those are asked about again, as
+// Xbox Live may have one.
+#define NONE_EXTENSION     "none2"
 
 // The cache file: a small header, then the front of the case as pixels.
 // Older files read as unusable and are fetched again, once: "OMC1" held the
@@ -26,7 +34,7 @@ DESCRIPTION : Box art from xboxunity.net, looked up and cached on a worker
 #define COVER_FILE_MAGIC   0x4F4D4333 // "OMC3"
 #define COVER_PIXEL_BYTES  ((unsigned long)COVER_FRONT_W * COVER_SIZE * 4)
 
-// How long "xboxunity has no cover for this" is believed before asking again.
+// How long "no cover anywhere for this" is believed before asking again.
 #define NONE_RETRY_DAYS    7
 
 // Generous: the covers seen are about 530KB, and the listing a few KB.
@@ -60,6 +68,12 @@ static int g_nextRequest = 0;
 // rescanned.
 static unsigned long g_delivered[MAX_REQUESTED];
 static int g_deliveredCount = 0;
+
+// The Store's tiles on screen, served first.
+#define MAX_STORE_REQUESTED 64
+static unsigned long g_storeRequested[MAX_STORE_REQUESTED];
+static int g_storeRequestedCount = 0;
+static int g_nextStoreRequest = 0;
 
 static CoverData g_ready[MAX_READY];
 static int g_readyCount = 0;
@@ -120,7 +134,7 @@ static unsigned char *ReadCachedCover(unsigned long titleId)
 static bool RecentlyMissing(unsigned long titleId)
 {
     char path[64];
-    CoverPath(titleId, "none", path, sizeof(path));
+    CoverPath(titleId, NONE_EXTENSION, path, sizeof(path));
 
     WIN32_FILE_ATTRIBUTE_DATA attrs;
     if (!GetFileAttributesExA(path, GetFileExInfoStandard, &attrs))
@@ -143,9 +157,11 @@ static void WriteCoverFile(unsigned long titleId, const unsigned long *pixels)
 {
     CreateDirectoryA(COVER_DIR, NULL); // fails harmlessly once it exists
 
-    char path[64], noneMarker[64];
-    CoverPath(titleId, pixels != NULL ? "bin" : "none", path, sizeof(path));
-    CoverPath(titleId, "none", noneMarker, sizeof(noneMarker));
+    char path[64], noneMarker[64], oldMarker[64];
+    CoverPath(titleId, pixels != NULL ? "bin" : NONE_EXTENSION, path, sizeof(path));
+    CoverPath(titleId, NONE_EXTENSION, noneMarker, sizeof(noneMarker));
+    CoverPath(titleId, "none", oldMarker, sizeof(oldMarker));
+    DeleteFileA(oldMarker); // superseded either way
 
     FILE *f = fopen(path, "wb");
     if (f == NULL)
@@ -178,10 +194,25 @@ static void WriteCoverFile(unsigned long titleId, const unsigned long *pixels)
 // xboxunity
 // ---------------------------------------------------------------------------
 
+// The HTTP client's chatter, failures only: browsing the Store fetches covers
+// by the dozen, and a few lines for each slowed it and buried the rest.
+static void QuietPrint(const char *format, ...)
+{
+    char line[1024];
+    va_list args;
+    va_start(args, format);
+    _vsnprintf(line, sizeof(line), format, args);
+    va_end(args);
+    line[sizeof(line) - 1] = '\0';
+
+    if (strstr(line, "ERROR") != NULL || strstr(line, "Failed") != NULL || strstr(line, "failed") != NULL)
+        dprintf("%s", line);
+}
+
 enum FetchResult
 {
     FETCH_OK,
-    FETCH_NO_COVER,   // xboxunity answered, and has nothing for this game
+    FETCH_NO_COVER,   // xboxunity and Xbox Live answered, and have nothing for this game
     FETCH_FAILED      // couldn't ask - the network, or an error; tried again next launch
 };
 
@@ -233,6 +264,41 @@ static bool ChooseCoverId(const char *json, unsigned long long jsonLen, char *ou
     return found;
 }
 
+// Xbox Live's box art, for a game xboxunity has no cover for: the front
+// alone, which GameListUI cuts under its header strip like an insert's.
+static FetchResult FetchBoxArt(unsigned long titleId, CoverData *out)
+{
+    char url[160];
+    _snprintf(url, sizeof(url), BOXART_URL, titleId);
+    url[sizeof(url) - 1] = '\0';
+
+    // About 60KB; the buffer is the insert's size all the same.
+    char *image = (char *)malloc(IMAGE_BUFFER_BYTES + 1);
+    if (image == NULL)
+        return FETCH_FAILED;
+
+    unsigned long long imageLen = 0;
+    const int status = HttpGetPlain(url, NULL, image, IMAGE_BUFFER_BYTES, &imageLen);
+    if (status == 404)
+    {
+        dprintf("[covers] %08lX: no cover on xboxunity or Xbox Live\n", titleId);
+        free(image);
+        return FETCH_NO_COVER;
+    }
+    if (status != 200 || imageLen < 64)
+    {
+        dprintf("[covers] %08lX: Xbox Live box art -> HTTP %d, %I64u bytes\n", titleId, status, imageLen);
+        free(image);
+        return FETCH_FAILED;
+    }
+
+    out->titleId = titleId;
+    out->kind = COVER_DATA_JPEG;
+    out->bytes = (unsigned char *)image;
+    out->size = (unsigned long)imageLen;
+    return FETCH_OK;
+}
+
 static FetchResult FetchCover(unsigned long titleId, CoverData *out)
 {
     char url[256];
@@ -244,7 +310,7 @@ static FetchResult FetchCover(unsigned long titleId, CoverData *out)
         return FETCH_FAILED;
 
     unsigned long long infoLen = INFO_BUFFER_BYTES;
-    int status = httpRequestHTTPS(url, HTTP_GET, NULL, NULL, "", info, &infoLen, false, NULL, 0, dprintf);
+    int status = httpRequestHTTPS(url, HTTP_GET, NULL, NULL, "", info, &infoLen, false, NULL, 0, QuietPrint);
     if (status != 200)
     {
         dprintf("[covers] %08lX: cover list -> HTTP %d\n", titleId, status);
@@ -258,10 +324,7 @@ static FetchResult FetchCover(unsigned long titleId, CoverData *out)
     free(info);
 
     if (!haveCover)
-    {
-        dprintf("[covers] %08lX: xboxunity has no cover\n", titleId);
-        return FETCH_NO_COVER;
-    }
+        return FetchBoxArt(titleId, out);
 
     _snprintf(url, sizeof(url), COVER_IMAGE_URL, coverId);
     url[sizeof(url) - 1] = '\0';
@@ -271,15 +334,13 @@ static FetchResult FetchCover(unsigned long titleId, CoverData *out)
         return FETCH_FAILED;
 
     unsigned long long imageLen = IMAGE_BUFFER_BYTES;
-    status = httpRequestHTTPS(url, HTTP_GET, NULL, NULL, "", image, &imageLen, false, NULL, 0, dprintf);
+    status = httpRequestHTTPS(url, HTTP_GET, NULL, NULL, "", image, &imageLen, false, NULL, 0, QuietPrint);
     if (status != 200 || imageLen < 64)
     {
         dprintf("[covers] %08lX: cover %s -> HTTP %d, %I64u bytes\n", titleId, coverId, status, imageLen);
         free(image);
         return FETCH_FAILED;
     }
-
-    dprintf("[covers] %08lX: cover %s, %I64u bytes\n", titleId, coverId, imageLen);
 
     out->titleId = titleId;
     out->kind = COVER_DATA_JPEG;
@@ -335,15 +396,18 @@ static DWORD WINAPI CoverEntry(LPVOID)
         }
 
         // Nothing to do, or the UI hasn't caught up: wait to be woken.
-        if (g_nextRequest >= g_requestedCount || g_readyCount >= MAX_READY)
+        const bool storeWaiting = (g_nextStoreRequest < g_storeRequestedCount);
+        if ((!storeWaiting && g_nextRequest >= g_requestedCount) || g_readyCount >= MAX_READY)
         {
             LeaveCriticalSection(&g_lock);
             WaitForSingleObject(g_wake, INFINITE);
             continue;
         }
 
-        unsigned long titleId = g_requested[g_nextRequest++];
-        bool skip = AlreadyDelivered(titleId);
+        // The Store's first: they're on screen now.
+        const bool forStore = storeWaiting;
+        unsigned long titleId = forStore ? g_storeRequested[g_nextStoreRequest++] : g_requested[g_nextRequest++];
+        bool skip = !forStore && AlreadyDelivered(titleId);
         LeaveCriticalSection(&g_lock);
 
         if (skip)
@@ -373,8 +437,12 @@ static DWORD WINAPI CoverEntry(LPVOID)
                 continue;
         }
 
+        data.forStore = forStore;
         EnterCriticalSection(&g_lock);
-        Deliver(data);
+        if (forStore)
+            g_ready[g_readyCount++] = data; // not marked delivered: the Store may ask again
+        else
+            Deliver(data);
         LeaveCriticalSection(&g_lock);
     }
 
@@ -467,6 +535,24 @@ void RequestCoverArt(const unsigned long *titleIds, int count)
         g_requested[i] = titleIds[i];
     g_requestedCount = count;
     g_nextRequest = 0;
+    LeaveCriticalSection(&g_lock);
+
+    SetEvent(g_wake);
+}
+
+void RequestStoreCoverArt(const unsigned long *titleIds, int count)
+{
+    if (!g_running)
+        return;
+
+    if (count > MAX_STORE_REQUESTED)
+        count = MAX_STORE_REQUESTED;
+
+    EnterCriticalSection(&g_lock);
+    for (int i = 0; i < count; ++i)
+        g_storeRequested[i] = titleIds[i];
+    g_storeRequestedCount = count;
+    g_nextStoreRequest = 0;
     LeaveCriticalSection(&g_lock);
 
     SetEvent(g_wake);

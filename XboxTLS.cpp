@@ -66,7 +66,8 @@
 // waiting forever - found when four parallel connections to archive.org all
 // stalled after sending their requests and the app never got control back.
 // Two minutes is far longer than any healthy pause, even archive.org
-// extracting a zip member before its first byte.
+// extracting a zip member before its first byte. A thread can set a shorter
+// one of its own - see XboxTLS_SetThreadIoTimeout.
 #define XBOXTLS_IO_TIMEOUT_MS (2 * 60 * 1000)
 // Xbox 360-specific socket option required for direct outbound sockets that do
 // not tunnel through Microsoft's service stack.
@@ -201,6 +202,29 @@ static int tls_socket_write(void* ctx, const unsigned char* buf, size_t len) {
     return send(s, (const char*)buf, (int)len, 0);
 }
 
+// A thread's own timeout, from XboxTLS_SetThreadIoTimeout: a thread-local
+// slot, allocated the first time any thread sets one.
+static volatile LONG g_timeoutSlot = (LONG)TLS_OUT_OF_INDEXES;
+
+void XboxTLS_SetThreadIoTimeout(unsigned long timeoutMs) {
+    if (g_timeoutSlot == (LONG)TLS_OUT_OF_INDEXES) {
+        DWORD slot = TlsAlloc();
+        if (slot == TLS_OUT_OF_INDEXES)
+            return;
+        // Another thread may have got there first; keep whichever won.
+        if (InterlockedCompareExchange(&g_timeoutSlot, (LONG)slot, (LONG)TLS_OUT_OF_INDEXES) != (LONG)TLS_OUT_OF_INDEXES)
+            TlsFree(slot);
+    }
+    TlsSetValue((DWORD)g_timeoutSlot, (LPVOID)(ULONG_PTR)timeoutMs);
+}
+
+static DWORD XboxTLS_IoTimeoutForThisThread() {
+    if (g_timeoutSlot == (LONG)TLS_OUT_OF_INDEXES)
+        return XBOXTLS_IO_TIMEOUT_MS;
+    DWORD ms = (DWORD)(ULONG_PTR)TlsGetValue((DWORD)g_timeoutSlot);
+    return ms != 0 ? ms : XBOXTLS_IO_TIMEOUT_MS;
+}
+
 static void XboxTLS_SetSocketOptions(SOCKET sock) {
     BOOL opt_true = TRUE;
     int recvBufferSize = XBOXTLS_RECV_BUFFER_SIZE;
@@ -209,7 +233,7 @@ static void XboxTLS_SetSocketOptions(SOCKET sock) {
     setsockopt(sock, SOL_SOCKET, SO_RCVBUF, (PCSTR)&recvBufferSize, sizeof(recvBufferSize));
     setsockopt(sock, IPPROTO_TCP, TCP_NODELAY, (PCSTR)&opt_true, sizeof(opt_true));
 
-    DWORD timeoutMs = XBOXTLS_IO_TIMEOUT_MS;
+    DWORD timeoutMs = XboxTLS_IoTimeoutForThisThread();
     setsockopt(sock, SOL_SOCKET, SO_RCVTIMEO, (PCSTR)&timeoutMs, sizeof(timeoutMs));
     setsockopt(sock, SOL_SOCKET, SO_SNDTIMEO, (PCSTR)&timeoutMs, sizeof(timeoutMs));
 }
@@ -501,8 +525,6 @@ bool XboxTLS_Connect(XboxTLSContext* ctx, const char* ip, const char* hostname, 
         br_ssl_client_reset(&ic->sc, hostname, 0);
         br_sslio_init(&ic->ioc, &ic->sc.eng, tls_socket_read, &ic->sock, tls_socket_write, &ic->sock);
 
-        printf("Connect: %s:%d OK\n", ip, port);
-
         success = true;
     }
     __except (EXCEPTION_EXECUTE_HANDLER)
@@ -590,8 +612,6 @@ int XboxTLS_Write(XboxTLSContext* ctx, const void* buf, int len) {
         debug_tls(msg);
         return -1;
     }
-    printf("Write: %d bytes OK\n", len);
-
     return len;
 }
 

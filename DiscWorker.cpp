@@ -11,6 +11,7 @@ DESCRIPTION : Watches the disc drive and installs discs as Games on Demand, on
 #include "ReadAhead.h"
 #include "ArchiveOrgDLC.h" // DriveFreeSpace
 #include "downloadFile.h"  // FormatBytes
+#include "StoreArt.h"      // FetchTitleIcon
 #include "OutputConsole.h"
 
 #include <xtl.h>
@@ -149,9 +150,15 @@ static void SetDiscState(DiscState state)
 // couldn't be read yet.
 static bool ProbeDisc(bool lastChance)
 {
+    // Quietly: an empty drive fails every read, and its sector-by-sector
+    // details only ever said "no disc". One line says it on the last try.
     DiscSource disc;
-    if (!disc.Open(lastChance ? dprintf : NULL))
+    if (!disc.Open(NULL))
+    {
+        if (lastChance)
+            dprintf("[disc] nothing readable in the drive\n");
         return false;
+    }
 
     EnterCriticalSection(&g_lock);
     SetDiscState(DISC_READING);
@@ -308,6 +315,13 @@ static void RunInstall(DiscJob *job, const char *gamesPath)
     // From here until GodConvert returns, the marker is what cleans up if the
     // app is ended mid-copy. GodConvert removes its own output on every
     // failure it sees, so once it returns there is nothing left to clean.
+    // The game's icon for the package, from Xbox Live - none if it can't be
+    // had, offline say, and the dashboard shows its placeholder.
+    static unsigned char icon[GOD_ICON_MAX];
+    unsigned long iconSize = 0;
+    if (!FetchTitleIcon(info.title.titleId, icon, sizeof(icon), &iconSize))
+        iconSize = 0;
+
     WriteInstallMarker(gamesPath, info, job->snap.gameName);
 
     char packagePath[600] = "";
@@ -318,7 +332,7 @@ static void RunInstall(DiscJob *job, const char *gamesPath)
         // see ReadAhead.h. 8MB ahead, in 1MB reads. Scoped so its thread has
         // finished with the drive before the drive is closed.
         ReadAheadSource ahead(&disc, 1024 * 1024, 8);
-        result = GodConvert(&ahead, info, gamesPath, job->snap.gameName, NULL, 0,
+        result = GodConvert(&ahead, info, gamesPath, job->snap.gameName, iconSize > 0 ? icon : NULL, iconSize,
                             InstallProgressCallback, &progress, packagePath, sizeof(packagePath), &timings);
     }
 

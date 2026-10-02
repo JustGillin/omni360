@@ -207,6 +207,134 @@ struct ListPageView
 
 void RenderListFrame(ListPageView &view, const UiHint *hints, int hintCount);
 
+// The Store's front page: three featured games - one large tile, two small -
+// with their marketplace wallpaper, a row of four buttons, and the A-Z tiles.
+//
+// focus runs through them in that order: STORE_FOCUS_FEATURED + 0..2, then
+// STORE_FOCUS_BUTTONS + 0..3, then STORE_FOCUS_LETTERS + 0..26. The page
+// scrolls so the A-Z tiles come into view when one of them has focus; scroll
+// is the caller's to keep between frames, and the Render call eases it.
+#define STORE_FEATURED_COUNT 3
+#define STORE_BUTTON_COUNT   4
+#define STORE_LETTER_COUNT   27 // '#', then A to Z
+
+#define STORE_FOCUS_FEATURED 0
+#define STORE_FOCUS_BUTTONS  (STORE_FOCUS_FEATURED + STORE_FEATURED_COUNT)
+#define STORE_FOCUS_LETTERS  (STORE_FOCUS_BUTTONS + STORE_BUTTON_COUNT)
+#define STORE_FOCUS_COUNT    (STORE_FOCUS_LETTERS + STORE_LETTER_COUNT)
+
+struct StoreFeaturedView
+{
+    unsigned long titleId; // for its wallpaper
+    const char *name;
+    const char *detail;    // under the name on the large tile; may be NULL
+};
+
+struct StoreButtonView
+{
+    const char *label;
+    bool disabled;         // drawn faded, marked SOON
+};
+
+struct StorePageView
+{
+    StoreFeaturedView featured[STORE_FEATURED_COUNT];
+    StoreButtonView buttons[STORE_BUTTON_COUNT];
+    const char *letters;   // STORE_LETTER_COUNT characters
+    int focus;
+    float scroll;          // pixels the page has moved up; starts at 0
+    bool focused;
+};
+
+// How many A-Z tiles fit across: they wrap onto as many rows as it takes.
+int StoreLettersPerRow();
+
+void RenderStoreFrame(StorePageView &view, const UiHint *hints, int hintCount);
+
+// Turns at most one image StoreArt.cpp has ready into a texture. Call once
+// per frame, as PumpCoverArt.
+void PumpStoreArt();
+
+// One letter's games: a grid of cover tiles like the library's, each with
+// its regions in the corner. The covers on screen and the row after are
+// asked for as they come into view, and only those are kept.
+struct StoreTileView
+{
+    unsigned long titleId;  // for its cover; 0 for none
+    const char *name;
+    unsigned short regions; // STORE_REGION_*
+};
+
+struct StoreLetterView
+{
+    char letter;
+    const StoreTileView *tiles;
+    int count;
+    int selected;
+    int scroll;  // rows, as LibraryPageView's
+    bool focused;
+};
+
+// Full rows on screen - LB/RB page by this many.
+int StoreLetterVisibleRows();
+
+void RenderStoreLetterFrame(StoreLetterView &view, const UiHint *hints, int hintCount);
+
+// A game's page: its wallpaper across the top, the box, the catalog's
+// details, three buttons, the synopsis, its versions and screenshots.
+//
+// focus: STORE_GAME_FOCUS_BUTTONS + 0..2 is a button, STORE_GAME_FOCUS_VERSIONS
+// + i is version i. versionScroll is the first version row shown; the Render
+// call keeps the focused one on screen.
+#define STORE_GAME_BUTTONS        3
+#define STORE_GAME_FOCUS_BUTTONS  0
+#define STORE_GAME_FOCUS_VERSIONS STORE_GAME_BUTTONS
+
+struct StoreVersionView
+{
+    const char *label;  // "USA, Europe  ·  Disc 2"
+    const char *detail; // "En, Fr, De  ·  Rev 1"; may be empty
+    const char *size;   // "6.2 GB"
+};
+
+// Whether the game on a game page can be installed, or is on its way or
+// already there.
+enum StoreInstallState
+{
+    STORE_INSTALL_AVAILABLE,  // green - A installs the chosen version
+    STORE_INSTALL_QUEUED,     // waiting its turn on the Queue page
+    STORE_INSTALL_INSTALLING, // the button fills as it goes
+    STORE_INSTALL_INSTALLED   // in the library
+};
+
+struct StoreGameView
+{
+    unsigned long titleId;  // for the wallpaper, box and screenshots
+    const char *name;
+    const char *meta;       // "Bungie Studios  ·  Microsoft  ·  Shooter"; NULL while loading or for none
+    const char *players;    // may be NULL
+    float rating;           // 0..5; 0 hides the stars
+    unsigned long ratings;
+    const char *description; // NULL: the page explains there's no catalog entry
+    bool loading;           // the details haven't arrived yet
+    const int *screenshots; // their numbers, for STORE_ART_SCREEN + n
+    int screenshotCount;
+
+    const char *buttons[STORE_GAME_BUTTONS];
+    bool buttonDisabled[STORE_GAME_BUTTONS];
+    StoreInstallState install; // how the first button, Install, is drawn
+    float installFraction;     // while installing: 0..1, negative when unknown
+
+    const StoreVersionView *versions;
+    int versionCount;
+    int versionChosen;      // the one Install installs
+    int versionScroll;
+    int focus;
+    bool focused;
+};
+
+void RenderStoreGameFrame(StoreGameView &view, const UiHint *hints, int hintCount);
+
 // A page with nothing to choose on it - a heading and a line or two of text.
 // For Store, which is a placeholder, and Queue while nothing is downloading.
 // detailLine may be NULL.

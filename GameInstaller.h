@@ -60,7 +60,14 @@ enum GameEnqueueResult
 GameEnqueueResult EnqueueGameInstall(const GameRequest &request, const char *authHeader);
 
 // The active job first, then waiting ones in order, then finished, newest first.
+// A game job's snapshot has the zip's name as its title.
 int SnapshotGameJobs(QueueJobSnapshot *out, int maxJobs);
+
+// Whether this zip has been installed from, and the game it made is still
+// there. Every install is noted in game:\Store\Installed.txt with the title
+// and media ID read from its disc; a note is believed while that disc's
+// package is in the games folder. Cheap - the notes are read once, at start.
+bool IsGameZipInstalled(const char *zipName);
 int PendingGameJobCount();
 void CancelGameJob(int id);
 void RemoveGameJob(int id);

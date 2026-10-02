@@ -322,58 +322,6 @@ bool StfsReadTitleInfo(const char *packagePath, StfsTitleInfo *outInfo)
 
     DecodeDisplayName(header + 0x0411, 0x80, outInfo->displayName, sizeof(outInfo->displayName));
 
-    // Capture the raw field for names that decoded to anything outside ASCII,
-    // so the encoding can be read off the log rather than inferred from how
-    // the result looks on screen.
-    outInfo->diagNameNonAscii = false;
-    for (const unsigned char *d = (const unsigned char *)outInfo->displayName; *d != '\0'; ++d)
-    {
-        if (*d >= 0x80)
-        {
-            outInfo->diagNameNonAscii = true;
-            break;
-        }
-    }
-
-    if (outInfo->diagNameNonAscii)
-    {
-        // Centre the window on the first unit that is not plain ASCII, rather
-        // than dumping from the start of the field.
-        //
-        // The first version always took the opening bytes, and on both of the
-        // titles it was written to diagnose the interesting character sat just
-        // past the end of the window - "Spider-Man" and "Modern War" are each
-        // exactly ten characters, so twenty bytes of UTF-16 stopped one unit
-        // short of the thing being looked for. A diagnostic that reliably
-        // misses the subject is worse than none, because it looks like an
-        // answer.
-        const unsigned char *field = header + 0x0411;
-        const int FIELD_LEN = 0x80;
-        int firstOdd = 0;
-
-        for (int i = 0; i + 1 < FIELD_LEN; i += 2)
-        {
-            if (field[i] != 0x00 || field[i + 1] >= 0x80)
-            {
-                firstOdd = i;
-                break;
-            }
-        }
-
-        int start = firstOdd - 6; // a few units of context before it
-        if (start < 0)
-            start = 0;
-        start &= ~1; // stay on a unit boundary
-
-        int len = (int)sizeof(outInfo->diagRawName);
-        if (start + len > FIELD_LEN)
-            len = FIELD_LEN - start;
-
-        outInfo->diagRawNameLen = len;
-        outInfo->diagRawNameOffset = start;
-        memcpy(outInfo->diagRawName, field + start, len);
-    }
-
     // Only look for a thumbnail if the file actually extends that far - a
     // small header (common for GOD packages) may not have this section at
     // all, and reading past actuallyRead would be uninitialized memory.
@@ -404,16 +352,6 @@ bool StfsReadTitleInfo(const char *packagePath, StfsTitleInfo *outInfo)
 
     // Shortest magic the helper accepts; at or under this it cannot be an image.
     const unsigned long MIN_IMAGE_BYTES = 8;
-
-    // Record what was actually found before any of it is judged, so a title
-    // that ends up with no art can say which gate refused it.
-    outInfo->diagBytesRead = actuallyRead;
-    outInfo->diagTitleThumbSize = thumbSize;
-    outInfo->diagContentThumbSize = contentThumbSize;
-    if (actuallyRead >= 0x571A + 4)
-        outInfo->diagTitleMagic = ReadBE32(header + 0x571A);
-    if (actuallyRead >= 0x171A + 4)
-        outInfo->diagContentMagic = ReadBE32(header + 0x171A);
 
     if (thumbSize > MIN_IMAGE_BYTES && (long)(0x571A + thumbSize) <= actuallyRead &&
         ImageMagicLooksDecodable(header + 0x571A))
@@ -603,58 +541,6 @@ int EnumerateInstalledGames(const char *contentBasePath, InstalledGame *outGames
                     if (!IsGameContentType(info.contentType))
                         printFunction("  %s -> contentType=%08lX in a game folder, skipped\n",
                                       packagePath, info.contentType);
-
-                    // Only for titles that came out with no art at all. Three
-                    // separate gates can refuse an image and from the outside
-                    // all three look the same - a blank square - so this says
-                    // which one it was rather than leaving it to guesswork at
-                    // a full hardware build cycle per guess.
-                    //
-                    // Reading it: size 0 means the package genuinely declares
-                    // no image. A nonzero size with 0x89504E47 (PNG) or
-                    // FFD8FFxx (JPEG) magic that still got refused means the
-                    // bounds check did it - the image runs past bytesRead, so
-                    // this header file is shorter than the image it claims.
-                    // Any other magic is a converter that left the field as
-                    // garbage, which is exactly what the gate is there to
-                    // catch.
-                    if (IsGameContentType(info.contentType) &&
-                        info.titleThumbnail == NULL && info.contentThumbnail == NULL)
-                    {
-                        printFunction("    no icon: bytesRead=%ld titleThumb(size=%lu magic=%08lX) contentThumb(size=%lu magic=%08lX)\n",
-                                     info.diagBytesRead,
-                                     info.diagTitleThumbSize, info.diagTitleMagic,
-                                     info.diagContentThumbSize, info.diagContentMagic);
-                    }
-
-                    // Raw Display Name bytes, for names that decoded to
-                    // anything outside ASCII. Reading them settles which end
-                    // of the pipeline a mojibake symptom comes from:
-                    //
-                    //   00 AE            -> UTF-16BE holding the real
-                    //                       character; the decoder is at fault
-                    //   00 C2 00 AE      -> UTF-16BE holding UTF-8 BYTES, so
-                    //                       the package itself is
-                    //                       double-encoded and re-encoding it
-                    //                       correctly preserves the damage
-                    //   C2 AE            -> plain UTF-8, handled by the
-                    //                       passthrough branch
-                    //   C3 82 C2 AE      -> already double-encoded UTF-8 in
-                    //                       the package
-                    if (info.diagNameNonAscii && info.diagRawNameLen > 0)
-                    {
-                        char hex[80];
-                        char *h = hex;
-                        int n = info.diagRawNameLen;
-                        if (n > 20)
-                            n = 20; // 20 bytes is well past the first odd character
-
-                        for (int b = 0; b < n; ++b)
-                            h += _snprintf(h, 4, "%02X ", info.diagRawName[b]);
-                        *h = '\0';
-
-                        printFunction("    name bytes @+%d: %s\n", info.diagRawNameOffset, hex);
-                    }
 
                     if (IsGameContentType(info.contentType) && count < maxGames)
                     {

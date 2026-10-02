@@ -20,13 +20,19 @@
 //       the cover itself: the whole case insert - back, spine, front - as a
 //       900x600 JPEG of about half a megabyte.
 //
+// For a game xboxunity has no cover for, Xbox Live's box art, over plain HTTP:
+//
+//   download.xbox.com/content/images/66acd000-77fe-1000-9115-d802XXXXXXXX/1033/boxartlg.jpg
+//       the front alone, 219x300 under a header strip, about 60KB. It's cut
+//       the same way, just from a smaller image.
+//
 // A worker thread looks covers up, downloads them, and reads the ones already
 // cached. Cutting the front out of a download happens on the UI thread
 // (GameListUI's PumpCoverArt), because it decodes through D3DX, which needs
 // the device; the front comes back here to be written to the cache:
 //
 //   game:\Covers\XXXXXXXX.bin   the front of the case, 418x512 ARGB pixels
-//   game:\Covers\XXXXXXXX.none  xboxunity had nothing; asked again after a week
+//   game:\Covers\XXXXXXXX.none2 neither had anything; asked again after a week
 //
 // Only the front is cached, and the banner put beside it as each cover
 // loads, so a new banner never means downloading the covers again.
@@ -50,6 +56,12 @@ bool StopCoverArt(DWORD timeoutMs);
 // covers already handed over aren't asked for again.
 void RequestCoverArt(const unsigned long *titleIds, int count);
 
+// The Store's covers, for the tiles on screen: fetched ahead of the
+// library's. Replaces any earlier Store list. Unlike the library's, a cover
+// asked for again is read again - the Store keeps only the covers it's
+// showing, so it may have let one go.
+void RequestStoreCoverArt(const unsigned long *titleIds, int count);
+
 enum CoverDataKind
 {
     COVER_DATA_PIXELS, // from the cache: the front, COVER_FRONT_W * COVER_SIZE ARGB pixels
@@ -62,6 +74,7 @@ struct CoverData
     CoverDataKind kind;
     unsigned char *bytes; // malloc'd; the caller frees it
     unsigned long size;
+    bool forStore;        // asked for by RequestStoreCoverArt
 };
 
 // The next cover ready to draw, if there is one. The UI thread calls this.

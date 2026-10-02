@@ -12,6 +12,8 @@ DESCRIPTION : Downloads a Redump game's zip from archive.org and installs it as
 #include "DiscWorker.h"    // WriteInstallMarker, ClearInstallMarker
 #include "ArchiveOrgDLC.h" // DriveFreeSpace
 #include "downloadFile.h"
+#include "XboxTLS.h"       // XboxTLS_SetThreadIoTimeout
+#include "StoreArt.h"      // FetchTitleIcon
 #include "parsing.h"       // UrlEncodeFormValue
 #include "OutputConsole.h"
 
@@ -25,7 +27,7 @@ DESCRIPTION : Downloads a Redump game's zip from archive.org and installs it as
 #define PIECE_SIZE        (32ULL * 1024 * 1024)
 #define CONNECTIONS       2
 #define CONNECTION_STAGGER_MS 1500 // four opened at the same instant all stalled once
-#define PIECE_ATTEMPTS    4
+#define PIECE_ATTEMPTS    6 // slow drops use them up too
 #define STAGING_FOLDER    "Omni360Staging"
 #define SPACE_MARGIN      (64ULL * 1024 * 1024)
 #define AUTH_MAX          256
@@ -51,6 +53,102 @@ static char g_gamesPath[512] = "";
 // worker holds a pointer to the one it's running.
 static GameJob g_jobs[MAX_GAME_JOBS];
 static int g_nextId = GAME_JOB_ID_BASE;
+
+// ---------------------------------------------------------------------------
+// What's been installed, by zip - see IsGameZipInstalled
+// ---------------------------------------------------------------------------
+//
+// A line a zip, "TITLEID MEDIAID zip name", added to as each install
+// finishes. A title ID alone can't say which disc of a multi-disc game is
+// installed; the media ID can, as each disc's package is named by it.
+
+#define INSTALLED_LIST     "game:\\Store\\Installed.txt"
+#define MAX_INSTALLED_ZIPS 256
+
+struct InstalledZip
+{
+    unsigned long titleId;
+    unsigned long mediaId;
+    char zip[256];
+};
+
+static InstalledZip g_installed[MAX_INSTALLED_ZIPS];
+static int g_installedCount = 0;
+
+// Under the lock, once the installer is running. A later line for the same
+// zip replaces an earlier one.
+static void NoteInstalledZip(const char *zip, unsigned long titleId, unsigned long mediaId)
+{
+    int slot = 0;
+    while (slot < g_installedCount && strcmp(g_installed[slot].zip, zip) != 0)
+        slot++;
+    if (slot == g_installedCount)
+    {
+        if (g_installedCount >= MAX_INSTALLED_ZIPS)
+            return;
+        g_installedCount++;
+    }
+    g_installed[slot].titleId = titleId;
+    g_installed[slot].mediaId = mediaId;
+    strncpy(g_installed[slot].zip, zip, sizeof(g_installed[slot].zip) - 1);
+    g_installed[slot].zip[sizeof(g_installed[slot].zip) - 1] = '\0';
+}
+
+// The notes whose packages are still in the games folder.
+static void LoadInstalledZips(const char *gamesPath)
+{
+    g_installedCount = 0;
+    FILE *f = fopen(INSTALLED_LIST, "rb");
+    if (f == NULL)
+        return;
+
+    char line[300];
+    while (fgets(line, sizeof(line), f) != NULL)
+    {
+        size_t len = strlen(line);
+        while (len > 0 && (line[len - 1] == '\n' || line[len - 1] == '\r'))
+            line[--len] = '\0';
+
+        unsigned long titleId = 0, mediaId = 0;
+        int nameAt = 0;
+        if (sscanf(line, "%lx %lx %n", &titleId, &mediaId, &nameAt) < 2 || nameAt <= 0 || line[nameAt] == '\0')
+            continue;
+        if (IsDiscInstalled(gamesPath, titleId, mediaId))
+            NoteInstalledZip(line + nameAt, titleId, mediaId);
+    }
+    fclose(f);
+}
+
+// After an install: noted for this session, and in the file for the next.
+static void RecordInstalledZip(const char *zip, unsigned long titleId, unsigned long mediaId)
+{
+    EnterCriticalSection(&g_lock);
+    NoteInstalledZip(zip, titleId, mediaId);
+    LeaveCriticalSection(&g_lock);
+
+    CreateDirectoryA("game:\\Store", NULL); // fails harmlessly once it exists
+    FILE *f = fopen(INSTALLED_LIST, "ab");
+    if (f == NULL)
+    {
+        dprintf("[game] couldn't note the install in %s\n", INSTALLED_LIST);
+        return;
+    }
+    fprintf(f, "%08lX %08lX %s\r\n", titleId, mediaId, zip);
+    fclose(f);
+}
+
+bool IsGameZipInstalled(const char *zipName)
+{
+    if (!g_running || zipName == NULL)
+        return false;
+
+    bool found = false;
+    EnterCriticalSection(&g_lock);
+    for (int i = 0; i < g_installedCount && !found; ++i)
+        found = (strcmp(g_installed[i].zip, zipName) == 0);
+    LeaveCriticalSection(&g_lock);
+    return found;
+}
 
 // The used slot whose job is in `state`, with the lowest id above `after`
 // (or highest below it, with newestFirst) - the order the Queue lists them.
@@ -276,9 +374,35 @@ static bool ReadZipDirectory(const std::string &url, const char *auth, unsigned 
 // Downloading, two pieces at a time
 // ---------------------------------------------------------------------------
 
+static std::string HostOf(const std::string &url); // with the server ranking, below
+
+// A connection that averages less than this over a window is dropped and its
+// piece resumed - a server that trickles never trips the HTTP client's
+// timeout, which waits for nothing at all to arrive.
+#define SLOW_WINDOW_MS     20000
+#define SLOW_BYTES_PER_SEC (512ULL * 1024)
+#define RESUME_LOG_MS      10000 // how often a resumed piece reports itself
+
+// How long a connection may receive nothing at all before it's dropped and
+// resumed - the slow check can't see a stall, as nothing arrives to check.
+// archive.org stops sending on both connections at once about once a
+// minute; at the TLS layer's usual two minutes, five of those cost ten
+// minutes of a Naruto download, and at 20 seconds thirty cost eleven of its
+// 32. A range of a zip starts in a second or two, so this can be short.
+#define STALL_TIMEOUT_MS   10000
+
+// Slow drops and failed retries on one server before moving to the next.
+// Cut-offs that resume don't count: every server cuts both connections every
+// few minutes, and moving for those would only find slower ones.
+#define STRIKES_TO_SWITCH  2
+#define MAX_SERVERS        5
+
 struct Download
 {
-    std::string url;          // the datanode, redirect already followed
+    std::string servers[MAX_SERVERS]; // fastest first, redirects already followed
+    int serverCount;
+    int serverAt;                     // the one in use
+    int strikes;                      // against it
     const char *auth;
     ZipPieces *pieces;
     unsigned long long total; // bytes of the zip that are needed
@@ -289,6 +413,13 @@ struct Download
     unsigned long long inFlight[CONNECTIONS];
     unsigned long long resumedAt[CONNECTIONS]; // what a resumed piece already had
     DWORD threadIds[CONNECTIONS];
+
+    // Each connection's request in hand, for the slow check and the log.
+    unsigned long piece[CONNECTIONS];
+    DWORD windowStart[CONNECTIONS];             // when the current window began
+    unsigned long long windowFrom[CONNECTIONS]; // the request's bytes then
+    DWORD lastLog[CONNECTIONS];
+    bool tooSlow[CONNECTIONS];                  // dropped by the slow check
     bool failed;
     int failStatus;
     const bool *cancel;
@@ -302,23 +433,92 @@ static bool Stopping(const Download *d)
     return d->failed || *d->cancel || g_shutdown;
 }
 
-// The HTTP client's progress, for whichever connection is calling.
+// The HTTP client's progress, for whichever connection is calling: the bytes
+// for the Queue page, and the slow check - false drops the request.
 static bool PieceProgress(unsigned long long done, unsigned long long, unsigned long long, unsigned long long)
 {
     Download *d = g_download;
     if (d == NULL)
         return false;
 
+    const DWORD now = GetTickCount();
+    bool report = false, slow = false;
+    int slot = -1;
+    unsigned long piece = 0;
+    unsigned long long total = 0;
+    double rate = 0.0;
+    std::string host;
+
     EnterCriticalSection(&g_lock);
     DWORD me = GetCurrentThreadId();
     for (int i = 0; i < CONNECTIONS; ++i)
     {
         if (d->threadIds[i] == me)
-            d->inFlight[i] = d->resumedAt[i] + done;
+            slot = i;
     }
     bool keepGoing = !Stopping(d);
+    if (slot >= 0)
+    {
+        d->inFlight[slot] = d->resumedAt[slot] + done;
+        piece = d->piece[slot];
+        total = d->inFlight[slot];
+
+        const DWORD elapsed = now - d->windowStart[slot];
+        if (elapsed >= SLOW_WINDOW_MS)
+        {
+            const unsigned long long got = done - d->windowFrom[slot];
+            rate = got / 1048576.0 / (elapsed / 1000.0);
+            if (got * 1000 / elapsed < SLOW_BYTES_PER_SEC)
+            {
+                d->tooSlow[slot] = true;
+                keepGoing = false;
+                slow = true;
+            }
+            d->windowStart[slot] = now;
+            d->windowFrom[slot] = done;
+        }
+        if (!slow && d->resumedAt[slot] > 0 && now - d->lastLog[slot] >= RESUME_LOG_MS)
+        {
+            // Over the window so far, or the one just finished.
+            d->lastLog[slot] = now;
+            report = true;
+            const DWORD since = now - d->windowStart[slot];
+            if (rate == 0.0 && since > 0)
+                rate = (done - d->windowFrom[slot]) / 1048576.0 / (since / 1000.0);
+        }
+        if (report || slow)
+            host = HostOf(d->servers[d->serverAt]);
+    }
     LeaveCriticalSection(&g_lock);
+
+    if (slow)
+        dprintf("[game] piece %lu on connection %d: %.2f MB/s from %s for %ds - dropping it to resume\n", piece,
+                slot + 1, rate, host.c_str(), SLOW_WINDOW_MS / 1000);
+    else if (report)
+        dprintf("[game] piece %lu on connection %d (resumed, %s): %.1f MB in, %.2f MB/s\n", piece, slot + 1,
+                host.c_str(), total / 1048576.0, rate);
     return keepGoing;
+}
+
+// A slow drop or a failed retry against the server in use - server, the one
+// the request went to. Enough of them, and both connections move to the next
+// server in the ranking, back round to the first after the last. A strike
+// against a server already left behind doesn't count.
+static void StrikeServer(Download *d, int server, const char *why)
+{
+    std::string from, to;
+    EnterCriticalSection(&g_lock);
+    if (server == d->serverAt && ++d->strikes >= STRIKES_TO_SWITCH && d->serverCount > 1)
+    {
+        from = HostOf(d->servers[d->serverAt]);
+        d->serverAt = (d->serverAt + 1) % d->serverCount;
+        d->strikes = 0;
+        to = HostOf(d->servers[d->serverAt]);
+    }
+    LeaveCriticalSection(&g_lock);
+
+    if (!to.empty())
+        dprintf("[game] %s on %s again - moving to %s\n", why, from.c_str(), to.c_str());
 }
 
 // A file's size, or 0.
@@ -373,6 +573,8 @@ static DWORD WINAPI ConnectionEntry(LPVOID param)
     Download *d = args->d;
     const int slot = args->slot;
 
+    XboxTLS_SetThreadIoTimeout(STALL_TIMEOUT_MS);
+
     for (;;)
     {
         EnterCriticalSection(&g_lock);
@@ -399,8 +601,8 @@ static DWORD WINAPI ConnectionEntry(LPVOID param)
 
         // A cut-off piece resumes where it stopped: the rest goes to a second
         // file, appended to the first - the HTTP client only writes files
-        // from the start. Both connections get cut off together every few
-        // minutes, often well into a piece.
+        // from the start. Both connections stall together every few minutes,
+        // often well into a piece, and are cut off after STALL_TIMEOUT_MS.
         bool got = false;
         int status = 0;
         unsigned long long have = 0; // bytes of the piece already in tempPath
@@ -423,15 +625,36 @@ static DWORD WINAPI ConnectionEntry(LPVOID param)
             _snprintf(headers, sizeof(headers), "%sRange: bytes=%I64u-%I64u\r\n", d->auth, from + resumeFrom, to - 1);
             headers[sizeof(headers) - 1] = '\0';
 
+            // The server in use now - it may have changed since the last try.
+            std::string url;
+            int server = 0;
             EnterCriticalSection(&g_lock);
+            server = d->serverAt;
+            url = d->servers[server];
             d->resumedAt[slot] = resumeFrom;
             d->inFlight[slot] = resumeFrom;
+            d->piece[slot] = index;
+            d->windowStart[slot] = GetTickCount();
+            d->windowFrom[slot] = 0;
+            d->lastLog[slot] = d->windowStart[slot];
+            d->tooSlow[slot] = false;
             LeaveCriticalSection(&g_lock);
 
             const char *target = (resumeFrom > 0) ? restPath : tempPath;
             unsigned long long size = 0;
-            status = httpRequestHTTPS(d->url, HTTP_GET, NULL, headers, target, NULL, &size, true, NULL, 0,
+            status = httpRequestHTTPS(url, HTTP_GET, NULL, headers, target, NULL, &size, true, NULL, 0,
                                       QuietPrint, length - resumeFrom, PieceProgress);
+
+            // Dropped by the slow check: what came is good, as if cut off.
+            EnterCriticalSection(&g_lock);
+            const bool dropped = d->tooSlow[slot] && !Stopping(d);
+            d->tooSlow[slot] = false;
+            LeaveCriticalSection(&g_lock);
+            if (dropped && status == HTTP_STATUS_CANCELLED)
+            {
+                status = 206;
+                StrikeServer(d, server, "Too slow");
+            }
 
             // Whatever came of the rest, as long as it's the range asked for.
             bool spoilt = false;
@@ -448,8 +671,8 @@ static DWORD WINAPI ConnectionEntry(LPVOID param)
                 got = true;
                 DWORD ms = GetTickCount() - started;
                 double mb = (length - resumeFrom) / 1048576.0;
-                dprintf("[game] piece %lu on connection %d: %.1f MB in %.1fs, %.2f MB/s\n", index, slot + 1,
-                        mb, ms / 1000.0, ms > 0 ? mb / (ms / 1000.0) : 0.0);
+                dprintf("[game] piece %lu on connection %d: %.1f MB in %.1fs, %.2f MB/s (%s)\n", index, slot + 1,
+                        mb, ms / 1000.0, ms > 0 ? mb / (ms / 1000.0) : 0.0, HostOf(url).c_str());
             }
             else if (!spoilt && status == 206 && onDisk > 0 && onDisk < length)
             {
@@ -458,6 +681,8 @@ static DWORD WINAPI ConnectionEntry(LPVOID param)
             else if (!spoilt && resumeFrom > 0 && status != 401 && status != 403 && onDisk == resumeFrom)
             {
                 // The rest didn't come at all; what was there still is.
+                if (!Stopping(d))
+                    StrikeServer(d, server, "A retry failed");
             }
             else
             {
@@ -465,6 +690,8 @@ static DWORD WINAPI ConnectionEntry(LPVOID param)
                 DeleteFileA(tempPath);
                 if (status == 401 || status == 403)
                     break; // the keys - trying again won't help
+                if (!Stopping(d))
+                    StrikeServer(d, server, "A retry failed");
             }
         }
         if (!got)
@@ -599,13 +826,15 @@ static int MetadataStrings(const char *item, const char *field, std::string *out
 // archive.org's redirect picks a server, and not always a fast one - a run
 // sent to a European copy got half what its US server gives. So: a few MB
 // from each server that holds the item and from the one the redirect chose,
-// and the rest from the fastest. Falls back to the redirect's.
-static std::string ChooseServer(GameJob *job, const std::string &redirected, const char *item,
-                                const char *encodedZip, const char *auth, unsigned long long zipSize)
+// fastest first, into out - the download starts on the first and moves down
+// the list if a server goes bad. At least the redirect's. Returns how many.
+static int RankServers(GameJob *job, const std::string &redirected, const char *item, const char *encodedZip,
+                       const char *auth, unsigned long long zipSize, std::string *out, int maxOut)
 {
     const unsigned long long PROBE = 4ULL * 1024 * 1024;
+    out[0] = redirected;
     if (zipSize < PROBE * 2)
-        return redirected;
+        return 1;
 
     std::string dir;
     std::string servers[4];
@@ -625,12 +854,12 @@ static std::string ChooseServer(GameJob *job, const std::string &redirected, con
     if (count == 1)
     {
         dprintf("[game] no server list from archive.org; using %s\n", redirectedHost.c_str());
-        return redirected;
+        return 1;
     }
 
     char *buffer = (char *)malloc((size_t)PROBE + 4096);
     if (buffer == NULL)
-        return redirected;
+        return 1;
 
     // Past the zip's first piece, so a server's cache of the start doesn't
     // flatter it.
@@ -638,8 +867,8 @@ static std::string ChooseServer(GameJob *job, const std::string &redirected, con
     _snprintf(range, sizeof(range), "Range: bytes=%I64u-%I64u\r\n", PROBE, PROBE * 2 - 1);
     range[sizeof(range) - 1] = '\0';
 
-    int best = -1;
-    double bestRate = 0.0;
+    double rates[5];
+    int ranked = 0;
     for (int i = 0; i < count && !Cancelled(job); ++i)
     {
         std::string u = candidates[i];
@@ -655,19 +884,28 @@ static std::string ChooseServer(GameJob *job, const std::string &redirected, con
         }
         double rate = PROBE / 1048576.0 / ((ms > 0 ? ms : 1) / 1000.0);
         dprintf("[game] server %s: %.2f MB/s\n", HostOf(u).c_str(), rate);
-        if (best < 0 || rate > bestRate)
+
+        // Into place by speed; u is where it redirected to, if anywhere.
+        int at = ranked;
+        while (at > 0 && rates[at - 1] < rate)
         {
-            best = i;
-            bestRate = rate;
-            candidates[i] = u; // where it redirected to, if anywhere
+            rates[at] = rates[at - 1];
+            candidates[at] = candidates[at - 1];
+            at--;
         }
+        rates[at] = rate;
+        candidates[at] = u;
+        ranked++;
     }
     free(buffer);
 
-    if (best < 0)
-        return redirected;
-    dprintf("[game] downloading from %s\n", HostOf(candidates[best]).c_str());
-    return candidates[best];
+    if (ranked == 0)
+        return 1;
+    int n = 0;
+    for (; n < ranked && n < maxOut; ++n)
+        out[n] = candidates[n];
+    dprintf("[game] downloading from %s\n", HostOf(out[0]).c_str());
+    return n;
 }
 
 static void RunJob(GameJob *job, const char *gamesPath)
@@ -705,7 +943,9 @@ static void RunJob(GameJob *job, const char *gamesPath)
     }
 
     SetPhase(job, "Finding the fastest server", 0, 0, 0);
-    url = ChooseServer(job, url, req.item, encodedZip, auth, req.zipSize);
+    std::string servers[MAX_SERVERS];
+    const int serverCount = RankServers(job, url, req.item, encodedZip, auth, req.zipSize, servers, MAX_SERVERS);
+    url = servers[0];
     if (Cancelled(job))
     {
         FinishLocked(job, QUEUE_OUTCOME_CANCELLED, "Stopped", "Nothing was installed.", false);
@@ -781,7 +1021,11 @@ static void RunJob(GameJob *job, const char *gamesPath)
     // --- Download, and index as the pieces land -----------------------------
     ZipPieces pieces(dir, PIECE_SIZE);
     Download d;
-    d.url = url;
+    for (int i = 0; i < serverCount; ++i)
+        d.servers[i] = servers[i];
+    d.serverCount = serverCount;
+    d.serverAt = 0;
+    d.strikes = 0;
     d.auth = auth;
     d.pieces = &pieces;
     d.total = needed;
@@ -798,6 +1042,11 @@ static void RunJob(GameJob *job, const char *gamesPath)
         d.inFlight[i] = 0;
         d.resumedAt[i] = 0;
         d.threadIds[i] = 0;
+        d.piece[i] = 0;
+        d.windowStart[i] = 0;
+        d.windowFrom[i] = 0;
+        d.lastLog[i] = 0;
+        d.tooSlow[i] = false;
     }
 
     InflateIndexer *indexer = new InflateIndexer(member.unpacked);
@@ -977,6 +1226,13 @@ static void RunJob(GameJob *job, const char *gamesPath)
     progress.started = GetTickCount();
     SetPhase(job, "Installing", 0, info.usedSize, 0);
 
+    // The game's icon for the package, so the dashboard and Aurora show it.
+    // Without one the install goes ahead, with the dashboard's placeholder.
+    static unsigned char icon[GOD_ICON_MAX];
+    unsigned long iconSize = 0;
+    if (!FetchTitleIcon(info.title.titleId, icon, sizeof(icon), &iconSize))
+        iconSize = 0;
+
     WriteInstallMarker(gamesPath, info, req.name);
 
     char packagePath[600] = "";
@@ -986,8 +1242,8 @@ static void RunJob(GameJob *job, const char *gamesPath)
         // Decompressing runs on the read-ahead's thread while this one
         // hashes and writes. Scoped so it has finished before the image goes.
         ReadAheadSource ahead(&image, 1024 * 1024, 8);
-        result = GodConvert(&ahead, info, gamesPath, req.name, NULL, 0, ConvertProgressFn, &progress,
-                            packagePath, sizeof(packagePath), &timings);
+        result = GodConvert(&ahead, info, gamesPath, req.name, iconSize > 0 ? icon : NULL, iconSize,
+                            ConvertProgressFn, &progress, packagePath, sizeof(packagePath), &timings);
     }
     ClearInstallMarker();
 
@@ -1003,8 +1259,13 @@ static void RunJob(GameJob *job, const char *gamesPath)
     RemoveFolder(dir);
 
     if (result == GOD_OK)
+    {
+        // Noted before it's reported, so the Store never sees it finished
+        // but not installed.
+        RecordInstalledZip(req.zipName, info.title.titleId, info.title.mediaId);
         FinishLocked(job, QUEUE_OUTCOME_INSTALLED, "Installed",
                      "Play it from the dashboard or Aurora.", true);
+    }
     else if (result == GOD_CANCELLED)
         FinishLocked(job, QUEUE_OUTCOME_CANCELLED, "Stopped", "Nothing was installed.", false);
     else if (result == GOD_WRITE_FAILED)
@@ -1063,7 +1324,7 @@ bool StartGameInstaller(const char *gamesPath)
         return true;
 
     InitializeCriticalSection(&g_lock);
-    SetGameInstallerGamesPath(gamesPath);
+    SetGameInstallerGamesPath(gamesPath); // reads what's installed, too
 
     // A session that ended mid-download leaves its pieces behind.
     char root[300];
@@ -1122,6 +1383,7 @@ void SetGameInstallerGamesPath(const char *gamesPath)
         EnterCriticalSection(&g_lock);
     strncpy(g_gamesPath, gamesPath != NULL ? gamesPath : "", sizeof(g_gamesPath) - 1);
     g_gamesPath[sizeof(g_gamesPath) - 1] = '\0';
+    LoadInstalledZips(g_gamesPath); // against the folder they'd be in now
     if (g_running)
         LeaveCriticalSection(&g_lock);
 }

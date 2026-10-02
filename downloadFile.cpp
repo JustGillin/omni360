@@ -937,8 +937,6 @@ redirectSuccess:
     if (fileBuffer != NULL)
         free(fileBuffer);
 
-    std::cout << "Download Complete\n";
-
     return responseCode;
 
 failure:

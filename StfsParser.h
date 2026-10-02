@@ -37,36 +37,6 @@ struct StfsTitleInfo
     // same header block StfsReadTitleInfo reads.
     unsigned char *contentThumbnail;
     unsigned long contentThumbnailSize;
-
-    // Why a thumbnail was rejected, for the handful of titles that come out
-    // without art. Populated on every parse whether or not it was needed;
-    // EnumerateInstalledGames logs them only when both images came back NULL,
-    // which is the only case anyone wants to read about.
-    //
-    // These exist because there are three separate reasons an image can be
-    // refused below - declared size, bounds against how much of the header
-    // actually got read, and the leading magic - and from the outside all
-    // three look identical: a blank square. Guessing which one is in play
-    // costs a full hardware build cycle per guess.
-    // The first bytes of the raw Display Name field, before any decoding.
-    // Logged only for names that decode to something non-ASCII, which is the
-    // only case where the encoding is in question.
-    //
-    // This exists because a mojibake symptom cannot be diagnosed from the
-    // decoded string alone - "WarfareA(R)" looks the same whether the package
-    // stored one character and we mangled it, or the package stored the
-    // mangling and we faithfully reproduced it. The raw bytes distinguish
-    // those, and nothing else does.
-    unsigned char diagRawName[24];
-    int           diagRawNameLen;
-    int           diagRawNameOffset; // where in the field the window starts, so the log is locatable
-    bool          diagNameNonAscii;
-
-    long          diagBytesRead;        // how much of the header this file actually yielded
-    unsigned long diagTitleThumbSize;   // declared Title Thumbnail size, before clamping
-    unsigned long diagContentThumbSize; // declared Thumbnail size, before clamping
-    unsigned long diagTitleMagic;       // first 4 bytes at 0x571A, big-endian
-    unsigned long diagContentMagic;     // first 4 bytes at 0x171A, big-endian
 };
 
 // Reads just the metadata (not the actual file contents) from one content
