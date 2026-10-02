@@ -449,7 +449,7 @@ static int GetFollowing(const char *url, char *buffer, unsigned long long capaci
                                             progress);
         if (status == 301 || status == 302 || status == 303 || status == 307 || status == 308)
         {
-            char next[2048];
+            static char next[4096]; // GitHub's are about 950 characters
             strncpy(next, buffer, sizeof(next) - 1);
             next[sizeof(next) - 1] = '\0';
             if (strncmp(next, "https://", 8) != 0)
@@ -522,8 +522,11 @@ UpdateInstallResult InstallUpdate(const UpdateInfo &info, UpdateProgressFn progr
     if (!FindRunningXex(name, sizeof(name)))
         return UPDATE_INSTALL_NO_RUNNING_XEX;
 
-    // The signature first: it's small, and without it there's no point.
-    char sig[512];
+    // The signature first: it's small, and without it there's no point. The
+    // buffer is far bigger than any signature because GitHub's redirect to
+    // the file comes back in it first - a signed address of 900-odd
+    // characters, which a 512-byte buffer didn't hold.
+    static char sig[8192];
     unsigned long long sigLen = 0;
     int status = GetFollowing(info.sigUrl, sig, sizeof(sig) - 1, &sigLen, NULL);
     if (status != 200 || sigLen < 8 || sigLen > 200)
