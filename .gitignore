@@ -38,3 +38,6 @@ build_errors.txt
 # atlases must be renamed off "Selawik" before being committed - see the
 # font comment in XboxTLS2.vcxproj and Media/Fonts/OFL.txt.
 Media/Fonts/Selawik_*
+
+# Per-user Visual Studio settings (debugger options and the like)
+*.vcxproj.user
