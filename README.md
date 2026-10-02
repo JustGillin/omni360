@@ -48,7 +48,7 @@ Nothing downloads without you choosing it, and a popup says when each job finish
 - A soft-modded (BadUpdate, ABadAvatar) or hard-modded (RGH, JTAG) Xbox 360, connected to the internet. Ethernet is recommended.
 - An archive.org account, and its IAS3 access key and secret key. Every collection Omni360 downloads from is marked private, so archive.org refuses downloads without them.
 - Free space for installing games: the download and the installed game both, while it installs — around 7GB plus 3-8GB for a typical game. The download is removed once it's installed.
-- To build it yourself: the official Microsoft Xbox 360 XDK and Visual Studio 2010 (`XboxTLS2.vcxproj` targets `Platform=Xbox 360` directly — this is **not** buildable with the open free60/libxenon toolchain). Sourcing the XDK is on you. See `COMPILING.md`.
+- To build it yourself: the official Microsoft Xbox 360 XDK and Visual Studio 2010 (`XboxTLS2.vcxproj` targets `Platform=Xbox 360` directly — this is **not** buildable with the open free60/libxenon toolchain). Sourcing the XDK is on you. See `COMPILING.md`, and `RELEASING.md` for publishing a version people can update to.
 
 ## Setup
 
