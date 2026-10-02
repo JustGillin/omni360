@@ -1408,13 +1408,21 @@ static const StoreFeaturedView kStoreFeatured[STORE_FEATURED_COUNT] = {
     { 0x4D530AA4, "Forza Horizon 2", "Sumo Digital" STORE_MIDDOT "Racing" },
 };
 
-// Search, DLC and Title Updates wait on a decision; a game's own page will
-// have its DLC and updates.
+// The other ways in, all marked SOON for now. DLC and title updates are on
+// each game's page instead.
 static const StoreButtonView kStoreButtons[STORE_BUTTON_COUNT] = {
     { "Search", true },
-    { "DLC", true },
-    { "Title Updates", true },
-    { "XBLA", false },
+    { "XBLA", true },
+    { "XBLIG", true },
+    { "Original Xbox", true },
+};
+
+// What each will be, for the toast when one's pressed before then.
+static const char *const kStoreButtonsSoon[STORE_BUTTON_COUNT] = {
+    "Search every game by name",
+    "Xbox Live Arcade games, A to Z",
+    "Xbox Live Indie Games, A to Z",
+    "Original Xbox games, A to Z",
 };
 
 static const char kStoreLetters[] = "#ABCDEFGHIJKLMNOPQRSTUVWXYZ";
@@ -1741,6 +1749,147 @@ static StoreInstallState StoreVersionState(const Library &lib, int version, floa
     return STORE_INSTALL_AVAILABLE;
 }
 
+// Whether the game page offers Uninstall: something of the chosen version is
+// installed, and none of it is on its way.
+static bool CanUninstallStoreVersion(const Library &lib, const Shell &shell)
+{
+    float fraction = 0.0f;
+    bool partial = false;
+    const StoreInstallState state = StoreVersionState(lib, shell.storeVersionChosen, &fraction, &partial);
+    return state == STORE_INSTALL_INSTALLED || (state == STORE_INSTALL_AVAILABLE && partial);
+}
+
+// "<root>\TITLEID\00007000\MEDIAID" split up: the content root, and the
+// media ID. False for a path that isn't a Games on Demand package's.
+static bool ParseGodPackagePath(const char *path, char *root, size_t rootSize, unsigned long *mediaId)
+{
+    const char *name = strrchr(path, '\\');
+    if (name == NULL || strlen(name + 1) != 8)
+        return false;
+    const char *type = name - 9; // "\00007000"
+    if (type < path || _strnicmp(type, "\\00007000", 9) != 0)
+        return false;
+    const char *title = type - 9; // "\TITLEID"
+    if (title < path || title[0] != '\\')
+        return false;
+    char *end = NULL;
+    *mediaId = strtoul(name + 1, &end, 16);
+    if (end == NULL || *end != '\0')
+        return false;
+
+    size_t n = (size_t)(title - path);
+    if (n >= rootSize)
+        return false;
+    memcpy(root, path, n);
+    root[n] = '\0';
+    return true;
+}
+
+// Every package in a library game's own content-type folder - all the discs
+// of a Games on Demand game, or an arcade game's one package. Its DLC and
+// title updates are in other folders, and stay.
+static int RemoveLibraryGamePackages(const InstalledGame &game)
+{
+    char root[512];
+    unsigned long mediaId = 0;
+    if (!ParseGodPackagePath(game.packagePath, root, sizeof(root), &mediaId))
+    {
+        // Not Games on Demand: one package file, nothing beside it.
+        return DeleteFileA(game.packagePath) ? 1 : 0;
+    }
+
+    // Each disc's header in the 00007000 folder, by media ID.
+    char folder[600], pattern[620];
+    _snprintf(folder, sizeof(folder), "%s\\%08lX\\00007000", root, game.titleId);
+    folder[sizeof(folder) - 1] = '\0';
+    _snprintf(pattern, sizeof(pattern), "%s\\*", folder);
+    pattern[sizeof(pattern) - 1] = '\0';
+
+    unsigned long mediaIds[16];
+    int count = 0;
+    WIN32_FIND_DATAA found;
+    HANDLE h = FindFirstFileA(pattern, &found);
+    if (h != INVALID_HANDLE_VALUE)
+    {
+        do
+        {
+            char *end = NULL;
+            unsigned long id = strtoul(found.cFileName, &end, 16);
+            if (!(found.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY) && strlen(found.cFileName) == 8 &&
+                end != NULL && *end == '\0' && count < 16)
+                mediaIds[count++] = id;
+        } while (FindNextFileA(h, &found));
+        FindClose(h);
+    }
+    for (int i = 0; i < count; ++i)
+        GodRemovePackage(root, game.titleId, mediaIds[i]);
+    return count;
+}
+
+// Uninstall on the game page, once confirmed: the chosen version's discs - by
+// the installer's note of each, or for a single disc the library's package -
+// or, for a game the Store hasn't got, everything of it in the library. True
+// if anything was removed.
+static bool UninstallStoreVersion(Shell &shell, const Library &lib, const char *gamesPath)
+{
+    char message[200];
+    _snprintf(message, sizeof(message), "Remove %s from the hard drive?", g_storeGame.name);
+    message[sizeof(message) - 1] = '\0';
+    if (!ShowConfirmUI("Uninstall", message, "Its DLC and title updates stay.", "Uninstall"))
+        return false;
+
+    RenderStatusFrame("Uninstalling", g_storeGame.name, NULL);
+
+    int removed = 0;
+    const StoreRelease *release = StoreReleaseOf(&g_storeGame, shell.storeVersionChosen);
+    if (release == NULL)
+    {
+        for (int i = 0; i < lib.count; ++i)
+        {
+            if (lib.games[i].titleId == g_storeGame.titleId)
+                removed += RemoveLibraryGamePackages(lib.games[i]);
+        }
+    }
+    else
+    {
+        for (int d = 0; d < release->discCount; ++d)
+        {
+            const StoreDisc *disc = StoreReleaseDisc(release, d);
+            if (disc == NULL)
+                continue;
+
+            unsigned long titleId = 0, mediaId = 0;
+            if (GameZipInstalledAs(disc->zip, &titleId, &mediaId))
+            {
+                GodRemovePackage(gamesPath, titleId, mediaId);
+                ForgetInstalledZip(disc->zip);
+                removed++;
+                continue;
+            }
+            // One the installer didn't note: the library's, for a single disc.
+            for (int i = 0; release->discCount == 1 && disc->titleId != 0 && i < lib.count; ++i)
+            {
+                char root[512];
+                if (lib.games[i].titleId == disc->titleId &&
+                    ParseGodPackagePath(lib.games[i].packagePath, root, sizeof(root), &mediaId))
+                {
+                    GodRemovePackage(root, disc->titleId, mediaId);
+                    removed++;
+                }
+            }
+        }
+    }
+
+    dprintf("[store] uninstalled %d package(s) of \"%s\"\n", removed, g_storeGame.name);
+    shell.rescanLibrary = true;
+    shell.stale = true;
+    if (removed > 0)
+        ShowShellToast("Uninstalled", g_storeGame.name, UI_TOAST_SUCCESS);
+    else
+        ShowShellToast("Nothing to uninstall", "Its package wasn't where the library said.", UI_TOAST_ERROR);
+    return removed > 0;
+}
+
 // A on a library game: its page, as the Store has it - on the version that's
 // installed, where it can tell - or, for a game the Store hasn't got (an
 // arcade game, homebrew), a page of its own with no versions to install,
@@ -1837,6 +1986,8 @@ static StoreGameView MakeStoreGameView(Shell &shell, const Library &lib)
     }
     view.buttons[1] = "Find DLC";
     view.buttons[2] = "Title updates";
+    if (view.install == STORE_INSTALL_INSTALLED || (view.install == STORE_INSTALL_AVAILABLE && partial))
+        view.buttons[3] = "Uninstall"; // else not shown
 
     view.versions = g_storeVersions;
     view.versionCount = g_storeGame.versionCount;
@@ -1849,10 +2000,11 @@ static StoreGameView MakeStoreGameView(Shell &shell, const Library &lib)
 
 // The D-pad on a game page: along the buttons, and down the versions beside
 // the synopsis. Left from Install, as from any first column, is the sidebar.
-static void StepStoreGame(WORD nav, Shell &shell)
+static void StepStoreGame(WORD nav, Shell &shell, const Library &lib)
 {
     int &f = shell.storeGameFocus;
     const int versions = g_storeGame.versionCount;
+    const int buttons = CanUninstallStoreVersion(lib, shell) ? STORE_GAME_BUTTONS : STORE_GAME_BUTTONS - 1;
 
     if (f < STORE_GAME_FOCUS_VERSIONS)
     {
@@ -1864,7 +2016,7 @@ static void StepStoreGame(WORD nav, Shell &shell)
             else
                 f--;
         }
-        else if (nav == XINPUT_GAMEPAD_DPAD_RIGHT && b + 1 < STORE_GAME_BUTTONS)
+        else if (nav == XINPUT_GAMEPAD_DPAD_RIGHT && b + 1 < buttons)
             f++;
         else if (nav == XINPUT_GAMEPAD_DPAD_DOWN && versions > 0)
             f = STORE_GAME_FOCUS_VERSIONS + shell.storeVersionChosen;
@@ -1955,9 +2107,8 @@ static void ActOnStoreFocus(Shell &shell)
     }
     else if (i < STORE_FOCUS_LETTERS)
     {
-        const StoreButtonView &b = kStoreButtons[i - STORE_FOCUS_BUTTONS];
-        if (!b.disabled)
-            ShowShellToast("Coming soon", "Xbox Live Arcade games, A to Z", UI_TOAST_INFO);
+        // All still to come.
+        ShowShellToast("Coming soon", kStoreButtonsSoon[i - STORE_FOCUS_BUTTONS], UI_TOAST_INFO);
     }
     else
     {
@@ -2470,6 +2621,8 @@ static void RenderGamePageFrame(Shell &shell, const Library &lib, UiHint *hints,
             hintCount = AddHint(hints, hintCount, UI_BUTTON_A, L"Find DLC", L"DLC");
         else if (f == STORE_GAME_FOCUS_BUTTONS + 2)
             hintCount = AddHint(hints, hintCount, UI_BUTTON_A, L"Find title updates", L"Updates");
+        else if (f == STORE_GAME_FOCUS_BUTTONS + 3)
+            hintCount = AddHint(hints, hintCount, UI_BUTTON_A, L"Uninstall");
         hintCount = AddHint(hints, hintCount, UI_BUTTON_B, L"Back");
     }
 
@@ -2944,10 +3097,21 @@ int main()
                     OpenPicker(shell.picker, f == STORE_GAME_FOCUS_BUTTONS + 1 ? PICKER_DLC : PICKER_TITLE_UPDATE,
                                g_storeGame.name, g_storeGame.titleId, shell.page);
                 }
+                else if (f == STORE_GAME_FOCUS_BUTTONS + 3 && CanUninstallStoreVersion(lib, shell))
+                {
+                    // The confirmation takes over the screen, so resync after.
+                    const bool removed = UninstallStoreVersion(shell, lib, gamesPath);
+                    acted = true;
+                    shell.storeGameFocus = STORE_GAME_FOCUS_BUTTONS;
+
+                    // A game the Store hasn't got has no page once it's gone.
+                    if (removed && shell.page == SHELL_PAGE_LIBRARY && g_storeGame.versionCount == 0)
+                        shell.libraryInGame = false;
+                }
             }
             else if (input.nav != 0)
             {
-                StepStoreGame(input.nav, shell);
+                StepStoreGame(input.nav, shell, lib);
             }
         }
         else if (shell.page == SHELL_PAGE_STORE && shell.storeInLetter)
@@ -3203,7 +3367,7 @@ int main()
                     else if (i < STORE_FOCUS_LETTERS)
                     {
                         if (!kStoreButtons[i - STORE_FOCUS_BUTTONS].disabled)
-                            hintCount = AddHint(hints, hintCount, UI_BUTTON_A, L"Browse XBLA", L"Browse");
+                            hintCount = AddHint(hints, hintCount, UI_BUTTON_A, L"Browse", L"Browse");
                     }
                     else
                     {

@@ -997,11 +997,20 @@ static float LineHeight(float mul)
     return 22.0f * g_M.textScale * mul;
 }
 
+// How far below the middle of a line's nominal height the middle of its
+// capitals sits, as a fraction of that height. Selawik's ascent and XUI's
+// leading put the glyphs low in the box: on a 1080p capture the sidebar's
+// "Your Library" had its capitals centred 2.5px below its button's centre,
+// at a nominal 31px. Centring the capitals is what reads as centred - the
+// usual rule for buttons - and keeps digits in pills centred too.
+#define TEXT_CAP_DROP 0.08f
+
 // DrawText positions text by its top edge, so centring on a line means
-// subtracting half the rendered line height.
+// subtracting half the line height - and the capitals' drop below its middle.
 static float TextTopForCenter(float centerY, float yScale)
 {
-    return centerY - (g_UiFont.GetFontHeight() * yScale) * 0.5f;
+    const float height = g_UiFont.GetFontHeight() * yScale;
+    return centerY - height * (0.5f + TEXT_CAP_DROP);
 }
 
 static void SetType(float mul, bool bold)
@@ -1390,6 +1399,24 @@ static bool NavCountFor(int page, NavCount *out)
     return true;
 }
 
+// The BETA badge after the app's name: a green pill, level with the name's
+// capitals.
+struct BetaBadge
+{
+    float x, centerY, w, h;
+};
+
+static BetaBadge LayOutBetaBadge()
+{
+    BetaBadge b;
+    const float nameTop = g_M.headerY + S(4.0f);
+    b.h = S(22.0f);
+    b.w = TextWidth("BETA", 0.58f, true) + S(16.0f);
+    b.x = g_M.safeX + TextWidth("Omni360", 1.1f, true) + S(12.0f);
+    b.centerY = nameTop + LineHeight(1.1f) * (0.5f + TEXT_CAP_DROP);
+    return b;
+}
+
 static float StorageRingSize()
 {
     return S(60.0f);
@@ -1410,6 +1437,9 @@ static void DrawSidebarQuads(bool focused)
 
     // The brand's green underline.
     FillRound(g_M.safeX, g_M.headerY + S(4.0f) + LineHeight(1.1f) * 1.2f + S(8.0f), S(28.0f), S(4.0f), R(2.0f), COL_GREEN);
+
+    const BetaBadge beta = LayOutBetaBadge();
+    FillRound(beta.x, beta.centerY - beta.h * 0.5f, beta.w, beta.h, beta.h * 0.5f, COL_GREEN);
 
     FillRound(g_M.safeX, NavItemY(SHELL_PAGE_QUEUE) - S(15.0f), g_M.navX + g_M.navW - g_M.safeX, S(2.0f), R(1.0f), COL_DIVIDER);
 
@@ -1449,6 +1479,9 @@ static void DrawSidebarText(bool focused)
     (void)focused; // the focus ring is the whole difference, and it's a quad
 
     Text(g_M.safeX, g_M.headerY + S(4.0f), 1.1f, COL_TEXT, "Omni360", 0, 0.0f, true);
+
+    const BetaBadge beta = LayOutBetaBadge();
+    TextMid(beta.x + beta.w * 0.5f, beta.centerY, 0.58f, COL_TEXT, "BETA", ATGFONT_CENTER_X, 0.0f, true);
 
     const float itemH = NavItemHeight();
 
@@ -3691,6 +3724,32 @@ static void StoreFeaturedRect(const StoreLayout &L, int i, float *x, float *y, f
     }
 }
 
+// A button that's coming later: its label and a SOON pill after it, the two
+// centred together in the button. On a narrow screen the label gives way.
+struct StoreButtonLabel
+{
+    float labelX, labelW;
+    float pillX, pillW, pillH;
+};
+
+static StoreButtonLabel LayOutStoreButtonLabel(const StoreLayout &L, float buttonX, const char *label)
+{
+    StoreButtonLabel b;
+    b.pillH = S(22.0f);
+    b.pillW = TextWidth("SOON", 0.58f, true) + S(16.0f);
+
+    const float gap = S(10.0f);
+    const float room = L.btnW - S(24.0f) - gap - b.pillW;
+    b.labelW = TextWidth(label, 0.92f, true);
+    if (b.labelW > room)
+        b.labelW = room > 0.0f ? room : 0.0f;
+
+    const float total = b.labelW + gap + b.pillW;
+    b.labelX = buttonX + (L.btnW - total) * 0.5f;
+    b.pillX = b.labelX + b.labelW + gap;
+    return b;
+}
+
 static void StoreLetterRect(const StoreLayout &L, int i, float *x, float *y)
 {
     *x = g_M.contentX + (i % L.perRow) * (L.cell + L.cellGap);
@@ -3782,6 +3841,11 @@ void RenderStoreFrame(StorePageView &view, const UiHint *hints, int hintCount)
         if (view.buttons[i].disabled)
             fill = (fill & 0x00FFFFFF) | 0x8C000000;
         FillRound(x, y, L.btnW, L.btnH, g_M.radius, fill);
+        if (view.buttons[i].disabled)
+        {
+            const StoreButtonLabel b = LayOutStoreButtonLabel(L, x, view.buttons[i].label);
+            FillRound(b.pillX, y + (L.btnH - b.pillH) * 0.5f, b.pillW, b.pillH, b.pillH * 0.5f, COL_TRACK);
+        }
         if (isFocused)
             FocusRing(x, y, L.btnW, L.btnH, g_M.radius);
     }
@@ -3848,9 +3912,17 @@ void RenderStoreFrame(StorePageView &view, const UiHint *hints, int hintCount)
         const float x = g_M.contentX + i * (L.btnW + L.gap), cy = L.btnY + sy + L.btnH * 0.5f;
         if (!TextInClip(cy - LineHeight(0.92f) * 0.6f, LineHeight(0.92f) * 1.2f))
             continue;
-        TextMid(x + L.btnW * 0.5f, cy, 0.92f, b.disabled ? COL_DIM : COL_TEXT, b.label, ATGFONT_CENTER_X, 0.0f, true);
         if (b.disabled)
-            TextMid(x + L.btnW - S(16.0f), cy, 0.6f, COL_DIM, "SOON", ATGFONT_RIGHT, 0.0f, true);
+        {
+            // The label and its SOON pill, centred together.
+            const StoreButtonLabel l = LayOutStoreButtonLabel(L, x, b.label);
+            TextMid(l.labelX, cy, 0.92f, COL_DIM, b.label, ATGFONT_TRUNCATED, l.labelW, true);
+            TextMid(l.pillX + l.pillW * 0.5f, cy, 0.58f, COL_TEXT2, "SOON", ATGFONT_CENTER_X, 0.0f, true);
+        }
+        else
+        {
+            TextMid(x + L.btnW * 0.5f, cy, 0.92f, COL_TEXT, b.label, ATGFONT_CENTER_X, 0.0f, true);
+        }
     }
 
     if (TextInClip(L.azLabelY + sy, LineHeight(0.95f) * 1.2f))
@@ -4216,22 +4288,45 @@ static StoreGameLayout LayOutStoreGame(int versionCount)
     return L;
 }
 
-static float StoreButtonWidth(const char *label)
+// A game page's button labels. Install's is held at its widest while
+// installing, so it doesn't twitch as the percentage changes. 0 for a button
+// that isn't shown.
+static float StoreGameLabelWidth(const StoreGameView &view, int i)
 {
-    return TextWidth(label, 0.92f, true) + S(56.0f);
-}
-
-// A game page's buttons. Install is held at its widest while installing, so
-// it doesn't twitch as the percentage changes.
-static float StoreGameButtonWidth(const StoreGameView &view, int i)
-{
-    const float w = StoreButtonWidth(view.buttons[i] != NULL ? view.buttons[i] : "");
+    if (view.buttons[i] == NULL)
+        return 0.0f;
+    const float w = TextWidth(view.buttons[i], 0.92f, true);
     if (i == 0 && view.install == STORE_INSTALL_INSTALLING)
     {
-        const float widest = StoreButtonWidth("Installing 100%");
+        const float widest = TextWidth("Installing 100%", 0.92f, true);
         return w > widest ? w : widest;
     }
     return w;
+}
+
+// The room around each label, together: 56px, unless the buttons shown
+// wouldn't fit across - four on HD, or three on SD - when it shrinks to make
+// them.
+static float StoreGameButtonPad(const StoreGameView &view, float availableW)
+{
+    float labels = 0.0f;
+    int shown = 0;
+    for (int i = 0; i < STORE_GAME_BUTTONS; ++i)
+    {
+        if (view.buttons[i] != NULL)
+        {
+            labels += StoreGameLabelWidth(view, i);
+            shown++;
+        }
+    }
+    if (shown == 0)
+        return S(56.0f);
+    float pad = (availableW - labels - (shown - 1) * S(16.0f)) / shown;
+    if (pad > S(56.0f))
+        pad = S(56.0f);
+    if (pad < S(20.0f))
+        pad = S(20.0f);
+    return pad;
 }
 
 void RenderStoreGameFrame(StoreGameView &view, const UiHint *hints, int hintCount)
@@ -4249,6 +4344,9 @@ void RenderStoreGameFrame(StoreGameView &view, const UiHint *hints, int hintCoun
     const int focusCount = STORE_GAME_BUTTONS + versionCount;
     if (view.focus >= focusCount) view.focus = focusCount - 1;
     if (view.focus < 0) view.focus = 0;
+    // A button that's gone - Uninstall, once there's nothing left to remove.
+    if (view.focus < STORE_GAME_FOCUS_VERSIONS && view.buttons[view.focus - STORE_GAME_FOCUS_BUTTONS] == NULL)
+        view.focus = STORE_GAME_FOCUS_BUTTONS;
 
     const StoreGameLayout L = LayOutStoreGame(versionCount);
     const float r = g_M.radius;
@@ -4297,11 +4395,13 @@ void RenderStoreGameFrame(StoreGameView &view, const UiHint *hints, int hintCoun
         }
     }
 
+    const float buttonPad = StoreGameButtonPad(view, L.textW);
     float bx = L.textX;
     for (int i = 0; i < STORE_GAME_BUTTONS; ++i)
     {
-        const char *label = view.buttons[i] != NULL ? view.buttons[i] : "";
-        const float bw = StoreGameButtonWidth(view, i);
+        if (view.buttons[i] == NULL)
+            continue;
+        const float bw = StoreGameLabelWidth(view, i) + buttonPad;
         const bool isFocused = view.focused && view.focus == STORE_GAME_FOCUS_BUTTONS + i;
         const D3DCOLOR plain = view.buttonDisabled[i] ? 0x8C232323 : (isFocused ? COL_SURFACE_HI : 0xE62F2F2F);
         if (i == 0 && view.install == STORE_INSTALL_AVAILABLE && !view.buttonDisabled[i])
@@ -4393,10 +4493,11 @@ void RenderStoreGameFrame(StoreGameView &view, const UiHint *hints, int hintCoun
     bx = L.textX;
     for (int i = 0; i < STORE_GAME_BUTTONS; ++i)
     {
-        const char *label = view.buttons[i] != NULL ? view.buttons[i] : "";
-        const float bw = StoreGameButtonWidth(view, i);
+        if (view.buttons[i] == NULL)
+            continue;
+        const float bw = StoreGameLabelWidth(view, i) + buttonPad;
         TextMid(bx + bw * 0.5f, L.buttonsY + L.buttonH * 0.5f, 0.92f, view.buttonDisabled[i] ? COL_DIM : COL_TEXT,
-                label, ATGFONT_CENTER_X, 0.0f, true);
+                view.buttons[i], ATGFONT_CENTER_X, 0.0f, true);
         bx += bw + S(16.0f);
     }
 

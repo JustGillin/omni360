@@ -281,12 +281,14 @@ int StoreLetterVisibleRows();
 void RenderStoreLetterFrame(StoreLetterView &view, const UiHint *hints, int hintCount);
 
 // A game's page: its wallpaper across the top, the box, the catalog's
-// details, three buttons, the synopsis, its versions and screenshots.
+// details, its buttons, the synopsis, its versions and screenshots.
 //
-// focus: STORE_GAME_FOCUS_BUTTONS + 0..2 is a button, STORE_GAME_FOCUS_VERSIONS
+// focus: STORE_GAME_FOCUS_BUTTONS + 0..3 is a button, STORE_GAME_FOCUS_VERSIONS
 // + i is version i. versionScroll is the first version row shown; the Render
-// call keeps the focused one on screen.
-#define STORE_GAME_BUTTONS        3
+// call keeps the focused one on screen. The buttons are Install, Find DLC,
+// Title updates and Uninstall; a NULL one isn't shown, and only the last may
+// be - Uninstall, while there's nothing installed to remove.
+#define STORE_GAME_BUTTONS        4
 #define STORE_GAME_FOCUS_BUTTONS  0
 #define STORE_GAME_FOCUS_VERSIONS STORE_GAME_BUTTONS
 

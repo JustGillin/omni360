@@ -68,6 +68,13 @@ int SnapshotGameJobs(QueueJobSnapshot *out, int maxJobs);
 // and media ID read from its disc; a note is believed while that disc's
 // package is in the games folder. Cheap - the notes are read once, at start.
 bool IsGameZipInstalled(const char *zipName);
+
+// The same, with the title and media ID of the package it made - where it is,
+// for uninstalling: <games folder>\TITLEID\00007000\MEDIAID.
+bool GameZipInstalledAs(const char *zipName, unsigned long *outTitleId, unsigned long *outMediaId);
+
+// After an uninstall: the zip's note is dropped, here and in Installed.txt.
+void ForgetInstalledZip(const char *zipName);
 int PendingGameJobCount();
 void CancelGameJob(int id);
 void RemoveGameJob(int id);

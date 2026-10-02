@@ -137,7 +137,7 @@ static void RecordInstalledZip(const char *zip, unsigned long titleId, unsigned 
     fclose(f);
 }
 
-bool IsGameZipInstalled(const char *zipName)
+bool GameZipInstalledAs(const char *zipName, unsigned long *outTitleId, unsigned long *outMediaId)
 {
     if (!g_running || zipName == NULL)
         return false;
@@ -145,9 +145,53 @@ bool IsGameZipInstalled(const char *zipName)
     bool found = false;
     EnterCriticalSection(&g_lock);
     for (int i = 0; i < g_installedCount && !found; ++i)
-        found = (strcmp(g_installed[i].zip, zipName) == 0);
+    {
+        if (strcmp(g_installed[i].zip, zipName) == 0)
+        {
+            found = true;
+            if (outTitleId != NULL)
+                *outTitleId = g_installed[i].titleId;
+            if (outMediaId != NULL)
+                *outMediaId = g_installed[i].mediaId;
+        }
+    }
     LeaveCriticalSection(&g_lock);
     return found;
+}
+
+bool IsGameZipInstalled(const char *zipName)
+{
+    return GameZipInstalledAs(zipName, NULL, NULL);
+}
+
+void ForgetInstalledZip(const char *zipName)
+{
+    if (!g_running || zipName == NULL)
+        return;
+
+    // Out of the list, then the file written afresh from what's left - it's
+    // a few lines, and this keeps it from growing with every reinstall.
+    static InstalledZip kept[MAX_INSTALLED_ZIPS];
+    int keptCount = 0;
+    EnterCriticalSection(&g_lock);
+    for (int i = 0; i < g_installedCount; ++i)
+    {
+        if (strcmp(g_installed[i].zip, zipName) != 0)
+            g_installed[keptCount++] = g_installed[i];
+    }
+    g_installedCount = keptCount;
+    memcpy(kept, g_installed, keptCount * sizeof(InstalledZip));
+    LeaveCriticalSection(&g_lock);
+
+    FILE *f = fopen(INSTALLED_LIST, "wb");
+    if (f == NULL)
+    {
+        dprintf("[game] couldn't rewrite %s\n", INSTALLED_LIST);
+        return;
+    }
+    for (int i = 0; i < keptCount; ++i)
+        fprintf(f, "%08lX %08lX %s\r\n", kept[i].titleId, kept[i].mediaId, kept[i].zip);
+    fclose(f);
 }
 
 // The used slot whose job is in `state`, with the lowest id above `after`
