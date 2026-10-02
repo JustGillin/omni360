@@ -1,72 +1,85 @@
 # Omni360
 
-A homebrew Xbox 360 app that shows your **installed games** (with real box-art icons, no typing) and downloads their **DLC and title updates from archive.org** straight onto the console — no PC required.
+A homebrew Xbox 360 app for getting games and their extras onto a modded console, with no PC needed once it's set up:
 
-Pick a game, then press **A** for its DLC (from the `msx360gcdlc` collection) or **X** for its title updates (from `microsoft_xbox360_title-updates`). **Y** opens Settings, where the games folder and your archive.org keys can be changed without a PC. A game disc in the drive shows up as the first tile in the library; **A** on it installs it as Games on Demand, into your games folder, so it plays without the disc. Both install to the right place on their own: DLC and lowercase `tu...` updates into `Content\`, uppercase `TU_...` updates into `Cache\`.
+- **Your Library** — your installed games as a grid of covers, read straight from the hard drive.
+- **Store** — about 1,500 Xbox 360 disc games from archive.org, A to Z, each with its own page: wallpaper, description, screenshots and its regional versions. Install one and it downloads and installs as Games on Demand, playable from the dashboard or Aurora without the disc.
+- **DLC and title updates** for any game, from archive.org's `msx360gcdlc` and `microsoft_xbox360_title-updates` collections, installed where the console expects them.
+- **Disc installs** — a game disc in the drive can be copied to the hard drive as Games on Demand.
+- **Queue** — everything downloads and installs in the background while you carry on browsing.
 
-This is a fork of [951261/X-Store](https://github.com/951261/X-Store), reusing its proven BearSSL/TLS networking core and Direct3D rendering framework. Everything Vimm's Lair/full-game/ISO/updater-related has been stripped out; everything archive.org/DLC/installed-game-related is new. See `docs/` for X-Store's own original architecture notes (still accurate for the networking layer this fork builds on).
+Omni360 began as a fork of [X-Store](https://github.com/951261/X-Store) by 951261, and still runs on its networking core: the HTTPS client and BearSSL/TLS wrapper, DNS lookups and drive mounting. Everything Vimm's Lair/full-game/ISO/updater-related has been stripped out; the library, the Store, the installers and the interface are new. See `docs/` for X-Store's own original architecture notes (still accurate for the networking layer this fork builds on).
 
-**Status: working on real hardware.** The full pipeline — library scan, picker, archive.org auth, content lookup, archive member walk, install — has been run end-to-end against a real 27-game library on a JTAG/RGH console, for both DLC and title updates (Skyrim's 25.5 MB update installed and was picked up by the dashboard). The **Testing order** section below is kept as a guide for bringing it up on a fresh setup.
+**Status: beta (0.2.0-beta), working on real hardware.** Installs from the Store, DLC, title updates and disc installs have all been run end to end on a modded console with a real library.
 
-## Why this exists instead of just using X-Store or Aurora
+## Using it
 
-Two other approaches were tried and ruled out before this:
+The sidebar on the left has four pages; left on the D-pad reaches it from any page, and **B** steps back a level (B on the sidebar exits).
 
-- **An Aurora Lua script** got further than expected (installed-game list, on-screen keyboard, HTTP downloads all worked), but Aurora's `Http` library doesn't persist cookies between requests and has no way to attach custom headers — confirmed on real hardware (a successful archive.org login `POST` followed by an authenticated `GET` still came back `401`). Archive.org's login wall makes this a dead end from Lua.
-- **X-Store as-is** (pointed at Vimm's Lair) worked initially, then broke with `404`s from Vimm's own anti-scraping measures — outside anyone's control but that project's maintainer.
+- **Your Library** — **A** on a game opens its page. A game disc in the drive is the first tile: **A** installs it to the hard drive, **X** finds its title updates, and once it's installed **A** finds its DLC and **START** installs it again. **Y** is a shortcut to Settings.
+- **Store** — three featured games, then A to Z. **A** on a letter shows its games; **A** on a game opens its page. Search, Xbox Live Arcade, Xbox Live Indie Games and Original Xbox are on the way, marked SOON.
+- **A game's page** — **Install** installs the chosen version, every disc of it; choose another version from the list beside the description first. The button shows Queued, Installing, Installed, or Install remaining for a multi-disc game partly installed. **Find DLC** and **Title updates** search archive.org and show what's there to pick from. **Uninstall** appears once something is installed, and removes the game but leaves its DLC and title updates.
+- **Queue** — what's downloading, waiting and done. **X** stops a download or install, or clears a finished one.
+- **Settings** — the games folder, and your archive.org keys.
 
-A standalone native `.xex` was the only remaining option with full control over HTTP requests (custom headers, cookies, redirects), which is exactly what archive.org's login wall requires.
+Nothing downloads without you choosing it, and a popup says when each job finishes or fails.
 
 ## Requirements
 
-- The official Microsoft Xbox 360 XDK + Visual Studio 2010 (`XboxTLS2.vcxproj` targets `Xbox360Proj`/`Platform=Xbox 360` directly — this is **not** buildable with the open free60/libxenon toolchain). Sourcing the XDK itself is on you.
-- A JTAG/RGH/BadUpdate/ABadAvatar console, same as X-Store.
-- An archive.org account, and its IAS3 access key + secret key (see Setup below) — every file in the `msx360gcdlc` collection is marked private in its own metadata, confirmed on hardware as a hard 401 even for a fully anonymous request, so real authentication is genuinely required, not optional.
+- A soft-modded (BadUpdate, ABadAvatar) or hard-modded (RGH, JTAG) Xbox 360, connected to the internet. Ethernet is recommended.
+- An archive.org account, and its IAS3 access key and secret key. Every collection Omni360 downloads from is marked private, so archive.org refuses downloads without them.
+- Free space for installing games: the download and the installed game both, while it installs — around 7GB plus 3-8GB for a typical game. The download is removed once it's installed.
+- To build it yourself: the official Microsoft Xbox 360 XDK and Visual Studio 2010 (`XboxTLS2.vcxproj` targets `Platform=Xbox 360` directly — this is **not** buildable with the open free60/libxenon toolchain). Sourcing the XDK is on you. See `COMPILING.md`.
 
 ## Setup
 
-1. Open `Omni360.sln` and build `XboxTLS2.vcxproj` (Release config) once you have the XDK working. The project keeps its original name; the Release build produces `Omni360.xex`.
-2. Deploy that `.xex` to your console the same way you would any other homebrew title (standalone, launched from Aurora/your dashboard like X-Store already is — this isn't an Aurora script or plugin).
-3. Optional: two independent settings.txt keys control where things live, since your existing game library and where DLC actually installs can be different drives/folders:
-   - `xbla-path:` (same key X-Store already uses) — where downloaded DLC gets written. Defaults to `Hdd1:\Content\0000000000000000`, the standard Xbox content layout.
-   - `games-path:` — where your installed game library is scanned from for the picker. Defaults to `Hdd1:\Content\0000000000000000`, where the dashboard installs Games on Demand and arcade titles. If you keep your GOD games in a folder of their own instead (for example `Hdd1:\Games\{TitleID}\00007000\{ContentID}` — the same layout under a different root), point this there, or change it on the console in **Settings**.
-4. Before first run, get your archive.org **IAS3 access key + secret key** at [archive.org/account/s3.php](https://archive.org/account/s3.php) (log in with your normal account first) — this is archive.org's official, script-friendly API key pair (the same mechanism their own `ia` command-line tool uses), not your account password.
-   - **Recommended**: FTP a plain text file to `game:\ArchiveOrgKeys.txt` yourself, access key on line 1 and secret key on line 2, before ever launching the app. It's picked up silently on launch with no prompt at all - much less painful than typing a ~40-character secret key with an on-screen keyboard and a controller.
-   - Otherwise, first run prompts for both values via the on-screen keyboard and saves them to that same file so you're not asked again.
-   - **This file is plain text** either way — fine on your own console, delete it if anyone else has physical/FTP access.
-   - (An earlier version of this tool tried logging in with your actual email/password instead — that turned out to hit the wrong endpoint entirely, since archive.org's real login is a JS-driven flow with its own CSRF handshake and a reCAPTCHA-referencing security policy a script can't satisfy. IAS3 keys sidestep all of that.)
+See [`docs/Setup Guide.md`](docs/Setup%20Guide.md) for the whole thing. In short:
+
+1. Get `Omni360.xex` — a release build, or build `XboxTLS2.vcxproj` (Release) from `Omni360.sln`.
+2. Get your archive.org keys at [archive.org/account/s3.php](https://archive.org/account/s3.php), logged in with your normal account. These are archive.org's official script-friendly credentials, the same pair their `ia` tool uses — not your password. Put them in a plain text file, `ArchiveOrgKeys.txt`, access key on line 1 and secret key on line 2. (Or type them in on the console, in Settings — painful with a controller, but it works.)
+3. Copy `Omni360.xex` and `ArchiveOrgKeys.txt` into a folder of their own on the console, and launch it.
+
+Two optional `settings.txt` keys change where things go, and the games folder can also be changed on the console in Settings:
+
+- `games-path:` — where games install, and where the library is scanned. Defaults to `Hdd1:\Content\0000000000000000`, where the dashboard keeps Games on Demand and arcade titles.
+- `xbla-path:` — where DLC and title updates are written. Same default. (The name is inherited from X-Store, which used the same key.)
 
 ## How it works
 
-1. Walks `Content\0000000000000000\{TitleID}\{ContentType}\*` and reads each installed title's Title ID / display name / box-art icon straight out of its STFS package header (`StfsParser.cpp`) — entirely offline.
-2. Shows that list as a grid of cover tiles on the Your Library page (`GameListUI.cpp`), in the style of the Xbox Series dashboard, beside a sidebar of pages — Your Library, Store, Queue, Settings. D-pad or left stick to move, left to reach the sidebar; on the library, A for DLC, X for title updates, Y as a shortcut to Settings. A game disc in the drive is the first tile (`DiscWorker.cpp` watches the tray and reads what's put in); A on it installs it, as a job on the Queue that runs alongside downloads. B steps back a level, and B on the sidebar exits. Searches run in the background (`SearchWorker.cpp`), and the picker opens straight away and fills in when the results arrive; each collection's listing is fetched once per session, so searches after the first are near-instant. Looking needs no keys — they're asked for the first time something is queued. Choosing a pack or update adds it to the **Queue**, which downloads on its own thread (`DownloadQueue.cpp`) while you carry on browsing; a popup says when each one finishes or fails, and X on the Queue page stops one.
-3. Sends your IAS3 key pair as an `Authorization: LOW <access>:<secret>` header (`ArchiveOrgDLC.cpp`) and looks up the chosen game against the relevant item's public metadata — `msx360gcdlc` for DLC, `microsoft_xbox360_title-updates` for updates. Name-matching is soft, so a game with several separate DLC packs — e.g. Call of Duty 2's Bonus/Invasion/Skirmish Packs — picks up all of them.
-4. For each matched archive, reads its internal file table via a handful of small `Range` requests. RAR interleaves headers with each file's data, so that walks the chain one entry at a time; ZIP keeps a central directory at the tail, so one request covers it.
-5. Downloads each real file through archive.org's `/download/{item}/{archive}/{urlencoded/internal/path}` URL form, which serves the member **already extracted server-side** — no RAR or ZIP decompression is implemented or needed on our end.
-6. Writes each file where the console expects it. DLC members already carry a `TitleID\ContentType\ContentID` internal path that matches the Content layout. Title updates are placed by filename: lowercase `tu...` into `Content\0000000000000000\{TitleID}\000B0000\`, uppercase `TU_...` into `{device}\Cache\`.
-7. Avatar-item packs (STFS content type `00009000`) are filtered out — matching Sonic Generations turned up 12 files, 11 of which were avatar data rather than DLC.
+**The library** walks `{games folder}\{TitleID}\{ContentType}\*` and reads each title's ID, name and icon out of its STFS package header (`StfsParser.cpp`) — entirely offline. Covers come from xboxunity.net, or Xbox Live's box art where xboxunity has none, and are cached in `game:\Covers` (`CoverArt.cpp`).
+
+**The Store's games are compiled in.** `tools/make_store_titles.py` builds `StoreTitles.h` from archive.org's Redump collection (the `microsoft_xbox360_*` items, one zip per disc), with title IDs from Redump's own datfile — a disc's serial *is* its title ID: "MW-2004" is publisher code `MW` (0x4D57) and title 2004 (0x07D4). It adds games the Redump collection lacks from the `XBOX_360_2` to `_6` set, gathers each game's discs into games and versions, and writes their labels, so the console only reads tables. Wallpapers, screenshots, descriptions and ratings come from Xbox Live's servers over plain HTTP (`HttpPlain.cpp`), and are cached in `game:\Store` (`StoreArt.cpp`).
+
+**Installing a game** (`GameInstaller.cpp`) downloads the disc's zip in 32MB pieces over two connections, from whichever of archive.org's servers holding it is fastest. archive.org stalls both connections about once a minute, so a connection that goes silent for 10 seconds, or slows below 0.5MB/s, is dropped and its piece resumed where it stopped; one server failing repeatedly moves the download to the next. As the pieces land, the disc image is decompressed once to check its CRC and to note restart points; then it's converted to Games on Demand (`GodConvert.cpp`) straight out of the zip, so the 7-8GB image is never written out — only the parts of the disc the game uses, typically 3-7GB. The package gets the game's icon from Xbox Live. Each install is noted in `game:\Store\Installed.txt`, with the disc's media ID, so the Store can tell which disc of a multi-disc game is installed. A typical game takes 30-40 minutes to download and 5-10 to install.
+
+**DLC and title updates** (`ArchiveOrgDLC.cpp`, `DownloadQueue.cpp`) send your keys as an `Authorization: LOW <access>:<secret>` header, look the game up by name in the collection's metadata, then read each matching archive's file table with a few small `Range` requests: RAR interleaves headers with each file's data, so that walks the chain one entry at a time; ZIP keeps a central directory at the tail, so one request covers it. Each file is downloaded through archive.org's `/download/{item}/{archive}/{path}` form, which serves the member already extracted, and written where the console expects it: DLC by its own `TitleID\ContentType\ContentID` path, lowercase `tu...` updates into `Content\0000000000000000\{TitleID}\000B0000\`, and uppercase `TU_...` updates into `{device}\Cache\`. Avatar-item packs (content type `00009000`) are filtered out.
+
+**Disc installs** (`DiscWorker.cpp`) watch the tray, read the disc that goes in, and convert it to Games on Demand the same way, reading ahead from the drive at full speed.
 
 ## Known limitations
 
-- **Games-on-Demand-style split packages** (a folder of numbered parts instead of one file) aren't handled by `EnumerateInstalledGames` — such titles are silently skipped rather than mis-parsed. How common that layout is on a JTAG/RGH+Aurora setup wasn't verified this session.
-- **Display Name encoding**: the STFS field is documented as UTF-8 by the Free60 wiki but historically treated as UTF-16BE by real tooling (Modio, Velocity, Horizon). `StfsParser.cpp` detects which one per-file rather than assuming, but this is the first thing worth checking against your own library — if names come out garbled, that's where to look.
-- **Supplementary-plane characters** (outside the BMP) decode to `?`. Everything in the BMP, including the trademark and registered signs that turn up in real title names, now survives both decode paths intact.
-- **Key entry** via the on-screen keyboard is not masked (visible while typing), same caveat the earlier Aurora Lua prototype had for password entry - your secret key is visible on screen while typing it in.
-- **Fuzzy DLC matching** scores candidates 0–100 (`ArchiveOrgDLC.cpp`'s `ScoreDlcMatch`) on how much of the game's name appears anywhere in the filename, weighted by word length, and shows anything above 50 in a ranked picker. This replaced a strict word-prefix match that failed on two real cases: release groups inserting words (`Halo.1.Combat.Evolved.Anniversary...` vs a title with no "1" in it), and packages whose Display Name is abbreviated (`CoD: World at War` can never prefix-match `Call.of.Duty.World.at.War...`). A missing *number* is penalised heavily, so "Halo 3" doesn't offer you "Halo 4". Because matching is deliberately loose, **you always confirm the pack yourself** — nothing downloads automatically.
-- The `.vcxproj.filters` file still lists the old Vimm/7z/ISO/updater folder groupings cosmetically (Solution Explorer organization only, doesn't affect the build) — untouched since it's a large, low-value mechanical edit.
+- **Downloads are slow-ish** — about 3.5MB/s on average, so a game takes half an hour or more. archive.org's servers are the limit, not the console.
+- **Some games aren't in the Store.** Games only archived as RARs (in `XBOX_360_1`, such as Crackdown and the Dirt series) aren't listed, as the installer reads zips only; a few dozen more aren't on archive.org in either set.
+- **An interrupted game install starts over.** Pieces resume within a session, but quitting the app mid-download removes what was downloaded.
+- **A multi-disc game installed some other way** — from real discs, or another tool — can't be uninstalled by version from its Store page, since Omni360 can't tell which disc is which. Its own library entry still can be, if the Store hasn't got it.
+- **Key entry** on the on-screen keyboard isn't masked.
+- **DLC matching is deliberately loose** — it has to cope with release-group names like `Halo.1.Combat.Evolved.Anniversary...` and abbreviated display names like `CoD: World at War`. It scores candidates 0-100 on how much of the game's name appears in the filename, and penalises a missing number heavily so "Halo 3" doesn't offer "Halo 4". You always confirm the pack yourself.
+- **Display names** are decoded as UTF-8 or UTF-16BE, whichever each package turns out to use; characters outside the BMP become `?`.
+- The `.vcxproj.filters` file still lists X-Store's old folder groupings (Solution Explorer only; it doesn't affect the build).
 
-## Testing order
+## Why this exists instead of just using X-Store or Aurora
 
-This is the order the app was originally brought up in, and it is still the fastest way to isolate a failure on a fresh setup — build cycles are slow and there is no emulator, so bisecting after the fact costs more than staging it does:
+- **An Aurora Lua script** got further than expected, but Aurora's `Http` library doesn't keep cookies between requests and can't attach custom headers — confirmed on hardware — and archive.org's login wall needs both.
+- **X-Store as-is** (pointed at Vimm's Lair) broke with `404`s from Vimm's own anti-scraping measures.
 
-1. Confirm the stripped project actually builds and boots to a blank screen.
-2. Test the archive.org IAS3 auth header alone (watch `game:\DebugInfo.txt` / the on-screen log) before touching the UI.
-3. Test RAR header parsing against a small known file — `007.Legends.DLC.RF.X360-ZTM.rar` (17.6K) was used as the test case throughout development.
-4. Test STFS icon/name extraction against a couple of your installed titles.
-5. Only then exercise the full UI end-to-end.
+A native `.xex` was the only option with full control over HTTP requests.
 
 ## License
 
-AGPL-3.0, inherited from the original X-Store project (see `LICENSE`). Vendored components keep their own licenses: BearSSL (`SSL/`, MIT), cJSON (`cJSON.c/.h`, MIT). A modified version you distribute must stay under AGPL-3.0 with copyright notices preserved and source available to anyone you give the binary to.
+AGPL-3.0, inherited from the original X-Store project (see `LICENSE`). Vendored components keep their own licenses: BearSSL (`SSL/`, MIT), zlib (`zlib/`, zlib license), cJSON (`cJSON.c/.h`, MIT), the Selawik font (OFL). A modified version you distribute must stay under AGPL-3.0 with copyright notices preserved and source available to anyone you give the binary to.
 
-Omni360 is a distinct name for a distinct application, but a good deal of it is still X-Store's code. `dns.cpp`, `parsing.cpp`, `OutputConsole.cpp`, `downloadFile.cpp` and `driveMount.c` carry `PROGRAMMER : 951261` headers, and the BearSSL/TLS networking core underneath them is inherited essentially intact. Those headers, and the fork notice in the startup banner, are there on purpose — AGPL-3.0 requires copyright notices to survive and requires a modified work to say that it has been modified. Rename the product as much as you like; leave those alone.
+### Credits
+
+Omni360 is a modified version of [X-Store](https://github.com/951261/X-Store) by 951261, released under AGPL-3.0; this section is its notice that it has been modified (AGPL-3.0 section 5(a)). Most of the application has since been rewritten, but X-Store's code is still at its foundation: the TLS wrapper around BearSSL (`XboxTLS.cpp/.h`), the HTTPS client (`downloadFile.cpp`), DNS (`dns.cpp`), URL and text helpers (`parsing.cpp`), drive mounting (`driveMount.c`), the log console (`OutputConsole.cpp`) and the on-screen keyboard (`Keyboard.cpp`). Several of those files carry `PROGRAMMER : 951261` headers. Those headers are copyright notices, and AGPL-3.0 requires them to survive - rename the product as much as you like, but leave them, and this section, in place.
+
+Game data comes from [Redump](http://redump.org) (title IDs, by disc serial), [xboxunity.net](https://xboxunity.net) (covers) and Xbox Live's own servers (art, details and icons); the games themselves from the archive.org collections named above.

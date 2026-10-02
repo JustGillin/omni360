@@ -2720,10 +2720,9 @@ int main()
     if (!CheckGameMounted())
         dprintf("Warning: Some paths may not be mounted\n");
 
-    // The "fork of X-Store" half of this line is not decoration - AGPL-3.0
-    // section 5(a) wants a modified work to say prominently that it has been
-    // modified. Rename the product freely; leave the attribution alone.
-    dprintf("Omni360 " CURRENT_VERSION " (fork of X-Store, https://github.com/951261/X-Store)\n");
+    // X-Store, which this began as a fork of, is credited in the README's
+    // Credits section - the modified-version notice AGPL-3.0 asks for.
+    dprintf("Omni360 " CURRENT_VERSION "\n");
 
     // Whether opening the disc tray should leave the app running (see
     // xex.xml), and whether DashLaunch is loaded - the first thing to check
