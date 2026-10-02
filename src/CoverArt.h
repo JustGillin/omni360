@@ -10,8 +10,10 @@
 //
 // Each game's tile is the front of its case art beside one fixed banner - the
 // green XBOX 360 strip down the left edge, from Media/BoxArtBanner.png - which
-// makes a square. The banner is the same on every tile; each cover's own
-// header strip changed design over the console's life, so it isn't used.
+// makes a square. An Xbox Live Arcade game has its own, from
+// Media/BoxArtBannerXbla.png. The banner is the same on every tile of a kind;
+// each cover's own header strip changed design over the console's life, so it
+// isn't used.
 //
 // First choice is Xbox Live's box art, over plain HTTP:
 //
