@@ -385,6 +385,8 @@
     <ClInclude Include="src\DownloadQueue.h" />
     <ClInclude Include="src\SearchWorker.h" />
     <ClInclude Include="src\CoverArt.h" />
+    <ClInclude Include="src\ImageDecode.h" />
+    <ClInclude Include="src\stb_image.h" />
     <ClInclude Include="src\TitleNames.h" />
     <ClInclude Include="src\RarHeaders.h" />
     <ClInclude Include="src\parsing.h" />
@@ -441,6 +443,7 @@
     <ClCompile Include="src\DownloadQueue.cpp" />
     <ClCompile Include="src\SearchWorker.cpp" />
     <ClCompile Include="src\CoverArt.cpp" />
+    <ClCompile Include="src\ImageDecode.cpp" />
     <ClCompile Include="src\RarHeaders.cpp" />
     <ClCompile Include="src\parsing.cpp" />
     <ClCompile Include="src\StfsParser.cpp" />

@@ -8,6 +8,7 @@ DESCRIPTION : The Store's artwork and details from Xbox Live, fetched and
 #include "StoreArt.h"
 #include "HttpPlain.h"
 #include "OutputConsole.h"
+#include "ImageDecode.h"
 
 #include <xtl.h>
 #include <stdio.h>
@@ -27,7 +28,7 @@ DESCRIPTION : The Store's artwork and details from Xbox Live, fetched and
 #define IMAGE_MAX_BYTES   (1024 * 1024)  // screenshots are about 250KB, backgrounds under 100KB
 #define CATALOG_MAX_BYTES (256 * 1024)   // a game's entry is about 13KB
 #define MAX_REQUESTS      64
-#define MAX_READY         4
+#define MAX_READY         2  // a wallpaper decoded is 3.5MB
 #define MAX_DETAILS       8
 
 struct ArtRequest
@@ -475,6 +476,53 @@ static StoreDetailsState LoadDetails(unsigned long titleId, StoreDetails *out)
 // The worker
 // ---------------------------------------------------------------------------
 
+// An image that wouldn't decode: its cached file is removed, so it's fetched
+// again next launch rather than failing every time.
+static void DiscardStoreArt(unsigned long titleId, StoreArtKind kind)
+{
+    char path[64];
+    CachePath(titleId, kind, "jpg", path, sizeof(path));
+    DeleteFileA(path);
+}
+
+// An image's pixels, a screenshot's at half size - still more than its
+// thumbnail on the game page needs. NULL if it wouldn't decode.
+static unsigned long *DecodeArt(unsigned long titleId, StoreArtKind kind, const unsigned char *bytes,
+                                unsigned long size, int *outW, int *outH)
+{
+    const bool screenshot = (kind >= STORE_ART_SCREEN);
+    const double started = ImageTimerMs();
+    int w = 0, h = 0;
+    unsigned long *pixels = DecodeImageToArgb(bytes, size, &w, &h);
+    if (pixels == NULL || w < 16 || h < 16)
+    {
+        dprintf("[store] %08lX: image %d wouldn't decode (%s, %dx%d)\n", titleId, kind, ImageDecodeError(), w, h);
+        if (pixels != NULL)
+            free(pixels);
+        DiscardStoreArt(titleId, kind);
+        return NULL;
+    }
+    const double decoded = ImageTimerMs();
+
+    if (screenshot)
+    {
+        unsigned long *half = HalveArgb(pixels, w, h);
+        free(pixels);
+        if (half == NULL)
+            return NULL;
+        pixels = half;
+        w /= 2;
+        h /= 2;
+    }
+
+    dprintf("[timing] %s %08lX (%dx%d, %lu KB, worker): decode %.1f + halve %.1f ms\n",
+            screenshot ? "screenshot" : "wallpaper", titleId, w, h, size / 1024, decoded - started,
+            ImageTimerMs() - decoded);
+    *outW = w;
+    *outH = h;
+    return pixels;
+}
+
 static DWORD WINAPI StoreArtEntry(LPVOID)
 {
     for (;;)
@@ -540,12 +588,19 @@ static DWORD WINAPI StoreArtEntry(LPVOID)
         if (bytes == NULL)
             continue;
 
+        int w = 0, h = 0;
+        unsigned long *pixels = DecodeArt(request.titleId, request.kind, bytes, size, &w, &h);
+        free(bytes);
+        if (pixels == NULL)
+            continue;
+
         EnterCriticalSection(&g_lock);
         StoreArtData &data = g_ready[g_readyCount++];
         data.titleId = request.titleId;
         data.kind = request.kind;
-        data.bytes = bytes;
-        data.size = size;
+        data.pixels = pixels;
+        data.width = w;
+        data.height = h;
         LeaveCriticalSection(&g_lock);
     }
     return 0;
@@ -577,7 +632,8 @@ bool StartStoreArt()
 
 #ifdef _XBOX
     // Beside the cover worker: both are a moment's work between waits on
-    // the network, and plain HTTP needs no TLS.
+    // the network - a wallpaper's decode is the longest, a few hundred
+    // milliseconds - and plain HTTP needs no TLS.
     XSetThreadProcessor(g_thread, 5);
 #endif
 
@@ -608,7 +664,7 @@ bool StopStoreArt(DWORD timeoutMs)
     g_running = false;
 
     for (int i = 0; i < g_readyCount; ++i)
-        free(g_ready[i].bytes);
+        free(g_ready[i].pixels);
     g_readyCount = 0;
     return true;
 }
@@ -670,14 +726,6 @@ bool TakeStoreArt(StoreArtData *out)
     if (took)
         SetEvent(g_wake); // room for the next one
     return took;
-}
-
-void DiscardStoreArt(unsigned long titleId, StoreArtKind kind)
-{
-    // On the UI thread, but a delete is quick.
-    char path[64];
-    CachePath(titleId, kind, "jpg", path, sizeof(path));
-    DeleteFileA(path);
 }
 
 void RequestStoreDetails(unsigned long titleId)

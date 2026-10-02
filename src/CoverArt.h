@@ -18,12 +18,11 @@
 //   download.xbox.com/content/images/66acd000-77fe-1000-9115-d802XXXXXXXX/1033/boxartlg.jpg
 //       the front alone, 219x300 under a header strip, about 60KB.
 //
-// It used to be the fallback. It's first because the cover is decoded and cut
-// on the UI thread: a new cover from xboxunity cost an estimated 25-60ms there
-// - a visible stutter while browsing - and this a fraction of it. At the size
-// tiles are drawn it's about as sharp; only a game page's big box is a touch
-// softer. For a game Xbox Live has no box art for - often a Japan-only disc -
-// xboxunity, which needs no account:
+// It used to be the fallback; it's first because it's a fraction of the work
+// to decode and cut - xboxunity's insert is four times the pixels. At the
+// size tiles are drawn it's about as sharp; only a game page's big box is a
+// touch softer. For a game Xbox Live has no box art for - often a Japan-only
+// disc - xboxunity, which needs no account:
 //
 //   Resources/Lib/CoverInfo.php?titleid=XXXXXXXX
 //       a game's covers, as JSON. Each one's CoverID is what the next URL
@@ -35,10 +34,10 @@
 // Both are cut to the front the same way. Covers already cached stay as they
 // were fetched.
 //
-// A worker thread looks covers up, downloads them, and reads the ones already
-// cached. Cutting the front out of a download happens on the UI thread
-// (GameListUI's PumpCoverArt), because it decodes through D3DX, which needs
-// the device; the front comes back here to be written to the cache:
+// A worker thread looks covers up, downloads them, decodes and cuts them
+// (ImageDecode, not D3DX, so it needs no device), and reads the ones already
+// cached - then puts the banner beside each and hands over the finished
+// tile, so the UI thread only copies it into a texture:
 //
 //   game:\Covers\XXXXXXXX.bin   the front of the case, 418x512 ARGB pixels
 //   game:\Covers\XXXXXXXX.none2 neither had anything; asked again after a week
@@ -71,30 +70,18 @@ void RequestCoverArt(const unsigned long *titleIds, int count);
 // showing, so it may have let one go.
 void RequestStoreCoverArt(const unsigned long *titleIds, int count);
 
-enum CoverDataKind
-{
-    COVER_DATA_PIXELS, // from the cache: the front, COVER_FRONT_W * COVER_SIZE ARGB pixels
-    COVER_DATA_JPEG    // just downloaded: the whole case insert, to be cut down
-};
+// The Store's tiles are half size: a long letter can't then fill memory.
+#define COVER_STORE_SIZE (COVER_SIZE / 2)
 
 struct CoverData
 {
     unsigned long titleId;
-    CoverDataKind kind;
-    unsigned char *bytes; // malloc'd; the caller frees it
-    unsigned long size;
-    bool forStore;        // asked for by RequestStoreCoverArt
+    unsigned long *pixels; // the tile, side x side ARGB pixels, malloc'd; the caller frees it
+    int side;              // COVER_SIZE, or COVER_STORE_SIZE for the Store
+    bool forStore;         // asked for by RequestStoreCoverArt
 };
 
-// The next cover ready to draw, if there is one. The UI thread calls this.
+// The next tile ready to draw, if there is one. The UI thread calls this.
 bool TakeCoverData(CoverData *out);
-
-// Hands back the front cut from a COVER_DATA_JPEG, to be written to the
-// cache. Takes ownership of pixels (COVER_FRONT_W * COVER_SIZE, malloc'd).
-void SaveCoverPixels(unsigned long titleId, unsigned long *pixels);
-
-// A download that wouldn't decode: noted like a game with no cover, so it
-// isn't downloaded again on every launch.
-void MarkCoverUnusable(unsigned long titleId);
 
 #endif

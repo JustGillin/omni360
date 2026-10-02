@@ -20,8 +20,9 @@
 //
 // A worker thread fetches what the Store asks for and keeps each file as it
 // came, in game:\Store - XXXXXXXX.bg.jpg, XXXXXXXX.s1.jpg, XXXXXXXX.cat.xml.
-// Images are decoded into textures on the UI thread (GameListUI's
-// PumpStoreArt), as D3DX needs the device; details are parsed here. A game
+// Images are decoded here too (ImageDecode, which needs no device) - a
+// screenshot to half size - so the UI thread (GameListUI's PumpStoreArt)
+// only copies the pixels into a texture; details are parsed here. A game
 // the marketplace has nothing for gets a .none marker, asked again after a
 // week, like the covers.
 
@@ -47,16 +48,12 @@ struct StoreArtData
 {
     unsigned long titleId;
     StoreArtKind kind;
-    unsigned char *bytes; // the JPEG, malloc'd; the caller frees it
-    unsigned long size;
+    unsigned long *pixels; // width x height ARGB pixels, malloc'd; the caller frees it
+    int width, height;
 };
 
 // The next image ready, if there is one. The UI thread calls this.
 bool TakeStoreArt(StoreArtData *out);
-
-// An image that wouldn't decode: its cached file is removed, so it's
-// fetched again next launch rather than failing every time.
-void DiscardStoreArt(unsigned long titleId, StoreArtKind kind);
 
 // A game's catalog entry, as the game page shows it. Strings are UTF-8 and
 // may be empty.
