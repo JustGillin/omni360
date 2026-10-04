@@ -6,8 +6,9 @@ A homebrew Xbox 360 app for getting games and their extras onto a modded console
 - **Store** — about 1,500 Xbox 360 disc games from archive.org, A to Z, each with its own page: wallpaper, description, screenshots and its regional versions. Install one and it downloads and installs as Games on Demand, playable from the dashboard or Aurora without the disc.
 - **Xbox Live Arcade** — about 740 arcade games from archive.org's `XBOX_360_XBLA` collection, A to Z, installed straight into the console's content folder.
 - **Xbox Live Indie Games** — about 3,450 indie games from archive.org's `XBOX_360_XBLIG` collections, A to Z. The update indie games need to start on a console offline from Xbox Live is installed with the first one.
+- **Original Xbox** — about 500 Original Xbox games the 360 can play, from archive.org's Redump collections, installed as Games on Demand. The 360's backward compatibility files need to be on the console.
 - **DLC and title updates** for any game, from archive.org's `msx360gcdlc` and `microsoft_xbox360_title-updates` collections, installed where the console expects them.
-- **Disc installs** — a game disc in the drive can be copied to the hard drive as Games on Demand.
+- **Disc installs** — a game disc in the drive, Xbox 360 or Original Xbox, can be copied to the hard drive as Games on Demand.
 - **Queue** — everything downloads and installs in the background while you carry on browsing.
 
 <table>
@@ -31,17 +32,17 @@ A homebrew Xbox 360 app for getting games and their extras onto a modded console
 
 Omni360 began as a fork of [X-Store](https://github.com/951261/X-Store) by 951261, and still runs on its networking core: the HTTPS client and BearSSL/TLS wrapper, DNS lookups and drive mounting. Everything Vimm's Lair/full-game/ISO/updater-related has been stripped out; the library, the Store, the installers and the interface are new. See `docs/` for X-Store's own original architecture notes (still accurate for the networking layer this fork builds on).
 
-**Status: beta (0.4.0-beta), working on real hardware.** Installs from the Store, Xbox Live Arcade, Xbox Live Indie Games, DLC, title updates and disc installs have all been run end to end on a modded console with a real library.
+**Status: beta (0.5.0-beta), working on real hardware.** Installs from the Store, Xbox Live Arcade, Xbox Live Indie Games, Original Xbox, DLC, title updates and disc installs have all been run end to end on a modded console with a real library.
 
 ## Using it
 
 The sidebar on the left has four pages; left on the D-pad reaches it from any page, and **B** steps back a level (B on the sidebar exits).
 
 - **Your Library** — **A** on a game opens its page. A game disc in the drive is the first tile: **A** installs it to the hard drive, **X** opens its page, and once it's installed **A** finds its DLC and **START** installs it again. **Y** is a shortcut to Settings.
-- **Store** — three featured games, then A to Z. **A** on a letter shows its games; **A** on a game opens its page. **XBLA** and **XBLIG** open Xbox Live Arcade's and Indie Games' own A to Z. Search and Original Xbox are on the way, marked SOON.
+- **Store** — three featured games, then A to Z. **A** on a letter shows its games; **A** on a game opens its page. **XBLA**, **XBLIG** and **Original Xbox** open their own A to Z. Search is on the way, marked SOON.
 - **A game's page** — **Install** installs the chosen version, every disc of it; choose another version from the list beside the description first. The button shows Queued, Installing, Installed, or Install remaining for a multi-disc game partly installed. **Find DLC** and **Title updates** search archive.org and show what's there to pick from. **Uninstall** appears once something is installed, and removes the game but leaves its DLC and title updates.
 - **Queue** — what's downloading, waiting and done. **X** stops a download or install, or clears a finished one.
-- **Settings** — the games folder, your archive.org keys, and updates: Omni360 checks GitHub for a newer version when it starts (this can be turned off), shows what's new in it, and installs it and restarts when you choose Update. It only installs a release signed with the project's key (`tools/sign_release.py`), keeping the previous version beside it as `.old`.
+- **Settings** — the games folder and more library folders, your archive.org keys, the disc read speed (lower it for a scratched disc that fails partway through), and updates: Omni360 checks GitHub for a newer version when it starts (this can be turned off), shows what's new in it, and installs it and restarts when you choose Update. It only installs a release signed with the project's key (`tools/sign_release.py`), keeping the previous version beside it as `.old`.
 
 Nothing downloads without you choosing it, and a popup says when each job finishes or fails.
 
@@ -75,7 +76,7 @@ Two optional `settings.txt` keys change where things go, and the games folder ca
 
 **DLC and title updates** (`ArchiveOrgDLC.cpp`, `DownloadQueue.cpp`) send your keys as an `Authorization: LOW <access>:<secret>` header, look the game up by name in the collection's metadata, then read each matching archive's file table with a few small `Range` requests: RAR interleaves headers with each file's data, so that walks the chain one entry at a time; ZIP keeps a central directory at the tail, so one request covers it. Each file is downloaded through archive.org's `/download/{item}/{archive}/{path}` form, which serves the member already extracted, and written where the console expects it: DLC by its own `TitleID\ContentType\ContentID` path, lowercase `tu...` updates into `Content\0000000000000000\{TitleID}\000B0000\`, and uppercase `TU_...` updates into `{device}\Cache\`. Avatar-item packs (content type `00009000`) are filtered out.
 
-**Disc installs** (`DiscWorker.cpp`) watch the tray, read the disc that goes in, and convert it to Games on Demand the same way, reading ahead from the drive at full speed.
+**Disc installs** (`DiscWorker.cpp`) watch the tray, read the disc that goes in, and convert it to Games on Demand the same way, reading ahead from the drive at full speed (or the speed set in Settings). An Original Xbox disc is read only where its files are, as the 360's drive refuses its security ranges.
 
 ## Known limitations
 
