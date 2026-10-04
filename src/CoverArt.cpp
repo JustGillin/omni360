@@ -28,8 +28,10 @@ DESCRIPTION : Box art from Xbox Live, else xboxunity.net, looked up, cut to a ti
 
 // The marker for a game neither source has a cover for. Renamed from "none",
 // which meant only that xboxunity had none - those are asked about again, as
-// Xbox Live may have one.
-#define NONE_EXTENSION     "none2"
+// Xbox Live may have one - and then from "none2", which a download that
+// wouldn't decode also left, without xboxunity being asked: an Original
+// Xbox game's, as Halo's was. Each old marker is asked about again, once.
+#define NONE_EXTENSION     "none3"
 
 // The cache file: a small header, then the front of the case as pixels.
 // Older files read as unusable and are fetched again, once: "OMC1" held the
@@ -161,6 +163,8 @@ static void WriteCoverFile(unsigned long titleId, const unsigned long *pixels)
     CoverPath(titleId, NONE_EXTENSION, noneMarker, sizeof(noneMarker));
     CoverPath(titleId, "none", oldMarker, sizeof(oldMarker));
     DeleteFileA(oldMarker); // superseded either way
+    CoverPath(titleId, "none2", oldMarker, sizeof(oldMarker));
+    DeleteFileA(oldMarker);
 
     FILE *f = fopen(path, "wb");
     if (f == NULL)
@@ -351,24 +355,6 @@ static FetchResult FetchXboxUnityCover(unsigned long titleId, Download *out)
     out->bytes = (unsigned char *)image;
     out->size = (unsigned long)imageLen;
     return FETCH_OK;
-}
-
-// Xbox Live's box art, else xboxunity's. No cover only when both answered
-// and had none; a failure to ask either is tried again another time.
-static FetchResult FetchCover(unsigned long titleId, Download *out)
-{
-    const FetchResult xboxLive = FetchBoxArt(titleId, out);
-    if (xboxLive == FETCH_OK)
-        return FETCH_OK;
-
-    const FetchResult xboxUnity = FetchXboxUnityCover(titleId, out);
-    if (xboxUnity == FETCH_OK)
-        return FETCH_OK;
-    if (xboxLive == FETCH_FAILED || xboxUnity == FETCH_FAILED)
-        return FETCH_FAILED;
-
-    dprintf("[covers] %08lX: no cover on Xbox Live or xboxunity\n", titleId);
-    return FETCH_NO_COVER;
 }
 
 // ---------------------------------------------------------------------------
@@ -565,6 +551,65 @@ static unsigned long *ComposeTile(const unsigned long *front, int banner)
     return square;
 }
 
+// A download decoded and cut to the front of its case - NULL, logged, if it
+// isn't an image that decodes.
+static unsigned long *DecodeFront(unsigned long titleId, const char *source, Download &download, int *imageW,
+                                  int *imageH, double *decodeMs, double *cutMs)
+{
+    const double decodeStarted = ImageTimerMs();
+    unsigned long *image = DecodeImageToArgb(download.bytes, download.size, imageW, imageH);
+    free(download.bytes);
+    download.bytes = NULL;
+    const double cutStarted = ImageTimerMs();
+    *decodeMs = cutStarted - decodeStarted;
+    if (image == NULL || *imageW < 16 || *imageH < 16)
+    {
+        dprintf("[covers] %08lX: %s's download wouldn't decode (%s, %lu bytes)\n", titleId, source,
+                ImageDecodeError(), download.size);
+        if (image != NULL)
+            free(image);
+        return NULL;
+    }
+    unsigned long *front = CutCoverFront(image, *imageW, *imageH);
+    free(image);
+    *cutMs = ImageTimerMs() - cutStarted;
+    return front;
+}
+
+// The front of a game's cover: Xbox Live's box art, else xboxunity's - also
+// when Xbox Live's download isn't an image. *outFailed: a source couldn't be
+// asked, so it's worth trying again another time; otherwise a NULL means
+// neither has a cover for it.
+static unsigned long *FetchFront(unsigned long titleId, unsigned long *downloaded, int *imageW, int *imageH,
+                                 double *decodeMs, double *cutMs, bool *outFailed)
+{
+    *outFailed = false;
+    Download download = {NULL, 0};
+
+    const FetchResult xboxLive = FetchBoxArt(titleId, &download);
+    if (xboxLive == FETCH_OK)
+    {
+        *downloaded = download.size;
+        unsigned long *front = DecodeFront(titleId, "Xbox Live", download, imageW, imageH, decodeMs, cutMs);
+        if (front != NULL)
+            return front;
+    }
+
+    const FetchResult xboxUnity = FetchXboxUnityCover(titleId, &download);
+    if (xboxUnity == FETCH_OK)
+    {
+        *downloaded = download.size;
+        unsigned long *front = DecodeFront(titleId, "xboxunity", download, imageW, imageH, decodeMs, cutMs);
+        if (front != NULL)
+            return front;
+    }
+
+    *outFailed = (xboxLive == FETCH_FAILED || xboxUnity == FETCH_FAILED);
+    if (!*outFailed)
+        dprintf("[covers] %08lX: no cover on Xbox Live or xboxunity\n", titleId);
+    return NULL;
+}
+
 // ---------------------------------------------------------------------------
 // The worker
 // ---------------------------------------------------------------------------
@@ -626,36 +671,25 @@ static DWORD WINAPI CoverEntry(LPVOID)
         if (fresh)
         {
             if (RecentlyMissing(titleId))
-                continue;
-
-            Download download = {NULL, 0};
-            FetchResult result = FetchCover(titleId, &download);
-            if (result == FETCH_NO_COVER)
-                WriteCoverFile(titleId, NULL);
-            if (result != FETCH_OK)
-                continue;
-
-            const double decodeStarted = ImageTimerMs();
-            downloaded = download.size;
-            unsigned long *image = DecodeImageToArgb(download.bytes, download.size, &imageW, &imageH);
-            free(download.bytes);
-            const double cutStarted = ImageTimerMs();
-            decodeMs = cutStarted - decodeStarted;
-            if (image == NULL || imageW < 16 || imageH < 16)
             {
-                dprintf("[covers] %08lX: the download wouldn't decode (%s)\n", titleId, ImageDecodeError());
-                if (image != NULL)
-                    free(image);
-                // Noted like a game with no cover, so it isn't downloaded
-                // again on every launch.
-                WriteCoverFile(titleId, NULL);
+                // Once a session each, so the log says why a tile has no cover.
+                if (!forStore)
+                    dprintf("[covers] %08lX: no cover was found within the last week - not asking again yet\n",
+                            titleId);
                 continue;
             }
-            front = CutCoverFront(image, imageW, imageH);
-            free(image);
-            cutMs = ImageTimerMs() - cutStarted;
+
+            bool failed = false;
+            front = FetchFront(titleId, &downloaded, &imageW, &imageH, &decodeMs, &cutMs, &failed);
             if (front == NULL)
+            {
+                // Neither has one - or neither's would decode - so it isn't
+                // asked about on every launch. A source that couldn't be
+                // asked is tried again next time.
+                if (!failed)
+                    WriteCoverFile(titleId, NULL);
                 continue;
+            }
         }
 
         // The banner beside it, and the Store's halved.
