@@ -148,7 +148,38 @@ struct DirWalk
     bool foundXbe;           // an Original Xbox disc's
     unsigned long xbeSector;
     unsigned long xbeSize;
+
+    // Every table's and file's byte range, when UsedSectorsSource wants
+    // them; NULL otherwise.
+    unsigned long long *starts;
+    unsigned long long *ends;
+    unsigned long extentCount;
+    unsigned long extentCapacity;
+    bool outOfMemory;
 };
+
+static void AddExtent(DirWalk &w, unsigned long long start, unsigned long long length)
+{
+    if (w.starts == NULL || length == 0 || w.outOfMemory)
+        return;
+    if (w.extentCount == w.extentCapacity)
+    {
+        const unsigned long grow = w.extentCapacity * 2;
+        unsigned long long *s2 = (unsigned long long *)realloc(w.starts, grow * sizeof(unsigned long long));
+        if (s2 == NULL) { w.outOfMemory = true; return; }
+        w.starts = s2;
+        unsigned long long *e2 = (unsigned long long *)realloc(w.ends, grow * sizeof(unsigned long long));
+        if (e2 == NULL) { w.outOfMemory = true; return; }
+        w.ends = e2;
+        w.extentCapacity = grow;
+    }
+    // Whole sectors: the drive reads no less.
+    const unsigned long long first = start / SECTOR_SIZE * SECTOR_SIZE;
+    const unsigned long long end = (start + length + SECTOR_SIZE - 1) / SECTOR_SIZE * SECTOR_SIZE;
+    w.starts[w.extentCount] = first;
+    w.ends[w.extentCount] = end;
+    w.extentCount++;
+}
 
 static bool NameIs(const unsigned char *name, unsigned long len, const char *want)
 {
@@ -185,6 +216,7 @@ static GodResult WalkTable(DirWalk &w, unsigned long sector, unsigned long size,
 
     if (tableStart + size > w.usedEnd)
         w.usedEnd = tableStart + size;
+    AddExtent(w, tableStart, tableBytes);
 
     unsigned char *table = (unsigned char *)malloc((size_t)tableBytes);
     if (table == NULL)
@@ -233,6 +265,8 @@ static GodResult WalkTable(DirWalk &w, unsigned long sector, unsigned long size,
                 unsigned long long end = (unsigned long long)entSector * SECTOR_SIZE + entSize;
                 if (end > w.usedEnd)
                     w.usedEnd = end;
+                if (!isDirectory) // a directory's table is added as it's walked
+                    AddExtent(w, (unsigned long long)entSector * SECTOR_SIZE, entSize);
             }
 
             if (isRoot && !isDirectory && NameIs(e + 14, nameLen, "default.xex"))
@@ -470,6 +504,128 @@ GodResult GodInspect(GodSource *source, GodImageInfo *outInfo)
                         + (unsigned long long)(outInfo->partCount - 1) * PART_FILE_BLOCKS * BLOCK_SIZE
                         + PartFileSize(LastPartBlocks(*outInfo));
     return GOD_OK;
+}
+
+// ---------------------------------------------------------------------------
+// Reading only what the filesystem uses
+// ---------------------------------------------------------------------------
+
+UsedSectorsSource::UsedSectorsSource(GodSource *inner_, unsigned long long rootOffset_)
+    : inner(inner_), rootOffset(rootOffset_), starts(NULL), ends(NULL), count(0), usedBytes(0)
+{
+}
+
+UsedSectorsSource::~UsedSectorsSource()
+{
+    free(starts);
+    free(ends);
+}
+
+GodResult UsedSectorsSource::Build()
+{
+    unsigned char descriptor[28];
+    if (!inner->ReadAt(rootOffset + 0x20 * SECTOR_SIZE, descriptor, sizeof(descriptor)))
+        return GOD_READ_FAILED;
+    if (memcmp(descriptor, kVolumeMagic, 20) != 0)
+        return GOD_NOT_A_DISC_IMAGE;
+
+    DirWalk w;
+    memset(&w, 0, sizeof(w));
+    w.source = inner;
+    w.rootOffset = rootOffset;
+    w.partitionSize = inner->Size() - rootOffset;
+    w.usedEnd = 0x21 * SECTOR_SIZE;
+    w.extentCapacity = 1024;
+    w.starts = (unsigned long long *)malloc(w.extentCapacity * sizeof(unsigned long long));
+    w.ends = (unsigned long long *)malloc(w.extentCapacity * sizeof(unsigned long long));
+    if (w.starts == NULL || w.ends == NULL)
+    {
+        free(w.starts);
+        free(w.ends);
+        return GOD_OUT_OF_MEMORY;
+    }
+    // The volume descriptor and what's before it.
+    AddExtent(w, 0, 0x22 * SECTOR_SIZE);
+
+    GodResult result = WalkTable(w, ReadLE32(descriptor + 20), ReadLE32(descriptor + 24), 0, true);
+    if (result == GOD_OK && w.outOfMemory)
+        result = GOD_OUT_OF_MEMORY;
+    if (result != GOD_OK)
+    {
+        free(w.starts);
+        free(w.ends);
+        return result;
+    }
+
+    // Sorted by start (an insertion sort: a disc's files are nearly in
+    // order already), then overlapping and touching ranges merged.
+    for (unsigned long i = 1; i < w.extentCount; ++i)
+    {
+        const unsigned long long ks = w.starts[i], ke = w.ends[i];
+        unsigned long j = i;
+        while (j > 0 && w.starts[j - 1] > ks)
+        {
+            w.starts[j] = w.starts[j - 1];
+            w.ends[j] = w.ends[j - 1];
+            --j;
+        }
+        w.starts[j] = ks;
+        w.ends[j] = ke;
+    }
+    unsigned long n = 0;
+    for (unsigned long i = 0; i < w.extentCount; ++i)
+    {
+        if (n > 0 && w.starts[i] <= w.ends[n - 1])
+        {
+            if (w.ends[i] > w.ends[n - 1])
+                w.ends[n - 1] = w.ends[i];
+        }
+        else
+        {
+            w.starts[n] = w.starts[i];
+            w.ends[n] = w.ends[i];
+            n++;
+        }
+    }
+
+    free(starts);
+    free(ends);
+    starts = w.starts;
+    ends = w.ends;
+    count = n;
+    usedBytes = 0;
+    for (unsigned long i = 0; i < n; ++i)
+        usedBytes += ends[i] - starts[i];
+    return GOD_OK;
+}
+
+bool UsedSectorsSource::ReadAt(unsigned long long offset, void *buffer, unsigned long len)
+{
+    if (starts == NULL || offset < rootOffset)
+        return inner->ReadAt(offset, buffer, len);
+
+    unsigned char *out = (unsigned char *)buffer;
+    memset(out, 0, len);
+    const unsigned long long from = offset - rootOffset, to = from + len;
+
+    // The first range that ends after from, by binary search.
+    unsigned long lo = 0, hi = count;
+    while (lo < hi)
+    {
+        const unsigned long mid = (lo + hi) / 2;
+        if (ends[mid] <= from)
+            lo = mid + 1;
+        else
+            hi = mid;
+    }
+    for (unsigned long i = lo; i < count && starts[i] < to; ++i)
+    {
+        const unsigned long long a = (starts[i] > from) ? starts[i] : from;
+        const unsigned long long b = (ends[i] < to) ? ends[i] : to;
+        if (b > a && !inner->ReadAt(rootOffset + a, out + (a - from), (unsigned long)(b - a)))
+            return false;
+    }
+    return true;
 }
 
 // ---------------------------------------------------------------------------

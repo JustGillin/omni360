@@ -109,6 +109,37 @@ struct GodTimings
     double progressMs;  // inside the progress callback (drawing, the cancel prompt)
 };
 
+// A disc image read through its filesystem: only the sectors its files and
+// directory tables are in are read from the source, and every other byte
+// comes back zero. An Original Xbox disc needs it - the 360's drive refuses
+// to read its security ranges (status 0xC0000010), stretches no file is ever
+// in, so copying the partition straight through stops at the first one.
+// It skips the filler between files too, so it's faster.
+//
+// Build() walks the filesystem once; until it succeeds, reads pass straight
+// through. Reading only forward is fine - ReadAheadSource sits on top.
+class UsedSectorsSource : public GodSource
+{
+public:
+    UsedSectorsSource(GodSource *inner, unsigned long long rootOffset);
+    ~UsedSectorsSource();
+
+    GodResult Build();
+    bool ReadAt(unsigned long long offset, void *buffer, unsigned long len);
+    unsigned long long Size() { return inner->Size(); }
+
+    unsigned long long UsedBytes() const { return usedBytes; } // for the log
+    unsigned long Extents() const { return count; }
+
+private:
+    GodSource *inner;
+    unsigned long long rootOffset;
+    unsigned long long *starts; // partition-relative byte ranges, sorted and merged
+    unsigned long long *ends;
+    unsigned long count;
+    unsigned long long usedBytes;
+};
+
 // Largest icon the header has room for (metadata version 2 thumbnails).
 #define GOD_ICON_MAX 0x3D00
 

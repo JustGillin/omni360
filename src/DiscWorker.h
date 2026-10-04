@@ -61,6 +61,14 @@ bool StopDiscWorker(DWORD timeoutMs);
 // After the games folder is changed in Settings.
 void SetDiscWorkerGamesPath(const char *gamesPath);
 
+// How fast the drive spins for a disc install: XamSetDvdSpindleSpeed's
+// value, 1 (the drive's quiet speed, about 1.6 MB/s) to 4 (full, about 6.6
+// at the start of a disc). A scratched disc that fails at full speed may read
+// slower. Takes effect from the next install.
+#define DISC_SPEED_SLOWEST 1
+#define DISC_SPEED_FULL    4
+void SetDiscReadSpeed(int speed);
+
 void GetDiscInfo(DiscInfo *out);
 
 // Whether this disc is installed in the games folder already - its header is

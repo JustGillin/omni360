@@ -39,8 +39,18 @@ extern "C" VOID HalSendSMCMessage(LPVOID input, LPVOID output);
 // game disc, and a third of Aurora's Disc to GOD.
 extern "C" DWORD XamSetDvdSpindleSpeed(DWORD speed);
 
-#define SPINDLE_SPEED_FULL     4
 #define SPINDLE_SPEED_NORMAL   0 // measured the same as never setting it
+
+// The speed for installs, from Settings - full unless lowered for a disc that
+// won't read at it.
+static volatile LONG g_spindleSpeed = DISC_SPEED_FULL;
+
+void SetDiscReadSpeed(int speed)
+{
+    if (speed < DISC_SPEED_SLOWEST) speed = DISC_SPEED_SLOWEST;
+    if (speed > DISC_SPEED_FULL) speed = DISC_SPEED_FULL;
+    InterlockedExchange(&g_spindleSpeed, speed);
+}
 #define SPINDLE_SETTLE_MS      3000
 
 #define TRAY_POLL_MS        500
@@ -303,10 +313,13 @@ static void RunInstall(DiscJob *job, const char *gamesPath)
     }
 
     // Full speed for the copy - about four times what the drive does left
-    // alone - and back to normal afterwards, so a film or a game played next
-    // isn't any louder for it.
-    DWORD spindleResult = XamSetDvdSpindleSpeed(SPINDLE_SPEED_FULL);
-    dprintf("[disc] spindle to full speed -> 0x%08lX\n", (unsigned long)spindleResult);
+    // alone - unless Settings lowered it for a disc that won't read at that,
+    // and back to normal afterwards, so a film or a game played next isn't
+    // any louder for it.
+    const DWORD speed = (DWORD)g_spindleSpeed;
+    DWORD spindleResult = XamSetDvdSpindleSpeed(speed);
+    dprintf("[disc] spindle to speed %lu of %d -> 0x%08lX\n", (unsigned long)speed, DISC_SPEED_FULL,
+            (unsigned long)spindleResult);
     Sleep(SPINDLE_SETTLE_MS);
 
     EnterCriticalSection(&g_lock);
@@ -337,7 +350,28 @@ static void RunInstall(DiscJob *job, const char *gamesPath)
         // The drive keeps reading while each group is hashed and written -
         // see ReadAhead.h. 8MB ahead, in 1MB reads. Scoped so its thread has
         // finished with the drive before the drive is closed.
-        ReadAheadSource ahead(&disc, 1024 * 1024, 8);
+        //
+        // An Original Xbox disc is read through its filesystem - only the
+        // sectors its files are in - as the drive refuses its security
+        // ranges; see UsedSectorsSource.
+        UsedSectorsSource used(&disc, info.rootOffset);
+        GodSource *source = &disc;
+        if (info.title.contentType == GOD_CONTENT_XBOX_ORIGINAL)
+        {
+            const GodResult built = used.Build();
+            if (built == GOD_OK)
+            {
+                source = &used;
+                dprintf("[disc] Original Xbox disc: reading only its files - %I64u MB in %lu ranges\n",
+                        used.UsedBytes() / (1024 * 1024), used.Extents());
+            }
+            else
+            {
+                dprintf("[disc] Original Xbox disc: couldn't map its files (%s) - reading it all\n",
+                        GodResultText(built));
+            }
+        }
+        ReadAheadSource ahead(source, 1024 * 1024, 8);
         result = GodConvert(&ahead, info, gamesPath, job->snap.gameName, iconSize > 0 ? icon : NULL, iconSize,
                             InstallProgressCallback, &progress, packagePath, sizeof(packagePath), &timings);
     }

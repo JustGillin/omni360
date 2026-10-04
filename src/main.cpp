@@ -55,6 +55,7 @@ extern "C" NTSTATUS XexGetModuleHandle(PSZ moduleName, PHANDLE outHandle);
 #define SETTINGS_TEMP_FILE "game:\\settings.tmp"
 #define GAMES_PATH_KEY "games-path: "
 #define UPDATE_CHECK_KEY "check-updates: " // "off" stops the check at start
+#define DISC_SPEED_KEY "disc-speed: "       // 1 to 4, DiscWorker's spindle speed for installs
 #define CREDENTIALS_FILE "game:\\ArchiveOrgKeys.txt"
 #define CONTENT_BASE_PATH_DEFAULT "Hdd1:\\Content\\0000000000000000"
 #define GAMES_PATH_DEFAULT CONTENT_BASE_PATH_DEFAULT // where the dashboard itself keeps installed games
@@ -1175,7 +1176,8 @@ enum SettingsRow
     SETTINGS_ROW_UPDATES,      // the version, and what's newer
     SETTINGS_ROW_UPDATE_CHECKS, // checking at start, on or off
     SETTINGS_ROW_LIBRARY_FOLDER, // one of g_folderRows: A adds or removes it
-    SETTINGS_ROW_ADD_FOLDER    // another library folder, typed
+    SETTINGS_ROW_ADD_FOLDER,   // another library folder, typed
+    SETTINGS_ROW_DISC_SPEED    // how fast a disc install reads the disc
 };
 
 // Rescans with the library folders now in settings.txt.
@@ -1410,6 +1412,58 @@ static void ShowUpdate()
     XLaunchNewImage(xexPath, 0);
 }
 
+// The disc read speed from settings.txt, 1 to 4; full when it isn't set.
+static int DiscSpeedSetting()
+{
+    // Read here rather than by GetSettingsPath, which takes a value of three
+    // characters or more - a path's - and so would never see "3".
+    int speed = DISC_SPEED_FULL;
+    FILE *fd = fopen(SETTINGS_FILE, "r");
+    if (fd != NULL)
+    {
+        char line[128];
+        const size_t keyLen = strlen(DISC_SPEED_KEY);
+        while (fgets(line, sizeof(line), fd) != NULL)
+        {
+            if (line[0] != '#' && strncmp(line, DISC_SPEED_KEY, keyLen) == 0)
+            {
+                speed = atoi(line + keyLen);
+                break;
+            }
+        }
+        fclose(fd);
+    }
+    if (speed < DISC_SPEED_SLOWEST || speed > DISC_SPEED_FULL)
+        speed = DISC_SPEED_FULL;
+    return speed;
+}
+
+static const char *DiscSpeedName(int speed)
+{
+    switch (speed)
+    {
+    case 1:  return "Slowest";
+    case 2:  return "Slow";
+    case 3:  return "Fast";
+    default: return "Full";
+    }
+}
+
+// A on the disc speed's row: the next one down, from the slowest back to full.
+static void CycleDiscSpeed()
+{
+    int speed = DiscSpeedSetting() - 1;
+    if (speed < DISC_SPEED_SLOWEST)
+        speed = DISC_SPEED_FULL;
+    char value[8];
+    _snprintf(value, sizeof(value), "%d", speed);
+    value[sizeof(value) - 1] = '\0';
+    if (!SetSettingsValue(DISC_SPEED_KEY, value))
+        ShowMessageUI("Not saved", "settings.txt could not be written.", NULL);
+    SetDiscReadSpeed(speed);
+    dprintf("Disc read speed set to %d (%s)\n", speed, DiscSpeedName(speed));
+}
+
 static void ToggleUpdateChecks()
 {
     const bool on = !UpdateChecksOn();
@@ -1438,7 +1492,7 @@ static void RemoveKeys(SettingsOutcome &outcome)
 // so it doubles as a summary of how the app is set up. Rebuilt whenever
 // something may have changed it, rather than every frame - each rebuild reads
 // the keys file.
-#define MAX_SETTINGS_ROWS (6 + MAX_FOLDER_ROWS)
+#define MAX_SETTINGS_ROWS (7 + MAX_FOLDER_ROWS)
 
 struct SettingsPage
 {
@@ -1521,6 +1575,18 @@ static void BuildSettingsPage(SettingsPage &page, const Library &lib, const char
     page.sublabels[page.count] = "Type the path of a folder to look for games in";
     page.rows[page.count++] = SETTINGS_ROW_ADD_FOLDER;
 
+    // How fast a disc install reads.
+    static char speedLabel[48];
+    const int speed = DiscSpeedSetting();
+    _snprintf(speedLabel, sizeof(speedLabel), "Disc read speed: %s", DiscSpeedName(speed));
+    speedLabel[sizeof(speedLabel) - 1] = '\0';
+    page.sections[page.count] = "Disc installs";
+    page.labels[page.count] = speedLabel;
+    page.sublabels[page.count] = speed == DISC_SPEED_FULL
+                                     ? "The fastest. If a disc fails partway through, try a slower speed - A to change"
+                                     : "Slower, and gentler on a scratched disc. A to change; Full is the fastest";
+    page.rows[page.count++] = SETTINGS_ROW_DISC_SPEED;
+
     page.sections[page.count] = "archive.org keys";
     page.labels[page.count] = haveKeys ? "Change archive.org keys" : "Add archive.org keys";
     page.sublabels[page.count] = page.keysSub;
@@ -1588,6 +1654,7 @@ static SettingsOutcome RunSettingsRow(SettingsRow row, int arg, Library &lib, ch
     case SETTINGS_ROW_UPDATE_CHECKS: ToggleUpdateChecks(); break;
     case SETTINGS_ROW_LIBRARY_FOLDER: ToggleLibraryFolder(arg, lib, gamesPath, outcome); break;
     case SETTINGS_ROW_ADD_FOLDER:   AddLibraryFolder(lib, gamesPath, outcome); break;
+    case SETTINGS_ROW_DISC_SPEED:   CycleDiscSpeed(); break;
     }
 
     return outcome;
@@ -3687,6 +3754,7 @@ int main()
     // sees it - the first thing to read when a download won't connect.
     StartNetwork();
     LogNetworkStatus();
+    SetDiscReadSpeed(DiscSpeedSetting());
 
     if (!InitGameListUI())
     {
