@@ -76,7 +76,11 @@ struct StoreGame
     unsigned short firstVersion; // into kStoreReleases
     unsigned char versionCount;
     char letter;                 // its A-Z tile: 'A' to 'Z', or '#'
+    unsigned char system;        // STORE_SYSTEM_*: left out of this file's rows, so 360
 };
+
+#define STORE_SYSTEM_XBOX360 0
+#define STORE_SYSTEM_XBOX    1 // XboxTitles.h's games, the Original Xbox's
 
 #define STORE_GAME_COUNT       1492
 #define STORE_MAX_LETTER_GAMES 149 // the most under one letter

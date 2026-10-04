@@ -44,8 +44,10 @@ struct DiscInfo
     unsigned long long outputSize; // what the installed package takes
     char reason[96];          // DISC_UNREADABLE: why
 
-    // No name: main.cpp looks it up in the bundled title list (TitleNames.h),
-    // which is a static table and better included in one place.
+    // An Original Xbox disc's own name, from its default.xbe; empty for a 360
+    // disc. main.cpp looks a name up first - the bundled title list
+    // (TitleNames.h), then the Store's lists - and falls back on this.
+    char name[96];
     bool installing;          // a job for this disc is waiting or running
 };
 

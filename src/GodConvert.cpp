@@ -31,7 +31,7 @@ and were checked against the original Iso2God and iso2god-rs.
 #define BLOCKS_PER_PART   (BLOCKS_PER_GROUP * GROUPS_PER_PART)   // 0xA1C4 data blocks in a full Data file
 #define PART_FILE_BLOCKS  (1 + GROUPS_PER_PART * (1 + BLOCKS_PER_GROUP)) // 0xA290 blocks on disk, hashes included
 #define HEADER_SIZE       0xB000UL
-#define CONTENT_TYPE_GOD  0x00007000UL
+#define CONTENT_TYPE_GOD  GOD_CONTENT_GAMES_ON_DEMAND
 
 // Limits on what the directory walk will accept. Real discs are nowhere near
 // them; they are there so a corrupt table can't recurse forever or claim a
@@ -99,8 +99,8 @@ const char *GodResultText(GodResult result)
     case GOD_OK:               return "OK";
     case GOD_NOT_A_DISC_IMAGE: return "This isn't an Xbox 360 disc image";
     case GOD_BAD_FILESYSTEM:   return "The disc image's file table is damaged";
-    case GOD_NO_DEFAULT_XEX:   return "No default.xex on the disc (original Xbox discs aren't supported yet)";
-    case GOD_BAD_XEX:          return "The disc's default.xex has no title information";
+    case GOD_NO_DEFAULT_XEX:   return "No default.xex or default.xbe on the disc";
+    case GOD_BAD_XEX:          return "The disc's default.xex or default.xbe has no title information";
     case GOD_READ_FAILED:      return "Couldn't read the disc image";
     case GOD_WRITE_FAILED:     return "Couldn't write the game to the drive";
     case GOD_OUT_OF_MEMORY:    return "Out of memory";
@@ -144,6 +144,10 @@ struct DirWalk
     bool foundXex;
     unsigned long xexSector;
     unsigned long xexSize;
+
+    bool foundXbe;           // an Original Xbox disc's
+    unsigned long xbeSector;
+    unsigned long xbeSize;
 };
 
 static bool NameIs(const unsigned char *name, unsigned long len, const char *want)
@@ -237,6 +241,12 @@ static GodResult WalkTable(DirWalk &w, unsigned long sector, unsigned long size,
                 w.xexSector = entSector;
                 w.xexSize = entSize;
             }
+            if (isRoot && !isDirectory && NameIs(e + 14, nameLen, "default.xbe"))
+            {
+                w.foundXbe = true;
+                w.xbeSector = entSector;
+                w.xbeSize = entSize;
+            }
 
             if (isDirectory)
             {
@@ -299,6 +309,7 @@ static GodResult ReadExecutionInfo(GodSource *source, unsigned long long xexOffs
     if (!source->ReadAt(xexOffset + infoOffset, info, sizeof(info)))
         return GOD_READ_FAILED;
 
+    out->contentType = CONTENT_TYPE_GOD;
     out->mediaId = ReadBE32(info + 0);
     out->version = ReadBE32(info + 4);
     out->baseVersion = ReadBE32(info + 8);
@@ -308,6 +319,71 @@ static GodResult ReadExecutionInfo(GodSource *source, unsigned long long xexOffs
     out->discNumber = info[18];
     out->discCount = info[19];
     return GOD_OK;
+}
+
+// An Original Xbox disc's title, from default.xbe's certificate: "XBEH", the
+// image's base address at 0x104 and the certificate's at 0x118, both
+// little-endian; the certificate's title ID at +0x08 and version at +0xAC.
+// The disc has no media ID - its title ID names the package - and is one
+// disc, as iso2god-rs writes it.
+static GodResult ReadXbeInfo(GodSource *source, unsigned long long xbeOffset, unsigned long xbeSize,
+                             GodTitleInfo *out)
+{
+    unsigned char head[0x120];
+    if (xbeSize < sizeof(head))
+        return GOD_BAD_XEX;
+    if (!source->ReadAt(xbeOffset, head, sizeof(head)))
+        return GOD_READ_FAILED;
+    if (memcmp(head, "XBEH", 4) != 0)
+        return GOD_BAD_XEX;
+
+    const unsigned long base = ReadLE32(head + 0x104);
+    const unsigned long certAddress = ReadLE32(head + 0x118);
+    if (certAddress < base)
+        return GOD_BAD_XEX;
+    const unsigned long certOffset = certAddress - base;
+    unsigned char cert[0xB0];
+    if (certOffset > xbeSize || xbeSize - certOffset < sizeof(cert))
+        return GOD_BAD_XEX;
+    if (!source->ReadAt(xbeOffset + certOffset, cert, sizeof(cert)))
+        return GOD_READ_FAILED;
+
+    out->contentType = GOD_CONTENT_XBOX_ORIGINAL;
+    out->titleId = ReadLE32(cert + 0x08);
+    out->mediaId = out->titleId;
+    out->version = ReadLE32(cert + 0xAC);
+    out->baseVersion = 0;
+    out->platform = 0;
+    out->executableType = 0;
+    out->discNumber = 1;
+    out->discCount = 1;
+
+    // The certificate's title name: 40 UTF-16LE characters at +0x0C, to
+    // UTF-8 - the name to show for a disc no list knows.
+    size_t n = 0;
+    for (int i = 0; i < 40; ++i)
+    {
+        const unsigned long c = ReadLE16(cert + 0x0C + i * 2);
+        if (c == 0)
+            break;
+        if (c < 0x80 && n + 1 < sizeof(out->name))
+            out->name[n++] = (char)c;
+        else if (c < 0x800 && n + 2 < sizeof(out->name))
+        {
+            out->name[n++] = (char)(0xC0 | (c >> 6));
+            out->name[n++] = (char)(0x80 | (c & 0x3F));
+        }
+        else if (c >= 0x800 && n + 3 < sizeof(out->name))
+        {
+            out->name[n++] = (char)(0xE0 | (c >> 12));
+            out->name[n++] = (char)(0x80 | ((c >> 6) & 0x3F));
+            out->name[n++] = (char)(0x80 | (c & 0x3F));
+        }
+    }
+    out->name[n] = '\0';
+    while (n > 0 && out->name[n - 1] == ' ')
+        out->name[--n] = '\0';
+    return out->titleId != 0 ? GOD_OK : GOD_BAD_XEX;
 }
 
 // Blocks in the last Data file, and its size on disk with its hash blocks.
@@ -359,14 +435,25 @@ GodResult GodInspect(GodSource *source, GodImageInfo *outInfo)
     if (result != GOD_OK)
         return result;
 
-    if (!w.foundXex)
+    if (w.foundXex)
+    {
+        unsigned long long xexStart = (unsigned long long)w.xexSector * SECTOR_SIZE;
+        if (xexStart + w.xexSize > w.partitionSize)
+            return GOD_BAD_FILESYSTEM;
+        result = ReadExecutionInfo(source, type->rootOffset + xexStart, w.xexSize, &outInfo->title);
+    }
+    else if (w.foundXbe)
+    {
+        // An Original Xbox disc.
+        unsigned long long xbeStart = (unsigned long long)w.xbeSector * SECTOR_SIZE;
+        if (xbeStart + w.xbeSize > w.partitionSize)
+            return GOD_BAD_FILESYSTEM;
+        result = ReadXbeInfo(source, type->rootOffset + xbeStart, w.xbeSize, &outInfo->title);
+    }
+    else
+    {
         return GOD_NO_DEFAULT_XEX;
-
-    unsigned long long xexStart = (unsigned long long)w.xexSector * SECTOR_SIZE;
-    if (xexStart + w.xexSize > w.partitionSize)
-        return GOD_BAD_FILESYSTEM;
-
-    result = ReadExecutionInfo(source, type->rootOffset + xexStart, w.xexSize, &outInfo->title);
+    }
     if (result != GOD_OK)
         return result;
 
@@ -392,7 +479,7 @@ GodResult GodInspect(GodSource *source, GodImageInfo *outInfo)
 struct PackagePaths
 {
     char titleDir[512];   // <root>\<TitleID>
-    char typeDir[512];    // <root>\<TitleID>\00007000
+    char typeDir[512];    // <root>\<TitleID>\00007000, or 00005000
     char header[512];     // ...\<MediaID>
     char dataDir[512];    // ...\<MediaID>.data
 };
@@ -400,7 +487,8 @@ struct PackagePaths
 static bool BuildPaths(const char *contentRoot, const GodTitleInfo &title, PackagePaths *p)
 {
     int n1 = _snprintf(p->titleDir, sizeof(p->titleDir), "%s\\%08lX", contentRoot, title.titleId);
-    int n2 = _snprintf(p->typeDir, sizeof(p->typeDir), "%s\\%08lX", p->titleDir, CONTENT_TYPE_GOD);
+    const unsigned long type = (title.contentType != 0) ? title.contentType : CONTENT_TYPE_GOD;
+    int n2 = _snprintf(p->typeDir, sizeof(p->typeDir), "%s\\%08lX", p->titleDir, type);
     int n3 = _snprintf(p->header, sizeof(p->header), "%s\\%08lX", p->typeDir, title.mediaId);
     int n4 = _snprintf(p->dataDir, sizeof(p->dataDir), "%s.data", p->header);
 
@@ -451,6 +539,8 @@ static bool PathsFor(const char *contentRoot, unsigned long titleId, unsigned lo
     memset(&title, 0, sizeof(title));
     title.titleId = titleId;
     title.mediaId = mediaId;
+    // Named for its title ID: an Original Xbox package.
+    title.contentType = (mediaId == titleId) ? GOD_CONTENT_XBOX_ORIGINAL : CONTENT_TYPE_GOD;
     return BuildPaths(contentRoot, title, p);
 }
 
@@ -541,12 +631,13 @@ static void BuildHeader(unsigned char *h, const GodImageInfo &info, const char *
     memset(h + 0x22C, 0xFF, 8);    // first license entry: any
 
     WriteBE32(h + 0x340, 0xAD0E);  // header size
-    WriteBE32(h + 0x344, CONTENT_TYPE_GOD);
+    WriteBE32(h + 0x344, info.title.contentType != 0 ? info.title.contentType : CONTENT_TYPE_GOD);
     WriteBE32(h + 0x348, 2);       // metadata version
 
     // Version and base version (0x358, 0x35C) stay 0, as in both reference
     // tools' output.
-    WriteBE32(h + 0x354, info.title.mediaId);
+    // An Original Xbox disc has no media ID: 0, as iso2god-rs writes it.
+    WriteBE32(h + 0x354, info.title.contentType == GOD_CONTENT_XBOX_ORIGINAL ? 0 : info.title.mediaId);
     WriteBE32(h + 0x360, info.title.titleId);
     h[0x364] = info.title.platform;
     h[0x365] = info.title.executableType;

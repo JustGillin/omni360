@@ -7,6 +7,12 @@
 //   <contentRoot>\<TitleID>\00007000\<MediaID>          the header ("LIVE" package)
 //   <contentRoot>\<TitleID>\00007000\<MediaID>.data\    Data0000, Data0001, ...
 //
+// An Original Xbox disc - default.xbe rather than default.xex - becomes the
+// same kind of package, as the 360's backwards compatibility runs them, of
+// content type 00005000 and named for its title ID, as iso2god-rs does:
+//
+//   <contentRoot>\<TitleID>\00005000\<TitleID>          and <TitleID>.data\
+//
 // Only the disc's game partition is copied, and only up to the last sector
 // its files use - the rest of a disc is padding, which is why a GOD install
 // is smaller than the ISO it came from.
@@ -37,10 +43,15 @@ public:
     virtual unsigned long long Size() = 0;
 };
 
-// The execution ID from default.xex - what the header says the package is.
+#define GOD_CONTENT_GAMES_ON_DEMAND 0x00007000UL // a 360 disc's package
+#define GOD_CONTENT_XBOX_ORIGINAL   0x00005000UL // an Original Xbox disc's
+
+// The execution ID from default.xex - what the header says the package is -
+// or for an Original Xbox disc, what default.xbe's certificate says.
 struct GodTitleInfo
 {
-    unsigned long mediaId;
+    unsigned long contentType;   // GOD_CONTENT_*
+    unsigned long mediaId;       // an Original Xbox disc has none: its title ID, which names the package
     unsigned long version;
     unsigned long baseVersion;
     unsigned long titleId;
@@ -48,6 +59,7 @@ struct GodTitleInfo
     unsigned char executableType;
     unsigned char discNumber;
     unsigned char discCount;
+    char name[96];               // an Original Xbox disc's, from default.xbe's certificate, UTF-8; else empty
 };
 
 struct GodImageInfo
@@ -68,8 +80,8 @@ enum GodResult
     GOD_OK,
     GOD_NOT_A_DISC_IMAGE,    // no Xbox game partition found
     GOD_BAD_FILESYSTEM,      // the partition's directory tables don't parse
-    GOD_NO_DEFAULT_XEX,      // no \default.xex (an original Xbox disc has default.xbe - not handled yet)
-    GOD_BAD_XEX,             // default.xex has no readable execution ID
+    GOD_NO_DEFAULT_XEX,      // neither \default.xex nor an Original Xbox disc's \default.xbe
+    GOD_BAD_XEX,             // default.xex has no readable execution ID, or default.xbe no certificate
     GOD_READ_FAILED,
     GOD_WRITE_FAILED,
     GOD_OUT_OF_MEMORY,
@@ -124,7 +136,8 @@ GodResult GodConvert(GodSource *source, const GodImageInfo &info, const char *co
 // or 0 if it has no header - compare it with GodImageInfo::outputSize to tell
 // a finished install from a partial one. GodRemovePackage removes whatever of
 // the package exists, header first; the title's other content (DLC, title
-// updates) is left alone.
+// updates) is left alone. A media ID equal to the title ID means an Original
+// Xbox package, in 00005000 - a 360 disc's media ID never is its title ID.
 unsigned long long GodPackageSizeOnDisk(const char *contentRoot, unsigned long titleId, unsigned long mediaId);
 void GodRemovePackage(const char *contentRoot, unsigned long titleId, unsigned long mediaId);
 

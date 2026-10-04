@@ -9,6 +9,7 @@
 // the games by the name shown. This only reads its tables.
 
 #include "StoreTitles.h" // StoreDisc, StoreRelease, StoreGame, STORE_REGION_*, STORE_MAX_*
+#include "XboxTitles.h"  // the Original Xbox's, in the same shapes: XBOX_MAX_*
 
 // The archive.org item a disc is in, e.g. "microsoft_xbox360_b_part2".
 const char *StoreItemOf(const StoreDisc *disc);
@@ -18,8 +19,23 @@ const char *StoreItemOf(const StoreDisc *disc);
 // listed. Returns how many were written.
 int StoreGamesForLetter(char letter, StoreGame *out, int maxGames);
 
-// One game by its title ID, any of its discs' - for the featured tiles.
-// False if no game has it.
+// The same for the Original Xbox games the 360 runs, from XboxTitles.h
+// (make_store_titles.py --system xbox). Their StoreGames say
+// STORE_SYSTEM_XBOX, and everything below finds their versions and discs
+// in that file's tables from it.
+int XboxGamesForLetter(char letter, StoreGame *out, int maxGames);
+
+// Whether a disc is an Original Xbox one - installed as one, content type
+// 00005000 rather than Games on Demand's 00007000.
+bool StoreDiscIsXbox(const StoreDisc *disc);
+
+// Whether a title ID is an Original Xbox game's - one of XboxTitles.h's
+// discs. For its tile's banner.
+bool IsXboxTitleId(unsigned long titleId);
+
+// One game by its title ID, any of its discs' - for the featured tiles, and
+// a library game's page: the 360's, then the Original Xbox's. False if no
+// game has it.
 bool StoreGameByTitleId(unsigned long titleId, StoreGame *out);
 
 // One of a game's versions, USA and World first; NULL out of range.

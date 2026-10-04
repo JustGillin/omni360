@@ -110,8 +110,11 @@ void ClearInstallMarker()
 
 bool IsDiscInstalled(const char *gamesPath, unsigned long titleId, unsigned long mediaId)
 {
+    // An Original Xbox package is named for its title ID, in 00005000 (see
+    // GodConvert.h); a 360 disc's for its media ID, in 00007000.
     char headerPath[600];
-    _snprintf(headerPath, sizeof(headerPath), "%s\\%08lX\\00007000\\%08lX", gamesPath, titleId, mediaId);
+    _snprintf(headerPath, sizeof(headerPath), "%s\\%08lX\\%s\\%08lX", gamesPath, titleId,
+              mediaId == titleId ? "00005000" : "00007000", mediaId);
     headerPath[sizeof(headerPath) - 1] = '\0';
 
     FILE *f = fopen(headerPath, "rb");
@@ -182,6 +185,8 @@ static bool ProbeDisc(bool lastChance)
         g_disc.discNumber = info.title.discNumber;
         g_disc.discCount = info.title.discCount;
         g_disc.outputSize = info.outputSize;
+        memcpy(g_disc.name, info.title.name, sizeof(g_disc.name));
+        g_disc.name[sizeof(g_disc.name) - 1] = '\0';
         g_disc.reason[0] = '\0';
         SetDiscState(DISC_READY);
         g_disc.changeCount++; // a different game is a change even from READY to READY
@@ -190,6 +195,7 @@ static bool ProbeDisc(bool lastChance)
     {
         g_disc.titleId = 0;
         g_disc.mediaId = 0;
+        g_disc.name[0] = '\0';
         _snprintf(g_disc.reason, sizeof(g_disc.reason), "%s",
                   result == GOD_NOT_A_DISC_IMAGE ? "Not an Xbox 360 game disc" : GodResultText(result));
         g_disc.reason[sizeof(g_disc.reason) - 1] = '\0';

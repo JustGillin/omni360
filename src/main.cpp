@@ -1771,6 +1771,13 @@ static void WaitForExit()
 // Downloads and disc installs, on one Queue page.
 #define MAX_QUEUE_ROWS (MAX_QUEUE_JOBS + MAX_DISC_JOBS + MAX_GAME_JOBS)
 
+// The Store's sections with A-Z pages of their own - the arcade's and the
+// indie games' lists (ArcadeSet), and the Original Xbox's discs.
+#define SECTION_XBLA  ARCADE_XBLA
+#define SECTION_XBLIG ARCADE_XBLIG
+#define SECTION_XBOX  2
+#define SECTION_COUNT 3
+
 struct Shell
 {
     ShellPage page;
@@ -1820,17 +1827,19 @@ struct Shell
     float storeScroll;
     bool storeArtRequested;
 
-    // A section's A-Z page - Xbox Live Arcade's or the Indie Games' - open
-    // over the front page, and which letter has focus on each. A letter's
-    // grid and a game's page open over it in turn.
+    // A section's A-Z page - Xbox Live Arcade's, the Indie Games' or the
+    // Original Xbox's - open over the front page, and which letter has focus
+    // on each. A letter's grid and a game's page open over it in turn.
     bool storeInSection;
-    ArcadeSet storeSection;
-    int sectionFocus[2];   // by ArcadeSet
+    int storeSection;      // SECTION_*
+    int sectionFocus[SECTION_COUNT];
 
     // A letter's games, while one is open over the front page - or over a
-    // section's page, storeLetterArcade, its games then in g_arcadeGames.
+    // section's page, storeLetterSection; an arcade or indie letter's games
+    // are in g_arcadeGames (storeLetterArcade), others in g_storeGames.
     bool storeInLetter;
     bool storeLetterArcade;
+    int storeLetterSection; // SECTION_*, or -1 for the front page's
     char storeLetter;
     int storeGameCount; // in g_storeGames
     int storeSelected;
@@ -1854,9 +1863,9 @@ static const XblaGame *g_arcadeGames[MAX_STORE_GAMES];
 static StoreTileView g_storeTiles[MAX_STORE_GAMES];
 
 // How many games each letter of a section has, counted when its page first
-// opens - a letter with none is drawn faded. By ArcadeSet.
-static int g_sectionLetterCounts[2][STORE_LETTER_COUNT];
-static bool g_sectionCounted[2] = { false, false };
+// opens - a letter with none is drawn faded. By SECTION_*.
+static int g_sectionLetterCounts[SECTION_COUNT][STORE_LETTER_COUNT];
+static bool g_sectionCounted[SECTION_COUNT] = { false, false, false };
 
 // The game whose page is open, and its version rows - the labels are the
 // table's, the sizes formatted here.
@@ -1904,12 +1913,13 @@ static const StoreButtonView kStoreButtons[STORE_BUTTON_COUNT] = {
     { "Search", true },
     { "XBLA", false },
     { "XBLIG", false },
-    { "Original Xbox", true },
+    { "Original Xbox", false },
 };
 
 // What each will be, for the toast when one's pressed before then.
 #define STORE_BUTTON_XBLA  1
 #define STORE_BUTTON_XBLIG 2
+#define STORE_BUTTON_XBOX  3
 static const char *const kStoreButtonsSoon[STORE_BUTTON_COUNT] = {
     "Search every game by name",
     "Xbox Live Arcade games, A to Z",
@@ -2012,20 +2022,38 @@ static void StepStoreFocus(WORD nav, Shell &shell)
 }
 
 // A section's name, for its page and its letters' headers.
-static const char *SectionName(ArcadeSet set)
+static const char *SectionName(int section)
 {
-    return set == ARCADE_XBLIG ? "Xbox Live Indie Games" : "Xbox Live Arcade";
+    switch (section)
+    {
+    case SECTION_XBLIG: return "Xbox Live Indie Games";
+    case SECTION_XBOX:  return "Original Xbox";
+    default:            return "Xbox Live Arcade";
+    }
 }
 
-// A letter's grid - the discs', or with arcade, the open section's.
-static void OpenStoreLetter(Shell &shell, char letter, bool arcade)
+// A section's games under one letter, counted - for its A-Z page's faded
+// letters.
+static int SectionGamesForLetter(int section, char letter)
 {
+    if (section == SECTION_XBOX)
+        return XboxGamesForLetter(letter, g_storeGames, MAX_STORE_GAMES);
+    static const XblaGame *scratch[MAX_STORE_GAMES];
+    return ArcadeGamesForLetter((ArcadeSet)section, letter, scratch, MAX_STORE_GAMES);
+}
+
+// A letter's grid - the front page's discs, or with section >= 0 that
+// section's: the arcade's or indie games' lists, or the Original Xbox's
+// discs, which are disc games like the front page's.
+static void OpenStoreLetter(Shell &shell, char letter, int section)
+{
+    const bool arcade = (section == SECTION_XBLA || section == SECTION_XBLIG);
     if (arcade)
     {
         // Indie games have no covers to ask for: they're drawn with the
         // indie banner and their names instead (see IndieTile).
-        const bool indie = (shell.storeSection == ARCADE_XBLIG);
-        shell.storeGameCount = ArcadeGamesForLetter(shell.storeSection, letter, g_arcadeGames, MAX_STORE_GAMES);
+        const bool indie = (section == SECTION_XBLIG);
+        shell.storeGameCount = ArcadeGamesForLetter((ArcadeSet)section, letter, g_arcadeGames, MAX_STORE_GAMES);
         for (int i = 0; i < shell.storeGameCount; ++i)
         {
             g_storeTiles[i].titleId = indie ? 0 : g_arcadeGames[i]->titleId;
@@ -2036,7 +2064,8 @@ static void OpenStoreLetter(Shell &shell, char letter, bool arcade)
     }
     else
     {
-        shell.storeGameCount = StoreGamesForLetter(letter, g_storeGames, MAX_STORE_GAMES);
+        shell.storeGameCount = (section == SECTION_XBOX) ? XboxGamesForLetter(letter, g_storeGames, MAX_STORE_GAMES)
+                                                         : StoreGamesForLetter(letter, g_storeGames, MAX_STORE_GAMES);
         for (int i = 0; i < shell.storeGameCount; ++i)
         {
             g_storeTiles[i].titleId = g_storeGames[i].titleId;
@@ -2046,6 +2075,7 @@ static void OpenStoreLetter(Shell &shell, char letter, bool arcade)
         }
     }
     shell.storeLetterArcade = arcade;
+    shell.storeLetterSection = section;
     shell.storeLetter = letter;
     shell.storeSelected = 0;
     shell.storeLetterScroll = 0;
@@ -2056,7 +2086,7 @@ static StoreLetterView MakeStoreLetterView(const Shell &shell)
 {
     StoreLetterView view;
     view.letter = shell.storeLetter;
-    view.section = shell.storeLetterArcade ? SectionName(shell.storeSection) : NULL;
+    view.section = shell.storeLetterSection >= 0 ? SectionName(shell.storeLetterSection) : NULL;
     view.tiles = g_storeTiles;
     view.count = shell.storeGameCount;
     view.selected = shell.storeSelected;
@@ -2111,22 +2141,24 @@ static void StepStoreLetter(const UiInput &input, Shell &shell)
 
 // A letter's first screenful of covers, asked for as its tile takes focus, so
 // they're arriving before it's opened. The letter's page asks again for what
-// it shows once it is. Indie games have none.
-static void PrefetchLetterCovers(char letter, bool arcade, ArcadeSet set)
+// it shows once it is. section is as OpenStoreLetter's. Indie games have
+// none.
+static void PrefetchLetterCovers(char letter, int section)
 {
     unsigned long ids[24];
     int idCount = 0;
-    if (arcade)
+    if (section == SECTION_XBLIG)
+        return;
+    if (section == SECTION_XBLA)
     {
-        if (set == ARCADE_XBLIG)
-            return;
-        const int n = ArcadeGamesForLetter(set, letter, g_arcadeGames, 24);
+        const int n = ArcadeGamesForLetter(ARCADE_XBLA, letter, g_arcadeGames, 24);
         for (int i = 0; i < n; ++i)
             ids[idCount++] = g_arcadeGames[i]->titleId;
     }
     else
     {
-        const int n = StoreGamesForLetter(letter, g_storeGames, MAX_STORE_GAMES);
+        const int n = (section == SECTION_XBOX) ? XboxGamesForLetter(letter, g_storeGames, MAX_STORE_GAMES)
+                                                : StoreGamesForLetter(letter, g_storeGames, MAX_STORE_GAMES);
         for (int i = 0; i < n && idCount < 24; ++i)
         {
             if (g_storeGames[i].titleId != 0)
@@ -2137,26 +2169,28 @@ static void PrefetchLetterCovers(char letter, bool arcade, ArcadeSet set)
 }
 
 // A section's A-Z page, over the front page.
-static void OpenSection(Shell &shell, ArcadeSet set)
+static void OpenSection(Shell &shell, int section)
 {
-    if (!g_sectionCounted[set])
+    if (!g_sectionCounted[section])
     {
-        static const XblaGame *scratch[MAX_STORE_GAMES];
         for (int i = 0; i < STORE_LETTER_COUNT; ++i)
-            g_sectionLetterCounts[set][i] = ArcadeGamesForLetter(set, kStoreLetters[i], scratch, MAX_STORE_GAMES);
-        g_sectionCounted[set] = true;
+            g_sectionLetterCounts[section][i] = SectionGamesForLetter(section, kStoreLetters[i]);
+        g_sectionCounted[section] = true;
     }
-    shell.storeSection = set;
+    shell.storeSection = section;
     shell.storeInSection = true;
-    PrefetchLetterCovers(kStoreLetters[shell.sectionFocus[set]], true, set);
+    PrefetchLetterCovers(kStoreLetters[shell.sectionFocus[section]], section);
 }
 
 static StoreSectionView MakeSectionView(const Shell &shell)
 {
-    const ArcadeSet set = shell.storeSection;
-    static char subtitle[64];
-    _snprintf(subtitle, sizeof(subtitle), "%d games from archive.org",
-              set == ARCADE_XBLIG ? XBLIG_GAME_COUNT : XBLA_GAME_COUNT);
+    const int set = shell.storeSection;
+    static char subtitle[96];
+    if (set == SECTION_XBOX)
+        _snprintf(subtitle, sizeof(subtitle), "%d games from archive.org that the 360 can run", XBOX_GAME_COUNT);
+    else
+        _snprintf(subtitle, sizeof(subtitle), "%d games from archive.org",
+                  set == SECTION_XBLIG ? XBLIG_GAME_COUNT : XBLA_GAME_COUNT);
     subtitle[sizeof(subtitle) - 1] = '\0';
 
     StoreSectionView view;
@@ -2242,13 +2276,24 @@ static void OpenStoreGame(Shell &shell, const StoreGame &game)
     const unsigned long titleId = g_storeGame.titleId;
     if (titleId != 0)
     {
-        RequestStoreDetails(titleId);
-        RequestStoreArt(titleId, STORE_ART_BACKGROUND);
+        // Xbox Live's catalog has nothing for an Original Xbox game; its
+        // cover comes from xboxunity.
+        if (game.system != STORE_SYSTEM_XBOX)
+        {
+            RequestStoreDetails(titleId);
+            RequestStoreArt(titleId, STORE_ART_BACKGROUND);
+        }
         RequestStoreCoverArt(&titleId, 1);
     }
 }
 
 // Whether the page open is an indie game's.
+// Whether the page open is an Original Xbox game's.
+static bool StoreGameIsXbox()
+{
+    return g_storeArcade == NULL && g_storeGame.system == STORE_SYSTEM_XBOX;
+}
+
 static bool StoreGameIsIndie()
 {
     return g_storeArcade != NULL && ArcadeSetOf(g_storeArcade) == ARCADE_XBLIG;
@@ -2488,14 +2533,15 @@ static bool CanUninstallStoreVersion(const Library &lib, const Shell &shell)
 }
 
 // "<root>\TITLEID\00007000\MEDIAID" split up: the content root, and the
-// media ID. False for a path that isn't a Games on Demand package's.
+// media ID - or an Original Xbox package's, "...\00005000\TITLEID", whose
+// name is its title ID. False for a path that is neither.
 static bool ParseGodPackagePath(const char *path, char *root, size_t rootSize, unsigned long *mediaId)
 {
     const char *name = strrchr(path, '\\');
     if (name == NULL || strlen(name + 1) != 8)
         return false;
     const char *type = name - 9; // "\00007000"
-    if (type < path || _strnicmp(type, "\\00007000", 9) != 0)
+    if (type < path || (_strnicmp(type, "\\00007000", 9) != 0 && _strnicmp(type, "\\00005000", 9) != 0))
         return false;
     const char *title = type - 9; // "\TITLEID"
     if (title < path || title[0] != '\\')
@@ -2526,9 +2572,11 @@ static int RemoveLibraryGamePackages(const InstalledGame &game)
         return DeleteFileA(game.packagePath) ? 1 : 0;
     }
 
-    // Each disc's header in the 00007000 folder, by media ID.
+    // Each disc's header in its folder, by media ID - 00007000, or an
+    // Original Xbox game's 00005000, as its own path says.
+    const char *typeDir = strstr(game.packagePath, "\\00005000\\") != NULL ? "00005000" : "00007000";
     char folder[600], pattern[620];
-    _snprintf(folder, sizeof(folder), "%s\\%08lX\\00007000", root, game.titleId);
+    _snprintf(folder, sizeof(folder), "%s\\%08lX\\%s", root, game.titleId, typeDir);
     folder[sizeof(folder) - 1] = '\0';
     _snprintf(pattern, sizeof(pattern), "%s\\*", folder);
     pattern[sizeof(pattern) - 1] = '\0';
@@ -2749,6 +2797,15 @@ static StoreGameView MakeStoreGameView(Shell &shell, const Library &lib)
         view.description = "An Xbox Live Indie Game. Xbox Live's catalog doesn't list indie games, "
                            "so there's no description or screenshots for it here.";
     }
+    else if (StoreGameIsXbox())
+    {
+        // The archive's DLC and title updates are the 360's.
+        view.buttonDisabled[1] = view.buttonDisabled[2] = true;
+        view.loading = false;
+        view.description = "An Original Xbox game, played through the 360's backwards compatibility - it's "
+                           "on Microsoft's list of the games that run. Xbox Live's catalog doesn't list "
+                           "Original Xbox games, so there's no description or screenshots for it here.";
+    }
     if (view.install == STORE_INSTALL_INSTALLED || (view.install == STORE_INSTALL_AVAILABLE && partial))
         view.buttons[3] = "Uninstall"; // else not shown
 
@@ -2944,15 +3001,17 @@ static void ActOnStoreFocus(Shell &shell)
     else if (i < STORE_FOCUS_LETTERS)
     {
         if (i - STORE_FOCUS_BUTTONS == STORE_BUTTON_XBLA)
-            OpenSection(shell, ARCADE_XBLA);
+            OpenSection(shell, SECTION_XBLA);
         else if (i - STORE_FOCUS_BUTTONS == STORE_BUTTON_XBLIG)
-            OpenSection(shell, ARCADE_XBLIG);
+            OpenSection(shell, SECTION_XBLIG);
+        else if (i - STORE_FOCUS_BUTTONS == STORE_BUTTON_XBOX)
+            OpenSection(shell, SECTION_XBOX);
         else
             ShowShellToast("Coming soon", kStoreButtonsSoon[i - STORE_FOCUS_BUTTONS], UI_TOAST_INFO);
     }
     else
     {
-        OpenStoreLetter(shell, kStoreLetters[i - STORE_FOCUS_LETTERS], false);
+        OpenStoreLetter(shell, kStoreLetters[i - STORE_FOCUS_LETTERS], -1);
     }
 }
 
@@ -3043,6 +3102,20 @@ static LibraryPageView MakeLibraryView(const Shell &shell, const Library &lib, c
 // different one - its name is looked up, whether it's installed is checked,
 // and its box art is asked for; the selection moves with the games, so the
 // one you were on stays selected as the disc's tile comes and goes.
+// A disc's name: the bundled title list's, then the Store's - its 360 and
+// Original Xbox lists - then an Original Xbox disc's own, from default.xbe.
+// NULL if none has one.
+static const char *KnownDiscName(const DiscInfo &disc)
+{
+    const char *listed = LookupTitleName(disc.titleId);
+    if (listed != NULL)
+        return listed;
+    static StoreGame game;
+    if (StoreGameByTitleId(disc.titleId, &game) && game.name != NULL && game.name[0] != '\0')
+        return game.name;
+    return disc.name[0] != '\0' ? disc.name : NULL;
+}
+
 static void UpdateDisc(Shell &shell, const Library &lib, const char *gamesPath)
 {
     DiscInfo now;
@@ -3058,7 +3131,7 @@ static void UpdateDisc(Shell &shell, const Library &lib, const char *gamesPath)
     {
         if (now.state == DISC_READY)
         {
-            const char *listed = LookupTitleName(now.titleId);
+            const char *listed = KnownDiscName(now);
             if (listed != NULL)
                 _snprintf(shell.discName, sizeof(shell.discName), "%s", listed);
             else
@@ -3154,11 +3227,11 @@ static bool DiscTileAction(Shell &shell, const Library &lib, const char *gamesPa
         return true;
     }
 
-    // A name from the bundled list is used as it is; without one, the
+    // A name from a list or the disc is used as it is; without one, the
     // keyboard asks rather than installing it as "Title XXXXXXXX".
     std::string name = shell.discName;
     bool tookScreen = shell.discInstalled; // the confirm above
-    if (LookupTitleName(disc.titleId) == NULL)
+    if (KnownDiscName(disc) == NULL)
     {
         tookScreen = true;
         if (!AskDiscName(shell.discName, disc.discNumber, disc.discCount, name))
@@ -3492,9 +3565,9 @@ static void RenderGamePageFrame(Shell &shell, const Library &lib, UiHint *hints,
             hintCount = AddHint(hints, hintCount, UI_BUTTON_A, L"Choose this version", L"Choose");
         else if (f == STORE_GAME_FOCUS_BUTTONS && StoreVersionCount() > 0)
             hintCount = AddHint(hints, hintCount, UI_BUTTON_A, L"Install", L"Install");
-        else if (f == STORE_GAME_FOCUS_BUTTONS + 1 && !StoreGameIsIndie())
+        else if (f == STORE_GAME_FOCUS_BUTTONS + 1 && !StoreGameIsIndie() && !StoreGameIsXbox())
             hintCount = AddHint(hints, hintCount, UI_BUTTON_A, L"Find DLC", L"DLC");
-        else if (f == STORE_GAME_FOCUS_BUTTONS + 2 && !StoreGameIsIndie())
+        else if (f == STORE_GAME_FOCUS_BUTTONS + 2 && !StoreGameIsIndie() && !StoreGameIsXbox())
             hintCount = AddHint(hints, hintCount, UI_BUTTON_A, L"Find title updates", L"Updates");
         else if (f == STORE_GAME_FOCUS_BUTTONS + 3)
             hintCount = AddHint(hints, hintCount, UI_BUTTON_A, L"Uninstall");
@@ -3989,7 +4062,8 @@ int main()
                     if (!hadAuth)
                         acted = true;
                 }
-                else if ((f == STORE_GAME_FOCUS_BUTTONS + 1 || f == STORE_GAME_FOCUS_BUTTONS + 2) && !StoreGameIsIndie())
+                else if ((f == STORE_GAME_FOCUS_BUTTONS + 1 || f == STORE_GAME_FOCUS_BUTTONS + 2) && !StoreGameIsIndie() &&
+                         !StoreGameIsXbox())
                 {
                     // The library's pickers, open over this page.
                     OpenPicker(shell.picker, f == STORE_GAME_FOCUS_BUTTONS + 1 ? PICKER_DLC : PICKER_TITLE_UPDATE,
@@ -4033,7 +4107,7 @@ int main()
         }
         else if (shell.page == SHELL_PAGE_STORE && shell.storeInSection)
         {
-            const ArcadeSet set = shell.storeSection;
+            const int set = shell.storeSection;
             const int focusBefore = shell.sectionFocus[set];
             if (pressed & XINPUT_GAMEPAD_B)
             {
@@ -4044,7 +4118,7 @@ int main()
             {
                 const int l = shell.sectionFocus[set];
                 if (g_sectionLetterCounts[set][l] > 0)
-                    OpenStoreLetter(shell, kStoreLetters[l], true);
+                    OpenStoreLetter(shell, kStoreLetters[l], set);
                 else
                     ShowShellToast("No games here", "Nothing in the collection starts with that.", UI_TOAST_INFO);
             }
@@ -4052,7 +4126,7 @@ int main()
                 StepSectionFocus(input.nav, shell);
 
             if (shell.storeInSection && !shell.storeInLetter && shell.sectionFocus[set] != focusBefore)
-                PrefetchLetterCovers(kStoreLetters[shell.sectionFocus[set]], true, set);
+                PrefetchLetterCovers(kStoreLetters[shell.sectionFocus[set]], set);
         }
         else if (shell.page == SHELL_PAGE_STORE)
         {
@@ -4065,7 +4139,7 @@ int main()
                 StepStoreFocus(input.nav, shell);
 
             if (!shell.storeInLetter && shell.storeFocus != focusBefore && shell.storeFocus >= STORE_FOCUS_LETTERS)
-                PrefetchLetterCovers(kStoreLetters[shell.storeFocus - STORE_FOCUS_LETTERS], false, ARCADE_XBLA);
+                PrefetchLetterCovers(kStoreLetters[shell.storeFocus - STORE_FOCUS_LETTERS], -1);
         }
         else if (shell.page == SHELL_PAGE_QUEUE)
         {

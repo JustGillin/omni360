@@ -468,12 +468,17 @@ static bool IsArcadeTitle(unsigned long titleId)
 }
 
 // The banners, each decoded from BoxArtBanner.h the first time a tile needs
-// it: a disc game's [0] and an arcade game's [1]. NULL if one wouldn't decode
-// - or, for the arcade's, while there isn't one - and a tile then gets the
-// disc banner, or failing that a plain green strip. Only the worker uses
-// them, and StopCoverArt lets them go once the worker's stopped.
-static unsigned long *g_bannerPixels[2] = { NULL, NULL };
-static bool g_bannerTried[2] = { false, false };
+// it: a disc game's [BANNER_DISC], an arcade game's and an Original Xbox
+// game's. NULL if one wouldn't decode - or while there isn't one - and a
+// tile then gets the disc banner, or failing that a plain green strip. Only
+// the worker uses them, and StopCoverArt lets them go once the worker's
+// stopped.
+#define BANNER_DISC   0
+#define BANNER_ARCADE 1
+#define BANNER_XBOX   2
+#define BANNER_COUNT  3
+static unsigned long *g_bannerPixels[BANNER_COUNT] = { NULL, NULL, NULL };
+static bool g_bannerTried[BANNER_COUNT] = { false, false, false };
 
 static const unsigned long *DecodeBanner(int which)
 {
@@ -481,9 +486,12 @@ static const unsigned long *DecodeBanner(int which)
         return g_bannerPixels[which];
     g_bannerTried[which] = true;
 
-    const unsigned char *png = (which == 0) ? kBoxArtBannerPng : kBoxArtBannerXblaPng;
-    const unsigned long size = (which == 0) ? kBoxArtBannerPngSize : kBoxArtBannerXblaPngSize;
-    const char *name = (which == 0) ? "banner" : "arcade banner";
+    const unsigned char *png = (which == BANNER_XBOX) ? kBoxArtBannerXboPng
+                             : (which == BANNER_ARCADE) ? kBoxArtBannerXblaPng : kBoxArtBannerPng;
+    const unsigned long size = (which == BANNER_XBOX) ? kBoxArtBannerXboPngSize
+                             : (which == BANNER_ARCADE) ? kBoxArtBannerXblaPngSize : kBoxArtBannerPngSize;
+    const char *name = (which == BANNER_XBOX) ? "Original Xbox banner"
+                     : (which == BANNER_ARCADE) ? "arcade banner" : "banner";
     if (size == 0)
         return NULL;
 
@@ -506,15 +514,25 @@ static const unsigned long *DecodeBanner(int which)
     return pixels;
 }
 
-static const unsigned long *Banner(bool arcade)
+static const unsigned long *Banner(int which)
 {
-    const unsigned long *banner = arcade ? DecodeBanner(1) : NULL;
-    return banner != NULL ? banner : DecodeBanner(0);
+    const unsigned long *banner = (which != BANNER_DISC) ? DecodeBanner(which) : NULL;
+    return banner != NULL ? banner : DecodeBanner(BANNER_DISC);
+}
+
+// Which banner a game's tile gets.
+static int BannerFor(unsigned long titleId)
+{
+    if (IsArcadeTitle(titleId))
+        return BANNER_ARCADE;
+    if (IsXboxTitleId(titleId))
+        return BANNER_XBOX;
+    return BANNER_DISC;
 }
 
 static void ReleaseBanners()
 {
-    for (int i = 0; i < 2; ++i)
+    for (int i = 0; i < BANNER_COUNT; ++i)
     {
         if (g_bannerPixels[i] != NULL)
             PngFree(g_bannerPixels[i]);
@@ -523,22 +541,22 @@ static void ReleaseBanners()
     }
 }
 
-// The tile's square: the banner - the arcade's, for an arcade game - then
-// the front beside it. malloc'd.
-static unsigned long *ComposeTile(const unsigned long *front, bool arcade)
+// The tile's square: the banner - the arcade's or the Original Xbox's, for
+// one of those - then the front beside it. malloc'd.
+static unsigned long *ComposeTile(const unsigned long *front, int banner)
 {
     const int N = COVER_SIZE;
     unsigned long *square = (unsigned long *)malloc((size_t)N * N * 4);
     if (square == NULL)
         return NULL;
 
-    const unsigned long *banner = Banner(arcade);
+    const unsigned long *bannerPixels = Banner(banner);
 
     for (int y = 0; y < N; ++y)
     {
         unsigned long *row = square + y * N;
-        if (banner != NULL)
-            memcpy(row, banner + y * COVER_BANNER_W, COVER_BANNER_W * 4);
+        if (bannerPixels != NULL)
+            memcpy(row, bannerPixels + y * COVER_BANNER_W, COVER_BANNER_W * 4);
         else
             for (int x = 0; x < COVER_BANNER_W; ++x)
                 row[x] = BANNER_GREEN;
@@ -642,7 +660,7 @@ static DWORD WINAPI CoverEntry(LPVOID)
 
         // The banner beside it, and the Store's halved.
         const double tileStarted = ImageTimerMs();
-        unsigned long *tile = ComposeTile(front, IsArcadeTitle(titleId));
+        unsigned long *tile = ComposeTile(front, BannerFor(titleId));
         if (tile != NULL && forStore)
         {
             unsigned long *half = HalveArgb(tile, COVER_SIZE, COVER_SIZE);

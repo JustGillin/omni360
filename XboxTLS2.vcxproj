@@ -381,6 +381,9 @@
     <ClInclude Include="src\UpdateCheck.h" />
     <ClInclude Include="src\UpdateKey.h" />
     <ClInclude Include="src\StoreTitles.h" />
+    <ClInclude Include="src\XboxTitles.h" />
+    <ClInclude Include="src\XbligTitles.h" />
+    <ClInclude Include="src\XblaTitles.h" />
     <ClInclude Include="src\InflateSource.h" />
     <ClInclude Include="src\DownloadQueue.h" />
     <ClInclude Include="src\SearchWorker.h" />

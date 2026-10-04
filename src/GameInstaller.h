@@ -70,7 +70,8 @@ int SnapshotGameJobs(QueueJobSnapshot *out, int maxJobs);
 bool IsGameZipInstalled(const char *zipName);
 
 // The same, with the title and media ID of the package it made - where it is,
-// for uninstalling: <games folder>\TITLEID\00007000\MEDIAID.
+// for uninstalling: <games folder>\TITLEID\00007000\MEDIAID - or for an
+// Original Xbox game, ...\00005000\TITLEID, its media ID being its title ID.
 bool GameZipInstalledAs(const char *zipName, unsigned long *outTitleId, unsigned long *outMediaId);
 
 // After an uninstall: the zip's note is dropped, here and in Installed.txt.
