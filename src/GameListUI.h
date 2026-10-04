@@ -278,6 +278,7 @@ struct StoreTileView
     unsigned long titleId;  // for its cover; 0 for none
     const char *name;
     unsigned short regions; // STORE_REGION_*
+    bool indie;             // an indie game: no cover, so the indie banner beside its name
 };
 
 struct StoreLetterView
@@ -328,6 +329,7 @@ enum StoreInstallState
 struct StoreGameView
 {
     unsigned long titleId;  // for the wallpaper, box and screenshots
+    bool indie;             // an indie game: its box is the indie banner beside its name
     const char *name;
     const char *meta;       // "Bungie Studios  ·  Microsoft  ·  Shooter"; NULL while loading or for none
     const char *players;    // may be NULL

@@ -5,8 +5,8 @@ Media/BoxArtBanner.png: green at the top, "XBOX 360" reading upwards, the
 logo at the foot. It replaces the header strip each cover's own case insert
 carries, which changed design over the console's life, so every tile matches
 whichever era its case came from. An Xbox Live Arcade game's tile has its own,
-Media/BoxArtBannerXbla.png; until there is one, arcade games get the disc
-banner too.
+Media/BoxArtBannerXbla.png, and an indie game's Media/BoxArtBannerXblig.png;
+until there's one, those get the disc banner too.
 
 Each is 94 x 512: in the 512 x 512 tile, the banner takes the left 94 pixels
 and the front of the case the other 418 (CoverArt.h's COVER_BANNER_W and
@@ -29,6 +29,7 @@ EXPECTED = (94, 512)
 BANNERS = [
     ('BoxArtBanner.png', 'kBoxArtBannerPng', True),
     ('BoxArtBannerXbla.png', 'kBoxArtBannerXblaPng', False),
+    ('BoxArtBannerXblig.png', 'kBoxArtBannerXbligPng', False),
 ]
 
 

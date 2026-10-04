@@ -1484,16 +1484,17 @@ struct Shell
     float storeScroll;
     bool storeArtRequested;
 
-    // Xbox Live Arcade's A-Z page, open over the front page, and which
-    // letter has focus on it. A letter's grid and a game's page open over it
-    // in turn.
-    bool storeInXbla;
-    int xblaFocus;
+    // A section's A-Z page - Xbox Live Arcade's or the Indie Games' - open
+    // over the front page, and which letter has focus on each. A letter's
+    // grid and a game's page open over it in turn.
+    bool storeInSection;
+    ArcadeSet storeSection;
+    int sectionFocus[2];   // by ArcadeSet
 
-    // A letter's games, while one is open over the front page - or over the
-    // arcade's page, storeLetterXbla, its games then in g_xblaGames.
+    // A letter's games, while one is open over the front page - or over a
+    // section's page, storeLetterArcade, its games then in g_arcadeGames.
     bool storeInLetter;
-    bool storeLetterXbla;
+    bool storeLetterArcade;
     char storeLetter;
     int storeGameCount; // in g_storeGames
     int storeSelected;
@@ -1510,15 +1511,16 @@ struct Shell
 };
 
 // One letter's games and their tiles - as many as the biggest letter has.
-#define MAX_STORE_GAMES STORE_MAX_LETTER_GAMES
+#define MAX_STORE_GAMES (STORE_MAX_LETTER_GAMES > ARCADE_MAX_LETTER_GAMES ? STORE_MAX_LETTER_GAMES \
+                                                                       : ARCADE_MAX_LETTER_GAMES)
 static StoreGame g_storeGames[MAX_STORE_GAMES];
-static const XblaGame *g_xblaGames[MAX_STORE_GAMES]; // the arcade's biggest letter, S, has 97
+static const XblaGame *g_arcadeGames[MAX_STORE_GAMES];
 static StoreTileView g_storeTiles[MAX_STORE_GAMES];
 
-// How many arcade games each letter has, counted when the page first opens -
-// a letter with none is drawn faded.
-static int g_xblaLetterCounts[STORE_LETTER_COUNT];
-static bool g_xblaCounted = false;
+// How many games each letter of a section has, counted when its page first
+// opens - a letter with none is drawn faded. By ArcadeSet.
+static int g_sectionLetterCounts[2][STORE_LETTER_COUNT];
+static bool g_sectionCounted[2] = { false, false };
 
 // The game whose page is open, and its version rows - the labels are the
 // table's, the sizes formatted here.
@@ -1528,9 +1530,12 @@ static char g_storeVersionSize[STORE_MAX_VERSIONS][24];
 static StoreDetails g_storeDetails;
 static char g_storeMeta[256];
 
-// The arcade game whose page is open, or NULL for a disc's. Its one version
-// row is the RAR - the game, and anything packed with it.
-static const XblaGame *g_storeXbla = NULL;
+// The arcade or indie game whose page is open, or NULL for a disc's. Its one
+// version row is the RAR - the game, and anything packed with it.
+static const XblaGame *g_storeArcade = NULL;
+
+// The content folder, where arcade and indie games install - main's.
+static const char *g_contentBase = "";
 
 // Static rather than on main's stack: the picker's match arrays and the
 // queue's snapshot are tens of KB between them.
@@ -1562,12 +1567,13 @@ static const StoreFeaturedView kStoreFeatured[STORE_FEATURED_COUNT] = {
 static const StoreButtonView kStoreButtons[STORE_BUTTON_COUNT] = {
     { "Search", true },
     { "XBLA", false },
-    { "XBLIG", true },
+    { "XBLIG", false },
     { "Original Xbox", true },
 };
 
 // What each will be, for the toast when one's pressed before then.
-#define STORE_BUTTON_XBLA 1
+#define STORE_BUTTON_XBLA  1
+#define STORE_BUTTON_XBLIG 2
 static const char *const kStoreButtonsSoon[STORE_BUTTON_COUNT] = {
     "Search every game by name",
     "Xbox Live Arcade games, A to Z",
@@ -1669,17 +1675,27 @@ static void StepStoreFocus(WORD nav, Shell &shell)
     shell.storeFocus = i;
 }
 
-// A letter's grid - the discs', or with xbla the arcade's.
-static void OpenStoreLetter(Shell &shell, char letter, bool xbla)
+// A section's name, for its page and its letters' headers.
+static const char *SectionName(ArcadeSet set)
 {
-    if (xbla)
+    return set == ARCADE_XBLIG ? "Xbox Live Indie Games" : "Xbox Live Arcade";
+}
+
+// A letter's grid - the discs', or with arcade, the open section's.
+static void OpenStoreLetter(Shell &shell, char letter, bool arcade)
+{
+    if (arcade)
     {
-        shell.storeGameCount = XblaGamesForLetter(letter, g_xblaGames, MAX_STORE_GAMES);
+        // Indie games have no covers to ask for: they're drawn with the
+        // indie banner and their names instead (see IndieTile).
+        const bool indie = (shell.storeSection == ARCADE_XBLIG);
+        shell.storeGameCount = ArcadeGamesForLetter(shell.storeSection, letter, g_arcadeGames, MAX_STORE_GAMES);
         for (int i = 0; i < shell.storeGameCount; ++i)
         {
-            g_storeTiles[i].titleId = g_xblaGames[i]->titleId;
-            g_storeTiles[i].name = g_xblaGames[i]->name;
-            g_storeTiles[i].regions = 0; // the arcade's RARs don't say
+            g_storeTiles[i].titleId = indie ? 0 : g_arcadeGames[i]->titleId;
+            g_storeTiles[i].name = g_arcadeGames[i]->name;
+            g_storeTiles[i].regions = 0; // the RARs don't say
+            g_storeTiles[i].indie = indie;
         }
     }
     else
@@ -1690,9 +1706,10 @@ static void OpenStoreLetter(Shell &shell, char letter, bool xbla)
             g_storeTiles[i].titleId = g_storeGames[i].titleId;
             g_storeTiles[i].name = g_storeGames[i].name;
             g_storeTiles[i].regions = g_storeGames[i].regions;
+            g_storeTiles[i].indie = false;
         }
     }
-    shell.storeLetterXbla = xbla;
+    shell.storeLetterArcade = arcade;
     shell.storeLetter = letter;
     shell.storeSelected = 0;
     shell.storeLetterScroll = 0;
@@ -1703,7 +1720,7 @@ static StoreLetterView MakeStoreLetterView(const Shell &shell)
 {
     StoreLetterView view;
     view.letter = shell.storeLetter;
-    view.section = shell.storeLetterXbla ? "Xbox Live Arcade" : NULL;
+    view.section = shell.storeLetterArcade ? SectionName(shell.storeSection) : NULL;
     view.tiles = g_storeTiles;
     view.count = shell.storeGameCount;
     view.selected = shell.storeSelected;
@@ -1758,16 +1775,18 @@ static void StepStoreLetter(const UiInput &input, Shell &shell)
 
 // A letter's first screenful of covers, asked for as its tile takes focus, so
 // they're arriving before it's opened. The letter's page asks again for what
-// it shows once it is.
-static void PrefetchLetterCovers(char letter, bool xbla)
+// it shows once it is. Indie games have none.
+static void PrefetchLetterCovers(char letter, bool arcade, ArcadeSet set)
 {
     unsigned long ids[24];
     int idCount = 0;
-    if (xbla)
+    if (arcade)
     {
-        const int n = XblaGamesForLetter(letter, g_xblaGames, 24);
+        if (set == ARCADE_XBLIG)
+            return;
+        const int n = ArcadeGamesForLetter(set, letter, g_arcadeGames, 24);
         for (int i = 0; i < n; ++i)
-            ids[idCount++] = g_xblaGames[i]->titleId;
+            ids[idCount++] = g_arcadeGames[i]->titleId;
     }
     else
     {
@@ -1781,41 +1800,44 @@ static void PrefetchLetterCovers(char letter, bool xbla)
     RequestStoreCoverArt(ids, idCount);
 }
 
-// The arcade's A-Z page, over the front page.
-static void OpenXbla(Shell &shell)
+// A section's A-Z page, over the front page.
+static void OpenSection(Shell &shell, ArcadeSet set)
 {
-    if (!g_xblaCounted)
+    if (!g_sectionCounted[set])
     {
         static const XblaGame *scratch[MAX_STORE_GAMES];
         for (int i = 0; i < STORE_LETTER_COUNT; ++i)
-            g_xblaLetterCounts[i] = XblaGamesForLetter(kStoreLetters[i], scratch, MAX_STORE_GAMES);
-        g_xblaCounted = true;
+            g_sectionLetterCounts[set][i] = ArcadeGamesForLetter(set, kStoreLetters[i], scratch, MAX_STORE_GAMES);
+        g_sectionCounted[set] = true;
     }
-    shell.storeInXbla = true;
-    PrefetchLetterCovers(kStoreLetters[shell.xblaFocus], true);
+    shell.storeSection = set;
+    shell.storeInSection = true;
+    PrefetchLetterCovers(kStoreLetters[shell.sectionFocus[set]], true, set);
 }
 
-static StoreSectionView MakeXblaView(const Shell &shell)
+static StoreSectionView MakeSectionView(const Shell &shell)
 {
+    const ArcadeSet set = shell.storeSection;
     static char subtitle[64];
-    _snprintf(subtitle, sizeof(subtitle), "%d games from archive.org", XBLA_GAME_COUNT);
+    _snprintf(subtitle, sizeof(subtitle), "%d games from archive.org",
+              set == ARCADE_XBLIG ? XBLIG_GAME_COUNT : XBLA_GAME_COUNT);
     subtitle[sizeof(subtitle) - 1] = '\0';
 
     StoreSectionView view;
-    view.title = "Xbox Live Arcade";
+    view.title = SectionName(set);
     view.subtitle = subtitle;
     view.letters = kStoreLetters;
-    view.counts = g_xblaLetterCounts;
-    view.focus = shell.xblaFocus;
+    view.counts = g_sectionLetterCounts[set];
+    view.focus = shell.sectionFocus[set];
     view.focused = !shell.sidebarFocused;
     return view;
 }
 
-// The D-pad on the arcade's letters, as on the front page's.
-static void StepXblaFocus(WORD nav, Shell &shell)
+// The D-pad on a section's letters, as on the front page's.
+static void StepSectionFocus(WORD nav, Shell &shell)
 {
     const int perRow = StoreLettersPerRow();
-    int l = shell.xblaFocus;
+    int &l = shell.sectionFocus[shell.storeSection];
     const int col = l % perRow;
     if (nav == XINPUT_GAMEPAD_DPAD_RIGHT && col + 1 < perRow && l + 1 < STORE_LETTER_COUNT)
         l++;
@@ -1830,7 +1852,6 @@ static void StepXblaFocus(WORD nav, Shell &shell)
         l -= perRow;
     else if (nav == XINPUT_GAMEPAD_DPAD_DOWN && l / perRow < (STORE_LETTER_COUNT - 1) / perRow)
         l = (l + perRow < STORE_LETTER_COUNT) ? l + perRow : STORE_LETTER_COUNT - 1; // a shorter last row
-    shell.xblaFocus = l;
 }
 
 // The wallpapers for the featured tiles - again on the way back to the front
@@ -1859,7 +1880,7 @@ static bool GamePageOpen(const Shell &shell)
 static void OpenStoreGame(Shell &shell, const StoreGame &game)
 {
     g_storeGame = game;
-    g_storeXbla = NULL; // OpenXblaGame sets it after
+    g_storeArcade = NULL; // OpenArcadeGame sets it after
     for (int v = 0; v < g_storeGame.versionCount; ++v)
     {
         // The labels are the generator's; only the size is formatted here.
@@ -1891,58 +1912,129 @@ static void OpenStoreGame(Shell &shell, const StoreGame &game)
     }
 }
 
-// An arcade game's page: a disc game's, with one version - its RAR.
-static void OpenXblaGame(Shell &shell, const XblaGame &game)
+// Whether the page open is an indie game's.
+static bool StoreGameIsIndie()
 {
+    return g_storeArcade != NULL && ArcadeSetOf(g_storeArcade) == ARCADE_XBLIG;
+}
+
+// An arcade or indie game's page: a disc game's, with one version - its RAR.
+// An indie game's has no title ID of its own to find art or details by -
+// every indie game shares one - so it's opened without.
+static void OpenArcadeGame(Shell &shell, const XblaGame &game)
+{
+    const bool indie = (ArcadeSetOf(&game) == ARCADE_XBLIG);
     StoreGame page;
     memset(&page, 0, sizeof(page));
     page.name = game.name;
-    page.titleId = game.titleId;
+    page.titleId = indie ? 0 : game.titleId;
     OpenStoreGame(shell, page);
 
     static char detail[48];
     detail[0] = '\0';
     if (game.packages > 1)
     {
-        _snprintf(detail, sizeof(detail), "With %u add-on%s", (unsigned)(game.packages - 1),
-                  game.packages == 2 ? "" : "s");
+        if (indie)
+            _snprintf(detail, sizeof(detail), "%u packages", (unsigned)game.packages);
+        else
+            _snprintf(detail, sizeof(detail), "With %u add-on%s", (unsigned)(game.packages - 1),
+                      game.packages == 2 ? "" : "s");
         detail[sizeof(detail) - 1] = '\0';
     }
     FormatBytes(game.size, g_storeVersionSize[0], sizeof(g_storeVersionSize[0]));
-    g_storeVersions[0].label = "Xbox Live Arcade";
+    g_storeVersions[0].label = indie ? "Indie game" : "Xbox Live Arcade";
     g_storeVersions[0].detail = detail;
     g_storeVersions[0].size = g_storeVersionSize[0];
-    g_storeXbla = &game;
+    g_storeArcade = &game;
 }
 
-// The version rows the page shows: an arcade game's one, or a disc game's.
+// The version rows the page shows: an arcade or indie game's one, or a disc
+// game's.
 static int StoreVersionCount()
 {
-    return g_storeXbla != NULL ? 1 : g_storeGame.versionCount;
+    return g_storeArcade != NULL ? 1 : g_storeGame.versionCount;
 }
 
-// The arcade game's install: on its way in the download queue, where it's a
-// pack like DLC, or installed, by the library.
-static StoreInstallState XblaInstallState(const Library &lib, float *outFraction)
+// Whether a game from either list is on the drive: its biggest package, in
+// its title's folder under the content folder. Checked at most once a second
+// - the page asks every frame.
+static bool ArcadePackageOnDrive(const XblaGame &game)
+{
+    static const XblaGame *checked = NULL;
+    static DWORD checkedAt = 0;
+    static bool onDrive = false;
+    if (checked == &game && GetTickCount() - checkedAt < 1000)
+        return onDrive;
+
+    char file[64], path[512];
+    const char *space = strchr(game.files, ' ');
+    const size_t n = (space != NULL) ? (size_t)(space - game.files) : strlen(game.files);
+    onDrive = false;
+    if (n > 0 && n < sizeof(file))
+    {
+        memcpy(file, game.files, n);
+        file[n] = '\0';
+        _snprintf(path, sizeof(path), "%s\\%08lX\\%08lX\\%s", g_contentBase, game.titleId, game.contentType, file);
+        path[sizeof(path) - 1] = '\0';
+        onDrive = (GetFileAttributesA(path) != (DWORD)-1); // INVALID_FILE_ATTRIBUTES, which the XDK lacks
+    }
+    checked = &game;
+    checkedAt = GetTickCount();
+    return onDrive;
+}
+
+// The game's install: on its way in the download queue, where it's a pack
+// like DLC, or installed - its package on the drive, or for an arcade game
+// one the library has, installed some other way.
+static StoreInstallState ArcadeInstallState(const Library &lib, float *outFraction)
 {
     static QueueJobSnapshot jobs[MAX_QUEUE_JOBS];
     const int jobCount = SnapshotDownloadQueue(jobs, MAX_QUEUE_JOBS);
     for (int i = 0; i < jobCount; ++i)
     {
         const QueueJobSnapshot &job = jobs[i];
-        if (job.kind != QUEUE_JOB_DLC_PACK || job.state == QUEUE_FINISHED || strcmp(job.title, g_storeXbla->rar) != 0)
+        if (job.kind != QUEUE_JOB_DLC_PACK || job.state == QUEUE_FINISHED || strcmp(job.title, g_storeArcade->rar) != 0)
             continue;
         if (job.state == QUEUE_WAITING)
             return STORE_INSTALL_QUEUED;
         *outFraction = job.fraction;
         return STORE_INSTALL_INSTALLING;
     }
-    for (int i = 0; i < lib.count; ++i)
+    if (ArcadePackageOnDrive(*g_storeArcade))
+        return STORE_INSTALL_INSTALLED;
+    for (int i = 0; !StoreGameIsIndie() && i < lib.count; ++i)
     {
-        if (lib.games[i].titleId == g_storeXbla->titleId)
+        if (lib.games[i].titleId == g_storeArcade->titleId)
             return STORE_INSTALL_INSTALLED;
     }
     return STORE_INSTALL_AVAILABLE;
+}
+
+// Removes a game's own packages - those its RAR held for its title and
+// type. How many were removed.
+static int RemoveArcadePackages(const XblaGame &game)
+{
+    int removed = 0;
+    const char *p = game.files;
+    while (*p != '\0')
+    {
+        const char *space = strchr(p, ' ');
+        const size_t n = (space != NULL) ? (size_t)(space - p) : strlen(p);
+        char file[64], path[512];
+        if (n > 0 && n < sizeof(file))
+        {
+            memcpy(file, p, n);
+            file[n] = '\0';
+            _snprintf(path, sizeof(path), "%s\\%08lX\\%08lX\\%s", g_contentBase, game.titleId, game.contentType, file);
+            path[sizeof(path) - 1] = '\0';
+            if (DeleteFileA(path))
+                removed++;
+        }
+        p += n;
+        while (*p == ' ')
+            p++;
+    }
+    return removed;
 }
 
 // Where one disc of a version is: waiting or running in the game installer,
@@ -1992,8 +2084,8 @@ static StoreInstallState StoreVersionState(const Library &lib, int version, floa
 {
     *outFraction = -1.0f;
     *outPartial = false;
-    if (g_storeXbla != NULL)
-        return XblaInstallState(lib, outFraction);
+    if (g_storeArcade != NULL)
+        return ArcadeInstallState(lib, outFraction);
     const StoreRelease *release = StoreReleaseOf(&g_storeGame, version);
     if (release == NULL || release->discCount == 0)
     {
@@ -2135,14 +2227,26 @@ static bool UninstallStoreVersion(Shell &shell, const Library &lib, const char *
     char message[200];
     _snprintf(message, sizeof(message), "Remove %s from the hard drive?", g_storeGame.name);
     message[sizeof(message) - 1] = '\0';
-    if (!ShowConfirmUI("Uninstall", message, "Its DLC and title updates stay.", "Uninstall"))
+    if (!ShowConfirmUI("Uninstall", message, StoreGameIsIndie() ? "Only its own packages are removed."
+                                                                : "Its DLC and title updates stay.", "Uninstall"))
         return false;
 
     RenderStatusFrame("Uninstalling", g_storeGame.name, NULL);
 
     int removed = 0;
     const StoreRelease *release = StoreReleaseOf(&g_storeGame, shell.storeVersionChosen);
-    if (release == NULL)
+    if (g_storeArcade != NULL)
+    {
+        // Its own packages; for an arcade game installed some other way -
+        // another version - the library's.
+        removed = RemoveArcadePackages(*g_storeArcade);
+        for (int i = 0; removed == 0 && !StoreGameIsIndie() && i < lib.count; ++i)
+        {
+            if (lib.games[i].titleId == g_storeArcade->titleId)
+                removed += RemoveLibraryGamePackages(lib.games[i]);
+        }
+    }
+    else if (release == NULL)
     {
         for (int i = 0; i < lib.count; ++i)
         {
@@ -2205,7 +2309,7 @@ static void OpenGameByTitleId(Shell &shell, const Library &lib, unsigned long ti
         const XblaGame *xbla = XblaGameByTitleId(titleId);
         if (xbla != NULL)
         {
-            OpenXblaGame(shell, *xbla);
+            OpenArcadeGame(shell, *xbla);
             return;
         }
         _snprintf(ownName, sizeof(ownName), "%s", name != NULL ? name : "");
@@ -2239,6 +2343,7 @@ static StoreGameView MakeStoreGameView(Shell &shell, const Library &lib)
     StoreGameView view;
     memset(&view, 0, sizeof(view));
     view.titleId = g_storeGame.titleId;
+    view.indie = StoreGameIsIndie();
     view.name = g_storeGame.name;
 
     const StoreDetailsState state = GetStoreDetails(g_storeGame.titleId, &g_storeDetails);
@@ -2300,6 +2405,14 @@ static StoreGameView MakeStoreGameView(Shell &shell, const Library &lib)
     }
     view.buttons[1] = "Find DLC";
     view.buttons[2] = "Title updates";
+    if (view.indie)
+    {
+        // Indie games had neither, and Xbox Live's catalog doesn't list them.
+        view.buttonDisabled[1] = view.buttonDisabled[2] = true;
+        view.loading = false;
+        view.description = "An Xbox Live Indie Game. Xbox Live's catalog doesn't list indie games, "
+                           "so there's no description or screenshots for it here.";
+    }
     if (view.install == STORE_INSTALL_INSTALLED || (view.install == STORE_INSTALL_AVAILABLE && partial))
         view.buttons[3] = "Uninstall"; // else not shown
 
@@ -2349,28 +2462,78 @@ static void StepStoreGame(WORD nav, Shell &shell, const Library &lib)
 
 static void ReportEnqueue(EnqueueResult result, const char *filename);
 
-// Install on an arcade game's page: its RAR, queued as a pack - the download
-// queue lists the RAR and fetches each package in it, as it does DLC's.
-static void InstallXblaGame(const char *authHeader)
+// Install on an arcade or indie game's page: its RAR, queued as a pack - the
+// download queue lists the RAR and fetches each package in it, as it does
+// DLC's.
+// The indie games' runtime: the Indie Games title's own update, without
+// which a console offline from Xbox Live won't start one ("you need to
+// download and apply the available update"). The only copy in archive.org's
+// indie items is loose in Castle Miner Z's RAR - so that's where it's fetched
+// from, that one file alone.
+#define INDIE_RUNTIME_RAR  "Castle Miner Z.rar"
+#define INDIE_RUNTIME_FILE "tu32000100_00000000"
+#define INDIE_RUNTIME_NAME "Indie Games update"
+
+// Queues the runtime if it isn't on the drive. True if it was queued.
+static bool QueueIndieRuntime(const char *authHeader)
 {
+    char path[512];
+    _snprintf(path, sizeof(path), "%s\\584E07D2\\000B0000\\" INDIE_RUNTIME_FILE, g_contentBase);
+    path[sizeof(path) - 1] = '\0';
+    if (GetFileAttributesA(path) != (DWORD)-1)
+        return false;
+
+    const XblaGame *carrier = ArcadeGameByRar(INDIE_RUNTIME_RAR);
+    if (carrier == NULL)
+        return false;
+
     DlcRarMatch pack;
     memset(&pack, 0, sizeof(pack));
-    _snprintf(pack.item, sizeof(pack.item), "%s", XblaItemOf(g_storeXbla));
+    _snprintf(pack.item, sizeof(pack.item), "%s", ArcadeItemOf(carrier));
     pack.item[sizeof(pack.item) - 1] = '\0';
-    _snprintf(pack.filename, sizeof(pack.filename), "%s", g_storeXbla->rar);
+    _snprintf(pack.filename, sizeof(pack.filename), "%s", carrier->rar);
     pack.filename[sizeof(pack.filename) - 1] = '\0';
-    pack.size = g_storeXbla->size;
+    _snprintf(pack.only, sizeof(pack.only), "%s", INDIE_RUNTIME_FILE);
+    pack.size = carrier->size;
     pack.score = 100;
-    ReportEnqueue(EnqueueDlcPack(pack, g_storeXbla->name, g_storeXbla->titleId, authHeader), g_storeXbla->name);
+    return EnqueueDlcPack(pack, INDIE_RUNTIME_NAME, carrier->titleId, authHeader) == ENQUEUE_ADDED;
+}
+
+static void InstallArcadeGame(const char *authHeader)
+{
+    // An indie game's runtime goes first, if it's needed.
+    const bool runtime = StoreGameIsIndie() && QueueIndieRuntime(authHeader);
+
+    DlcRarMatch pack;
+    memset(&pack, 0, sizeof(pack));
+    _snprintf(pack.item, sizeof(pack.item), "%s", ArcadeItemOf(g_storeArcade));
+    pack.item[sizeof(pack.item) - 1] = '\0';
+    _snprintf(pack.filename, sizeof(pack.filename), "%s", g_storeArcade->rar);
+    pack.filename[sizeof(pack.filename) - 1] = '\0';
+    pack.size = g_storeArcade->size;
+    pack.score = 100;
+    const EnqueueResult result = EnqueueDlcPack(pack, g_storeArcade->name, g_storeArcade->titleId, authHeader);
+    if (runtime && result == ENQUEUE_ADDED)
+    {
+        char message[192];
+        _snprintf(message, sizeof(message), "%s, and the " INDIE_RUNTIME_NAME " indie games need to start",
+                  g_storeArcade->name);
+        message[sizeof(message) - 1] = '\0';
+        ShowShellToast("Added to the queue", message, UI_TOAST_INFO);
+    }
+    else
+    {
+        ReportEnqueue(result, g_storeArcade->name);
+    }
 }
 
 // Install on a game page: every disc of the chosen version that isn't
 // installed or on its way, in disc order, queued for GameInstaller.
 static void InstallStoreVersion(const Shell &shell, const Library &lib, const char *authHeader)
 {
-    if (g_storeXbla != NULL)
+    if (g_storeArcade != NULL)
     {
-        InstallXblaGame(authHeader);
+        InstallArcadeGame(authHeader);
         return;
     }
 
@@ -2445,7 +2608,9 @@ static void ActOnStoreFocus(Shell &shell)
     else if (i < STORE_FOCUS_LETTERS)
     {
         if (i - STORE_FOCUS_BUTTONS == STORE_BUTTON_XBLA)
-            OpenXbla(shell);
+            OpenSection(shell, ARCADE_XBLA);
+        else if (i - STORE_FOCUS_BUTTONS == STORE_BUTTON_XBLIG)
+            OpenSection(shell, ARCADE_XBLIG);
         else
             ShowShellToast("Coming soon", kStoreButtonsSoon[i - STORE_FOCUS_BUTTONS], UI_TOAST_INFO);
     }
@@ -2917,10 +3082,11 @@ static void HandleFinishedDownloads(Shell &shell, bool &haveAuth)
         if (job.outcome == QUEUE_OUTCOME_KEYS_REJECTED)
             haveAuth = false;
 
-        // An arcade game is new in the library.
-        const XblaGame *xbla = (job.kind == QUEUE_JOB_DLC_PACK) ? XblaGameByTitleId(job.titleId) : NULL;
-        const bool arcadeGame = (xbla != NULL && strcmp(xbla->rar, job.title) == 0);
-        if (arcadeGame && job.outcome == QUEUE_OUTCOME_INSTALLED)
+        // An arcade or indie game, by its RAR. An arcade game is new in the
+        // library; an indie game isn't one the library lists.
+        const XblaGame *arcade = (job.kind == QUEUE_JOB_DLC_PACK) ? ArcadeGameByRar(job.title) : NULL;
+        const bool arcadeGame = (arcade != NULL);
+        if (arcadeGame && ArcadeSetOf(arcade) == ARCADE_XBLA && job.outcome == QUEUE_OUTCOME_INSTALLED)
             shell.rescanLibrary = true;
 
         if (!job.notify)
@@ -2990,9 +3156,9 @@ static void RenderGamePageFrame(Shell &shell, const Library &lib, UiHint *hints,
             hintCount = AddHint(hints, hintCount, UI_BUTTON_A, L"Choose this version", L"Choose");
         else if (f == STORE_GAME_FOCUS_BUTTONS && StoreVersionCount() > 0)
             hintCount = AddHint(hints, hintCount, UI_BUTTON_A, L"Install", L"Install");
-        else if (f == STORE_GAME_FOCUS_BUTTONS + 1)
+        else if (f == STORE_GAME_FOCUS_BUTTONS + 1 && !StoreGameIsIndie())
             hintCount = AddHint(hints, hintCount, UI_BUTTON_A, L"Find DLC", L"DLC");
-        else if (f == STORE_GAME_FOCUS_BUTTONS + 2)
+        else if (f == STORE_GAME_FOCUS_BUTTONS + 2 && !StoreGameIsIndie())
             hintCount = AddHint(hints, hintCount, UI_BUTTON_A, L"Find title updates", L"Updates");
         else if (f == STORE_GAME_FOCUS_BUTTONS + 3)
             hintCount = AddHint(hints, hintCount, UI_BUTTON_A, L"Uninstall");
@@ -3123,6 +3289,7 @@ int main()
 
     char contentBasePath[MAX_TEXT_LENGTH];
     GetContentBasePath(contentBasePath, sizeof(contentBasePath));
+    g_contentBase = contentBasePath;
     dprintf("Content path (DLC installs here): %s\n", contentBasePath);
 
     char gamesPath[MAX_TEXT_LENGTH];
@@ -3451,7 +3618,7 @@ int main()
             {
                 // Back to the letter it was opened from, or the front page.
                 shell.storeInGame = false;
-                if (!shell.storeInLetter && !shell.storeInXbla)
+                if (!shell.storeInLetter && !shell.storeInSection)
                     RequestFeaturedArt();
             }
             else if (pressed & XINPUT_GAMEPAD_A)
@@ -3480,7 +3647,7 @@ int main()
                     if (!hadAuth)
                         acted = true;
                 }
-                else if (f == STORE_GAME_FOCUS_BUTTONS + 1 || f == STORE_GAME_FOCUS_BUTTONS + 2)
+                else if ((f == STORE_GAME_FOCUS_BUTTONS + 1 || f == STORE_GAME_FOCUS_BUTTONS + 2) && !StoreGameIsIndie())
                 {
                     // The library's pickers, open over this page.
                     OpenPicker(shell.picker, f == STORE_GAME_FOCUS_BUTTONS + 1 ? PICKER_DLC : PICKER_TITLE_UPDATE,
@@ -3509,41 +3676,41 @@ int main()
             {
                 // Back to the page it was opened from, on the same letter.
                 shell.storeInLetter = false;
-                if (!shell.storeInXbla)
+                if (!shell.storeInSection)
                     RequestFeaturedArt();
             }
             else if ((pressed & XINPUT_GAMEPAD_A) && shell.storeGameCount > 0)
             {
-                if (shell.storeLetterXbla)
-                    OpenXblaGame(shell, *g_xblaGames[shell.storeSelected]);
+                if (shell.storeLetterArcade)
+                    OpenArcadeGame(shell, *g_arcadeGames[shell.storeSelected]);
                 else
                     OpenStoreGame(shell, g_storeGames[shell.storeSelected]);
             }
             else
                 StepStoreLetter(input, shell);
         }
-        else if (shell.page == SHELL_PAGE_STORE && shell.storeInXbla)
+        else if (shell.page == SHELL_PAGE_STORE && shell.storeInSection)
         {
-            const int focusBefore = shell.xblaFocus;
+            const ArcadeSet set = shell.storeSection;
+            const int focusBefore = shell.sectionFocus[set];
             if (pressed & XINPUT_GAMEPAD_B)
             {
-                shell.storeInXbla = false; // back to the front page, on its XBLA button
+                shell.storeInSection = false; // back to the front page, on its button
                 RequestFeaturedArt();
             }
             else if (pressed & XINPUT_GAMEPAD_A)
             {
-                const int l = shell.xblaFocus;
-                if (g_xblaLetterCounts[l] > 0)
+                const int l = shell.sectionFocus[set];
+                if (g_sectionLetterCounts[set][l] > 0)
                     OpenStoreLetter(shell, kStoreLetters[l], true);
                 else
-                    ShowShellToast("No arcade games here", "Nothing in the collection starts with that.",
-                                   UI_TOAST_INFO);
+                    ShowShellToast("No games here", "Nothing in the collection starts with that.", UI_TOAST_INFO);
             }
             else if (input.nav != 0)
-                StepXblaFocus(input.nav, shell);
+                StepSectionFocus(input.nav, shell);
 
-            if (shell.storeInXbla && !shell.storeInLetter && shell.xblaFocus != focusBefore)
-                PrefetchLetterCovers(kStoreLetters[shell.xblaFocus], true);
+            if (shell.storeInSection && !shell.storeInLetter && shell.sectionFocus[set] != focusBefore)
+                PrefetchLetterCovers(kStoreLetters[shell.sectionFocus[set]], true, set);
         }
         else if (shell.page == SHELL_PAGE_STORE)
         {
@@ -3556,7 +3723,7 @@ int main()
                 StepStoreFocus(input.nav, shell);
 
             if (!shell.storeInLetter && shell.storeFocus != focusBefore && shell.storeFocus >= STORE_FOCUS_LETTERS)
-                PrefetchLetterCovers(kStoreLetters[shell.storeFocus - STORE_FOCUS_LETTERS], false);
+                PrefetchLetterCovers(kStoreLetters[shell.storeFocus - STORE_FOCUS_LETTERS], false, ARCADE_XBLA);
         }
         else if (shell.page == SHELL_PAGE_QUEUE)
         {
@@ -3757,23 +3924,24 @@ int main()
                 shell.storeSelected = view.selected;
                 shell.storeLetterScroll = view.scroll;
             }
-            else if (shell.storeInXbla)
+            else if (shell.storeInSection)
             {
+                const int l = shell.sectionFocus[shell.storeSection];
                 if (!shell.sidebarFocused)
                 {
                     static WCHAR browse[32];
-                    if (g_xblaLetterCounts[shell.xblaFocus] > 0)
+                    if (g_sectionLetterCounts[shell.storeSection][l] > 0)
                     {
-                        _snwprintf(browse, 32, L"Browse %c", (WCHAR)kStoreLetters[shell.xblaFocus]);
+                        _snwprintf(browse, 32, L"Browse %c", (WCHAR)kStoreLetters[l]);
                         browse[31] = L'\0';
                         hintCount = AddHint(hints, hintCount, UI_BUTTON_A, browse, L"Browse");
                     }
                     hintCount = AddHint(hints, hintCount, UI_BUTTON_B, L"Store");
                 }
 
-                StoreSectionView view = MakeXblaView(shell);
+                StoreSectionView view = MakeSectionView(shell);
                 RenderStoreSectionFrame(view, hints, hintCount);
-                shell.xblaFocus = view.focus;
+                shell.sectionFocus[shell.storeSection] = view.focus;
             }
             else
             {

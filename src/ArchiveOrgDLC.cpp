@@ -748,6 +748,101 @@ static const char *ContentRelativePath(const char *internalPath)
     }
 }
 
+// Indie games are all content of one title, the Indie Games marketplace's,
+// as Marketplace Content. A few of archive.org's indie RARs leave those
+// folders out - Castle Miner Z's packages sit straight under its name - so a
+// package found loose in one of them belongs there. Packages are known by
+// their file name, the content ID: 42 hex digits for an indie game's.
+//
+// One RAR, "Castle Miner Z.rar", also holds a title update loose beside its
+// packages, tu32000100_00000000 - the only one in any of the indie items. It
+// is taken to be the Indie Games title's own update: without it, a console
+// offline from Xbox Live won't start an indie game ("you need to download
+// and apply the available update"). A lowercase "tu" update goes in its
+// title's 000B0000 folder, as DownloadTitleUpdate puts them.
+#define INDIE_ITEM_PREFIX   "XBOX_360_XBLIG"
+#define INDIE_CONTENT_PATH  "584E07D2\\00000002\\"
+#define INDIE_UPDATE_PATH   "584E07D2\\000B0000\\"
+
+// A loose file's name: the part after its last folder.
+static const char *LeafName(const char *path)
+{
+    const char *name = path;
+    for (const char *p = path; *p != '\0'; ++p)
+    {
+        if (*p == '\\' || *p == '/')
+            name = p + 1;
+    }
+    return name;
+}
+
+// "tu" then 8 hex digits, '_', 8 more: a title update's file name.
+static bool IsTitleUpdateName(const char *name)
+{
+    if (strlen(name) != 19 || (name[0] != 't' && name[0] != 'T') || (name[1] != 'u' && name[1] != 'U') ||
+        name[10] != '_')
+        return false;
+    for (int i = 2; i < 19; ++i)
+    {
+        if (i != 10 && !isxdigit((unsigned char)name[i]))
+            return false;
+    }
+    return true;
+}
+
+static bool IsLooseIndiePackage(const DlcRarMatch &pack, const char *internalPath)
+{
+    if (strncmp(pack.item, INDIE_ITEM_PREFIX, sizeof(INDIE_ITEM_PREFIX) - 1) != 0)
+        return false;
+    const char *name = internalPath;
+    for (const char *p = internalPath; *p != '\0'; ++p)
+    {
+        if (*p == '\\' || *p == '/')
+            name = p + 1;
+    }
+    if (strlen(name) != 42)
+        return false;
+    for (const char *p = name; *p != '\0'; ++p)
+    {
+        if (!isxdigit((unsigned char)*p))
+            return false;
+    }
+    return true;
+}
+
+// Where a member installs, under the content folder - its path from its
+// TitleID folder on, or for a loose indie package, the indie folder. False
+// if it's neither: a readme beside the packages.
+static bool MemberContentPath(const DlcRarMatch &pack, const char *internalPath, char *out, size_t outSize)
+{
+    const char *fromTitle = ContentRelativePath(internalPath);
+    if (fromTitle != NULL)
+    {
+        _snprintf(out, outSize, "%s", fromTitle);
+    }
+    else if (IsLooseIndiePackage(pack, internalPath))
+    {
+        const char *name = internalPath + strlen(internalPath) - 42;
+        _snprintf(out, outSize, "%s%s", INDIE_CONTENT_PATH, name);
+    }
+    else if (strncmp(pack.item, INDIE_ITEM_PREFIX, sizeof(INDIE_ITEM_PREFIX) - 1) == 0 &&
+             IsTitleUpdateName(LeafName(internalPath)))
+    {
+        _snprintf(out, outSize, "%s%s", INDIE_UPDATE_PATH, LeafName(internalPath));
+    }
+    else
+    {
+        return false;
+    }
+    out[outSize - 1] = '\0';
+    for (char *p = out; *p != '\0'; ++p)
+    {
+        if (*p == '/')
+            *p = '\\';
+    }
+    return true;
+}
+
 // Reads the content-type segment out of a member's internal path.
 //
 // Paths look like "53450848\00000002\CD97F6BE...", so this is the second
@@ -948,7 +1043,7 @@ int ListDlcMembers(const DlcRarMatch &pack,
 
         // A file outside any TitleID\ContentType folders - a readme beside
         // the packages - isn't content, and has nowhere to go on the console.
-        if (isFileEntry && ContentRelativePath(member.internalPath) == NULL)
+        if (isFileEntry && !MemberContentPath(pack, member.internalPath, member.contentPath, sizeof(member.contentPath)))
         {
             printFunction("  Skipping a file outside the content folders: %s\n", member.internalPath);
             isFileEntry = false;
@@ -956,7 +1051,7 @@ int ListDlcMembers(const DlcRarMatch &pack,
 
         if (isFileEntry && count < maxMembers)
         {
-            unsigned long memberType = MemberContentType(member.internalPath);
+            unsigned long memberType = MemberContentType(member.contentPath);
 
             if (memberType == STFS_CONTENT_AVATAR_ITEM)
             {
@@ -1026,8 +1121,7 @@ int ListDlcMembers(const DlcRarMatch &pack,
 // useless.
 static std::string DlcMemberDestination(const DlcMember &member, const std::string &contentBasePath)
 {
-    const char *fromTitle = ContentRelativePath(member.internalPath);
-    std::string relativePath = (fromTitle != NULL) ? fromTitle : member.internalPath;
+    std::string relativePath = member.contentPath; // see MemberContentPath
 
     // A no-op for every archive seen so far - these store '\\' already - but
     // harmless insurance against a differently-packaged one.

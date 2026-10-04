@@ -245,6 +245,23 @@ static void RunDlcPack(const QueueJob &job, JobResult &result)
         return;
     }
 
+    // Just one file of the pack - the indie games' runtime update, out of
+    // the RAR that carries it: the rest of the list is left out.
+    if (pack.only[0] != '\0' && memberCount > 0)
+    {
+        int kept = 0;
+        for (int f = 0; f < memberCount; ++f)
+        {
+            const char *slash = strrchr(g_members[f].contentPath, '\\');
+            const char *name = (slash != NULL) ? slash + 1 : g_members[f].contentPath;
+            if (_stricmp(name, pack.only) == 0)
+                g_members[kept++] = g_members[f];
+        }
+        if (kept == 0)
+            dprintf("%s doesn't hold %s\n", pack.filename, pack.only);
+        memberCount = kept;
+    }
+
     if (memberCount <= 0)
     {
         // Reading the file list is the first thing that sends the keys, so
@@ -348,11 +365,14 @@ static void RunDlcPack(const QueueJob &job, JobResult &result)
     }
     else if (failures == 0)
     {
-        // An arcade game shows up in the library straight away; DLC needs
-        // the game to be started again.
-        SetResult(result, QUEUE_OUTCOME_INSTALLED, "Installed",
-                  pack.item[0] != '\0' ? "It's in your library now."
-                                        : "Restart your dashboard to pick up the new content.");
+        // An arcade game shows up in the library straight away, and an indie
+        // game is ready to play; DLC needs the game to be started again.
+        const char *detail = "Restart your dashboard to pick up the new content.";
+        if (strncmp(pack.item, "XBOX_360_XBLIG", 14) == 0)
+            detail = "It's on the hard drive, ready to play.";
+        else if (pack.item[0] != '\0')
+            detail = "It's in your library now.";
+        SetResult(result, QUEUE_OUTCOME_INSTALLED, "Installed", detail);
     }
     else
     {
@@ -619,7 +639,11 @@ static EnqueueResult Enqueue(QueueJobKind kind, const DlcRarMatch *pack, const T
     if (!g_running)
         return ENQUEUE_UNAVAILABLE;
 
-    const char *filename = (kind == QUEUE_JOB_DLC_PACK) ? pack->filename : update->filename;
+    // What the row is called, and what's checked for being queued already:
+    // the pack's file - or for one file of a pack, its own name (gameName),
+    // so it doesn't stand in for the whole pack.
+    const char *filename = (kind == QUEUE_JOB_DLC_PACK) ? (pack->only[0] != '\0' ? gameName : pack->filename)
+                                                        : update->filename;
 
     EnterCriticalSection(&g_lock);
 

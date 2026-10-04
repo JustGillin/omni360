@@ -1,5 +1,6 @@
 #define STORE_TITLES_DATA
 #define XBLA_TITLES_DATA
+#define XBLIG_TITLES_DATA
 #include "StoreCatalog.h"
 
 #include <string.h>
@@ -80,23 +81,40 @@ const StoreDisc *StoreReleaseDisc(const StoreRelease *release, int disc)
     return (index < COUNT_OF(kStoreDiscs)) ? &kStoreDiscs[index] : NULL;
 }
 
-const char *XblaItemOf(const XblaGame *game)
+static bool IsXblig(const XblaGame *game)
 {
-    return (game != NULL && game->item < COUNT_OF(kXblaItems)) ? kXblaItems[game->item] : "";
+    return game >= kXbligGames && game < kXbligGames + XBLIG_GAME_COUNT;
 }
 
-int XblaGamesForLetter(char letter, const XblaGame **out, int maxGames)
+ArcadeSet ArcadeSetOf(const XblaGame *game)
+{
+    return IsXblig(game) ? ARCADE_XBLIG : ARCADE_XBLA;
+}
+
+const char *ArcadeItemOf(const XblaGame *game)
+{
+    if (game == NULL)
+        return "";
+    if (IsXblig(game))
+        return game->item < COUNT_OF(kXbligItems) ? kXbligItems[game->item] : "";
+    return game->item < COUNT_OF(kXblaItems) ? kXblaItems[game->item] : "";
+}
+
+int ArcadeGamesForLetter(ArcadeSet set, char letter, const XblaGame **out, int maxGames)
 {
     if (out == NULL || maxGames <= 0)
         return 0;
 
     // The whole table, not just a run: its order is by name, ignoring case,
-    // which keeps a letter's games together - but 743 rows is nothing to read.
+    // which keeps a letter's games together - but a few thousand rows is
+    // nothing to read.
+    const XblaGame *games = (set == ARCADE_XBLIG) ? kXbligGames : kXblaGames;
+    const int total = (set == ARCADE_XBLIG) ? XBLIG_GAME_COUNT : XBLA_GAME_COUNT;
     int count = 0;
-    for (int i = 0; i < XBLA_GAME_COUNT && count < maxGames; ++i)
+    for (int i = 0; i < total && count < maxGames; ++i)
     {
-        if (kXblaGames[i].letter == letter)
-            out[count++] = &kXblaGames[i];
+        if (games[i].letter == letter)
+            out[count++] = &games[i];
     }
     return count;
 }
@@ -107,6 +125,23 @@ const XblaGame *XblaGameByTitleId(unsigned long titleId)
     {
         if (kXblaGames[i].titleId == titleId)
             return &kXblaGames[i];
+    }
+    return NULL;
+}
+
+const XblaGame *ArcadeGameByRar(const char *rar)
+{
+    if (rar == NULL)
+        return NULL;
+    for (int i = 0; i < XBLA_GAME_COUNT; ++i)
+    {
+        if (strcmp(kXblaGames[i].rar, rar) == 0)
+            return &kXblaGames[i];
+    }
+    for (int i = 0; i < XBLIG_GAME_COUNT; ++i)
+    {
+        if (strcmp(kXbligGames[i].rar, rar) == 0)
+            return &kXbligGames[i];
     }
     return NULL;
 }

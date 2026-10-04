@@ -28,18 +28,34 @@ const StoreRelease *StoreReleaseOf(const StoreGame *game, int version);
 // A version's discs, in disc order; NULL out of range.
 const StoreDisc *StoreReleaseDisc(const StoreRelease *release, int disc);
 
-// The Xbox Live Arcade games, from XblaTitles.h (tools/make_xbla_titles.py):
-// one RAR each in archive.org's XBOX_360_XBLA, sorted by name.
-#include "XblaTitles.h" // XblaGame, XBLA_GAME_COUNT
+// The Xbox Live Arcade and Indie Games lists, from XblaTitles.h and
+// XbligTitles.h (tools/make_xbla_titles.py): one RAR a game, in archive.org's
+// XBOX_360_XBLA and XBOX_360_XBLIG_1 to _5, sorted by name.
+#include "XblaTitles.h"  // XblaGame, XBLA_GAME_COUNT - both lists' games are XblaGames
+#include "XbligTitles.h" // XBLIG_GAME_COUNT
 
-// The archive.org item a game's RAR is in.
-const char *XblaItemOf(const XblaGame *game);
+enum ArcadeSet
+{
+    ARCADE_XBLA,
+    ARCADE_XBLIG
+};
+
+// The most games under one letter of either list.
+#define ARCADE_MAX_LETTER_GAMES (XBLIG_MAX_LETTER_GAMES > XBLA_MAX_LETTER_GAMES ? XBLIG_MAX_LETTER_GAMES : XBLA_MAX_LETTER_GAMES)
+
+// Which list a game is from, and the archive.org item its RAR is in.
+ArcadeSet ArcadeSetOf(const XblaGame *game);
+const char *ArcadeItemOf(const XblaGame *game);
 
 // The games under one letter tile ('A' to 'Z', or '#'), in the order shown.
 // Returns how many were written.
-int XblaGamesForLetter(char letter, const XblaGame **out, int maxGames);
+int ArcadeGamesForLetter(ArcadeSet set, char letter, const XblaGame **out, int maxGames);
 
-// The first game with this title ID, or NULL.
+// The arcade game with this title ID, or NULL - the first, if several share
+// it. Not for indie games: they all share one.
 const XblaGame *XblaGameByTitleId(unsigned long titleId);
+
+// The game from either list with this RAR name, or NULL.
+const XblaGame *ArcadeGameByRar(const char *rar);
 
 #endif

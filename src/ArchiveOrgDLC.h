@@ -114,6 +114,7 @@ KeyCheckResult CheckArchiveOrgKeys(const char *authHeader, char *outReason, size
 struct DlcMember
 {
     char internalPath[512]; // e.g. "415607FF/00000002/66632C72BEC2A85B643F365E76BA3B2D68F7D0AF41"
+    char contentPath[96];   // where it installs, under the content folder: "415607FF\00000002\66632C72..."
     unsigned long packSize;  // RAR-compressed size (informational only - we never decompress it ourselves)
     unsigned long unpSize;   // real, uncompressed size - this is what we actually download via the virtual-path URL
 };
@@ -124,6 +125,7 @@ struct DlcMember
 struct DlcRarMatch
 {
     char item[32];                        // the archive.org item it's in; empty for the DLC collection
+    char only[64];                        // install only the member with this file name; empty for all
     char filename[DLC_RAR_FILENAME_LEN]; // e.g. "007.Legends.DLC.RF.X360-ZTM.rar"
     unsigned long long size;              // whole-archive size in bytes, from the metadata listing
     int score;                            // 0-100 name-match confidence; results come back sorted by this, best first
