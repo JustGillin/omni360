@@ -553,6 +553,7 @@ int EnumerateInstalledGames(const char *contentBasePath, InstalledGame *outGames
                         g->displayName[sizeof(g->displayName) - 1] = '\0';
                         strncpy(g->packagePath, packagePath, sizeof(g->packagePath) - 1);
                         g->packagePath[sizeof(g->packagePath) - 1] = '\0';
+                        g->folder = false;
 
                         // The images move into the game, so the library
                         // never has to read this header again.

@@ -52,7 +52,8 @@ struct InstalledGame
     unsigned long titleId;
     unsigned long contentType;
     char displayName[256];
-    char packagePath[512]; // the representative package this info was read from
+    char packagePath[512]; // the representative package this info was read from - or a folder game's folder
+    bool folder;           // an extracted game's folder (FolderGames.h), not a package
 
     // The package's two embedded images, kept from the scan so drawing the
     // library doesn't read every header a second time. malloc'd PNG bytes,

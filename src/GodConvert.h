@@ -90,6 +90,10 @@ enum GodResult
 
 const char *GodResultText(GodResult result);
 
+// The title of a default.xex or default.xbe on the drive - an extracted
+// game's - from its header, as GodInspect reads a disc's.
+GodResult GodReadExecutableFile(const char *path, GodTitleInfo *out);
+
 // Reads the image's filesystem and default.xex, and works out how big the
 // package will be - enough to check the free space before starting.
 GodResult GodInspect(GodSource *source, GodImageInfo *outInfo);

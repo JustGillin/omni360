@@ -24,6 +24,7 @@ end-to-end on real hardware against a real 27-game library.
 #include "settings.h"
 #include "Keyboard.h"
 #include "StfsParser.h"
+#include "FolderGames.h"
 #include "GameListUI.h"
 #include "DownloadQueue.h"
 #include "SearchWorker.h"
@@ -1095,6 +1096,43 @@ static void RequestLibraryCovers(const Library &lib)
     RequestCoverArt(titleIds, n);
 }
 
+// The games found at lib.games[from..from+found), less any whose title is
+// already listed before them, kept at the end of the list. How many were kept.
+static int KeepNewTitles(Library &lib, int from, int found)
+{
+    int kept = from;
+    for (int i = from; i < from + found; ++i)
+    {
+        bool seen = false;
+        for (int j = 0; j < from && !seen; ++j)
+            seen = (lib.games[j].titleId == lib.games[i].titleId);
+        if (seen)
+        {
+            FreeInstalledGames(&lib.games[i], 1);
+            continue;
+        }
+        if (kept != i)
+            lib.games[kept] = lib.games[i];
+        kept++;
+    }
+    lib.count = kept;
+    return kept - from;
+}
+
+// One library folder's games into the list: its packages - a Content
+// folder's - then its extracted games' folders. How many it added.
+static int ScanLibraryFolder(Library &lib, const char *path)
+{
+    int added = 0;
+    int found = EnumerateInstalledGames(path, lib.games + lib.count, MAX_INSTALLED_GAMES - lib.count, dprintf);
+    if (found > 0)
+        added += KeepNewTitles(lib, lib.count, found);
+    found = EnumerateFolderGames(path, lib.games + lib.count, MAX_INSTALLED_GAMES - lib.count, dprintf);
+    if (found > 0)
+        added += KeepNewTitles(lib, lib.count, found);
+    return added;
+}
+
 static void ScanLibrary(Library &lib, const char *gamesPath)
 {
     RenderStatusFrame("Scanning", "Reading your installed games", gamesPath);
@@ -1104,41 +1142,36 @@ static void ScanLibrary(Library &lib, const char *gamesPath)
     FreeInstalledGames(lib.games, lib.count);
     lib.count = 0;
 
-    int found = EnumerateInstalledGames(gamesPath, lib.games, MAX_INSTALLED_GAMES, dprintf);
-    lib.count = (found > 0) ? found : 0;
+    ScanLibraryFolder(lib, gamesPath);
 
     // Then each more folder from settings.txt. A game in two of them -
     // copied to a USB drive, say - is listed once, from the first.
     ReadMoreGamesPaths();
     for (int p = 0; p < g_moreGamesPathCount && lib.count < MAX_INSTALLED_GAMES; ++p)
     {
-        const int before = lib.count;
-        found = EnumerateInstalledGames(g_moreGamesPaths[p], lib.games + lib.count, MAX_INSTALLED_GAMES - lib.count,
-                                        dprintf);
-        g_moreGamesFound[p] = 0;
-        if (found <= 0)
-        {
+        g_moreGamesFound[p] = ScanLibraryFolder(lib, g_moreGamesPaths[p]);
+        if (g_moreGamesFound[p] == 0)
             dprintf("No installed games found under %s\n", g_moreGamesPaths[p]);
+        else
+            dprintf("Found %d more installed games under %s\n", g_moreGamesFound[p], g_moreGamesPaths[p]);
+    }
+
+    // A folder game is named for its folder, which may be anything - the
+    // bundled list's name, or the Store's, where they have it.
+    for (int i = 0; i < lib.count; ++i)
+    {
+        InstalledGame &game = lib.games[i];
+        if (!game.folder)
             continue;
-        }
-        int kept = before;
-        for (int i = before; i < before + found; ++i)
+        const char *listed = LookupTitleName(game.titleId);
+        StoreGame store;
+        if (listed == NULL && StoreGameByTitleId(game.titleId, &store) && store.name != NULL && store.name[0] != '\0')
+            listed = store.name;
+        if (listed != NULL)
         {
-            bool seen = false;
-            for (int j = 0; j < before && !seen; ++j)
-                seen = (lib.games[j].titleId == lib.games[i].titleId);
-            if (seen)
-            {
-                FreeInstalledGames(&lib.games[i], 1);
-                continue;
-            }
-            if (kept != i)
-                lib.games[kept] = lib.games[i];
-            kept++;
+            _snprintf(game.displayName, sizeof(game.displayName), "%s", listed);
+            game.displayName[sizeof(game.displayName) - 1] = '\0';
         }
-        lib.count = kept;
-        g_moreGamesFound[p] = kept - before;
-        dprintf("Found %d more installed games under %s\n", kept - before, g_moreGamesPaths[p]);
     }
 
     // Sorted here rather than inside EnumerateInstalledGames - that
@@ -2514,11 +2547,13 @@ static StoreDiscProgress ProgressOfDisc(const Library &lib, const StoreRelease *
 
     if (IsGameZipInstalled(disc->zip))
         return STORE_DISC_INSTALLED;
-    if (release->discCount == 1 && disc->titleId != 0)
+    // An extracted game's folder holds every disc of it, so it speaks for a
+    // multi-disc version too.
+    if (disc->titleId != 0)
     {
         for (int i = 0; i < lib.count; ++i)
         {
-            if (lib.games[i].titleId == disc->titleId)
+            if (lib.games[i].titleId == disc->titleId && (release->discCount == 1 || lib.games[i].folder))
                 return STORE_DISC_INSTALLED;
         }
     }
@@ -2631,6 +2666,9 @@ static bool ParseGodPackagePath(const char *path, char *root, size_t rootSize, u
 // title updates are in other folders, and stay.
 static int RemoveLibraryGamePackages(const InstalledGame &game)
 {
+    if (game.folder)
+        return RemoveFolderGame(game) > 0 ? 1 : 0; // the folder, every disc in it
+
     char root[512];
     unsigned long mediaId = 0;
     if (!ParseGodPackagePath(game.packagePath, root, sizeof(root), &mediaId))
@@ -2732,6 +2770,13 @@ static bool UninstallStoreVersion(Shell &shell, const Library &lib, const char *
                     removed++;
                 }
             }
+        }
+
+        // Kept as an extracted folder rather than Games on Demand.
+        for (int i = 0; removed == 0 && i < lib.count; ++i)
+        {
+            if (lib.games[i].folder && lib.games[i].titleId == g_storeGame.titleId)
+                removed += RemoveLibraryGamePackages(lib.games[i]);
         }
     }
 

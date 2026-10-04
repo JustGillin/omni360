@@ -2,7 +2,7 @@
 
 A homebrew Xbox 360 app for getting games and their extras onto a modded console, with no PC needed once it's set up:
 
-- **Your Library** — your installed games as a grid of covers, read straight from the hard drive.
+- **Your Library** — your installed games as a grid of covers, read straight from the hard drive: Games on Demand and arcade packages, and games kept as extracted folders (`default.xex` or `default.xbe`) in any library folder.
 - **Store** — about 1,500 Xbox 360 disc games from archive.org, A to Z, each with its own page: wallpaper, description, screenshots and its regional versions. Install one and it downloads and installs as Games on Demand, playable from the dashboard or Aurora without the disc.
 - **Xbox Live Arcade** — about 740 arcade games from archive.org's `XBOX_360_XBLA` collection, A to Z, installed straight into the console's content folder.
 - **Xbox Live Indie Games** — about 3,450 indie games from archive.org's `XBOX_360_XBLIG` collections, A to Z. The update indie games need to start on a console offline from Xbox Live is installed with the first one.

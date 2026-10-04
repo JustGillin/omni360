@@ -432,6 +432,52 @@ static unsigned long long PartFileSize(unsigned long blocks)
     return (unsigned long long)(1 + groups + blocks) * BLOCK_SIZE;
 }
 
+// A file on the drive as a source, for GodReadExecutableFile.
+class FileGodSource : public GodSource
+{
+public:
+    explicit FileGodSource(FILE *file_) : file(file_), size(0)
+    {
+        if (fseek(file, 0, SEEK_END) == 0)
+        {
+            const long end = ftell(file);
+            size = end > 0 ? (unsigned long long)end : 0;
+        }
+    }
+    bool ReadAt(unsigned long long offset, void *buffer, unsigned long len)
+    {
+        if (offset + len > size || fseek(file, (long)offset, SEEK_SET) != 0)
+            return false;
+        return fread(buffer, 1, len, file) == len;
+    }
+    unsigned long long Size() { return size; }
+
+private:
+    FILE *file;
+    unsigned long long size;
+};
+
+GodResult GodReadExecutableFile(const char *path, GodTitleInfo *out)
+{
+    memset(out, 0, sizeof(*out));
+    FILE *file = fopen(path, "rb");
+    if (file == NULL)
+        return GOD_READ_FAILED;
+    FileGodSource source(file);
+    unsigned char magic[4];
+    GodResult result = GOD_BAD_XEX;
+    if (source.Size() > 0x7FFFFFFFULL)
+        result = GOD_BAD_XEX;
+    else if (!source.ReadAt(0, magic, sizeof(magic)))
+        result = GOD_READ_FAILED;
+    else if (memcmp(magic, "XEX2", 4) == 0)
+        result = ReadExecutionInfo(&source, 0, (unsigned long)source.Size(), out);
+    else if (memcmp(magic, "XBEH", 4) == 0)
+        result = ReadXbeInfo(&source, 0, (unsigned long)source.Size(), out);
+    fclose(file);
+    return result;
+}
+
 GodResult GodInspect(GodSource *source, GodImageInfo *outInfo)
 {
     memset(outInfo, 0, sizeof(*outInfo));
