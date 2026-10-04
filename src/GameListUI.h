@@ -198,6 +198,7 @@ struct ListPageView
     const char *subheading; // the line under the title; may be NULL
     const char **labels;
     const char **sublabels;
+    const char **sections;  // a heading over each row that starts a section, else NULL; may be NULL
     int count;
     int selected;
     int scroll;

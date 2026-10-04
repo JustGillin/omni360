@@ -34,9 +34,19 @@ Doing this on a PC is strongly recommended over the alternative, which is typing
 The app works with no settings file. Two keys override its defaults, and they are separate because your game library and your content folder are often on different drives. The games folder can also be changed on the console, in **Settings**, which writes this file for you:
 
 - `games-path:` — where games install, and where your library is scanned. Defaults to `Hdd1:\Content\0000000000000000`, which is where the dashboard keeps Games on Demand and arcade titles.
-- `xbla-path:` — where DLC and title updates are written. Defaults to `Hdd1:\Content\0000000000000000`. The name is inherited from X-Store, which used the same key.
+- `xbla-path:` — where DLC, title updates, arcade games and indie games are written. Defaults to `Hdd1:\Content\0000000000000000`. The name is inherited from X-Store, which used the same key.
 
 If you keep your GOD games in a folder of their own instead — `Hdd1:\Games\{TitleID}\00007000\{ContentID}` is a common choice — point `games-path:` there.
+
+**Games on more than one drive?** In **Settings**, under the games folder, each likely folder on the hard drive and any USB drive is listed — a `Content\0000000000000000` and a `Games` folder — and **A** adds it to your library or takes it out. **Add another library folder** takes any other path. Or add a `games-path:` line for each folder yourself: the first is where games install, and the others are looked in for your library too. A USB drive formatted FAT32 is `Usb0:` or `Usb1:`, as in Aurora:
+
+```
+games-path: Hdd1:\Content\0000000000000000
+games-path: Hdd1:\Games
+games-path: Usb0:\Content\0000000000000000
+```
+
+Each folder needs the `{TitleID}\{ContentType}\...` layout — Games on Demand, arcade games, installed packages. Extracted XEX games (a folder with a `default.xex`) aren't found yet. A drive the dashboard formatted as Xbox storage keeps its files in a container Omni360 can't reach.
 
 ## 4. Transfer files to the console
 

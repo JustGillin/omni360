@@ -3264,6 +3264,52 @@ static int ListVisibleRows()
     return (rows < 1) ? 1 : rows;
 }
 
+// A list's section headings - Settings' "Library location" and the like -
+// sit in the space above the row each starts, so fewer rows fit: the rows on
+// screen are laid out once, here, and drawn from that.
+#define MAX_LIST_ROWS_SHOWN 32
+
+struct ListLayout
+{
+    int shown;                        // rows from scroll that fit
+    float rowY[MAX_LIST_ROWS_SHOWN];
+    float headY[MAX_LIST_ROWS_SHOWN]; // the row's heading's, or < 0 for none
+};
+
+static float ListHeadingHeight()
+{
+    return LineHeight(0.8f) * 1.2f + S(14.0f);
+}
+
+// Where the rows from scroll go, down to the bottom of the list's space.
+static ListLayout LayOutList(const ListPageView &view, int count, int scroll)
+{
+    ListLayout L;
+    L.shown = 0;
+    const float rowH = ListRowHeight(), plateH = rowH - ListRowGap();
+    const float bottom = g_M.listY + ListVisibleRows() * rowH - ListRowGap();
+    float y = g_M.listY;
+    for (int index = scroll; index < count && L.shown < MAX_LIST_ROWS_SHOWN; ++index)
+    {
+        float headY = -1.0f;
+        if (view.sections != NULL && view.sections[index] != NULL)
+        {
+            // A gap above each but the first on screen, then the heading.
+            if (L.shown > 0)
+                y += S(12.0f);
+            headY = y;
+            y += ListHeadingHeight();
+        }
+        if (y + plateH > bottom + 0.5f)
+            break;
+        L.rowY[L.shown] = y;
+        L.headY[L.shown] = headY;
+        L.shown++;
+        y += rowH;
+    }
+    return L;
+}
+
 void RenderListFrame(ListPageView &view, const UiHint *hints, int hintCount)
 {
     if (!g_Initialized)
@@ -3273,11 +3319,31 @@ void RenderListFrame(ListPageView &view, const UiHint *hints, int hintCount)
 
     const float rowH = ListRowHeight();
     const float plateH = rowH - ListRowGap();
-    const int visibleRows = ListVisibleRows();
+    int visibleRows = ListVisibleRows();
 
-    KeepSelectionVisible(count, visibleRows, view.selected, view.scroll);
+    if (view.sections == NULL)
+    {
+        KeepSelectionVisible(count, visibleRows, view.selected, view.scroll);
+    }
+    else
+    {
+        // As KeepSelectionVisible, but by the rows that fit with headings.
+        if (view.selected > count - 1) view.selected = count - 1;
+        if (view.selected < 0) view.selected = 0;
+        if (view.scroll < 0) view.scroll = 0;
+        if (view.selected < view.scroll) view.scroll = view.selected;
+        while (view.scroll < view.selected && view.scroll + LayOutList(view, count, view.scroll).shown <= view.selected)
+            view.scroll++;
+        // Back up while the rows above fit too, so the list doesn't stay
+        // scrolled past room it has.
+        while (view.scroll > 0 && view.scroll - 1 + LayOutList(view, count, view.scroll - 1).shown >= count)
+            view.scroll--;
+    }
     const int selected = view.selected;
     const int scrollOffset = view.scroll;
+    const ListLayout layout = LayOutList(view, count, scrollOffset);
+    if (view.sections != NULL)
+        visibleRows = layout.shown;
 
     BeginFrame();
 
@@ -3298,7 +3364,7 @@ void RenderListFrame(ListPageView &view, const UiHint *hints, int hintCount)
         if (index >= count)
             break;
 
-        const float y = g_M.listY + row * rowH;
+        const float y = (row < layout.shown) ? layout.rowY[row] : g_M.listY + row * rowH;
         const bool isSelected = (index == selected);
         FillRound(g_M.contentX, y, plateW, plateH, g_M.radius, isSelected ? COL_SURFACE_HI : COL_SURFACE);
         if (isSelected && view.focused)
@@ -3306,7 +3372,7 @@ void RenderListFrame(ListPageView &view, const UiHint *hints, int hintCount)
     }
 
     if (showScroll)
-        DrawScrollbar(g_M.listY, visibleRows * rowH - ListRowGap(), count, visibleRows, scrollOffset);
+        DrawScrollbar(g_M.listY, ListVisibleRows() * rowH - ListRowGap(), count, visibleRows, scrollOffset);
 
     DrawButtonHintShapes(footer, footerCount, g_M.footerY);
     DrawHeaderQuads(showToast);
@@ -3342,7 +3408,9 @@ void RenderListFrame(ListPageView &view, const UiHint *hints, int hintCount)
         if (index >= count)
             break;
 
-        const float y = g_M.listY + row * rowH;
+        const float y = (row < layout.shown) ? layout.rowY[row] : g_M.listY + row * rowH;
+        if (row < layout.shown && layout.headY[row] >= 0.0f)
+            Text(g_M.contentX + S(4.0f), layout.headY[row], 0.8f, COL_TEXT2, view.sections[index], 0, 0.0f, true);
 
         // Scene release filenames are long and the interesting part is at the
         // front, so these are truncated rather than wrapped.

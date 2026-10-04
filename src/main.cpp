@@ -39,6 +39,7 @@ end-to-end on real hardware against a real 27-game library.
 #include "DiscSource.h"
 #include "ReadAhead.h"
 #include "TitleNames.h"
+#include "dns.h"         // LogNetworkStatus
 
 // Kernel exports with no XDK header.
 extern "C" BOOL XexCheckExecutablePrivilege(DWORD privilege);
@@ -105,6 +106,18 @@ bool CheckGameMounted()
         fclose(fd1);
         remove("Hdd1:\\test.tmp");
     }
+
+    // The USB ports, by Aurora's names, for library folders and installs on
+    // a USB drive formatted FAT32. A port with nothing in it just reads as
+    // empty. (A drive the dashboard formatted as Xbox storage keeps its
+    // files inside a container these don't reach.)
+    static const char *const usbDrives[][2] = {
+        { "Usb0:", "\\Device\\Mass0" },
+        { "Usb1:", "\\Device\\Mass1" },
+        { "Usb2:", "\\Device\\Mass2" },
+    };
+    for (int i = 0; i < 3; ++i)
+        mount(usbDrives[i][0], (char *)usbDrives[i][1]);
 
     return true;
 }
@@ -196,6 +209,45 @@ static void GetContentBasePath(char *outPath, size_t outPathSize)
 static void GetGamesPath(char *outPath, size_t outPathSize)
 {
     GetSettingsPath(GAMES_PATH_KEY, GAMES_PATH_DEFAULT, outPath, outPathSize);
+}
+
+// More library folders: every "games-path:" line after the first. The first
+// is where games install to, and the one Settings changes; these are only
+// scanned - games spread across drives, a USB drive's Content folder or a
+// Games folder of Games on Demand. Added by editing settings.txt.
+#define MAX_MORE_GAMES_PATHS 7
+static char g_moreGamesPaths[MAX_MORE_GAMES_PATHS][MAX_TEXT_LENGTH];
+static int g_moreGamesPathCount = 0;
+static int g_moreGamesFound[MAX_MORE_GAMES_PATHS]; // the games each added, at the last scan
+
+static void ReadMoreGamesPaths()
+{
+    g_moreGamesPathCount = 0;
+    FILE *fd = fopen(SETTINGS_FILE, "r");
+    if (fd == NULL)
+        return;
+
+    char line[512];
+    const size_t keyLen = strlen(GAMES_PATH_KEY);
+    bool first = true;
+    while (fgets(line, sizeof(line), fd) != NULL && g_moreGamesPathCount < MAX_MORE_GAMES_PATHS)
+    {
+        if (line[0] == '#' || strncmp(line, GAMES_PATH_KEY, keyLen) != 0)
+            continue;
+        char *value = line + keyLen;
+        value[strcspn(value, "\r\n")] = '\0';
+        if (strlen(value) < 3)
+            continue;
+        if (first)
+        {
+            first = false; // GetGamesPath's
+            continue;
+        }
+        _snprintf(g_moreGamesPaths[g_moreGamesPathCount], MAX_TEXT_LENGTH, "%s", value);
+        g_moreGamesPaths[g_moreGamesPathCount][MAX_TEXT_LENGTH - 1] = '\0';
+        g_moreGamesPathCount++;
+    }
+    fclose(fd);
 }
 
 // Whether to ask GitHub for a newer version at start. On unless turned off.
@@ -316,6 +368,117 @@ static bool FolderExists(const char *path)
     // INVALID_FILE_ATTRIBUTES, but the XDK's headers don't define that.
     DWORD attributes = GetFileAttributesA(probe);
     return attributes != (DWORD)-1 && (attributes & FILE_ATTRIBUTE_DIRECTORY) != 0;
+}
+
+// Rewrites settings.txt's library folders: the folder games install to,
+// first, then the others - in place of every "games-path:" line there was,
+// where the first of them was, or at the end. Every other line stays as it
+// was. Written to a temporary file and swapped in, as SetSettingsValue does.
+static bool WriteGamesPaths(const char *first, char more[][MAX_TEXT_LENGTH], int moreCount)
+{
+    std::string paths = std::string(GAMES_PATH_KEY) + first + "\n";
+    for (int i = 0; i < moreCount; ++i)
+        paths += std::string(GAMES_PATH_KEY) + more[i] + "\n";
+
+    std::string contents;
+    bool placed = false;
+    const size_t keyLen = strlen(GAMES_PATH_KEY);
+    FILE *in = fopen(SETTINGS_FILE, "r");
+    if (in != NULL)
+    {
+        char line[512];
+        while (fgets(line, sizeof(line), in) != NULL)
+        {
+            if (line[0] != '#' && strncmp(line, GAMES_PATH_KEY, keyLen) == 0)
+            {
+                if (!placed)
+                    contents += paths;
+                placed = true;
+                continue;
+            }
+            contents += line;
+        }
+        fclose(in);
+        if (!contents.empty() && contents[contents.size() - 1] != '\n')
+            contents += "\n";
+    }
+    if (!placed)
+        contents += paths;
+
+    FILE *out = fopen(SETTINGS_TEMP_FILE, "w");
+    if (out == NULL)
+        return false;
+    bool ok = fwrite(contents.data(), 1, contents.size(), out) == contents.size();
+    ok = (fclose(out) == 0) && ok;
+    if (!ok)
+    {
+        remove(SETTINGS_TEMP_FILE);
+        return false;
+    }
+    remove(SETTINGS_FILE); // rename won't replace an existing file
+    return rename(SETTINGS_TEMP_FILE, SETTINGS_FILE) == 0;
+}
+
+// The library folders Settings lists, after the one games install to: those
+// added, then the likely places on each drive that aren't - a Content folder
+// and a Games folder, on the hard drive and each USB port - that exist.
+struct LibraryFolderRow
+{
+    char path[MAX_TEXT_LENGTH];
+    bool scanned; // a "games-path:" line has it
+    bool exists;
+    int games;    // found there at the last scan, when scanned
+};
+
+#define MAX_FOLDER_ROWS (MAX_MORE_GAMES_PATHS + 8)
+static LibraryFolderRow g_folderRows[MAX_FOLDER_ROWS];
+static int g_folderRowCount = 0;
+
+static bool FolderListed(const char *path, const char *gamesPath)
+{
+    if (_stricmp(path, gamesPath) == 0)
+        return true;
+    for (int i = 0; i < g_folderRowCount; ++i)
+    {
+        if (_stricmp(g_folderRows[i].path, path) == 0)
+            return true;
+    }
+    return false;
+}
+
+static void FindLibraryFolders(const char *gamesPath)
+{
+    g_folderRowCount = 0;
+    for (int p = 0; p < g_moreGamesPathCount && g_folderRowCount < MAX_FOLDER_ROWS; ++p)
+    {
+        if (FolderListed(g_moreGamesPaths[p], gamesPath))
+            continue;
+        LibraryFolderRow &row = g_folderRows[g_folderRowCount++];
+        _snprintf(row.path, sizeof(row.path), "%s", g_moreGamesPaths[p]);
+        row.path[sizeof(row.path) - 1] = '\0';
+        row.scanned = true;
+        row.exists = FolderExists(row.path);
+        row.games = g_moreGamesFound[p];
+    }
+
+    static const char *const drives[] = { "Hdd1:", "Usb0:", "Usb1:", "Usb2:" };
+    static const char *const folders[] = { "\\Content\\0000000000000000", "\\Games" };
+    for (int d = 0; d < 4; ++d)
+    {
+        for (int f = 0; f < 2 && g_folderRowCount < MAX_FOLDER_ROWS; ++f)
+        {
+            char path[MAX_TEXT_LENGTH];
+            _snprintf(path, sizeof(path), "%s%s", drives[d], folders[f]);
+            path[sizeof(path) - 1] = '\0';
+            if (FolderListed(path, gamesPath) || !FolderExists(path))
+                continue;
+            LibraryFolderRow &row = g_folderRows[g_folderRowCount++];
+            memcpy(row.path, path, strlen(path) + 1);
+            row.scanned = false;
+            row.exists = true;
+            row.games = 0;
+        }
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -943,6 +1106,40 @@ static void ScanLibrary(Library &lib, const char *gamesPath)
     int found = EnumerateInstalledGames(gamesPath, lib.games, MAX_INSTALLED_GAMES, dprintf);
     lib.count = (found > 0) ? found : 0;
 
+    // Then each more folder from settings.txt. A game in two of them -
+    // copied to a USB drive, say - is listed once, from the first.
+    ReadMoreGamesPaths();
+    for (int p = 0; p < g_moreGamesPathCount && lib.count < MAX_INSTALLED_GAMES; ++p)
+    {
+        const int before = lib.count;
+        found = EnumerateInstalledGames(g_moreGamesPaths[p], lib.games + lib.count, MAX_INSTALLED_GAMES - lib.count,
+                                        dprintf);
+        g_moreGamesFound[p] = 0;
+        if (found <= 0)
+        {
+            dprintf("No installed games found under %s\n", g_moreGamesPaths[p]);
+            continue;
+        }
+        int kept = before;
+        for (int i = before; i < before + found; ++i)
+        {
+            bool seen = false;
+            for (int j = 0; j < before && !seen; ++j)
+                seen = (lib.games[j].titleId == lib.games[i].titleId);
+            if (seen)
+            {
+                FreeInstalledGames(&lib.games[i], 1);
+                continue;
+            }
+            if (kept != i)
+                lib.games[kept] = lib.games[i];
+            kept++;
+        }
+        lib.count = kept;
+        g_moreGamesFound[p] = kept - before;
+        dprintf("Found %d more installed games under %s\n", kept - before, g_moreGamesPaths[p]);
+    }
+
     // Sorted here rather than inside EnumerateInstalledGames - that
     // function's job is to walk the filesystem, and leaving presentation order
     // to the caller keeps it that way. Everything downstream (the installed
@@ -976,8 +1173,110 @@ enum SettingsRow
     SETTINGS_ROW_KEYS,
     SETTINGS_ROW_REMOVE_KEYS,
     SETTINGS_ROW_UPDATES,      // the version, and what's newer
-    SETTINGS_ROW_UPDATE_CHECKS // checking at start, on or off
+    SETTINGS_ROW_UPDATE_CHECKS, // checking at start, on or off
+    SETTINGS_ROW_LIBRARY_FOLDER, // one of g_folderRows: A adds or removes it
+    SETTINGS_ROW_ADD_FOLDER    // another library folder, typed
 };
+
+// Rescans with the library folders now in settings.txt.
+static void RescanFolders(Library &lib, const char *gamesPath, SettingsOutcome &outcome)
+{
+    ScanLibrary(lib, gamesPath);
+    outcome.libraryChanged = true;
+}
+
+// A on a library folder's row: scanned, it's removed - its games stay where
+// they are - and not, it's added.
+static void ToggleLibraryFolder(int index, Library &lib, const char *gamesPath, SettingsOutcome &outcome)
+{
+    if (index < 0 || index >= g_folderRowCount)
+        return;
+    const LibraryFolderRow row = g_folderRows[index]; // a copy - the rescan rebuilds the list
+
+    static char more[MAX_MORE_GAMES_PATHS][MAX_TEXT_LENGTH];
+    int n = 0;
+    if (row.scanned)
+    {
+        char message[MAX_TEXT_LENGTH + 64];
+        _snprintf(message, sizeof(message), "Stop looking for games in %s?", row.path);
+        message[sizeof(message) - 1] = '\0';
+        if (!ShowConfirmUI("Library folder", message, "Its games stay where they are.", "Remove"))
+            return;
+        for (int p = 0; p < g_moreGamesPathCount; ++p)
+        {
+            if (_stricmp(g_moreGamesPaths[p], row.path) != 0)
+                memcpy(more[n++], g_moreGamesPaths[p], MAX_TEXT_LENGTH);
+        }
+    }
+    else
+    {
+        if (g_moreGamesPathCount >= MAX_MORE_GAMES_PATHS)
+        {
+            ShowMessageUI("Too many folders", "Remove a library folder first.", "Up to 7 can be added.");
+            return;
+        }
+        for (int p = 0; p < g_moreGamesPathCount; ++p)
+            memcpy(more[n++], g_moreGamesPaths[p], MAX_TEXT_LENGTH);
+        memcpy(more[n++], row.path, MAX_TEXT_LENGTH);
+    }
+
+    if (!WriteGamesPaths(gamesPath, more, n))
+    {
+        ShowMessageUI("Not saved", "settings.txt could not be written.", row.path);
+        return;
+    }
+    dprintf("Library folder %s %s\n", row.path, row.scanned ? "removed" : "added");
+    RescanFolders(lib, gamesPath, outcome);
+}
+
+// "Add another library folder": one typed, for a folder somewhere the list
+// doesn't look.
+static void AddLibraryFolder(Library &lib, const char *gamesPath, SettingsOutcome &outcome)
+{
+    if (g_moreGamesPathCount >= MAX_MORE_GAMES_PATHS)
+    {
+        ShowMessageUI("Too many folders", "Remove a library folder first.", "Up to 7 can be added.");
+        return;
+    }
+
+    std::string typed;
+    if (OpenKeyboardToString(XUSER_INDEX_ANY, &typed, L"Library Folder",
+                             L"Another folder to look for games in, like Usb0:\\Games", L"Usb0:\\") != ERROR_SUCCESS)
+        return; // cancelled
+
+    char newPath[MAX_TEXT_LENGTH];
+    if (!NormaliseGamesPath(typed, newPath, sizeof(newPath)))
+    {
+        ShowMessageUI("Not a folder path", "Include the drive, like Hdd1:\\Games or Usb0:\\Games.", typed.c_str());
+        return;
+    }
+    if (!FolderExists(newPath))
+    {
+        ShowMessageUI("Folder not found", "There is no folder at that path.", newPath);
+        return;
+    }
+    bool listed = (_stricmp(newPath, gamesPath) == 0);
+    for (int p = 0; p < g_moreGamesPathCount && !listed; ++p)
+        listed = (_stricmp(g_moreGamesPaths[p], newPath) == 0);
+    if (listed)
+    {
+        ShowMessageUI("Already in your library", "That folder is looked in already.", newPath);
+        return;
+    }
+
+    static char more[MAX_MORE_GAMES_PATHS][MAX_TEXT_LENGTH];
+    int n = 0;
+    for (int p = 0; p < g_moreGamesPathCount; ++p)
+        memcpy(more[n++], g_moreGamesPaths[p], MAX_TEXT_LENGTH);
+    memcpy(more[n++], newPath, MAX_TEXT_LENGTH);
+    if (!WriteGamesPaths(gamesPath, more, n))
+    {
+        ShowMessageUI("Not saved", "settings.txt could not be written.", newPath);
+        return;
+    }
+    dprintf("Library folder %s added\n", newPath);
+    RescanFolders(lib, gamesPath, outcome);
+}
 
 static void ChangeGamesFolder(Library &lib, char *gamesPath, size_t gamesPathSize, SettingsOutcome &outcome)
 {
@@ -1139,15 +1438,18 @@ static void RemoveKeys(SettingsOutcome &outcome)
 // so it doubles as a summary of how the app is set up. Rebuilt whenever
 // something may have changed it, rather than every frame - each rebuild reads
 // the keys file.
-#define MAX_SETTINGS_ROWS 6
+#define MAX_SETTINGS_ROWS (6 + MAX_FOLDER_ROWS)
 
 struct SettingsPage
 {
     int count;
     SettingsRow rows[MAX_SETTINGS_ROWS];
+    int args[MAX_SETTINGS_ROWS]; // a library folder row's index into g_folderRows
     const char *labels[MAX_SETTINGS_ROWS];
     const char *sublabels[MAX_SETTINGS_ROWS];
-    char gamesSub[MAX_TEXT_LENGTH + 64];
+    const char *sections[MAX_SETTINGS_ROWS]; // a heading over the row that starts each part, else NULL
+    char gamesSub[MAX_TEXT_LENGTH + 96];
+    char folderSubs[MAX_FOLDER_ROWS][96];
     char keysSub[128];
     char updatesSub[160];
 
@@ -1160,11 +1462,14 @@ static void BuildSettingsPage(SettingsPage &page, const Library &lib, const char
     std::string accessKey, secretKey;
     const bool haveKeys = LoadSavedKeys(accessKey, secretKey);
 
+    // Where games install, and how many the library has in all - each other
+    // folder it looks in has a row of its own, below.
     if (lib.count > 0)
-        _snprintf(page.gamesSub, sizeof(page.gamesSub), "%s   -   %d game%s", gamesPath, lib.count,
-                  lib.count == 1 ? "" : "s");
+        _snprintf(page.gamesSub, sizeof(page.gamesSub), "%s   -   where games install   -   %d game%s in your library",
+                  gamesPath, lib.count, lib.count == 1 ? "" : "s");
     else
-        _snprintf(page.gamesSub, sizeof(page.gamesSub), "%s   -   no games found here", gamesPath);
+        _snprintf(page.gamesSub, sizeof(page.gamesSub), "%s   -   where games install   -   no games found",
+                  gamesPath);
     page.gamesSub[sizeof(page.gamesSub) - 1] = '\0';
 
     // Only the start of the access key is shown - enough to tell which keys
@@ -1184,11 +1489,39 @@ static void BuildSettingsPage(SettingsPage &page, const Library &lib, const char
     page.keysSub[sizeof(page.keysSub) - 1] = '\0';
 
     page.count = 0;
+    for (int i = 0; i < MAX_SETTINGS_ROWS; ++i)
+        page.sections[i] = NULL;
 
+    page.sections[page.count] = "Library location";
     page.labels[page.count] = "Games folder";
     page.sublabels[page.count] = page.gamesSub;
     page.rows[page.count++] = SETTINGS_ROW_GAMES_FOLDER;
 
+    // The other folders the library looks in, and the likely ones it could.
+    FindLibraryFolders(gamesPath);
+    for (int i = 0; i < g_folderRowCount; ++i)
+    {
+        const LibraryFolderRow &row = g_folderRows[i];
+        char *sub = page.folderSubs[i];
+        const size_t subSize = sizeof(page.folderSubs[i]);
+        if (!row.scanned)
+            _snprintf(sub, subSize, "Not in your library   -   A to look for games here");
+        else if (!row.exists)
+            _snprintf(sub, subSize, "In your library, but the folder isn't there   -   A to remove");
+        else
+            _snprintf(sub, subSize, "In your library   -   %d game%s here   -   A to remove", row.games,
+                      row.games == 1 ? "" : "s");
+        sub[subSize - 1] = '\0';
+        page.labels[page.count] = row.path;
+        page.sublabels[page.count] = sub;
+        page.args[page.count] = i;
+        page.rows[page.count++] = SETTINGS_ROW_LIBRARY_FOLDER;
+    }
+    page.labels[page.count] = "Add another library folder";
+    page.sublabels[page.count] = "Type the path of a folder to look for games in";
+    page.rows[page.count++] = SETTINGS_ROW_ADD_FOLDER;
+
+    page.sections[page.count] = "archive.org keys";
     page.labels[page.count] = haveKeys ? "Change archive.org keys" : "Add archive.org keys";
     page.sublabels[page.count] = page.keysSub;
     page.rows[page.count++] = SETTINGS_ROW_KEYS;
@@ -1227,21 +1560,22 @@ static void BuildSettingsPage(SettingsPage &page, const Library &lib, const char
     }
     page.updatesSub[sizeof(page.updatesSub) - 1] = '\0';
 
-    page.labels[page.count] = "Updates";
+    page.sections[page.count] = "Updates";
+    page.labels[page.count] = "Check for updates";
     page.sublabels[page.count] = page.updatesSub;
     page.rows[page.count++] = SETTINGS_ROW_UPDATES;
 
     const bool checksOn = UpdateChecksOn();
     page.labels[page.count] = checksOn ? "Check for updates at start: On" : "Check for updates at start: Off";
     page.sublabels[page.count] = checksOn ? "Asks GitHub for the latest version each time Omni360 starts"
-                                          : "Only when you choose Updates";
+                                          : "Only when you choose Check for updates";
     page.rows[page.count++] = SETTINGS_ROW_UPDATE_CHECKS;
 
     if (page.selected > page.count - 1)
         page.selected = page.count - 1; // the Remove row just went away
 }
 
-static SettingsOutcome RunSettingsRow(SettingsRow row, Library &lib, char *gamesPath, size_t gamesPathSize)
+static SettingsOutcome RunSettingsRow(SettingsRow row, int arg, Library &lib, char *gamesPath, size_t gamesPathSize)
 {
     SettingsOutcome outcome = {false, false};
 
@@ -1252,6 +1586,8 @@ static SettingsOutcome RunSettingsRow(SettingsRow row, Library &lib, char *games
     case SETTINGS_ROW_REMOVE_KEYS:  RemoveKeys(outcome); break;
     case SETTINGS_ROW_UPDATES:      ShowUpdate(); break;
     case SETTINGS_ROW_UPDATE_CHECKS: ToggleUpdateChecks(); break;
+    case SETTINGS_ROW_LIBRARY_FOLDER: ToggleLibraryFolder(arg, lib, gamesPath, outcome); break;
+    case SETTINGS_ROW_ADD_FOLDER:   AddLibraryFolder(lib, gamesPath, outcome); break;
     }
 
     return outcome;
@@ -3217,6 +3553,7 @@ static void RenderPickerFrame(Shell &shell, UiHint *hints, int hintCount)
         view.subheading = shell.picker.gameName;
         view.labels = shell.picker.labels;
         view.sublabels = shell.picker.sublabels;
+        view.sections = NULL;
         view.count = shell.picker.count;
         view.selected = shell.picker.selected;
         view.scroll = shell.picker.scroll;
@@ -3272,6 +3609,10 @@ int main()
         dprintf("Stays open when the disc tray opens (no-force-reboot privilege): %s; DashLaunch %s\n",
                 XexCheckExecutablePrivilege(0) ? "yes" : "NO", haveDashLaunch ? "loaded" : "not loaded");
     }
+
+    // The network as the app sees it - the first thing to read when a
+    // download won't connect.
+    LogNetworkStatus();
 
     if (!InitGameListUI())
     {
@@ -3790,7 +4131,8 @@ int main()
             else if ((pressed & XINPUT_GAMEPAD_A) && settings.count > 0)
             {
                 SettingsOutcome changed = RunSettingsRow(settings.rows[settings.selected],
-                                                         lib, gamesPath, sizeof(gamesPath));
+                                                         settings.args[settings.selected], lib, gamesPath,
+                                                         sizeof(gamesPath));
 
                 // A different library makes the old row number meaningless.
                 if (changed.libraryChanged)
@@ -4022,6 +4364,7 @@ int main()
             view.subheading = NULL;
             view.labels = shell.settings.labels;
             view.sublabels = shell.settings.sublabels;
+            view.sections = shell.settings.sections;
             view.count = shell.settings.count;
             view.selected = shell.settings.selected;
             view.scroll = shell.settings.scroll;

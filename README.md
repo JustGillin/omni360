@@ -61,8 +61,8 @@ See [`docs/Setup Guide.md`](docs/Setup%20Guide.md) for the whole thing. In short
 
 Two optional `settings.txt` keys change where things go, and the games folder can also be changed on the console in Settings:
 
-- `games-path:` — where games install, and where the library is scanned. Defaults to `Hdd1:\Content\0000000000000000`, where the dashboard keeps Games on Demand and arcade titles.
-- `xbla-path:` — where DLC and title updates are written. Same default. (The name is inherited from X-Store, which used the same key.)
+- `games-path:` — where games install, and where the library is scanned. Defaults to `Hdd1:\Content\0000000000000000`, where the dashboard keeps Games on Demand and arcade titles. Add more `games-path:` lines to scan more folders, such as `Usb0:\Content\0000000000000000` — the first is still where games install. See the Setup Guide.
+- `xbla-path:` — where DLC, title updates, arcade games and indie games are written. Same default. (The name is inherited from X-Store, which used the same key.)
 
 ## How it works
 
