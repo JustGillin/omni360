@@ -39,7 +39,7 @@ end-to-end on real hardware against a real 27-game library.
 #include "DiscSource.h"
 #include "ReadAhead.h"
 #include "TitleNames.h"
-#include "dns.h"         // LogNetworkStatus
+#include "dns.h"         // StartNetwork, LogNetworkStatus
 
 // Kernel exports with no XDK header.
 extern "C" BOOL XexCheckExecutablePrivilege(DWORD privilege);
@@ -3610,8 +3610,9 @@ int main()
                 XexCheckExecutablePrivilege(0) ? "yes" : "NO", haveDashLaunch ? "loaded" : "not loaded");
     }
 
-    // The network as the app sees it - the first thing to read when a
-    // download won't connect.
+    // The network stack, kept up for the session, and the network as the app
+    // sees it - the first thing to read when a download won't connect.
+    StartNetwork();
     LogNetworkStatus();
 
     if (!InitGameListUI())

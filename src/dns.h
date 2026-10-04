@@ -13,4 +13,10 @@ int searchDnsCache(const char *domain, char *ip, int ipSize);
 // own, so it doesn't hold up starting.
 void LogNetworkStatus();
 
+// Starts the network stack once, at start, before anything connects, and
+// keeps it up until the app exits. Each request still starts and stops it
+// around itself, but then only counts up and down from here, rather than
+// taking it down under another request running at the same time.
+void StartNetwork();
+
 #endif

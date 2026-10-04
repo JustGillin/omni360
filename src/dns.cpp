@@ -276,3 +276,29 @@ void LogNetworkStatus()
     else
         dprintf("[net] couldn't start the network check\n");
 }
+
+// ---------------------------------------------------------------------------
+// The network stack, for the whole session
+// ---------------------------------------------------------------------------
+//
+// (XAuthStartup with XAUTH_FLAG_BYPASS_SECURITY - the XDK's way for a game
+// to talk to servers outside Xbox Live - was tried here for a console that
+// times out every connection. It fails on a modded console, 0x80158406, and
+// XAuthInsecureSocketsAllowed says NO on one whose connections work, so
+// neither tells anything; the bypass that matters is the exploit's.)
+
+void StartNetwork()
+{
+    XNetStartupParams xnsp;
+    memset(&xnsp, 0, sizeof(xnsp));
+    xnsp.cfgSizeOfStruct = sizeof(xnsp);
+    xnsp.cfgFlags = XNET_STARTUP_BYPASS_SECURITY;
+    if (XNetStartup(&xnsp) != 0)
+    {
+        dprintf("[net] the network stack wouldn't start\n");
+        return;
+    }
+    WSADATA wsadata;
+    if (WSAStartup(MAKEWORD(2, 2), &wsadata) != 0)
+        dprintf("[net] Winsock wouldn't start\n");
+}
