@@ -5,6 +5,7 @@ A homebrew Xbox 360 app for getting games and their extras onto a modded console
 - **Your Library** — your installed games as a grid of covers, read straight from the hard drive.
 - **Store** — about 1,500 Xbox 360 disc games from archive.org, A to Z, each with its own page: wallpaper, description, screenshots and its regional versions. Install one and it downloads and installs as Games on Demand, playable from the dashboard or Aurora without the disc.
 - **Xbox Live Arcade** — about 740 arcade games from archive.org's `XBOX_360_XBLA` collection, A to Z, installed straight into the console's content folder.
+- **Xbox Live Indie Games** — about 3,450 indie games from archive.org's `XBOX_360_XBLIG` collections, A to Z. The update indie games need to start on a console offline from Xbox Live is installed with the first one.
 - **DLC and title updates** for any game, from archive.org's `msx360gcdlc` and `microsoft_xbox360_title-updates` collections, installed where the console expects them.
 - **Disc installs** — a game disc in the drive can be copied to the hard drive as Games on Demand.
 - **Queue** — everything downloads and installs in the background while you carry on browsing.
@@ -30,14 +31,14 @@ A homebrew Xbox 360 app for getting games and their extras onto a modded console
 
 Omni360 began as a fork of [X-Store](https://github.com/951261/X-Store) by 951261, and still runs on its networking core: the HTTPS client and BearSSL/TLS wrapper, DNS lookups and drive mounting. Everything Vimm's Lair/full-game/ISO/updater-related has been stripped out; the library, the Store, the installers and the interface are new. See `docs/` for X-Store's own original architecture notes (still accurate for the networking layer this fork builds on).
 
-**Status: beta (0.3.0-beta), working on real hardware.** Installs from the Store, Xbox Live Arcade, DLC, title updates and disc installs have all been run end to end on a modded console with a real library.
+**Status: beta (0.4.0-beta), working on real hardware.** Installs from the Store, Xbox Live Arcade, Xbox Live Indie Games, DLC, title updates and disc installs have all been run end to end on a modded console with a real library.
 
 ## Using it
 
 The sidebar on the left has four pages; left on the D-pad reaches it from any page, and **B** steps back a level (B on the sidebar exits).
 
 - **Your Library** — **A** on a game opens its page. A game disc in the drive is the first tile: **A** installs it to the hard drive, **X** opens its page, and once it's installed **A** finds its DLC and **START** installs it again. **Y** is a shortcut to Settings.
-- **Store** — three featured games, then A to Z. **A** on a letter shows its games; **A** on a game opens its page. **XBLA** opens Xbox Live Arcade's own A to Z. Search, Xbox Live Indie Games and Original Xbox are on the way, marked SOON.
+- **Store** — three featured games, then A to Z. **A** on a letter shows its games; **A** on a game opens its page. **XBLA** and **XBLIG** open Xbox Live Arcade's and Indie Games' own A to Z. Search and Original Xbox are on the way, marked SOON.
 - **A game's page** — **Install** installs the chosen version, every disc of it; choose another version from the list beside the description first. The button shows Queued, Installing, Installed, or Install remaining for a multi-disc game partly installed. **Find DLC** and **Title updates** search archive.org and show what's there to pick from. **Uninstall** appears once something is installed, and removes the game but leaves its DLC and title updates.
 - **Queue** — what's downloading, waiting and done. **X** stops a download or install, or clears a finished one.
 - **Settings** — the games folder, your archive.org keys, and updates: Omni360 checks GitHub for a newer version when it starts (this can be turned off), shows what's new in it, and installs it and restarts when you choose Update. It only installs a release signed with the project's key (`tools/sign_release.py`), keeping the previous version beside it as `.old`.
