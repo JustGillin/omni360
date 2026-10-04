@@ -285,6 +285,7 @@ struct StoreTileView
 struct StoreLetterView
 {
     char letter;
+    const char *title;   // in place of the letter - a search's; NULL for the letter
     const char *section; // before the count in the header - "Xbox Live Arcade"; NULL for none
     const StoreTileView *tiles;
     int count;

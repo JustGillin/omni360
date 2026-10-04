@@ -1942,6 +1942,11 @@ struct Shell
     int storeLetterSection; // SECTION_*, or -1 for the front page's
     char storeLetter;
     int storeGameCount; // in g_storeGames
+
+    // Or a search's results, in g_searchHits - any list's games - with what
+    // was typed.
+    bool storeSearch;
+    char storeQuery[64];
     int storeSelected;
     int storeLetterScroll;
 
@@ -1961,7 +1966,8 @@ struct Shell
 static StoreGame g_storeGames[MAX_STORE_GAMES];
 static const XblaGame *g_arcadeGames[MAX_STORE_GAMES];
 static StoreTileView g_storeTiles[MAX_STORE_GAMES];
-
+static StoreHit g_searchHits[MAX_STORE_GAMES];
+static int g_searchTotal = 0; // every match, of which the first MAX_STORE_GAMES are shown
 // How many games each letter of a section has, counted when its page first
 // opens - a letter with none is drawn faded. By SECTION_*.
 static int g_sectionLetterCounts[SECTION_COUNT][STORE_LETTER_COUNT];
@@ -2010,13 +2016,14 @@ static const StoreFeaturedView kStoreFeatured[STORE_FEATURED_COUNT] = {
 // The other ways in - those still to come marked SOON. DLC and title updates
 // are on each game's page instead.
 static const StoreButtonView kStoreButtons[STORE_BUTTON_COUNT] = {
-    { "Search", true },
+    { "Search", false },
     { "XBLA", false },
     { "XBLIG", false },
     { "Original Xbox", false },
 };
 
 // What each will be, for the toast when one's pressed before then.
+#define STORE_BUTTON_SEARCH 0
 #define STORE_BUTTON_XBLA  1
 #define STORE_BUTTON_XBLIG 2
 #define STORE_BUTTON_XBOX  3
@@ -2176,17 +2183,87 @@ static void OpenStoreLetter(Shell &shell, char letter, int section)
     }
     shell.storeLetterArcade = arcade;
     shell.storeLetterSection = section;
+    shell.storeSearch = false;
     shell.storeLetter = letter;
     shell.storeSelected = 0;
     shell.storeLetterScroll = 0;
     shell.storeInLetter = true;
 }
 
+// Search on the front page: the keyboard, then every list's games that
+// match, in a letter's grid. Nothing changes if it's cancelled or nothing
+// matches. True if the keyboard was shown.
+static bool OpenStoreSearch(Shell &shell)
+{
+    WCHAR typedBefore[64];
+    NarrowToWide(shell.storeQuery, typedBefore, 64);
+    std::string typed;
+    if (OpenKeyboardToString(XUSER_INDEX_ANY, &typed, L"Search the Store",
+                             L"A game's name, or part of it - every list is searched", typedBefore) != ERROR_SUCCESS)
+        return true; // cancelled
+    TrimInPlace(typed);
+    if (typed.empty())
+        return true;
+
+    const int shown = SearchStore(typed.c_str(), g_searchHits, MAX_STORE_GAMES, &g_searchTotal);
+    dprintf("[store] search \"%s\": %d match(es)\n", typed.c_str(), g_searchTotal);
+    _snprintf(shell.storeQuery, sizeof(shell.storeQuery), "%s", typed.c_str());
+    shell.storeQuery[sizeof(shell.storeQuery) - 1] = '\0';
+    if (shown == 0)
+    {
+        ShowShellToast("No games found", shell.storeQuery, UI_TOAST_INFO);
+        return true;
+    }
+
+    for (int i = 0; i < shown; ++i)
+    {
+        const StoreHit &hit = g_searchHits[i];
+        StoreTileView &tile = g_storeTiles[i];
+        if (hit.game != NULL)
+        {
+            tile.titleId = hit.game->titleId;
+            tile.name = hit.game->name;
+            tile.regions = hit.game->regions;
+            tile.indie = false;
+        }
+        else
+        {
+            tile.indie = (hit.kind == STORE_HIT_XBLIG);
+            tile.titleId = tile.indie ? 0 : hit.arcade->titleId;
+            tile.name = hit.arcade->name;
+            tile.regions = 0;
+        }
+    }
+    shell.storeGameCount = shown;
+    shell.storeLetterArcade = false;
+    shell.storeLetterSection = -1;
+    shell.storeSearch = true;
+    shell.storeSelected = 0;
+    shell.storeLetterScroll = 0;
+    shell.storeInLetter = true;
+    return true;
+}
+
 static StoreLetterView MakeStoreLetterView(const Shell &shell)
 {
     StoreLetterView view;
     view.letter = shell.storeLetter;
+    view.title = NULL;
     view.section = shell.storeLetterSection >= 0 ? SectionName(shell.storeLetterSection) : NULL;
+    if (shell.storeSearch)
+    {
+        static char title[96], section[48];
+        _snprintf(title, sizeof(title), "\xE2\x80\x9C%s\xE2\x80\x9D", shell.storeQuery); // in curly quotes
+        title[sizeof(title) - 1] = '\0';
+        if (g_searchTotal > shell.storeGameCount)
+            _snprintf(section, sizeof(section), "Search" STORE_MIDDOT "the best %d of %d", shell.storeGameCount,
+                      g_searchTotal);
+        else
+            _snprintf(section, sizeof(section), "Search");
+        section[sizeof(section) - 1] = '\0';
+        view.title = title;
+        view.section = section;
+    }
     view.tiles = g_storeTiles;
     view.count = shell.storeGameCount;
     view.selected = shell.storeSelected;
@@ -3098,8 +3175,8 @@ static void InstallStoreVersion(const Shell &shell, const Library &lib, const ch
         ShowShellToast("Already in the queue", g_storeGame.name, UI_TOAST_INFO);
 }
 
-// A on the front page.
-static void ActOnStoreFocus(Shell &shell)
+// A on the front page. True if something took over the screen.
+static bool ActOnStoreFocus(Shell &shell)
 {
     const int i = shell.storeFocus;
     if (i < STORE_FOCUS_BUTTONS)
@@ -3118,6 +3195,8 @@ static void ActOnStoreFocus(Shell &shell)
             OpenSection(shell, SECTION_XBLIG);
         else if (i - STORE_FOCUS_BUTTONS == STORE_BUTTON_XBOX)
             OpenSection(shell, SECTION_XBOX);
+        else if (i - STORE_FOCUS_BUTTONS == STORE_BUTTON_SEARCH)
+            return OpenStoreSearch(shell);
         else
             ShowShellToast("Coming soon", kStoreButtonsSoon[i - STORE_FOCUS_BUTTONS], UI_TOAST_INFO);
     }
@@ -3125,6 +3204,7 @@ static void ActOnStoreFocus(Shell &shell)
     {
         OpenStoreLetter(shell, kStoreLetters[i - STORE_FOCUS_LETTERS], -1);
     }
+    return false;
 }
 
 static void RefreshShell(Shell &shell, Library &lib, const char *contentBasePath, const char *gamesPath)
@@ -4208,9 +4288,18 @@ int main()
                 if (!shell.storeInSection)
                     RequestFeaturedArt();
             }
+            else if ((pressed & XINPUT_GAMEPAD_Y) && shell.storeSearch)
+            {
+                acted = OpenStoreSearch(shell);
+            }
             else if ((pressed & XINPUT_GAMEPAD_A) && shell.storeGameCount > 0)
             {
-                if (shell.storeLetterArcade)
+                const StoreHit &hit = g_searchHits[shell.storeSelected];
+                if (shell.storeSearch && hit.game != NULL)
+                    OpenStoreGame(shell, *hit.game);
+                else if (shell.storeSearch)
+                    OpenArcadeGame(shell, *hit.arcade);
+                else if (shell.storeLetterArcade)
                     OpenArcadeGame(shell, *g_arcadeGames[shell.storeSelected]);
                 else
                     OpenStoreGame(shell, g_storeGames[shell.storeSelected]);
@@ -4247,7 +4336,7 @@ int main()
             if (pressed & XINPUT_GAMEPAD_B)
                 shell.sidebarFocused = true;
             else if (pressed & XINPUT_GAMEPAD_A)
-                ActOnStoreFocus(shell);
+                acted = ActOnStoreFocus(shell);
             else if (input.nav != 0)
                 StepStoreFocus(input.nav, shell);
 
@@ -4445,6 +4534,8 @@ int main()
                     if (shell.storeGameCount > 0)
                         hintCount = AddHint(hints, hintCount, UI_BUTTON_A, L"View game", L"View");
                     hintCount = AddHint(hints, hintCount, UI_BUTTON_B, L"Store");
+                    if (shell.storeSearch)
+                        hintCount = AddHint(hints, hintCount, UI_BUTTON_Y, L"Search again", L"Search");
                     if (shell.storeGameCount > StoreLetterVisibleRows() * LibraryGridColumns())
                         hintCount = AddHint(hints, hintCount, UI_BUTTON_LBRB, L"Page");
                 }

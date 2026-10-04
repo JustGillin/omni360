@@ -74,4 +74,33 @@ const XblaGame *XblaGameByTitleId(unsigned long titleId);
 // The game from either list with this RAR name, or NULL.
 const XblaGame *ArcadeGameByRar(const char *rar);
 
+// ---------------------------------------------------------------------------
+// Search
+// ---------------------------------------------------------------------------
+
+enum StoreHitKind
+{
+    STORE_HIT_XBOX360, // a disc game: game
+    STORE_HIT_XBOX,    // an Original Xbox one: game
+    STORE_HIT_XBLA,    // arcade
+    STORE_HIT_XBLIG    // arcade, an indie game
+};
+
+struct StoreHit
+{
+    StoreHitKind kind;
+    const StoreGame *game;  // for the disc games
+    const XblaGame *arcade; // for the others
+};
+
+// Every list's games whose names have each of the query's words in them -
+// ignoring case, spaces and punctuation, so "spiderman" finds Spider-Man and
+// "halo3" Halo 3 - or, for eight hex digits, whose title ID it is. Best
+// first: the name exactly, then names that start with it, then those with
+// each word at a word's start, then the rest; within each, 360 discs,
+// Original Xbox, arcade, then indie games, in their lists' order. Returns
+// how many were written, at most maxHits; *outTotal, if given, how many
+// matched.
+int SearchStore(const char *query, StoreHit *out, int maxHits, int *outTotal);
+
 #endif

@@ -4,6 +4,7 @@
 #define XBLIG_TITLES_DATA
 #include "StoreCatalog.h"
 
+#include <stdlib.h>
 #include <string.h>
 
 #define COUNT_OF(a) ((int)(sizeof(a) / sizeof((a)[0])))
@@ -200,4 +201,205 @@ const XblaGame *ArcadeGameByRar(const char *rar)
             return &kXbligGames[i];
     }
     return NULL;
+}
+
+// ---------------------------------------------------------------------------
+// Search
+// ---------------------------------------------------------------------------
+
+#define SEARCH_TEXT_MAX 256
+
+// Lowercase letters and digits with one space between words - "Spider-Man:
+// Web of Shadows" is "spider man web of shadows". Bytes past ASCII (UTF-8)
+// are kept, so an accented name still matches itself. *compact: the same
+// without the spaces.
+static void NormaliseForSearch(const char *text, char *spaced, char *compact)
+{
+    size_t s = 0, c = 0;
+    bool gap = false;
+    for (const unsigned char *p = (const unsigned char *)text; *p != '\0' && s + 2 < SEARCH_TEXT_MAX; ++p)
+    {
+        unsigned char ch = *p;
+        if (ch >= 'A' && ch <= 'Z')
+            ch = (unsigned char)(ch - 'A' + 'a');
+        const bool word = (ch >= 'a' && ch <= 'z') || (ch >= '0' && ch <= '9') || ch >= 0x80;
+        if (ch == '\'')
+            continue; // "Assassin's" and "Assassins" alike
+        if (!word)
+        {
+            gap = (s > 0);
+            continue;
+        }
+        if (gap)
+            spaced[s++] = ' ';
+        gap = false;
+        spaced[s++] = (char)ch;
+        compact[c++] = (char)ch;
+    }
+    spaced[s] = '\0';
+    compact[c] = '\0';
+}
+
+struct SearchQuery
+{
+    char spaced[SEARCH_TEXT_MAX];
+    char compact[SEARCH_TEXT_MAX];
+    const char *words[16];
+    int wordCount;
+    unsigned long titleId; // non-zero for a query of eight hex digits
+};
+
+// How well a name matches: 0 exactly, 1 from its start, 2 each word at a
+// word's start, 3 somewhere; -1 not at all.
+static int MatchName(const SearchQuery &q, const char *name)
+{
+    char spaced[SEARCH_TEXT_MAX], compact[SEARCH_TEXT_MAX];
+    NormaliseForSearch(name, spaced, compact);
+    if (strcmp(compact, q.compact) == 0)
+        return 0;
+    if (strncmp(compact, q.compact, strlen(q.compact)) == 0)
+        return 1;
+
+    bool all = true, allAtStarts = true;
+    for (int w = 0; w < q.wordCount && all; ++w)
+    {
+        bool found = false, atStart = false;
+        for (const char *at = strstr(spaced, q.words[w]); at != NULL; at = strstr(at + 1, q.words[w]))
+        {
+            found = true;
+            if (at == spaced || at[-1] == ' ')
+            {
+                atStart = true;
+                break;
+            }
+        }
+        all = found;
+        allAtStarts = allAtStarts && atStart;
+    }
+    if (all)
+        return allAtStarts ? 2 : 3;
+
+    // Typed without its spaces - "halo3", "callofduty" - whole words of the
+    // name, so "gears" doesn't find Metal Gear Solid ("gear s...").
+    for (const char *start = spaced; *start != '\0'; ++start)
+    {
+        if (start != spaced && start[-1] != ' ')
+            continue;
+        const char *want = q.compact;
+        const char *p = start;
+        for (; *p != '\0' && *want != '\0'; ++p)
+        {
+            if (*p == ' ')
+                continue;
+            if (*p != *want)
+                break;
+            want++;
+        }
+        if (*want == '\0' && (*p == '\0' || *p == ' '))
+            return 3;
+    }
+    return -1;
+}
+
+struct RankedHit
+{
+    StoreHit hit;
+    int rank;
+    int order; // its place in the lists, for ties
+};
+
+static int CompareRankedHits(const void *a, const void *b)
+{
+    const RankedHit *x = (const RankedHit *)a;
+    const RankedHit *y = (const RankedHit *)b;
+    if (x->rank != y->rank)
+        return x->rank - y->rank;
+    return x->order - y->order;
+}
+
+#define SEARCH_MAX_MATCHES (STORE_GAME_COUNT + XBOX_GAME_COUNT + XBLA_GAME_COUNT + XBLIG_GAME_COUNT)
+static RankedHit g_matches[SEARCH_MAX_MATCHES];
+
+int SearchStore(const char *query, StoreHit *out, int maxHits, int *outTotal)
+{
+    if (outTotal != NULL)
+        *outTotal = 0;
+    if (query == NULL || out == NULL || maxHits <= 0)
+        return 0;
+
+    static SearchQuery q;
+    memset(&q, 0, sizeof(q));
+    NormaliseForSearch(query, q.spaced, q.compact);
+    if (q.compact[0] == '\0')
+        return 0;
+    for (char *p = q.spaced; *p != '\0' && q.wordCount < 16;)
+    {
+        q.words[q.wordCount] = p;
+        char *space = strchr(p, ' ');
+        q.wordCount++;
+        if (space == NULL)
+            break;
+        *space = '\0'; // the words are read as strings from here on
+        p = space + 1;
+    }
+    if (strlen(q.compact) == 8)
+    {
+        char *end = NULL;
+        const unsigned long id = strtoul(q.compact, &end, 16);
+        if (end != NULL && *end == '\0')
+            q.titleId = id;
+    }
+
+    int n = 0, order = 0;
+    for (int i = 0; i < STORE_GAME_COUNT; ++i, ++order)
+    {
+        const int rank = (q.titleId != 0 && kStoreGames[i].titleId == q.titleId) ? 0 : MatchName(q, kStoreGames[i].name);
+        if (rank < 0)
+            continue;
+        RankedHit &m = g_matches[n++];
+        m.hit.kind = STORE_HIT_XBOX360;
+        m.hit.game = &kStoreGames[i];
+        m.hit.arcade = NULL;
+        m.rank = rank;
+        m.order = order;
+    }
+    for (int i = 0; i < XBOX_GAME_COUNT; ++i, ++order)
+    {
+        const int rank = (q.titleId != 0 && kXboxGames[i].titleId == q.titleId) ? 0 : MatchName(q, kXboxGames[i].name);
+        if (rank < 0)
+            continue;
+        RankedHit &m = g_matches[n++];
+        m.hit.kind = STORE_HIT_XBOX;
+        m.hit.game = &kXboxGames[i];
+        m.hit.arcade = NULL;
+        m.rank = rank;
+        m.order = order;
+    }
+    for (int set = 0; set < 2; ++set)
+    {
+        const XblaGame *games = (set == 1) ? kXbligGames : kXblaGames;
+        const int total = (set == 1) ? XBLIG_GAME_COUNT : XBLA_GAME_COUNT;
+        for (int i = 0; i < total; ++i, ++order)
+        {
+            // Indie games share one title ID, so it finds none of them.
+            const bool byId = (q.titleId != 0 && set == 0 && games[i].titleId == q.titleId);
+            const int rank = byId ? 0 : MatchName(q, games[i].name);
+            if (rank < 0)
+                continue;
+            RankedHit &m = g_matches[n++];
+            m.hit.kind = (set == 1) ? STORE_HIT_XBLIG : STORE_HIT_XBLA;
+            m.hit.game = NULL;
+            m.hit.arcade = &games[i];
+            m.rank = rank;
+            m.order = order;
+        }
+    }
+
+    qsort(g_matches, n, sizeof(RankedHit), CompareRankedHits);
+    if (outTotal != NULL)
+        *outTotal = n;
+    const int written = n < maxHits ? n : maxHits;
+    for (int i = 0; i < written; ++i)
+        out[i] = g_matches[i].hit;
+    return written;
 }

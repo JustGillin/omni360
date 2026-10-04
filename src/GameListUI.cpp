@@ -4227,7 +4227,7 @@ void RenderStoreLetterFrame(StoreLetterView &view, const UiHint *hints, int hint
     _snprintf(subtitle, sizeof(subtitle), "%s%s%d game%s" MIDDOT "%d of %d", view.section != NULL ? view.section : "",
               view.section != NULL ? MIDDOT : "", count, count == 1 ? "" : "s", count > 0 ? selected + 1 : 0, count);
     subtitle[sizeof(subtitle) - 1] = '\0';
-    DrawHeaderText(title, subtitle, showToast);
+    DrawHeaderText(view.title != NULL ? view.title : title, subtitle, showToast);
 
     DrawButtonHintText(footer, footerCount, g_M.footerY);
 
