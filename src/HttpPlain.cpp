@@ -105,7 +105,7 @@ static int GetOnce(const char *url, const char *extraHeaderLines, char *buffer, 
     sa.sin_addr.s_addr = inet_addr(ip);
     if (connect(s, (sockaddr *)&sa, sizeof(sa)) == SOCKET_ERROR)
     {
-        dprintf("[http] could not connect to %s (%s)\n", host, ip);
+        dprintf("[http] could not connect to %s (%s): WSA error %d\n", host, ip, WSAGetLastError());
         closesocket(s);
         return 0;
     }

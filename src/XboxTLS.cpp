@@ -559,6 +559,24 @@ bool XboxTLS_Connect(XboxTLSContext* ctx, const char* ip, const char* hostname, 
  *   - Always flushes the stream after writing.
  *   - Uses BearSSL’s `br_sslio_write_all` and `br_sslio_flush`.
  */
+// What a handshake's error code means, for the few seen in practice -
+// BearSSL's codes from bearssl_ssl.h and bearssl_x509.h - else nothing.
+static const char *TlsErrorMeaning(int err)
+{
+    switch (err)
+    {
+    case BR_ERR_IO:
+        return " (the connection dropped)";
+    case BR_ERR_X509_EXPIRED:
+    case BR_ERR_X509_TIME_UNKNOWN:
+        return " (the certificate's dates don't fit the console's clock - is the clock right?)";
+    case BR_ERR_X509_NOT_TRUSTED:
+        return " (a certificate chain the app doesn't trust)";
+    default:
+        return "";
+    }
+}
+
 int XboxTLS_Write(XboxTLSContext* ctx, const void* buf, int len) {
     if (!ctx || !ctx->internal || !buf || len <= 0) {
         debug_tls("XboxTLS_Write: Invalid arguments.");
@@ -589,8 +607,8 @@ int XboxTLS_Write(XboxTLSContext* ctx, const void* buf, int len) {
 
     if (writeResult < 0) {
         int err = br_ssl_engine_last_error(&ic->sc.eng);
-        char msg[64];
-        sprintf(msg, "TLS write error code: %d", err);
+        char msg[160];
+        sprintf(msg, "TLS write error code: %d%s", err, TlsErrorMeaning(err));
         debug_tls(msg);
         return -1;
     }
@@ -607,8 +625,8 @@ int XboxTLS_Write(XboxTLSContext* ctx, const void* buf, int len) {
 
     if (writeResult != 0) {
         int err = br_ssl_engine_last_error(&ic->sc.eng);
-        char msg[64];
-        sprintf(msg, "TLS flush error code: %d", err);
+        char msg[160];
+        sprintf(msg, "TLS flush error code: %d%s", err, TlsErrorMeaning(err));
         debug_tls(msg);
         return -1;
     }

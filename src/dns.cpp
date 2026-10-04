@@ -7,8 +7,12 @@ DESCRIPTION : Resolves a domain name (example.com) to an IP (384.528.845.259)
 
 #include <xtl.h>
 #include "XboxTLS.h"
+#include "dns.h"
+#include "OutputConsole.h"
 
 #include <string.h>
+#include <stdio.h>
+#include <time.h>
 #include <iostream>
 
 struct DnsCacheEntry
@@ -64,6 +68,21 @@ bool ResolveDNS(const char *domain, char *resolvedIP, int ipBufferSize)
                 XNetInAddrToString(pxndns->aina[0], resolvedIP, ipBufferSize);
                 success = (resolvedIP[0] != '\0');
             }
+            else
+            {
+                // Why, for the log: no answer in time, no such name, or
+                // something else from the console's DNS server.
+                const int status = pxndns->iStatus;
+                dprintf("[dns] %s: %s (status %d)\n", domain,
+                        status == WSAEINPROGRESS ? "no answer in 5 seconds"
+                        : status == WSAHOST_NOT_FOUND ? "the DNS server says there's no such name"
+                        : status == 0 ? "no addresses came back"
+                                      : "the lookup failed", status);
+            }
+        }
+        else
+        {
+            dprintf("[dns] %s: the lookup couldn't start (%d) - is the network up?\n", domain, lookupResult);
         }
     }
     __except (EXCEPTION_EXECUTE_HANDLER)
@@ -120,4 +139,78 @@ int searchDnsCache(const char *domain, char *ip, int ipSize)
     }
 
     return -1; // failed to find DNS cache record
+}
+
+// ---------------------------------------------------------------------------
+// The network, for the log
+// ---------------------------------------------------------------------------
+
+static DWORD WINAPI NetworkStatusEntry(LPVOID)
+{
+    XNetStartupParams xnsp;
+    memset(&xnsp, 0, sizeof(xnsp));
+    xnsp.cfgSizeOfStruct = sizeof(xnsp);
+    xnsp.cfgFlags = XNET_STARTUP_BYPASS_SECURITY;
+    if (XNetStartup(&xnsp) != 0)
+    {
+        dprintf("[net] the network stack wouldn't start\n");
+        return 0;
+    }
+    WSADATA wsadata;
+    const bool wsa = (WSAStartup(MAKEWORD(2, 2), &wsadata) == 0);
+
+    const DWORD link = XNetGetEthernetLinkStatus();
+    if (link & XNET_ETHERNET_LINK_ACTIVE)
+        dprintf("[net] link: up, %s%s%s\n", (link & XNET_ETHERNET_LINK_WIRELESS) ? "wireless" : "wired",
+                (link & XNET_ETHERNET_LINK_100MBPS) ? ", 100 Mbps" : (link & XNET_ETHERNET_LINK_10MBPS) ? ", 10 Mbps" : "",
+                (link & XNET_ETHERNET_LINK_FULL_DUPLEX) ? ", full duplex"
+                : (link & XNET_ETHERNET_LINK_HALF_DUPLEX) ? ", half duplex" : "");
+    else
+        dprintf("[net] link: DOWN - no cable, or nothing at the other end (0x%08lX)\n", link);
+
+    // An address can take a moment after starting; up to five seconds.
+    XNADDR xna;
+    memset(&xna, 0, sizeof(xna));
+    DWORD flags = XNET_GET_XNADDR_PENDING;
+    for (int i = 0; i < 50; ++i)
+    {
+        flags = XNetGetTitleXnAddr(&xna);
+        if (flags != XNET_GET_XNADDR_PENDING)
+            break;
+        Sleep(100);
+    }
+    char ip[32] = "none";
+    if (xna.ina.s_addr != 0)
+        XNetInAddrToString(xna.ina, ip, sizeof(ip));
+    if (flags == XNET_GET_XNADDR_PENDING)
+        dprintf("[net] address: still waiting for one after 5 seconds\n");
+    else
+        dprintf("[net] address: %s (%s)%s%s%s\n", ip,
+                (flags & XNET_GET_XNADDR_DHCP) ? "DHCP" : (flags & XNET_GET_XNADDR_STATIC) ? "static"
+                : (flags & XNET_GET_XNADDR_PPPOE) ? "PPPoE" : "no IP",
+                (flags & XNET_GET_XNADDR_GATEWAY) ? ", gateway" : ", NO gateway",
+                (flags & XNET_GET_XNADDR_DNS) ? ", DNS servers" : ", NO DNS servers",
+                (flags & XNET_GET_XNADDR_TROUBLESHOOT) ? ", needs troubleshooting" : "");
+
+    // The clock HTTPS checks certificates against - BearSSL reads time().
+    const time_t now = time(NULL);
+    const struct tm *utc = gmtime(&now);
+    if (utc != NULL)
+        dprintf("[net] console clock (UTC): %04d-%02d-%02d %02d:%02d%s\n", utc->tm_year + 1900, utc->tm_mon + 1,
+                utc->tm_mday, utc->tm_hour, utc->tm_min,
+                utc->tm_year + 1900 < 2025 ? " - looks WRONG: secure connections will fail until it's set" : "");
+
+    if (wsa)
+        WSACleanup();
+    XNetCleanup();
+    return 0;
+}
+
+void LogNetworkStatus()
+{
+    HANDLE thread = CreateThread(NULL, 64 * 1024, NetworkStatusEntry, NULL, 0, NULL);
+    if (thread != NULL)
+        CloseHandle(thread);
+    else
+        dprintf("[net] couldn't start the network check\n");
 }
