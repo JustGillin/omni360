@@ -27,7 +27,7 @@ new or changed size.
     --keys PATH   the keys file (default: %USERPROFILE%\\.omni360\\ArchiveOrgKeys.txt)
     --limit N     only the first N RARs of each item, for a trial run
 """
-import argparse, json, os, re, struct, sys, time, urllib.parse, urllib.request
+import argparse, json, os, re, struct, sys, time, unicodedata, urllib.parse, urllib.request
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 DEFAULT_KEYS = os.path.join(os.path.expanduser("~"), ".omni360", "ArchiveOrgKeys.txt")
@@ -278,6 +278,39 @@ def c_string(s):
     return '"' + "".join(out) + '"'
 
 
+JAPANESE = re.compile("[぀-ヿ㐀-䶿一-鿿ｦ-ﾟ]")
+_kakasi = None
+
+
+def shown_name(name):
+    """The name the Store shows. The console's font has no Japanese, so a
+    Japanese name - a few dozen indie games' - is shown in romaji, through
+    pykakasi (pip install pykakasi): "ドキドキ☆コスプレせんせい" as
+    "Dokidoki Kosupure Sensei". Others are kept as they are; the download
+    still uses the RAR's own name."""
+    global _kakasi
+    if not JAPANESE.search(name):
+        return name
+    if _kakasi is None:
+        try:
+            import pykakasi
+        except ImportError:
+            sys.exit("Japanese names need pykakasi to be shown in romaji: pip install pykakasi")
+        _kakasi = pykakasi.kakasi()
+    text = unicodedata.normalize("NFKC", name)  # full-width ！ and spaces to plain ones
+    words = []
+    for part in _kakasi.convert(text):
+        romaji = part["hepburn"] if JAPANESE.search(part["orig"]) else part["orig"]
+        words.append(romaji)
+    out = " ".join(words)
+    out = re.sub(r"[^\x20-\x7e]", " ", out)        # ☆ and the like
+    out = re.sub(r"\s+([!?,.:)])", r"\1", out)      # no space before punctuation
+    out = re.sub(r"\(\s+", "(", out)                # or after an opening bracket
+    out = re.sub(r"(\d)\.\s+(\d)", r"\1.\2", out)   # "2.5", not "2. 5"
+    out = re.sub(r"\s+", " ", out).strip()
+    return re.sub(r"(^|[\s(\-~])([a-z])", lambda m: m.group(1) + m.group(2).upper(), out)
+
+
 def sort_key(name):
     s = name.lower()
     for article in ("the ", "a ", "an "):
@@ -359,7 +392,7 @@ def main():
         if "misc games without title" in rar.lower():
             skipped.append((rar, "unnamed games, each also uploaded on its own"))
             continue
-        name = rar[:-4]
+        name = shown_name(rar[:-4])
         kinds = {}
         for p in pk:
             kinds[p[1]] = kinds.get(p[1], 0) + 1

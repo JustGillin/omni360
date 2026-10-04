@@ -44,3 +44,5 @@ Media/Fonts/Selawik_*
 
 # What tools/make_xbla_titles.py learned of each RAR, so reruns are quick
 tools/cache/
+
+__pycache__/
