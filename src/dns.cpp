@@ -35,17 +35,76 @@ static const DnsCacheEntry dnsCache[] =
  * @param ipBufferSize Size of the resolvedIP buffer.
  * @return true if resolution succeeded, false otherwise.
  */
+// Names the DNS server said don't exist, this session - DashLaunch's
+// livestrong answers that way for every Xbox Live host. Asked about again,
+// they fail straight away: each image would otherwise ask three times over,
+// and an HTTPS request five, seconds apart. Only that answer is remembered -
+// a timeout or any other failure is tried again.
+#define MAX_MISSING_NAMES 16
+static char g_missingNames[MAX_MISSING_NAMES][128];
+static int g_missingCount = 0;
+static CRITICAL_SECTION g_missingLock;
+static volatile LONG g_missingLockState = 0; // 0 not made, 1 being made, 2 ready
+
+// The lock, made by whichever thread gets here first - lookups come from
+// several workers at once.
+static CRITICAL_SECTION *MissingLock()
+{
+    if (g_missingLockState != 2)
+    {
+        if (InterlockedCompareExchange(&g_missingLockState, 1, 0) == 0)
+        {
+            InitializeCriticalSection(&g_missingLock);
+            g_missingLockState = 2;
+        }
+        else
+        {
+            while (g_missingLockState != 2)
+                Sleep(0);
+        }
+    }
+    return &g_missingLock;
+}
+
+static bool KnownMissing(const char *domain)
+{
+    bool found = false;
+    EnterCriticalSection(MissingLock());
+    for (int i = 0; i < g_missingCount && !found; ++i)
+        found = (_stricmp(g_missingNames[i], domain) == 0);
+    LeaveCriticalSection(MissingLock());
+    return found;
+}
+
+static void NoteMissing(const char *domain)
+{
+    EnterCriticalSection(MissingLock());
+    bool found = false;
+    for (int i = 0; i < g_missingCount && !found; ++i)
+        found = (_stricmp(g_missingNames[i], domain) == 0);
+    if (!found && g_missingCount < MAX_MISSING_NAMES && strlen(domain) < sizeof(g_missingNames[0]))
+    {
+        strcpy(g_missingNames[g_missingCount++], domain);
+        dprintf("[dns] %s won't be looked up again this session - blocked, or no such name\n", domain);
+    }
+    LeaveCriticalSection(MissingLock());
+}
+
 bool ResolveDNS(const char *domain, char *resolvedIP, int ipBufferSize)
 {
     XNDNS *pxndns = NULL;
     int lookupResult;
     int i;
     bool success = false;
+    bool missing = false;
 
     if (domain == NULL || resolvedIP == NULL || ipBufferSize <= 0)
         return false;
 
     resolvedIP[0] = '\0';
+
+    if (KnownMissing(domain))
+        return false;
 
     // XNetDnsLookup or the returned XNDNS block can fault if the network stack
     // is not ready yet, so keep the whole interaction guarded and fail cleanly.
@@ -73,6 +132,7 @@ bool ResolveDNS(const char *domain, char *resolvedIP, int ipBufferSize)
                 // Why, for the log: no answer in time, no such name, or
                 // something else from the console's DNS server.
                 const int status = pxndns->iStatus;
+                missing = (status == WSAHOST_NOT_FOUND);
                 dprintf("[dns] %s: %s (status %d)\n", domain,
                         status == WSAEINPROGRESS ? "no answer in 5 seconds"
                         : status == WSAHOST_NOT_FOUND ? "the DNS server says there's no such name"
@@ -113,6 +173,8 @@ bool ResolveDNS(const char *domain, char *resolvedIP, int ipBufferSize)
         }
     }
 
+    if (missing)
+        NoteMissing(domain);
     return success;
 }
 
