@@ -27,12 +27,22 @@ XBOX_360_2 to _6, as zips named "Naruto The Broken Bond [RF].zip". One of
 those is added when it's a retail game the Redump collection doesn't have
 at all, or a USA or region-free release of one it has only from elsewhere.
 It's given a Redump-style name - "Naruto - The Broken Bond (World)" - for
-the Store to show, and its title ID from the datfile. That set's RARs
-aren't added: the installer reads zips only.
+the Store to show, and its title ID from the datfile.
+
+XBOX_360_1 and XBOX_360_1_OTHER hold the same kind of games as RARs -
+BioShock Infinite's only copy is one. A RAR is added only if its disc image is
+stored - no compression - and not encrypted or split, as the installer
+reads the disc image straight out of it. Finding that out means reading its
+headers, which are private, so it takes the archive.org keys (--keys, the
+two-line ArchiveOrgKeys.txt the app uses); what each RAR held is kept in
+tools/cache/store_rars.json, so a rerun asks only about new ones. Without
+the keys, RARs not in that cache are left out.
 
 Needs network access: redump.org for the datfile and archive.org's public
 metadata API for each letter's file list. The datfile isn't pinned - Redump
 publishes only the latest - so the header records which one it used.
+
+    python tools/make_store_titles.py --keys path/to/ArchiveOrgKeys.txt
 
     python tools/make_store_titles.py --system xbox
 
@@ -51,6 +61,8 @@ import sys
 import urllib.request
 import zipfile
 import xml.etree.ElementTree as ET
+
+import make_xbla_titles as xbla  # its keyed fetch and RAR header reading
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 OUT_HEADER = os.path.join(ROOT, "src", "StoreTitles.h")
@@ -75,9 +87,12 @@ ITEMS = ["numberssymbols", "a_part1", "a_part2", "b_part1", "b_part2", "c_part1"
          "m_part1", "m_part2", "n_part1", "n_part2", "o", "p", "q", "r", "s_part1", "s_part2",
          "t_part1", "t_part2", "u", "v", "w", "x_part1", "x_part2", "y", "z"]
 
-# The other set, for games the Redump collection lacks. XBOX_360_1 and
-# _1_OTHER hold only RARs.
-OTHER_ITEMS = ["XBOX_360_2", "XBOX_360_3", "XBOX_360_4", "XBOX_360_5", "XBOX_360_6"]
+# The other set, for games the Redump collection lacks: zips in XBOX_360_2 to
+# _6, then RARs in XBOX_360_1 and _1_OTHER - a game the zips have isn't taken
+# again from the RARs.
+OTHER_ITEMS = ["XBOX_360_2", "XBOX_360_3", "XBOX_360_4", "XBOX_360_5", "XBOX_360_6",
+               "XBOX_360_1", "XBOX_360_1_OTHER"]
+RAR_CACHE = os.path.join(ROOT, "tools", "cache", "store_rars.json")
 
 # Its names' region tags, as Redump's regions. "RF" is region free.
 OTHER_REGIONS = {"RF": "World", "NTSCU": "USA", "PAL": "Europe", "NTSCJ": "Japan"}
@@ -352,7 +367,7 @@ def parse_other_name(name):
     """(title, regions, disc number, other tags) from the other set's
     "Title [PAL][DVD1].zip". The other tags are mostly languages - "ENG-FR-MX"
     - and tell apart versions of the same region."""
-    stem = name[:-4]
+    stem = re.sub(r"\.iso$", "", name[:-4], flags=re.I)  # "Bulletstorm [RF].ISO.rar"
     tags = [t.strip() for t in re.findall(r"\[([^\]]*)\]", stem)]
     title = re.sub(r"\s*\[[^\]]*\]", "", stem).strip()
     regions = set()
@@ -371,6 +386,101 @@ def parse_other_name(name):
         elif not found and t.lower() != "kinect":
             other.append(t)
     return title, regions, disc, other
+
+
+def is_disc_image(name, size):
+    """The disc image among a RAR's files: an .iso, or anything a gigabyte or
+    more. Some RARs hold a 30-byte "DVD1.dvd" layer-break note before it."""
+    return name.lower().endswith(".iso") or size >= 1000000000
+
+
+def rar_disc_image(reader):
+    """What a RAR's disc image is: {format, name, size, stored, encrypted,
+    split} - the same reading as RarHeaders.cpp, which the installer uses."""
+    sig = reader.read(0, 8)
+    if sig[:7] == b"Rar!\x1a\x07\x00":
+        offset = 7
+        for _ in range(32):
+            h = reader.read(offset, 7)
+            if len(h) < 7:
+                break
+            _, kind, flags, size = xbla.struct.unpack("<HBHH", h)
+            if kind == 0x7B or size < 7:
+                break
+            if kind == 0x73 and flags & 0x80:
+                return {"format": "rar4", "encrypted": True}
+            head = reader.read(offset, size)
+            if kind == 0x74:
+                pack, unp = xbla.struct.unpack("<II", head[7:15])
+                name_len = xbla.struct.unpack("<H", head[26:28])[0]
+                name_at = 32
+                if flags & 0x100:
+                    hp, hu = xbla.struct.unpack("<II", head[32:40])
+                    pack |= hp << 32
+                    unp |= hu << 32
+                    name_at = 40
+                name = head[name_at:name_at + name_len].split(b"\x00")[0].decode("utf-8", "replace")
+                if (flags & 0xE0) == 0xE0 or not is_disc_image(name, unp):
+                    offset += size + pack
+                    continue
+                return {"format": "rar4", "name": name,
+                        "size": unp, "stored": head[25] == 0x30 and pack == unp,
+                        "encrypted": bool(flags & 0x04), "split": bool(flags & 0x03)}
+            add = xbla.struct.unpack("<I", head[7:11])[0] if flags & 0x8000 else 0
+            offset += size + add
+        raise ValueError("no disc image in its first headers")
+    if sig[:8] == b"Rar!\x1a\x07\x01\x00":
+        offset = 8
+        for _ in range(32):
+            h = reader.read(offset, 16)
+            size, i = xbla.vint(h, 4)
+            head = reader.read(offset, i + size)
+            end = i + size
+            kind, j = xbla.vint(head, i)
+            flags, j = xbla.vint(head, j)
+            extra = data = 0
+            if flags & 1:
+                extra, j = xbla.vint(head, j)
+            if flags & 2:
+                data, j = xbla.vint(head, j)
+            if kind == 5:
+                break
+            if kind == 4:
+                return {"format": "rar5", "encrypted": True}
+            if kind == 2:
+                file_flags, j = xbla.vint(head, j)
+                unp, j = xbla.vint(head, j)
+                _, j = xbla.vint(head, j)
+                j += (4 if file_flags & 2 else 0) + (4 if file_flags & 4 else 0)
+                compression, j = xbla.vint(head, j)
+                _, j = xbla.vint(head, j)
+                name_len, j = xbla.vint(head, j)
+                name = head[j:j + name_len].decode("utf-8", "replace")
+                if file_flags & 1 or not is_disc_image(name, unp):
+                    offset += end + data
+                    continue
+                encrypted = False
+                k = end - extra
+                while k < end:  # extra records: a size, a type; type 1 is encryption
+                    rsize, body = xbla.vint(head, k)
+                    rtype, _ = xbla.vint(head, body)
+                    encrypted |= (rtype == 1)
+                    if rsize == 0:
+                        break
+                    k = body + rsize
+                return {"format": "rar5", "name": name, "size": unp,
+                        "stored": ((compression >> 7) & 7) == 0 and data == unp,
+                        "encrypted": encrypted, "split": bool(flags & 0x18)}
+            offset += end + data
+        raise ValueError("no disc image in its first headers")
+    raise ValueError("not a RAR (starts %r)" % sig[:8])
+
+
+# Edition words the other set adds to a name that Redump keeps apart, or
+# leaves out: "Bioshock Infinite Complete Edition" is Redump's "BioShock
+# Infinite". Tried, stripped, when the whole name matches nothing.
+EDITION_WORDS = re.compile(r"\b(complete edition|game of the year edition|game of the year|goty|ultimate edition|"
+                           r"limited edition|collectors edition|collector's edition|platinum hits|classics)\b", re.I)
 
 
 def load_backcompat():
@@ -473,6 +583,8 @@ def xbox_header(version, total, how, not_compatible, rows, store_games, releases
 def main():
     parser = argparse.ArgumentParser(description="Build StoreTitles.h, or XboxTitles.h with --system xbox.")
     parser.add_argument("--system", choices=["xbox360", "xbox"], default="xbox360")
+    parser.add_argument("--keys", default=xbla.DEFAULT_KEYS,
+                        help="ArchiveOrgKeys.txt, for reading the RARs' headers (default: %(default)s)")
     args = parser.parse_args()
     xbox = (args.system == "xbox")
     items = XBOX_ITEMS if xbox else ITEMS
@@ -576,18 +688,37 @@ def main():
 
     # The other set, for what the Redump collection lacks.
     added = []
+    taken = set()  # (match key, disc) from an earlier item of the other set
+    rar_cache = json.load(open(RAR_CACHE, encoding="utf-8")) if os.path.exists(RAR_CACHE) else {}
+    auth = xbla.load_keys(args.keys) if os.path.exists(args.keys) else None
+    if auth is None and not xbox:
+        print("no keys at %s - only RARs already in %s are considered" % (args.keys, RAR_CACHE))
+    rar_skipped = []
     for index, ident in enumerate(other_items, len(items)):
         print("listing %s..." % ident)
-        files = json.loads(fetch(FILES_URL % ident))["result"]
+        meta = json.loads(fetch("https://archive.org/metadata/%s" % ident))
+        files = meta["files"]
         for f in files:
             zn = f["name"]
-            if not zn.lower().endswith(".zip") or "/" in zn or int(f.get("size", 0)) < 1000000000:
+            is_rar = zn.lower().endswith(".rar")
+            if not (zn.lower().endswith(".zip") or is_rar) or "/" in zn or int(f.get("size", 0)) < 1000000000:
                 continue  # the small ones are fan translations, not games
             title, regions, disc_no, other = parse_other_name(zn)
             key = match_key(title)
             versions = retail.get(key)
+            if not versions:
+                stripped = EDITION_WORDS.sub(" ", title)
+                if stripped != title:
+                    key = match_key(stripped)
+                    versions = retail.get(key)
             if not versions or not regions:
                 continue  # not a retail game Redump knows, or no region to go on
+            # A one-disc game's "DVD1" is the game; a "DVD2" of it is
+            # something else - a bonus disc - and isn't a disc of the game.
+            if disc_no and all(v[2] == 0 for v in versions):
+                if disc_no > 1:
+                    continue
+                disc_no = 0
             # What the Redump collection has of it, by name or by any of its
             # versions' title IDs - "FIFA Soccer 10 (USA)" is FIFA 10.
             held = set(have.get(key, set()))
@@ -595,6 +726,39 @@ def main():
                 held |= have_tid.get(v[3], set()) if v[3] else set()
             if held and (held & {"USA", "World"} or not regions & {"USA", "World"}):
                 continue  # the Redump collection has it already
+            if (key, disc_no) in taken and is_rar:
+                continue  # a zip of it was taken already
+
+            # A RAR only if the disc image is in it as it is.
+            if is_rar:
+                cache_key = "%s/%s" % (ident, zn)
+                size = int(f.get("size", 0))
+                entry = rar_cache.get(cache_key)
+                # Asked again if it was read before RARs' notes were skipped.
+                stale = entry is not None and "error" not in entry and not entry.get("encrypted") and \
+                    not is_disc_image(entry.get("name", ""), entry.get("size", 0))
+                if entry is None or entry.get("bytes") != size or stale:
+                    if auth is None:
+                        rar_skipped.append((zn, "not checked - no keys"))
+                        continue
+                    url = "https://%s%s/%s" % (meta["server"], meta["dir"], urllib.parse.quote(zn))
+                    try:
+                        entry = rar_disc_image(xbla.RarReader(url, auth))
+                    except Exception as e:
+                        entry = {"error": str(e)}
+                    entry["bytes"] = size
+                    rar_cache[cache_key] = entry
+                    os.makedirs(os.path.dirname(RAR_CACHE), exist_ok=True)
+                    json.dump(rar_cache, open(RAR_CACHE, "w", encoding="utf-8"), indent=1)
+                    print("  %s: %s" % (zn, entry))
+                why = ("unreadable: %s" % entry["error"] if "error" in entry
+                       else "encrypted" if entry.get("encrypted")
+                       else "split" if entry.get("split")
+                       else "compressed" if not entry.get("stored")
+                       else None)
+                if why:
+                    rar_skipped.append((zn, why))
+                    continue
 
             # Its datfile entry: the same disc, with regions in common if any.
             # Region free is World in Redump, or USA where there's no World.
@@ -616,7 +780,12 @@ def main():
             rows.append((sort_key(display), 0 if regions & {"USA", "World"} else 1, name,
                          index, disc_no, region_bits, 0, cat, tid, int(f.get("size", 0)), zn, name, display))
             added.append((name, ident, zn))
-    print("%d zips added from the other set" % len(added))
+            taken.add((key, disc_no))
+    print("%d added from the other set (%d RARs)" % (len(added), sum(1 for a in added if a[2].lower().endswith(".rar"))))
+    if rar_skipped:
+        print("%d RARs of games the Store lacks left out:" % len(rar_skipped))
+        for zn, why in rar_skipped:
+            print("    %s: %s" % (zn, why))
 
     rows.sort()
     store_games = group_games(rows)
@@ -647,7 +816,8 @@ def main():
     L.append("// name the Store shows, USA and World versions of a game first. Title IDs")
     L.append("// are from Redump's datfile %s, by each disc's serial." % version)
     L.append("// %d zips; title IDs matched: %s." % (total, ", ".join("%s %d" % kv for kv in how.items())))
-    L.append("// Then %d from XBOX_360_2 to _6, for games the Redump collection lacks." % len(added))
+    L.append("// Then %d from XBOX_360_1 to _6, for games the Redump collection lacks -" % len(added))
+    L.append("// zips, and RARs that hold their disc image uncompressed.")
     L.append("")
     L.append("#ifndef STORE_TITLES_H")
     L.append("#define STORE_TITLES_H")

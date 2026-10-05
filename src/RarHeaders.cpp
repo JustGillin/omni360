@@ -64,6 +64,10 @@ RarFormat RarDetectFormat(const unsigned char *data, unsigned long len, unsigned
 #define RAR4_END_HEAD    0x7B
 
 #define RAR4_LONG_BLOCK   0x8000 // a 32-bit ADD_SIZE of data follows the header
+#define RAR4_LHD_SPLIT_BEFORE 0x0001 // file header: continued from the previous volume
+#define RAR4_LHD_SPLIT_AFTER  0x0002 // ...and into the next
+#define RAR4_LHD_PASSWORD     0x0004 // its data is encrypted
+#define RAR4_METHOD_STORE     0x30
 #define RAR4_LHD_LARGE    0x0100 // file header: 64-bit sizes, high halves before the name
 #define RAR4_LHD_DIRECTORY 0x00E0
 #define RAR4_MHD_PASSWORD 0x0080 // main header: the headers themselves are encrypted
@@ -136,6 +140,15 @@ static int ParseRar4(const unsigned char *data, unsigned long len, RarEntry *out
         CopyName(out->name, data + nameStart, nameSize);
         out->packSize = packSize;
         out->unpSize = unpSize;
+
+        // HOST_OS, FILE_CRC, FTIME, UNP_VER and METHOD sit between the sizes
+        // and NAME_SIZE.
+        out->dataOffset = headSize;
+        out->stored = (data[7 + 18] == RAR4_METHOD_STORE);
+        out->encrypted = (flags & RAR4_LHD_PASSWORD) != 0;
+        out->split = (flags & (RAR4_LHD_SPLIT_BEFORE | RAR4_LHD_SPLIT_AFTER)) != 0;
+        out->hasCrc = true;
+        out->crc = ReadLE32(data + 7 + 9);
     }
 
     *outNext = (unsigned long long)headSize + dataSize;
@@ -154,6 +167,10 @@ static int ParseRar4(const unsigned char *data, unsigned long len, RarEntry *out
 
 #define RAR5_HFL_EXTRA    0x0001 // header has an extra area
 #define RAR5_HFL_DATA     0x0002 // header is followed by a data area
+#define RAR5_HFL_SPLIT_BEFORE 0x0008 // the data area continues from the previous volume
+#define RAR5_HFL_SPLIT_AFTER  0x0010 // ...or into the next
+
+#define RAR5_EXTRA_CRYPT  0x01 // a file's extra record: its data is encrypted
 
 #define RAR5_FHFL_DIRECTORY 0x0001
 #define RAR5_FHFL_UTIME     0x0002 // a 32-bit mtime is present
@@ -259,8 +276,15 @@ static int ParseRar5(const unsigned char *data, unsigned long len, RarEntry *out
 
         if (fileFlags & RAR5_FHFL_UTIME)
             pos += 4;
+        out->hasCrc = false;
         if (fileFlags & RAR5_FHFL_CRC32)
+        {
+            if (pos + 4 > end)
+                return RAR_HEADER_ERROR;
+            out->hasCrc = true;
+            out->crc = ReadLE32(data + pos);
             pos += 4;
+        }
 
         if (pos > end ||
             !ReadVint(data, end, &pos, &compression) ||
@@ -275,6 +299,34 @@ static int ParseRar5(const unsigned char *data, unsigned long len, RarEntry *out
         CopyName(out->name, data + pos, (unsigned long)nameLen);
         out->packSize = dataSize;
         out->unpSize = unpSize;
+
+        // Bits 7-9 of the compression information are the method; 0 stores.
+        out->dataOffset = headerEnd;
+        out->stored = ((compression >> 7) & 7) == 0;
+        out->split = (flags & (RAR5_HFL_SPLIT_BEFORE | RAR5_HFL_SPLIT_AFTER)) != 0;
+
+        // The extra area, at the header's end: records of a size, a type and
+        // their data. One of type 1 means the file is encrypted.
+        out->encrypted = false;
+        if (extraSize > 0 && extraSize <= end)
+        {
+            unsigned long at = end - (unsigned long)extraSize;
+            while (at < end)
+            {
+                unsigned long recordStart = at;
+                unsigned long long size, recordType;
+                if (!ReadVint(data, end, &at, &size))
+                    break;
+                const unsigned long bodyStart = at;
+                if (!ReadVint(data, end, &at, &recordType))
+                    break;
+                if (recordType == RAR5_EXTRA_CRYPT)
+                    out->encrypted = true;
+                if (size == 0 || bodyStart + size > end || bodyStart + size <= recordStart)
+                    break;
+                at = bodyStart + (unsigned long)size;
+            }
+        }
     }
 
     // Main, service and anything unrecognised are simply stepped over - the
@@ -290,6 +342,12 @@ int RarParseHeader(RarFormat format, const unsigned char *data, unsigned long le
     out->name[0] = '\0';
     out->packSize = 0;
     out->unpSize = 0;
+    out->dataOffset = 0;
+    out->stored = false;
+    out->encrypted = false;
+    out->split = false;
+    out->hasCrc = false;
+    out->crc = 0;
     *outNext = 0;
 
     if (format == RAR_FORMAT_4)

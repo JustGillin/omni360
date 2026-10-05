@@ -16,6 +16,8 @@ DESCRIPTION : Downloads a Redump game's zip from archive.org and installs it as
 #include "StoreArt.h"      // FetchTitleIcon
 #include "parsing.h"       // UrlEncodeFormValue
 #include "OutputConsole.h"
+#include "RarHeaders.h"     // a game kept in a RAR, uncompressed
+#include "zlib/zlib.h"      // crc32, for checking one
 
 #include <xtl.h>
 #include <stdio.h>
@@ -413,6 +415,121 @@ static bool ReadZipDirectory(const std::string &url, const char *auth, unsigned 
     free(tail);
     return ok;
 }
+
+// ---------------------------------------------------------------------------
+// A game kept in a RAR
+// ---------------------------------------------------------------------------
+//
+// Some games are on archive.org only as RARs (XBOX_360_1). The Store lists
+// one only once make_store_titles.py has seen it's stored - no compression,
+// "-m0" - so the disc image is in the RAR byte for byte, and is read straight
+// out of the download, with no unpacking. Compressed, encrypted or split ones
+// are refused here too, in case one gets through.
+
+enum RarMemberResult
+{
+    RAR_MEMBER_OK,
+    RAR_MEMBER_UNREADABLE,  // the headers couldn't be fetched or made sense of
+    RAR_MEMBER_COMPRESSED,
+    RAR_MEMBER_ENCRYPTED,
+    RAR_MEMBER_SPLIT
+};
+
+// Whether a RAR's file is its disc image: an .iso, or anything a gigabyte or
+// more. Some RARs hold a 30-byte "DVD1.dvd" layer-break note before it.
+static bool IsDiscImage(const RarEntry &entry)
+{
+    const size_t n = strlen(entry.name);
+    return (n > 4 && _stricmp(entry.name + n - 4, ".iso") == 0) || entry.unpSize >= 1000000000ULL;
+}
+
+// The archive's disc image: its size, CRC, and where its data starts.
+static RarMemberResult ReadRarMember(const std::string &url, const char *auth, RarFormat format,
+                                     unsigned long signatureLen, ZipMember *out, unsigned long long *outDataStart,
+                                     bool *outHasCrc)
+{
+    const unsigned long HEAD = 65536;
+    unsigned char *head = (unsigned char *)malloc(HEAD + 1);
+    if (head == NULL)
+        return RAR_MEMBER_UNREADABLE;
+    std::string u = url;
+    unsigned long long len = 0;
+    const int status = Get(u, auth, "Range: bytes=0-65535\r\n", (char *)head, HEAD, &len);
+    if (status != 206 && status != 200)
+    {
+        dprintf("[game] RAR headers: HTTP %d\n", status);
+        free(head);
+        return RAR_MEMBER_UNREADABLE;
+    }
+
+    RarMemberResult result = RAR_MEMBER_UNREADABLE;
+    unsigned long long at = signatureLen;
+    for (int i = 0; i < 32 && at < len; ++i)
+    {
+        RarEntry entry;
+        unsigned long long next = 0;
+        const int r = RarParseHeader(format, head + at, (unsigned long)(len - at), &entry, &next);
+        if (r == RAR_HEADER_ENCRYPTED)
+        {
+            result = RAR_MEMBER_ENCRYPTED;
+            break;
+        }
+        if (r != RAR_HEADER_OK)
+            break;
+        if (entry.isFile && IsDiscImage(entry))
+        {
+            dprintf("[game] RAR%d member \"%s\": %I64u packed, %I64u unpacked, %s%s%s\n",
+                    format == RAR_FORMAT_5 ? 5 : 4, entry.name, entry.packSize, entry.unpSize,
+                    entry.stored ? "stored" : "compressed", entry.encrypted ? ", encrypted" : "",
+                    entry.split ? ", split" : "");
+            if (entry.encrypted)
+                result = RAR_MEMBER_ENCRYPTED;
+            else if (entry.split)
+                result = RAR_MEMBER_SPLIT;
+            else if (!entry.stored || entry.packSize != entry.unpSize)
+                result = RAR_MEMBER_COMPRESSED;
+            else
+            {
+                _snprintf(out->name, sizeof(out->name), "%s", entry.name);
+                out->name[sizeof(out->name) - 1] = '\0';
+                out->method = 0;
+                out->crc = entry.crc;
+                out->packed = entry.packSize;
+                out->unpacked = entry.unpSize;
+                out->localHeader = at;
+                *outDataStart = at + entry.dataOffset;
+                *outHasCrc = entry.hasCrc;
+                result = RAR_MEMBER_OK;
+            }
+            break;
+        }
+        at += next;
+    }
+    free(head);
+    return result;
+}
+
+// The image, straight out of the downloaded pieces from where it starts.
+class StoredSource : public GodSource
+{
+public:
+    StoredSource(ZipPieces *pieces_, unsigned long long start_, unsigned long long size_)
+        : pieces(pieces_), start(start_), size(size_)
+    {
+    }
+    bool ReadAt(unsigned long long offset, void *buffer, unsigned long len)
+    {
+        if (offset + len > size)
+            return false;
+        return pieces->Read(start + offset, buffer, len);
+    }
+    unsigned long long Size() { return size; }
+
+private:
+    ZipPieces *pieces;
+    unsigned long long start;
+    unsigned long long size;
+};
 
 // ---------------------------------------------------------------------------
 // Downloading, two pieces at a time
@@ -996,41 +1113,64 @@ static void RunJob(GameJob *job, const char *gamesPath)
         return;
     }
 
+    // A zip's one member, compressed - or a RAR's, stored.
     ZipMember member;
     memset(&member, 0, sizeof(member));
-    if (!ReadZipDirectory(url, auth, req.zipSize, &member) || member.unpacked == 0)
+    unsigned long long dataStart = 0;
+    unsigned long signatureLen = 0;
+    const RarFormat rarFormat = RarDetectFormat((const unsigned char *)small, (unsigned long)len, &signatureLen);
+    const bool stored = (rarFormat != RAR_FORMAT_UNKNOWN);
+    bool hasCrc = true;
+    if (stored)
     {
-        FinishLocked(job, QUEUE_OUTCOME_FAILED, "Couldn't install", "The zip's directory couldn't be read.", true);
-        return;
-    }
-    if (member.method != 8)
-    {
-        dprintf("[game] %s: compression method %u isn't deflate\n", req.zipName, (unsigned)member.method);
-        FinishLocked(job, QUEUE_OUTCOME_FAILED, "Couldn't install", "The zip isn't compressed the usual way.", true);
-        return;
-    }
-
-    // The member's local header - where its compressed data starts. It's at
-    // the zip's start in practice, already in the bytes just fetched.
-    unsigned char local[1024];
-    if (member.localHeader == 0)
-    {
-        memcpy(local, small, 1024);
+        const RarMemberResult rar = ReadRarMember(url, auth, rarFormat, signatureLen, &member, &dataStart, &hasCrc);
+        if (rar != RAR_MEMBER_OK)
+        {
+            FinishLocked(job, QUEUE_OUTCOME_FAILED, "Couldn't install",
+                         rar == RAR_MEMBER_COMPRESSED ? "This RAR is compressed - only uncompressed ones can be installed."
+                         : rar == RAR_MEMBER_ENCRYPTED ? "This RAR has a password."
+                         : rar == RAR_MEMBER_SPLIT     ? "This RAR is split into parts."
+                                                       : "The RAR's headers couldn't be read.",
+                         true);
+            return;
+        }
     }
     else
     {
-        char range[96];
-        _snprintf(range, sizeof(range), "Range: bytes=%I64u-%I64u\r\n", member.localHeader, member.localHeader + 1023);
-        range[sizeof(range) - 1] = '\0';
-        std::string u = url;
-        Get(u, auth, range, (char *)local, sizeof(local), &len);
+        if (!ReadZipDirectory(url, auth, req.zipSize, &member) || member.unpacked == 0)
+        {
+            FinishLocked(job, QUEUE_OUTCOME_FAILED, "Couldn't install", "The zip's directory couldn't be read.", true);
+            return;
+        }
+        if (member.method != 8)
+        {
+            dprintf("[game] %s: compression method %u isn't deflate\n", req.zipName, (unsigned)member.method);
+            FinishLocked(job, QUEUE_OUTCOME_FAILED, "Couldn't install", "The zip isn't compressed the usual way.", true);
+            return;
+        }
+
+        // The member's local header - where its compressed data starts. It's at
+        // the zip's start in practice, already in the bytes just fetched.
+        unsigned char local[1024];
+        if (member.localHeader == 0)
+        {
+            memcpy(local, small, 1024);
+        }
+        else
+        {
+            char range[96];
+            _snprintf(range, sizeof(range), "Range: bytes=%I64u-%I64u\r\n", member.localHeader, member.localHeader + 1023);
+            range[sizeof(range) - 1] = '\0';
+            std::string u = url;
+            Get(u, auth, range, (char *)local, sizeof(local), &len);
+        }
+        if (LE32(local) != 0x04034B50)
+        {
+            FinishLocked(job, QUEUE_OUTCOME_FAILED, "Couldn't install", "The zip's file header is missing.", true);
+            return;
+        }
+        dataStart = member.localHeader + 30 + LE16(local + 26) + LE16(local + 28);
     }
-    if (LE32(local) != 0x04034B50)
-    {
-        FinishLocked(job, QUEUE_OUTCOME_FAILED, "Couldn't install", "The zip's file header is missing.", true);
-        return;
-    }
-    const unsigned long long dataStart = member.localHeader + 30 + LE16(local + 26) + LE16(local + 28);
     const unsigned long long needed = dataStart + member.packed;
 
     dprintf("[game] %s: \"%s\", %I64u packed from %I64u, %I64u unpacked, crc %08lX\n", req.zipName, member.name,
@@ -1093,10 +1233,13 @@ static void RunJob(GameJob *job, const char *gamesPath)
         d.tooSlow[i] = false;
     }
 
-    InflateIndexer *indexer = new InflateIndexer(member.unpacked);
+    // A zip's image is indexed for reading back out of its deflate stream;
+    // a RAR's needs only its CRC.
+    InflateIndexer *indexer = stored ? NULL : new InflateIndexer(member.unpacked);
+    unsigned long crc = crc32(0L, Z_NULL, 0);
     unsigned char *chunk = (unsigned char *)malloc(1024 * 1024);
 
-    if (d.done == NULL || d.pieceReady == NULL || !indexer->Ok() || chunk == NULL)
+    if (d.done == NULL || d.pieceReady == NULL || (indexer != NULL && !indexer->Ok()) || chunk == NULL)
     {
         free(d.done);
         if (d.pieceReady != NULL)
@@ -1173,12 +1316,14 @@ static void RunJob(GameJob *job, const char *gamesPath)
         while (from < to)
         {
             unsigned long take = (to - from > 1024 * 1024) ? 1024 * 1024 : (unsigned long)(to - from);
-            if (!pieces.Read(from, chunk, take) || !indexer->Feed(chunk, take))
+            if (!pieces.Read(from, chunk, take) || (indexer != NULL && !indexer->Feed(chunk, take)))
             {
                 dprintf("[game] indexing failed at %I64u\n", from);
                 indexOk = false;
                 break;
             }
+            if (indexer == NULL)
+                crc = crc32(crc, chunk, take);
             from += take;
         }
     }
@@ -1204,11 +1349,16 @@ static void RunJob(GameJob *job, const char *gamesPath)
     dprintf("[game] downloaded %I64u MB in %lu:%02lu\n", d.doneBytes / (1024 * 1024),
             (unsigned long)(downloadSeconds / 60), (unsigned long)(downloadSeconds % 60));
 
-    if (!indexOk || !indexer->Finished() || indexer->Out() != member.unpacked || indexer->Crc() != member.crc)
+    const bool imageOk = indexOk && (stored ? (!hasCrc || crc == member.crc)
+                                            : (indexer->Finished() && indexer->Out() == member.unpacked &&
+                                               indexer->Crc() == member.crc));
+    if (!imageOk)
     {
         bool cancelled = Cancelled(job);
         int failStatus = d.failStatus;
-        if (indexOk && !cancelled)
+        if (indexOk && !cancelled && stored)
+            dprintf("[game] the image didn't check out: crc %08lX (want %08lX)\n", crc, member.crc);
+        else if (indexOk && !cancelled)
             dprintf("[game] the image didn't check out: finished %d, %I64u of %I64u bytes, crc %08lX (want %08lX)\n",
                     indexer->Finished() ? 1 : 0, indexer->Out(), member.unpacked, indexer->Crc(), member.crc);
         delete indexer;
@@ -1229,15 +1379,18 @@ static void RunJob(GameJob *job, const char *gamesPath)
     }
 
     int pointCount = 0;
-    InflatePoint *points = indexer->TakePoints(&pointCount);
+    InflatePoint *points = (indexer != NULL) ? indexer->TakePoints(&pointCount) : NULL;
     delete indexer;
-    dprintf("[game] image checks out: %I64u bytes, crc %08lX, %d restart points\n", member.unpacked, member.crc, pointCount);
+    dprintf("[game] image checks out: %I64u bytes, crc %08lX%s, %d restart points\n", member.unpacked, member.crc,
+            stored && !hasCrc ? " (the RAR has none to check)" : "", pointCount);
 
     // --- Install --------------------------------------------------------------
-    InflateSource image(&pieces, dataStart, member.packed, member.unpacked, points, pointCount);
+    InflateSource inflated(&pieces, dataStart, member.packed, member.unpacked, points, pointCount);
+    StoredSource storedImage(&pieces, dataStart, member.unpacked);
+    GodSource *image = stored ? (GodSource *)&storedImage : (GodSource *)&inflated;
 
     GodImageInfo info;
-    GodResult result = GodInspect(&image, &info);
+    GodResult result = GodInspect(image, &info);
     if (result != GOD_OK)
     {
         free(points);
@@ -1285,7 +1438,7 @@ static void RunJob(GameJob *job, const char *gamesPath)
     {
         // Decompressing runs on the read-ahead's thread while this one
         // hashes and writes. Scoped so it has finished before the image goes.
-        ReadAheadSource ahead(&image, 1024 * 1024, 8);
+        ReadAheadSource ahead(image, 1024 * 1024, 8);
         result = GodConvert(&ahead, info, gamesPath, req.name, iconSize > 0 ? icon : NULL, iconSize,
                             ConvertProgressFn, &progress, packagePath, sizeof(packagePath), &timings);
     }
@@ -1293,7 +1446,7 @@ static void RunJob(GameJob *job, const char *gamesPath)
 
     DWORD seconds = (GetTickCount() - progress.started) / 1000;
     dprintf("[game] install %s after %lu:%02lu (%lu restarts): %s\n", GodResultText(result),
-            (unsigned long)(seconds / 60), (unsigned long)(seconds % 60), image.Restarts(), packagePath);
+            (unsigned long)(seconds / 60), (unsigned long)(seconds % 60), inflated.Restarts(), packagePath);
     if (seconds > 0)
         dprintf("[game] %I64u MB at %.2f MB/s - waiting for data %.0fs, hashing %.0fs, writing %.0fs\n",
                 info.usedSize / (1024 * 1024), (double)info.usedSize / (1024.0 * 1024.0) / (double)seconds,

@@ -42,6 +42,15 @@ struct RarEntry
     char name[RAR_NAME_MAX];      // path inside the archive, always with '\' separators (RAR5 stores '/')
     unsigned long long packSize;  // bytes of archived data following the header
     unsigned long long unpSize;   // size once extracted
+
+    // For reading a file's data straight out of the archive - a game's disc
+    // image kept without compression ("store", -m0):
+    unsigned long long dataOffset; // from the header's start to its data
+    bool stored;                   // not compressed: the data is the file, byte for byte
+    bool encrypted;                // the file's data is
+    bool split;                    // it continues from, or into, another volume
+    bool hasCrc;                   // crc is the file's CRC32 (RAR5 may leave it out)
+    unsigned long crc;
 };
 
 // Return values for RarParseHeader.
