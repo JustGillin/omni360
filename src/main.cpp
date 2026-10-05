@@ -221,6 +221,7 @@ static void GetGamesPath(char *outPath, size_t outPathSize)
 static char g_moreGamesPaths[MAX_MORE_GAMES_PATHS][MAX_TEXT_LENGTH];
 static int g_moreGamesPathCount = 0;
 static int g_moreGamesFound[MAX_MORE_GAMES_PATHS]; // the games each added, at the last scan
+static int g_installFolderFound = 0;               // and the folder games install to
 
 static void ReadMoreGamesPaths()
 {
@@ -427,7 +428,8 @@ static bool WriteGamesPaths(const char *first, char more[][MAX_TEXT_LENGTH], int
 struct LibraryFolderRow
 {
     char path[MAX_TEXT_LENGTH];
-    bool scanned; // a "games-path:" line has it
+    bool scanned;   // a "games-path:" line has it
+    bool suggested; // one of the likely places, listed whether it's scanned or not
     bool exists;
     int games;    // found there at the last scan, when scanned
 };
@@ -448,6 +450,25 @@ static bool FolderListed(const char *path, const char *gamesPath)
     return false;
 }
 
+static const char *const kFolderDrives[] = { "Hdd1:", "Usb0:", "Usb1:", "Usb2:" };
+static const char *const kFolderPlaces[] = { "\\Content\\0000000000000000", "\\Games" };
+
+static bool IsSuggestedFolder(const char *path)
+{
+    for (int d = 0; d < 4; ++d)
+    {
+        for (int f = 0; f < 2; ++f)
+        {
+            char candidate[MAX_TEXT_LENGTH];
+            _snprintf(candidate, sizeof(candidate), "%s%s", kFolderDrives[d], kFolderPlaces[f]);
+            candidate[sizeof(candidate) - 1] = '\0';
+            if (_stricmp(candidate, path) == 0)
+                return true;
+        }
+    }
+    return false;
+}
+
 static void FindLibraryFolders(const char *gamesPath)
 {
     g_folderRowCount = 0;
@@ -459,24 +480,24 @@ static void FindLibraryFolders(const char *gamesPath)
         _snprintf(row.path, sizeof(row.path), "%s", g_moreGamesPaths[p]);
         row.path[sizeof(row.path) - 1] = '\0';
         row.scanned = true;
+        row.suggested = IsSuggestedFolder(row.path);
         row.exists = FolderExists(row.path);
         row.games = g_moreGamesFound[p];
     }
 
-    static const char *const drives[] = { "Hdd1:", "Usb0:", "Usb1:", "Usb2:" };
-    static const char *const folders[] = { "\\Content\\0000000000000000", "\\Games" };
     for (int d = 0; d < 4; ++d)
     {
         for (int f = 0; f < 2 && g_folderRowCount < MAX_FOLDER_ROWS; ++f)
         {
             char path[MAX_TEXT_LENGTH];
-            _snprintf(path, sizeof(path), "%s%s", drives[d], folders[f]);
+            _snprintf(path, sizeof(path), "%s%s", kFolderDrives[d], kFolderPlaces[f]);
             path[sizeof(path) - 1] = '\0';
             if (FolderListed(path, gamesPath) || !FolderExists(path))
                 continue;
             LibraryFolderRow &row = g_folderRows[g_folderRowCount++];
             memcpy(row.path, path, strlen(path) + 1);
             row.scanned = false;
+            row.suggested = true;
             row.exists = true;
             row.games = 0;
         }
@@ -1142,7 +1163,7 @@ static void ScanLibrary(Library &lib, const char *gamesPath)
     FreeInstalledGames(lib.games, lib.count);
     lib.count = 0;
 
-    ScanLibraryFolder(lib, gamesPath);
+    g_installFolderFound = ScanLibraryFolder(lib, gamesPath);
 
     // Then each more folder from settings.txt. A game in two of them -
     // copied to a USB drive, say - is listed once, from the first.
@@ -1203,14 +1224,14 @@ struct SettingsOutcome
 
 enum SettingsRow
 {
+    SETTINGS_ROW_NONE,
     SETTINGS_ROW_GAMES_FOLDER,
     SETTINGS_ROW_KEYS,
     SETTINGS_ROW_REMOVE_KEYS,
     SETTINGS_ROW_UPDATES,      // the version, and what's newer
     SETTINGS_ROW_UPDATE_CHECKS, // checking at start, on or off
     SETTINGS_ROW_LIBRARY_FOLDER, // one of g_folderRows: A adds or removes it
-    SETTINGS_ROW_ADD_FOLDER,   // another library folder, typed
-    SETTINGS_ROW_DISC_SPEED    // how fast a disc install reads the disc
+    SETTINGS_ROW_ADD_FOLDER    // another library folder, typed
 };
 
 // Rescans with the library folders now in settings.txt.
@@ -1232,11 +1253,16 @@ static void ToggleLibraryFolder(int index, Library &lib, const char *gamesPath, 
     int n = 0;
     if (row.scanned)
     {
-        char message[MAX_TEXT_LENGTH + 64];
-        _snprintf(message, sizeof(message), "Stop looking for games in %s?", row.path);
-        message[sizeof(message) - 1] = '\0';
-        if (!ShowConfirmUI("Library folder", message, "Its games stay where they are.", "Remove"))
-            return;
+        // One of the likely places stays listed, unticked, so it's only
+        // asked about when it's one that was typed - it goes from the list.
+        if (!row.suggested)
+        {
+            char message[MAX_TEXT_LENGTH + 64];
+            _snprintf(message, sizeof(message), "Remove %s from your library?", row.path);
+            message[sizeof(message) - 1] = '\0';
+            if (!ShowConfirmUI("Library folder", message, "Its games stay where they are.", "Remove"))
+                return;
+        }
         for (int p = 0; p < g_moreGamesPathCount; ++p)
         {
             if (_stricmp(g_moreGamesPaths[p], row.path) != 0)
@@ -1482,12 +1508,12 @@ static const char *DiscSpeedName(int speed)
     }
 }
 
-// A on the disc speed's row: the next one down, from the slowest back to full.
-static void CycleDiscSpeed()
+// Left and right on the disc speed's row: one slower or faster, saved.
+static void StepDiscSpeed(int step)
 {
-    int speed = DiscSpeedSetting() - 1;
-    if (speed < DISC_SPEED_SLOWEST)
-        speed = DISC_SPEED_FULL;
+    const int speed = DiscSpeedSetting() + step;
+    if (speed < DISC_SPEED_SLOWEST || speed > DISC_SPEED_FULL)
+        return;
     char value[8];
     _snprintf(value, sizeof(value), "%d", speed);
     value[sizeof(value) - 1] = '\0';
@@ -1521,43 +1547,129 @@ static void RemoveKeys(SettingsOutcome &outcome)
     ShowMessageUI("Keys removed", "Your archive.org keys have been removed from this console.", NULL);
 }
 
-// The settings page: a short list whose second lines show the current state,
-// so it doubles as a summary of how the app is set up. Rebuilt whenever
-// something may have changed it, rather than every frame - each rebuild reads
-// the keys file.
-#define MAX_SETTINGS_ROWS (7 + MAX_FOLDER_ROWS)
+// The settings page, as GameListUI's SettingsRowView rows: the library
+// folders under a heading with Add folder and Change install folder, then
+// one line a setting. Rebuilt whenever something may have changed it, rather
+// than every frame - each rebuild reads the keys file.
+#define MAX_SETTINGS_ROWS (8 + MAX_FOLDER_ROWS)
+#define SETTINGS_MIDDOT "  \xC2\xB7  "
 
 struct SettingsPage
 {
     int count;
-    SettingsRow rows[MAX_SETTINGS_ROWS];
+    SettingsRowView rows[MAX_SETTINGS_ROWS];
+    SettingsRow actions[MAX_SETTINGS_ROWS][SETTINGS_MAX_CONTROLS]; // what A on each control does
     int args[MAX_SETTINGS_ROWS]; // a library folder row's index into g_folderRows
-    const char *labels[MAX_SETTINGS_ROWS];
-    const char *sublabels[MAX_SETTINGS_ROWS];
-    const char *sections[MAX_SETTINGS_ROWS]; // a heading over the row that starts each part, else NULL
-    char gamesSub[MAX_TEXT_LENGTH + 96];
-    char folderSubs[MAX_FOLDER_ROWS][96];
-    char keysSub[128];
-    char updatesSub[160];
 
-    int selected;
-    int scroll;
+    char installHelp[MAX_TEXT_LENGTH + 64];
+    char installStatus[64];
+    char folderStatus[MAX_FOLDER_ROWS][48];
+    char keysStatus[64];
+    char updatesStatus[96];
+    char updatesHelp[96];
+
+    int focusRow;
+    int focusCol;
+    float scroll;
 };
+
+static SettingsRowView &AddSettingsRow(SettingsPage &page, SettingsRowKind kind, const char *label)
+{
+    SettingsRowView &row = page.rows[page.count];
+    memset(&row, 0, sizeof(row));
+    row.kind = kind;
+    row.label = label;
+    for (int c = 0; c < SETTINGS_MAX_CONTROLS; ++c)
+        page.actions[page.count][c] = SETTINGS_ROW_NONE;
+    page.args[page.count] = -1;
+    page.count++;
+    return row;
+}
+
+static void AddSettingsControl(SettingsPage &page, SettingsControlKind kind, const char *label, SettingsRow action,
+                               const char *help)
+{
+    SettingsRowView &row = page.rows[page.count - 1];
+    if (row.controlCount >= SETTINGS_MAX_CONTROLS)
+        return;
+    SettingsControlView &c = row.controls[row.controlCount];
+    memset(&c, 0, sizeof(c));
+    c.kind = kind;
+    c.label = label;
+    c.help = help;
+    page.actions[page.count - 1][row.controlCount] = action;
+    row.controlCount++;
+}
+
+// A row the D-pad stops on: anything but a heading with nothing on it.
+static bool SettingsRowFocusable(const SettingsRowView &row)
+{
+    return row.kind != SETTINGS_VIEW_HEADING || row.controlCount > 0;
+}
 
 static void BuildSettingsPage(SettingsPage &page, const Library &lib, const char *gamesPath)
 {
     std::string accessKey, secretKey;
     const bool haveKeys = LoadSavedKeys(accessKey, secretKey);
+    page.count = 0;
 
-    // Where games install, and how many the library has in all - each other
-    // folder it looks in has a row of its own, below.
-    if (lib.count > 0)
-        _snprintf(page.gamesSub, sizeof(page.gamesSub), "%s   -   where games install   -   %d game%s in your library",
-                  gamesPath, lib.count, lib.count == 1 ? "" : "s");
-    else
-        _snprintf(page.gamesSub, sizeof(page.gamesSub), "%s   -   where games install   -   no games found",
-                  gamesPath);
-    page.gamesSub[sizeof(page.gamesSub) - 1] = '\0';
+    // --- The library's folders ---
+    _snprintf(page.installHelp, sizeof(page.installHelp), "Where Store and disc installs go - now %s", gamesPath);
+    page.installHelp[sizeof(page.installHelp) - 1] = '\0';
+    AddSettingsRow(page, SETTINGS_VIEW_HEADING, "Library folders");
+    AddSettingsControl(page, SETTINGS_CONTROL_BUTTON, "Add folder", SETTINGS_ROW_ADD_FOLDER,
+                       "Type the path of another folder to look for games in, like Usb0:\\Games");
+    AddSettingsControl(page, SETTINGS_CONTROL_BUTTON, "Change install folder", SETTINGS_ROW_GAMES_FOLDER,
+                       page.installHelp);
+
+    // Where games install: always scanned.
+    _snprintf(page.installStatus, sizeof(page.installStatus), "Installs here" SETTINGS_MIDDOT "%d game%s",
+              g_installFolderFound, g_installFolderFound == 1 ? "" : "s");
+    page.installStatus[sizeof(page.installStatus) - 1] = '\0';
+    {
+        SettingsRowView &row = AddSettingsRow(page, SETTINGS_VIEW_FOLDER, gamesPath);
+        row.status = page.installStatus;
+        row.statusGreen = true;
+        row.checked = true;
+        row.locked = true;
+        row.help = "Games install here, so it's always scanned. Change install folder, above, moves it.";
+    }
+
+    // The other folders the library looks in, and the likely ones it could.
+    (void)lib;
+    FindLibraryFolders(gamesPath);
+    for (int i = 0; i < g_folderRowCount; ++i)
+    {
+        const LibraryFolderRow &folder = g_folderRows[i];
+        char *status = page.folderStatus[i];
+        const size_t statusSize = sizeof(page.folderStatus[i]);
+        SettingsRowView &row = AddSettingsRow(page, SETTINGS_VIEW_FOLDER, folder.path);
+        page.args[page.count - 1] = i;
+        page.actions[page.count - 1][0] = SETTINGS_ROW_LIBRARY_FOLDER;
+        row.checked = folder.scanned;
+        if (!folder.scanned)
+        {
+            _snprintf(status, statusSize, "Not scanned");
+            row.help = "Not scanned. A adds it to your library.";
+        }
+        else if (!folder.exists)
+        {
+            _snprintf(status, statusSize, "Not found");
+            row.missing = true;
+            row.help = "This folder isn't there any more. A removes it from your library.";
+        }
+        else
+        {
+            _snprintf(status, statusSize, "%d game%s", folder.games, folder.games == 1 ? "" : "s");
+            row.help = folder.suggested ? "Scanned for games. A stops scanning it."
+                                        : "Scanned for games. A removes it from your library.";
+        }
+        status[statusSize - 1] = '\0';
+        row.status = status;
+    }
+
+    // --- One line a setting ---
+    AddSettingsRow(page, SETTINGS_VIEW_HEADING, "General");
 
     // Only the start of the access key is shown - enough to tell which keys
     // are saved. The secret key is never shown anywhere.
@@ -1566,112 +1678,93 @@ static void BuildSettingsPage(SettingsPage &page, const Library &lib, const char
         char shown[5] = "";
         strncpy(shown, accessKey.c_str(), 4);
         shown[4] = '\0';
-        _snprintf(page.keysSub, sizeof(page.keysSub), "Saved   -   access key %s...", shown);
+        _snprintf(page.keysStatus, sizeof(page.keysStatus), "Saved" SETTINGS_MIDDOT "access key %s\xE2\x80\xA6", shown);
     }
     else
     {
-        _snprintf(page.keysSub, sizeof(page.keysSub),
-                  "Not set   -   needed to download. Get them at archive.org/account/s3.php");
+        _snprintf(page.keysStatus, sizeof(page.keysStatus), "Not set" SETTINGS_MIDDOT "needed to download");
     }
-    page.keysSub[sizeof(page.keysSub) - 1] = '\0';
-
-    page.count = 0;
-    for (int i = 0; i < MAX_SETTINGS_ROWS; ++i)
-        page.sections[i] = NULL;
-
-    page.sections[page.count] = "Library location";
-    page.labels[page.count] = "Games folder";
-    page.sublabels[page.count] = page.gamesSub;
-    page.rows[page.count++] = SETTINGS_ROW_GAMES_FOLDER;
-
-    // The other folders the library looks in, and the likely ones it could.
-    FindLibraryFolders(gamesPath);
-    for (int i = 0; i < g_folderRowCount; ++i)
-    {
-        const LibraryFolderRow &row = g_folderRows[i];
-        char *sub = page.folderSubs[i];
-        const size_t subSize = sizeof(page.folderSubs[i]);
-        if (!row.scanned)
-            _snprintf(sub, subSize, "Not in your library   -   A to look for games here");
-        else if (!row.exists)
-            _snprintf(sub, subSize, "In your library, but the folder isn't there   -   A to remove");
-        else
-            _snprintf(sub, subSize, "In your library   -   %d game%s here   -   A to remove", row.games,
-                      row.games == 1 ? "" : "s");
-        sub[subSize - 1] = '\0';
-        page.labels[page.count] = row.path;
-        page.sublabels[page.count] = sub;
-        page.args[page.count] = i;
-        page.rows[page.count++] = SETTINGS_ROW_LIBRARY_FOLDER;
-    }
-    page.labels[page.count] = "Add another library folder";
-    page.sublabels[page.count] = "Type the path of a folder to look for games in";
-    page.rows[page.count++] = SETTINGS_ROW_ADD_FOLDER;
-
-    // How fast a disc install reads.
-    static char speedLabel[48];
-    const int speed = DiscSpeedSetting();
-    _snprintf(speedLabel, sizeof(speedLabel), "Disc read speed: %s", DiscSpeedName(speed));
-    speedLabel[sizeof(speedLabel) - 1] = '\0';
-    page.sections[page.count] = "Disc installs";
-    page.labels[page.count] = speedLabel;
-    page.sublabels[page.count] = speed == DISC_SPEED_FULL
-                                     ? "The fastest. If a disc fails partway through, try a slower speed - A to change"
-                                     : "Slower, and gentler on a scratched disc. A to change; Full is the fastest";
-    page.rows[page.count++] = SETTINGS_ROW_DISC_SPEED;
-
-    page.sections[page.count] = "archive.org keys";
-    page.labels[page.count] = haveKeys ? "Change archive.org keys" : "Add archive.org keys";
-    page.sublabels[page.count] = page.keysSub;
-    page.rows[page.count++] = SETTINGS_ROW_KEYS;
-
-    // Only offered when there's something to remove.
+    page.keysStatus[sizeof(page.keysStatus) - 1] = '\0';
+    AddSettingsRow(page, SETTINGS_VIEW_LINE, "archive.org keys").status = page.keysStatus;
+    AddSettingsControl(page, SETTINGS_CONTROL_BUTTON, haveKeys ? "Change" : "Add keys", SETTINGS_ROW_KEYS,
+                       "Type your access key and secret key, from archive.org/account/s3.php");
     if (haveKeys)
+        AddSettingsControl(page, SETTINGS_CONTROL_BUTTON, "Remove", SETTINGS_ROW_REMOVE_KEYS,
+                           "Deletes the saved keys from this console. Store installs stop until new ones are added.");
+
+    // How fast a disc install reads: left and right change it.
+    static const char *const speedNames[DISC_SPEED_FULL] = { "Slowest", "Slow", "Fast", "Full" };
+    const int speed = DiscSpeedSetting();
+    AddSettingsRow(page, SETTINGS_VIEW_LINE, "Disc read speed");
+    AddSettingsControl(page, SETTINGS_CONTROL_VALUE, speedNames[speed - 1], SETTINGS_ROW_NONE,
+                       speed == DISC_SPEED_FULL
+                           ? "The fastest. If a disc fails partway through, try a slower speed - left and right change it."
+                           : "Slower, and gentler on a scratched disc. Full is the fastest - left and right change it.");
     {
-        page.labels[page.count] = "Remove archive.org keys";
-        page.sublabels[page.count] = "Deletes the saved keys from this console";
-        page.rows[page.count++] = SETTINGS_ROW_REMOVE_KEYS;
+        SettingsControlView &c = page.rows[page.count - 1].controls[0];
+        c.valueIndex = speed - 1;
+        c.valueCount = DISC_SPEED_FULL;
     }
 
     // The version, and whether there's a newer one.
     UpdateInfo update;
-    switch (GetUpdateState(&update, NULL))
+    const UpdateState state = GetUpdateState(&update, NULL);
+    switch (state)
     {
     case UPDATE_AVAILABLE:
-        _snprintf(page.updatesSub, sizeof(page.updatesSub), "%s is available   -   you have %s. A for what's new",
-                  update.version, CURRENT_VERSION);
+        _snprintf(page.updatesStatus, sizeof(page.updatesStatus), "%s" SETTINGS_MIDDOT "%s is available", CURRENT_VERSION,
+                  update.version);
+        _snprintf(page.updatesHelp, sizeof(page.updatesHelp), "What's new in %s - and updating to it.", update.version);
         break;
     case UPDATE_CHECKING:
-        _snprintf(page.updatesSub, sizeof(page.updatesSub), "Version %s   -   checking for a newer one...",
-                  CURRENT_VERSION);
+        _snprintf(page.updatesStatus, sizeof(page.updatesStatus), "%s" SETTINGS_MIDDOT "checking\xE2\x80\xA6", CURRENT_VERSION);
         break;
     case UPDATE_CURRENT:
-        _snprintf(page.updatesSub, sizeof(page.updatesSub), "Version %s   -   up to date", CURRENT_VERSION);
+        _snprintf(page.updatesStatus, sizeof(page.updatesStatus), "%s" SETTINGS_MIDDOT "up to date", CURRENT_VERSION);
         break;
     case UPDATE_FAILED:
-        _snprintf(page.updatesSub, sizeof(page.updatesSub), "Version %s   -   couldn't reach GitHub. A to try again",
-                  CURRENT_VERSION);
+        _snprintf(page.updatesStatus, sizeof(page.updatesStatus), "%s" SETTINGS_MIDDOT "couldn't reach GitHub", CURRENT_VERSION);
         break;
     default:
-        _snprintf(page.updatesSub, sizeof(page.updatesSub), "Version %s   -   A to check for a newer one",
-                  CURRENT_VERSION);
+        _snprintf(page.updatesStatus, sizeof(page.updatesStatus), "%s", CURRENT_VERSION);
         break;
     }
-    page.updatesSub[sizeof(page.updatesSub) - 1] = '\0';
+    page.updatesStatus[sizeof(page.updatesStatus) - 1] = '\0';
+    page.updatesHelp[sizeof(page.updatesHelp) - 1] = '\0';
+    AddSettingsRow(page, SETTINGS_VIEW_LINE, "Updates").status = page.updatesStatus;
+    if (state == UPDATE_AVAILABLE)
+        AddSettingsControl(page, SETTINGS_CONTROL_BUTTON, "What's new", SETTINGS_ROW_UPDATES, page.updatesHelp);
+    else
+        AddSettingsControl(page, SETTINGS_CONTROL_BUTTON, "Check now", SETTINGS_ROW_UPDATES,
+                           "Asks GitHub for the latest version now.");
+    AddSettingsControl(page, SETTINGS_CONTROL_CHECK, "At start", SETTINGS_ROW_UPDATE_CHECKS,
+                       "Asks GitHub for the latest version each time Omni360 starts.");
+    page.rows[page.count - 1].controls[1].on = UpdateChecksOn();
 
-    page.sections[page.count] = "Updates";
-    page.labels[page.count] = "Check for updates";
-    page.sublabels[page.count] = page.updatesSub;
-    page.rows[page.count++] = SETTINGS_ROW_UPDATES;
+    // The focus where it was, on a row that's still there.
+    if (page.focusRow > page.count - 1)
+        page.focusRow = page.count - 1;
+    if (page.focusRow < 0)
+        page.focusRow = 0;
+    while (page.focusRow < page.count - 1 && !SettingsRowFocusable(page.rows[page.focusRow]))
+        page.focusRow++;
+    const int controls = page.rows[page.focusRow].controlCount;
+    if (page.focusCol > controls - 1)
+        page.focusCol = controls > 0 ? controls - 1 : 0;
+}
 
-    const bool checksOn = UpdateChecksOn();
-    page.labels[page.count] = checksOn ? "Check for updates at start: On" : "Check for updates at start: Off";
-    page.sublabels[page.count] = checksOn ? "Asks GitHub for the latest version each time Omni360 starts"
-                                          : "Only when you choose Check for updates";
-    page.rows[page.count++] = SETTINGS_ROW_UPDATE_CHECKS;
-
-    if (page.selected > page.count - 1)
-        page.selected = page.count - 1; // the Remove row just went away
+// Up and down: the next row that takes focus.
+static void StepSettingsRow(SettingsPage &page, int direction)
+{
+    for (int i = page.focusRow + direction; i >= 0 && i < page.count; i += direction)
+    {
+        if (SettingsRowFocusable(page.rows[i]))
+        {
+            page.focusRow = i;
+            page.focusCol = 0;
+            return;
+        }
+    }
 }
 
 static SettingsOutcome RunSettingsRow(SettingsRow row, int arg, Library &lib, char *gamesPath, size_t gamesPathSize)
@@ -1687,7 +1780,7 @@ static SettingsOutcome RunSettingsRow(SettingsRow row, int arg, Library &lib, ch
     case SETTINGS_ROW_UPDATE_CHECKS: ToggleUpdateChecks(); break;
     case SETTINGS_ROW_LIBRARY_FOLDER: ToggleLibraryFolder(arg, lib, gamesPath, outcome); break;
     case SETTINGS_ROW_ADD_FOLDER:   AddLibraryFolder(lib, gamesPath, outcome); break;
-    case SETTINGS_ROW_DISC_SPEED:   CycleDiscSpeed(); break;
+    default:                        break;
     }
 
     return outcome;
@@ -3975,8 +4068,9 @@ int main()
     shell.sidebarFocused = false;
     shell.librarySelected = 0;
     shell.libraryScroll = -1;
-    shell.settings.selected = 0;
-    shell.settings.scroll = -1;
+    shell.settings.focusRow = 0;
+    shell.settings.focusCol = 0;
+    shell.settings.scroll = 0.0f;
     shell.picker.kind = PICKER_NONE;
     shell.queueCount = 0;
     shell.queueSelected = 0;
@@ -4399,16 +4493,43 @@ int main()
         else if (shell.page == SHELL_PAGE_SETTINGS)
         {
             SettingsPage &settings = shell.settings;
-            StepSelection(input.nav, settings.count, settings.selected);
+            const SettingsRowView *row = settings.count > 0 ? &settings.rows[settings.focusRow] : NULL;
+            const SettingsControlView *control =
+                (row != NULL && settings.focusCol < row->controlCount) ? &row->controls[settings.focusCol] : NULL;
+            const bool onValue = (control != NULL && control->kind == SETTINGS_CONTROL_VALUE);
 
-            if (input.nav == XINPUT_GAMEPAD_DPAD_LEFT || (pressed & XINPUT_GAMEPAD_B))
+            if ((pressed & XINPUT_GAMEPAD_B) || row == NULL)
             {
                 shell.sidebarFocused = true;
             }
-            else if ((pressed & XINPUT_GAMEPAD_A) && settings.count > 0)
+            else if (input.nav == XINPUT_GAMEPAD_DPAD_UP || input.nav == XINPUT_GAMEPAD_DPAD_DOWN)
             {
-                SettingsOutcome changed = RunSettingsRow(settings.rows[settings.selected],
-                                                         settings.args[settings.selected], lib, gamesPath,
+                StepSettingsRow(settings, input.nav == XINPUT_GAMEPAD_DPAD_UP ? -1 : 1);
+            }
+            else if (input.nav == XINPUT_GAMEPAD_DPAD_LEFT || input.nav == XINPUT_GAMEPAD_DPAD_RIGHT)
+            {
+                // A value changes in place; otherwise along the row, and off
+                // its left end to the sidebar.
+                const bool right = (input.nav == XINPUT_GAMEPAD_DPAD_RIGHT);
+                if (onValue)
+                {
+                    StepDiscSpeed(right ? 1 : -1);
+                    shell.stale = true;
+                }
+                else if (right && row->kind != SETTINGS_VIEW_FOLDER && settings.focusCol + 1 < row->controlCount)
+                    settings.focusCol++;
+                else if (!right && settings.focusCol > 0 && row->kind != SETTINGS_VIEW_FOLDER)
+                    settings.focusCol--;
+                else if (!right)
+                    shell.sidebarFocused = true;
+            }
+            else if ((pressed & XINPUT_GAMEPAD_A) &&
+                     settings.actions[settings.focusRow][row->kind == SETTINGS_VIEW_FOLDER ? 0 : settings.focusCol] !=
+                         SETTINGS_ROW_NONE)
+            {
+                const int col = (row->kind == SETTINGS_VIEW_FOLDER) ? 0 : settings.focusCol;
+                SettingsOutcome changed = RunSettingsRow(settings.actions[settings.focusRow][col],
+                                                         settings.args[settings.focusRow], lib, gamesPath,
                                                          sizeof(gamesPath));
 
                 // A different library makes the old row number meaningless.
@@ -4632,28 +4753,37 @@ int main()
 
         case SHELL_PAGE_SETTINGS:
         {
-            if (!shell.sidebarFocused)
+            SettingsPage &settings = shell.settings;
+            if (!shell.sidebarFocused && settings.count > 0)
             {
-                hintCount = AddHint(hints, hintCount, UI_BUTTON_A, L"Select");
+                const SettingsRowView &row = settings.rows[settings.focusRow];
+                const int col = (row.kind == SETTINGS_VIEW_FOLDER) ? 0 : settings.focusCol;
+                const SettingsRow action = settings.actions[settings.focusRow][col];
+                const SettingsControlView *control = col < row.controlCount ? &row.controls[col] : NULL;
+                if (action == SETTINGS_ROW_LIBRARY_FOLDER)
+                {
+                    const LibraryFolderRow &folder = g_folderRows[settings.args[settings.focusRow]];
+                    hintCount = AddHint(hints, hintCount, UI_BUTTON_A,
+                                        !folder.scanned ? L"Scan" : (folder.suggested && folder.exists) ? L"Stop scanning"
+                                                                                                       : L"Remove");
+                }
+                else if (control != NULL && control->kind == SETTINGS_CONTROL_CHECK)
+                    hintCount = AddHint(hints, hintCount, UI_BUTTON_A, control->on ? L"Turn off" : L"Turn on");
+                else if (action != SETTINGS_ROW_NONE)
+                    hintCount = AddHint(hints, hintCount, UI_BUTTON_A, L"Select");
                 hintCount = AddHint(hints, hintCount, UI_BUTTON_B, L"Back");
             }
 
-            ListPageView view;
-            view.heading = "Settings";
-            view.subheading = NULL;
-            view.labels = shell.settings.labels;
-            view.sublabels = shell.settings.sublabels;
-            view.sections = shell.settings.sections;
-            view.count = shell.settings.count;
-            view.selected = shell.settings.selected;
-            view.scroll = shell.settings.scroll;
+            SettingsPageView view;
+            view.rows = settings.rows;
+            view.count = settings.count;
+            view.focusRow = settings.focusRow;
+            view.focusCol = settings.focusCol;
+            view.scroll = settings.scroll;
             view.focused = !shell.sidebarFocused;
-            view.showCounter = false;
 
-            RenderListFrame(view, hints, hintCount);
-
-            shell.settings.selected = view.selected;
-            shell.settings.scroll = view.scroll;
+            RenderSettingsFrame(view, hints, hintCount);
+            settings.scroll = view.scroll;
             break;
         }
 

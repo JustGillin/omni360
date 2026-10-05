@@ -208,6 +208,67 @@ struct ListPageView
 
 void RenderListFrame(ListPageView &view, const UiHint *hints, int hintCount);
 
+// Settings: slim rows under headings, as Aurora's Manage Paths. A row is a
+// heading with buttons on its right, a library folder (its checkbox, path
+// and status), or one setting on a line - its name, what it's set to, and
+// its controls on the right: buttons, checkboxes, or a value left and right
+// change. One help line at the foot says what the focused control does.
+//
+// focusRow and focusCol are the caller's: a heading without controls is
+// never focused. scroll, in pixels, is the caller's to keep between frames;
+// the Render call moves it so the focused row stays on screen.
+enum SettingsControlKind
+{
+    SETTINGS_CONTROL_BUTTON,
+    SETTINGS_CONTROL_CHECK,
+    SETTINGS_CONTROL_VALUE  // label is the value; valueIndex of valueCount marks where it sits
+};
+
+struct SettingsControlView
+{
+    SettingsControlKind kind;
+    const char *label;   // a checkbox's may be NULL - the row's name says it
+    bool on;             // a checkbox's
+    int valueIndex;
+    int valueCount;
+    const char *help;    // for the help line, while it has focus
+};
+
+enum SettingsRowKind
+{
+    SETTINGS_VIEW_HEADING, // label, and any controls on the right
+    SETTINGS_VIEW_FOLDER,  // a checkbox (checked, locked), label the path, status on the right
+    SETTINGS_VIEW_LINE     // label, status beside it, controls on the right
+};
+
+#define SETTINGS_MAX_CONTROLS 3
+
+struct SettingsRowView
+{
+    SettingsRowKind kind;
+    const char *label;
+    const char *status;   // may be NULL
+    bool statusGreen;     // a folder's "Installs here"
+    bool checked;         // a folder's
+    bool locked;          // a folder's box can't change - dimmed
+    bool missing;         // a folder that isn't there: its path dimmed
+    const char *help;     // a folder's, for the help line
+    int controlCount;
+    SettingsControlView controls[SETTINGS_MAX_CONTROLS];
+};
+
+struct SettingsPageView
+{
+    const SettingsRowView *rows;
+    int count;
+    int focusRow;
+    int focusCol;
+    float scroll;
+    bool focused;
+};
+
+void RenderSettingsFrame(SettingsPageView &view, const UiHint *hints, int hintCount);
+
 // The Store's front page: three featured games - one large tile, two small -
 // with their marketplace wallpaper, a row of four buttons, and the A-Z tiles.
 //

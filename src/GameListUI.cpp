@@ -716,6 +716,7 @@ struct UiMetrics
     float contentW;   // page width, out to the title-safe right edge
     float headerY;    // top of the page title
     float listY;      // top of the page's content
+    float listYTitleOnly; // the same on a page whose header has no subtitle
     float footerY;    // centre line of the button hints and the storage ring
     float radius;     // corners of tiles, cards and page buttons
     int gridCols;     // library columns
@@ -763,6 +764,7 @@ static bool ComputeUiMetrics()
 
     g_M.headerY = g_M.safeY;
     g_M.listY = g_M.safeY + 92.0f * k;
+    g_M.listYTitleOnly = g_M.safeY + 64.0f * k;
     g_M.footerY = g_M.screenH - g_M.safeY - 22.0f * k;
 
     g_M.radius = UI_ROUNDED_CORNERS ? 6.0f * k : 0.0f;
@@ -2412,7 +2414,7 @@ static LibraryLayout ComputeLibraryLayout(const LibraryPageView &view)
     L.tile = (g_M.contentW - (L.cols - 1) * L.gap) / (float)L.cols;
     L.pitch = L.tile + L.gap;
 
-    L.top = g_M.listY + (L.showBanner ? L.bannerH + S(18.0f) : 0.0f);
+    L.top = g_M.listYTitleOnly + (L.showBanner ? L.bannerH + S(18.0f) : 0.0f);
     L.bottom = g_M.footerY - S(30.0f);
 
     L.fullRows = (int)((L.bottom - L.top + L.gap) / L.pitch);
@@ -2663,9 +2665,9 @@ void RenderLibraryFrame(LibraryPageView &view, const UiHint *hints, int hintCoun
     {
         // The keys notice: a card with an amber edge and the Y button that
         // fixes it - the badge and the edge read as one thing.
-        FillRound(g_M.contentX, g_M.listY, g_M.contentW, L.bannerH, r, COL_SURFACE);
-        FillRound(g_M.contentX, g_M.listY, S(6.0f), L.bannerH, R(3.0f), COL_AMBER);
-        DrawButtonSprite(BUTTON_SPRITE_Y, g_M.contentX + S(22.0f), g_M.listY + L.bannerH * 0.5f);
+        FillRound(g_M.contentX, g_M.listYTitleOnly, g_M.contentW, L.bannerH, r, COL_SURFACE);
+        FillRound(g_M.contentX, g_M.listYTitleOnly, S(6.0f), L.bannerH, R(3.0f), COL_AMBER);
+        DrawButtonSprite(BUTTON_SPRITE_Y, g_M.contentX + S(22.0f), g_M.listYTitleOnly + L.bannerH * 0.5f);
     }
 
     // Tiles whose text the second pass draws: their pills, and a disc's name.
@@ -2769,25 +2771,14 @@ void RenderLibraryFrame(LibraryPageView &view, const UiHint *hints, int hintCoun
 
     DrawSidebarText(g_sidebar.focused);
 
-    char subtitle[128] = "";
-    if (items.count > 0)
-    {
-        if (view.hasDisc)
-            _snprintf(subtitle, sizeof(subtitle), "%d game%s" MIDDOT "a disc in the drive" MIDDOT "%d of %d",
-                      gameCount, gameCount == 1 ? "" : "s", selected + 1, items.count);
-        else
-            _snprintf(subtitle, sizeof(subtitle), "%d game%s" MIDDOT "%d of %d",
-                      gameCount, gameCount == 1 ? "" : "s", selected + 1, items.count);
-    }
-    subtitle[sizeof(subtitle) - 1] = '\0';
-    DrawHeaderText("Your Library", items.count > 0 ? subtitle : NULL, showToast);
+    DrawHeaderText("Your Library", NULL, showToast); // the sidebar has the count
 
     DrawButtonHintText(footer, footerCount, g_M.footerY);
 
     if (L.showBanner)
     {
         float textX = g_M.contentX + S(22.0f) + HintBadgeHeight() + S(14.0f);
-        TextMid(textX, g_M.listY + L.bannerH * 0.5f, 0.85f, COL_TEXT, view.bannerText,
+        TextMid(textX, g_M.listYTitleOnly + L.bannerH * 0.5f, 0.85f, COL_TEXT, view.bannerText,
                 ATGFONT_TRUNCATED, g_M.contentX + g_M.contentW - textX - S(20.0f));
     }
 
@@ -3428,6 +3419,286 @@ void RenderListFrame(ListPageView &view, const UiHint *hints, int hintCount)
     EndFrame();
 }
 
+// ---------------------------------------------------------------------------
+// Settings
+// ---------------------------------------------------------------------------
+
+#define SETTINGS_ROWS_MAX   40
+#define COL_BUTTON          0xFF383838 // a button on a row
+#define COL_BUTTON_HI       0xFF4A4A4A // one with focus
+#define COL_CHECK_EDGE      0xFF9A9A9A
+#define COL_CHECK_EDGE_DIM  0xFF555555
+#define COL_GREEN_DIM       0x8C107C10 // a locked box: green, faded
+#define COL_VALUE_END       0xFF4A4A4A // an arrow with nowhere further to go
+
+static float SettingsRowH()     { return S(44.0f); }
+static float SettingsHeadH()    { return S(44.0f); }
+static float SettingsGap()      { return S(4.0f); }
+static float SettingsButtonH()  { return S(32.0f); }
+static float SettingsCheck()    { return S(22.0f); }
+
+static float SettingsControlWidth(const SettingsControlView &c)
+{
+    switch (c.kind)
+    {
+    case SETTINGS_CONTROL_BUTTON:
+        return TextWidth(c.label, 0.8f, true) + S(36.0f);
+    case SETTINGS_CONTROL_CHECK:
+        return SettingsCheck() + (c.label != NULL && c.label[0] != '\0' ? S(10.0f) + TextWidth(c.label, 0.85f) : 0.0f) +
+               S(20.0f);
+    default:
+        return S(230.0f);
+    }
+}
+
+// Where a row's controls start: right-aligned, inset on a row's plate.
+static float SettingsControlsX(const SettingsRowView &row)
+{
+    const float gap = S(10.0f);
+    float total = 0.0f;
+    for (int c = 0; c < row.controlCount; ++c)
+        total += SettingsControlWidth(row.controls[c]) + (c > 0 ? gap : 0.0f);
+    const float inset = (row.kind == SETTINGS_VIEW_HEADING) ? 0.0f : S(8.0f);
+    return g_M.contentX + g_M.contentW - inset - total;
+}
+
+struct SettingsLayout
+{
+    float top;                     // the page's, on screen
+    float y[SETTINGS_ROWS_MAX];    // each row's, on screen
+    float h[SETTINGS_ROWS_MAX];
+    bool shown[SETTINGS_ROWS_MAX]; // wholly inside the page
+};
+
+// Lays the rows out from the top, and scrolls so the focused row - and the
+// heading over it, when it's the first under one - is on screen.
+static SettingsLayout LayOutSettings(SettingsPageView &view)
+{
+    SettingsLayout L;
+    const int count = view.count < SETTINGS_ROWS_MAX ? view.count : SETTINGS_ROWS_MAX;
+    L.top = g_M.listYTitleOnly;
+    const float height = g_M.footerY - S(34.0f) - L.top;
+
+    float y = 0.0f;
+    for (int i = 0; i < count; ++i)
+    {
+        const bool heading = (view.rows[i].kind == SETTINGS_VIEW_HEADING);
+        if (heading && i > 0)
+            y += S(14.0f);
+        L.y[i] = y;
+        L.h[i] = heading ? SettingsHeadH() : SettingsRowH();
+        y += L.h[i] + SettingsGap();
+    }
+    const float total = y - SettingsGap();
+
+    if (view.focusRow >= 0 && view.focusRow < count)
+    {
+        const int f = view.focusRow;
+        const float start = (f > 0 && view.rows[f - 1].kind == SETTINGS_VIEW_HEADING) ? L.y[f - 1] : L.y[f];
+        if (start < view.scroll)
+            view.scroll = start;
+        if (L.y[f] + L.h[f] > view.scroll + height)
+            view.scroll = L.y[f] + L.h[f] - height;
+    }
+    const float most = (total > height) ? total - height : 0.0f;
+    if (view.scroll > most) view.scroll = most;
+    if (view.scroll < 0.0f) view.scroll = 0.0f;
+
+    for (int i = 0; i < count; ++i)
+    {
+        const float rel = L.y[i] - view.scroll;
+        L.shown[i] = (rel >= -0.5f && rel + L.h[i] <= height + 0.5f);
+        L.y[i] = L.top + rel;
+    }
+    return L;
+}
+
+// A checkbox at x, centred on cy: green with a tick when on.
+static void DrawCheckQuads(float x, float cy, bool on, bool dim)
+{
+    const float s = SettingsCheck(), y = cy - s * 0.5f;
+    if (on)
+    {
+        FillRound(x, y, s, s, S(4.0f), dim ? COL_GREEN_DIM : COL_GREEN);
+        const float t = S(2.6f);
+        DrawLine(x + s * 0.24f, y + s * 0.53f, x + s * 0.43f, y + s * 0.72f, t, dim ? 0xB3FFFFFF : COL_TEXT);
+        DrawLine(x + s * 0.43f, y + s * 0.72f, x + s * 0.77f, y + s * 0.30f, t, dim ? 0xB3FFFFFF : COL_TEXT);
+    }
+    else
+    {
+        StrokeRound(x, y, s, s, S(4.0f), S(2.0f), dim ? COL_CHECK_EDGE_DIM : COL_CHECK_EDGE);
+    }
+}
+
+// The value control's marks: where the value sits among them.
+static void DrawValueQuads(const SettingsControlView &c, float x, float cy)
+{
+    const float mid = x + SettingsControlWidth(c) * 0.5f, w = S(14.0f), step = S(18.0f);
+    const float left = mid - (c.valueCount * step - (step - w)) * 0.5f;
+    for (int d = 0; d < c.valueCount; ++d)
+        FillRound(left + d * step, cy + S(11.0f), w, S(4.0f), S(2.0f), d == c.valueIndex ? COL_GREEN : COL_TRACK);
+}
+
+static void DrawSettingsControlsQuads(const SettingsRowView &row, float cy, int focusCol, bool rowFocused)
+{
+    const bool single = (row.controlCount == 1 && row.kind != SETTINGS_VIEW_HEADING);
+    float x = SettingsControlsX(row);
+    for (int c = 0; c < row.controlCount; ++c)
+    {
+        const SettingsControlView &ctl = row.controls[c];
+        const float w = SettingsControlWidth(ctl), h = SettingsButtonH(), top = cy - h * 0.5f;
+        const bool focused = rowFocused && c == focusCol;
+        if (ctl.kind == SETTINGS_CONTROL_BUTTON)
+            FillRound(x, top, w, h, g_M.radius, focused ? COL_BUTTON_HI : COL_BUTTON);
+        else if (ctl.kind == SETTINGS_CONTROL_CHECK)
+        {
+            if (focused && !single)
+                FillRound(x, top, w, h, g_M.radius, COL_BUTTON_HI);
+            DrawCheckQuads(x + S(10.0f), cy, ctl.on, false);
+        }
+        else
+            DrawValueQuads(ctl, x, cy);
+        if (focused && !single)
+            FocusRing(x, top, w, h, g_M.radius);
+        x += w + S(10.0f);
+    }
+}
+
+static void DrawSettingsControlsText(const SettingsRowView &row, float cy, int focusCol, bool rowFocused)
+{
+    float x = SettingsControlsX(row);
+    for (int c = 0; c < row.controlCount; ++c)
+    {
+        const SettingsControlView &ctl = row.controls[c];
+        const float w = SettingsControlWidth(ctl);
+        const bool focused = rowFocused && c == focusCol;
+        if (ctl.kind == SETTINGS_CONTROL_BUTTON)
+            TextMid(x + w * 0.5f, cy, 0.8f, focused ? COL_TEXT : COL_TEXT2, ctl.label, ATGFONT_CENTER_X, 0.0f, true);
+        else if (ctl.kind == SETTINGS_CONTROL_CHECK)
+        {
+            if (ctl.label != NULL)
+                TextMid(x + S(10.0f) + SettingsCheck() + S(10.0f), cy, 0.85f, focused ? COL_TEXT : COL_TEXT2, ctl.label);
+        }
+        else
+        {
+            const bool canDown = ctl.valueIndex > 0, canUp = ctl.valueIndex + 1 < ctl.valueCount;
+            const D3DCOLOR arrow = focused ? COL_TEXT : COL_DIM;
+            TextMid(x + S(8.0f), cy, 1.0f, canDown ? arrow : COL_VALUE_END, "\xE2\x80\xB9", 0, 0.0f, true);
+            TextMid(x + w - S(8.0f), cy, 1.0f, canUp ? arrow : COL_VALUE_END, "\xE2\x80\xBA", ATGFONT_RIGHT, 0.0f, true);
+            TextMid(x + w * 0.5f, cy - S(5.0f), 0.88f, focused ? COL_TEXT : COL_TEXT2, ctl.label, ATGFONT_CENTER_X, 0.0f,
+                    true);
+        }
+        x += w + S(10.0f);
+    }
+}
+
+void RenderSettingsFrame(SettingsPageView &view, const UiHint *hints, int hintCount)
+{
+    if (!g_Initialized)
+        return;
+
+    const int count = view.count < SETTINGS_ROWS_MAX ? view.count : SETTINGS_ROWS_MAX;
+    const SettingsLayout L = LayOutSettings(view);
+    const float x0 = g_M.contentX, w = g_M.contentW, rowH = SettingsRowH();
+
+    BeginFrame();
+    const bool showToast = ToastVisibleThisFrame();
+    ButtonHint footer[MAX_FOOTER_HINTS];
+    const int footerCount = LayoutFooter(hints, hintCount, footer);
+
+    // --- Pass 1: quads ---
+    DrawFrameBase(g_sidebar.focused);
+    for (int i = 0; i < count; ++i)
+    {
+        if (!L.shown[i])
+            continue;
+        const SettingsRowView &row = view.rows[i];
+        const bool rowFocused = view.focused && i == view.focusRow;
+        if (row.kind == SETTINGS_VIEW_HEADING)
+        {
+            DrawSettingsControlsQuads(row, L.y[i] + L.h[i] * 0.5f, view.focusCol, rowFocused);
+            continue;
+        }
+
+        // A row of one control is focused as a whole; of several, the
+        // control is.
+        const bool whole = (row.kind == SETTINGS_VIEW_FOLDER || row.controlCount == 1);
+        FillRound(x0, L.y[i], w, rowH, g_M.radius, rowFocused && whole ? COL_SURFACE_HI : COL_SURFACE);
+        if (rowFocused && whole)
+            FocusRing(x0, L.y[i], w, rowH, g_M.radius);
+
+        const float cy = L.y[i] + rowH * 0.5f;
+        if (row.kind == SETTINGS_VIEW_FOLDER)
+            DrawCheckQuads(x0 + S(16.0f), cy, row.checked, row.locked || row.missing);
+        else
+            DrawSettingsControlsQuads(row, cy, view.focusCol, rowFocused);
+    }
+    DrawButtonHintShapes(footer, footerCount, g_M.footerY);
+    DrawHeaderQuads(showToast);
+
+    // --- Pass 2: all text, one Begin/End ---
+    g_UiFont.Begin();
+    DrawSidebarText(g_sidebar.focused);
+    DrawHeaderText("Settings", NULL, showToast);
+    DrawButtonHintText(footer, footerCount, g_M.footerY);
+
+    const char *help = NULL;
+    for (int i = 0; i < count; ++i)
+    {
+        const SettingsRowView &row = view.rows[i];
+        const bool rowFocused = view.focused && i == view.focusRow;
+        if (rowFocused)
+        {
+            if (row.kind == SETTINGS_VIEW_FOLDER || row.controlCount == 0)
+                help = row.help;
+            else
+                help = row.controls[view.focusCol < row.controlCount ? view.focusCol : row.controlCount - 1].help;
+        }
+        if (!L.shown[i])
+            continue;
+
+        const float cy = L.y[i] + L.h[i] * 0.5f;
+        if (row.kind == SETTINGS_VIEW_HEADING)
+        {
+            TextMid(x0, cy, 1.0f, COL_TEXT, row.label, 0, 0.0f, true);
+            DrawSettingsControlsText(row, cy, view.focusCol, rowFocused);
+            continue;
+        }
+        if (row.kind == SETTINGS_VIEW_FOLDER)
+        {
+            const float pathX = x0 + S(16.0f) + SettingsCheck() + S(14.0f);
+            const float statusW = row.status != NULL ? TextWidth(row.status, 0.76f) : 0.0f;
+            TextMid(pathX, cy, 0.88f, row.missing ? COL_DIM : (rowFocused ? COL_TEXT : COL_TEXT2), row.label,
+                    ATGFONT_TRUNCATED, x0 + w - S(36.0f) - statusW - pathX);
+            if (row.status != NULL)
+                TextMid(x0 + w - S(18.0f), cy, 0.76f, row.statusGreen ? COL_GREEN_TEXT : COL_DIM, row.status,
+                        ATGFONT_RIGHT);
+            continue;
+        }
+        TextMid(x0 + S(18.0f), cy, 0.88f, rowFocused ? COL_TEXT : COL_TEXT2, row.label);
+        if (row.status != NULL)
+        {
+            const float statusX = x0 + S(18.0f) + S(250.0f);
+            TextMid(statusX, cy, 0.76f, COL_DIM, row.status, ATGFONT_TRUNCATED,
+                    SettingsControlsX(row) - S(20.0f) - statusX);
+        }
+        DrawSettingsControlsText(row, cy, view.focusCol, rowFocused);
+    }
+
+    // The help line, beside the hints: what has focus does.
+    if (help != NULL && view.focused)
+    {
+        const float hintsX = footerCount > 0 ? footer[0].badgeX : x0 + w;
+        TextMid(x0, g_M.footerY, 0.78f, COL_TEXT2, help, ATGFONT_TRUNCATED, hintsX - S(28.0f) - x0);
+    }
+
+    g_UiFont.SetBold(false);
+    g_UiFont.SetScaleFactors(1.0f, 1.0f);
+    g_UiFont.End();
+
+    EndFrame();
+}
+
 void RenderPlaceholderFrame(const char *heading, const char *message, const char *detailLine,
                             const UiHint *hints, int hintCount)
 {
@@ -3563,8 +3834,8 @@ static StoreLayout LayOutStore()
 {
     StoreLayout L;
     L.gap = S(18.0f);
-    L.labelY = g_M.listY;
-    L.top = g_M.listY + LineHeight(1.05f) * 1.3f + S(10.0f);
+    L.labelY = g_M.listYTitleOnly;
+    L.top = g_M.listYTitleOnly + LineHeight(1.05f) * 1.3f + S(10.0f);
 
     L.heroW = floorf(g_M.contentW * 0.655f);
     L.heroH = floorf(L.heroW * 9.0f / 16.0f);
@@ -3679,7 +3950,7 @@ void RenderStoreFrame(StorePageView &view, const UiHint *hints, int hintCount)
     const StoreLayout L = LayOutStore();
 
     // The page between the header and the footer, which it scrolls inside.
-    const float clipTop = g_M.listY - S(6.0f);
+    const float clipTop = g_M.listYTitleOnly - S(6.0f);
     const float clipBottom = g_M.footerY - S(30.0f);
 
     // Scrolled just far enough to show every letter while one has focus,
@@ -3760,7 +4031,7 @@ void RenderStoreFrame(StorePageView &view, const UiHint *hints, int hintCount)
     g_UiFont.Begin();
 
     DrawSidebarText(g_sidebar.focused);
-    DrawHeaderText("Store", "Xbox 360 games from archive.org", showToast);
+    DrawHeaderText("Store", NULL, showToast);
     DrawButtonHintText(footer, footerCount, g_M.footerY);
 
     // Only lines wholly inside the page: text can't be cut part way.
