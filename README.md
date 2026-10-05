@@ -32,7 +32,7 @@ A homebrew Xbox 360 app for getting games and their extras onto a modded console
 
 Omni360 began as a fork of [X-Store](https://github.com/951261/X-Store) by 951261, and still runs on its networking core: the HTTPS client and BearSSL/TLS wrapper, DNS lookups and drive mounting. Everything Vimm's Lair/full-game/ISO/updater-related has been stripped out; the library, the Store, the installers and the interface are new. See `docs/` for X-Store's own original architecture notes (still accurate for the networking layer this fork builds on).
 
-**Status: beta (0.5.0-beta), working on real hardware.** Installs from the Store, Xbox Live Arcade, Xbox Live Indie Games, Original Xbox, DLC, title updates and disc installs have all been run end to end on a modded console with a real library.
+**Status: beta (0.6.0-beta), working on real hardware.** Installs from the Store, Xbox Live Arcade, Xbox Live Indie Games, Original Xbox, DLC, title updates and disc installs have all been run end to end on a modded console with a real library.
 
 ## Using it
 
