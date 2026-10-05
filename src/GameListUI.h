@@ -285,7 +285,23 @@ void RenderSettingsFrame(SettingsPageView &view, const UiHint *hints, int hintCo
 #define STORE_FOCUS_FEATURED 0
 #define STORE_FOCUS_BUTTONS  (STORE_FOCUS_FEATURED + STORE_FEATURED_MAX) // some featured slots may be unused
 #define STORE_FOCUS_LETTERS  (STORE_FOCUS_BUTTONS + STORE_BUTTON_COUNT)
-#define STORE_FOCUS_COUNT    (STORE_FOCUS_LETTERS + STORE_LETTER_COUNT)
+// Under the A to Z, rows of games that scroll sideways - Popular, Top rated,
+// a genre each. Focus on a row's game is STORE_FOCUS_ROWS + row *
+// STORE_ROW_TILES_MAX + its place in the row.
+#define STORE_ROWS_MAX       16
+#define STORE_ROW_TILES_MAX  24
+#define STORE_FOCUS_ROWS     (STORE_FOCUS_LETTERS + STORE_LETTER_COUNT)
+#define STORE_FOCUS_COUNT    (STORE_FOCUS_ROWS + STORE_ROWS_MAX * STORE_ROW_TILES_MAX)
+
+struct StoreTileView;
+
+struct StoreRowView
+{
+    const char *name;
+    const StoreTileView *tiles;
+    int count;
+    int scroll; // the first game shown; the caller's to keep, the Render call moves it
+};
 
 struct StoreFeaturedView
 {
@@ -305,6 +321,8 @@ struct StorePageView
     const char *featuredLabel; // over the featured tiles - "Featured", or an event's name
     StoreFeaturedView featured[STORE_FEATURED_MAX];
     int featuredCount;         // 1 to STORE_FEATURED_MAX
+    StoreRowView rows[STORE_ROWS_MAX];
+    int rowCount;
     StoreButtonView buttons[STORE_BUTTON_COUNT];
     const char *letters;   // STORE_LETTER_COUNT characters
     int focus;
@@ -314,6 +332,9 @@ struct StorePageView
 
 // How many A-Z tiles fit across: they wrap onto as many rows as it takes.
 int StoreLettersPerRow();
+
+// How many of a row's games show across at once.
+int StoreRowTilesAcross();
 
 // Where featured tile i of count sits, before the page scrolls - and a
 // button's - for the D-pad to go to whichever is next to it.

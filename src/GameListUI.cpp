@@ -2114,8 +2114,11 @@ static void ReleaseBoxArt()
 }
 
 // The Store's covers: only those on or near the screen, at half size, so a
-// long letter can't fill memory. The least recently drawn goes first.
-#define MAX_STORE_COVERS 48
+// long letter can't fill memory - 80 of them, 256 pixels square, about 20MB:
+// enough for a screenful of the front page's rows, which is about 40, and
+// what was just scrolled past. The least recently drawn goes first, but never
+// one that's on screen - see AddStoreCover.
+#define MAX_STORE_COVERS 80
 
 struct StoreCover
 {
@@ -2168,6 +2171,16 @@ static void AddStoreCover(unsigned long titleId, D3DTexture *texture)
         {
             if (g_storeCovers[i].lastUsed < g_storeCovers[slot].lastUsed)
                 slot = i;
+        }
+
+        // A cover drawn this frame or the last is on screen: putting this
+        // one in its place would only have it asked for again, put back in
+        // place of another, and so on - covers flickering to their names and
+        // back. This one waits instead, a name on its tile.
+        if (g_storeCovers[slot].lastUsed + 1 >= g_storeFrame)
+        {
+            texture->Release();
+            return;
         }
         g_storeCovers[slot].texture->Release();
     }
@@ -3828,7 +3841,15 @@ struct StoreLayout
     float cell, cellGap;
     int perRow;
     float bottom;          // the foot of the last row of letters
+
+    float rowsY;           // the first row of games' label
+    float rowLabelH;       // a row's label, and the space under it
+    float rowTile, rowGap; // its tiles, square
+    float rowPitch;        // from one row to the next
+    int across;            // tiles shown across
 };
+
+static void RequestMissingStoreCovers(const unsigned long *want, int wantCount); // with the letter pages', below
 
 static StoreLayout LayOutStore()
 {
@@ -3855,7 +3876,27 @@ static StoreLayout LayOutStore()
 
     const int rows = (STORE_LETTER_COUNT + L.perRow - 1) / L.perRow;
     L.bottom = L.azY + rows * L.cell + (rows - 1) * L.cellGap;
+
+    L.across = StoreRowTilesAcross();
+    L.rowGap = S(14.0f);
+    L.rowTile = floorf((g_M.contentW - (L.across - 1) * L.rowGap) / L.across);
+    L.rowLabelH = LineHeight(0.95f) * 1.3f + S(8.0f);
+    L.rowsY = L.bottom + S(34.0f);
+    L.rowPitch = L.rowLabelH + L.rowTile + S(30.0f);
     return L;
+}
+
+int StoreRowTilesAcross()
+{
+    return g_M.gridCols + 2; // 7 on HD, 5 on a 4:3 screen
+}
+
+// Where a row's game sits, before the page scrolls: across from its row's
+// first shown game.
+static void StoreRowTileRect(const StoreLayout &L, int row, int place, int scroll, float *x, float *y)
+{
+    *x = g_M.contentX + (place - scroll) * (L.rowTile + L.rowGap);
+    *y = L.rowsY + row * L.rowPitch + L.rowLabelH;
 }
 
 static void StoreFeaturedRect(const StoreLayout &L, int count, int i, float *x, float *y, float *w, float *h)
@@ -3994,11 +4035,54 @@ void RenderStoreFrame(StorePageView &view, const UiHint *hints, int hintCount)
     const float clipTop = g_M.listYTitleOnly - S(6.0f);
     const float clipBottom = g_M.footerY - S(30.0f);
 
-    // Scrolled just far enough to show every letter while one has focus,
-    // and back to the top otherwise - eased, so the page glides.
+    // Scrolled just far enough to show every letter while one has focus, or
+    // the focused row of games, and back to the top otherwise - eased, so
+    // the page glides.
+    const int rowCount = view.rowCount < STORE_ROWS_MAX ? view.rowCount : STORE_ROWS_MAX;
+    int focusRow = -1, focusPlace = -1;
+    if (view.focus >= STORE_FOCUS_ROWS)
+    {
+        focusRow = (view.focus - STORE_FOCUS_ROWS) / STORE_ROW_TILES_MAX;
+        focusPlace = (view.focus - STORE_FOCUS_ROWS) % STORE_ROW_TILES_MAX;
+        if (focusRow >= rowCount || focusPlace >= view.rows[focusRow].count)
+            focusRow = focusPlace = -1;
+    }
     float target = 0.0f;
-    if (view.focus >= STORE_FOCUS_LETTERS && L.bottom > clipBottom - S(16.0f))
-        target = L.bottom - (clipBottom - S(16.0f));
+    if (focusRow >= 0)
+    {
+        // Only as far as it takes to bring the row on screen - one already
+        // in view, as Popular is from the letters, leaves the page where it is.
+        const float rowTop = L.rowsY + focusRow * L.rowPitch;
+        const float rowBottom = rowTop + L.rowLabelH + L.rowTile;
+        target = view.scroll;
+        if (rowBottom - target > clipBottom - S(16.0f))
+            target = rowBottom - (clipBottom - S(16.0f));
+        if (rowTop - target < clipTop + S(10.0f))
+            target = rowTop - (clipTop + S(10.0f));
+
+        // Sideways: the focused game in view, a row at a time.
+        StoreRowView &row = view.rows[focusRow];
+        if (focusPlace < row.scroll)
+            row.scroll = focusPlace;
+        if (focusPlace >= row.scroll + L.across)
+            row.scroll = focusPlace - L.across + 1;
+    }
+    else if (view.focus >= STORE_FOCUS_LETTERS)
+    {
+        // "Games, A to Z" to the top, so the rows of games start showing
+        // under the letters - Popular is there to be seen, not found.
+        target = L.azLabelY - (clipTop + S(10.0f));
+        if (target < 0.0f)
+            target = 0.0f;
+    }
+    for (int r = 0; r < rowCount; ++r)
+    {
+        StoreRowView &row = view.rows[r];
+        if (row.scroll > row.count - L.across)
+            row.scroll = row.count - L.across;
+        if (row.scroll < 0)
+            row.scroll = 0;
+    }
     view.scroll += (target - view.scroll) * 0.3f;
     if (fabsf(target - view.scroll) < 0.5f)
         view.scroll = target;
@@ -4064,6 +4148,40 @@ void RenderStoreFrame(StorePageView &view, const UiHint *hints, int hintCount)
         if (isFocused)
             FocusRing(x, y, L.cell, L.cell, g_M.radius);
     }
+
+    // The rows of games: those across, and the next one cut off at the
+    // page's edge to show there's more. Their covers are asked for as they
+    // come into view.
+    unsigned long wantCovers[MAX_STORE_COVERS];
+    int wantCount = 0;
+    ClearClip();
+    SetClip(g_M.contentX - S(12.0f), clipTop, g_M.contentW + S(24.0f), clipBottom - clipTop);
+    for (int r = 0; r < rowCount; ++r)
+    {
+        const StoreRowView &row = view.rows[r];
+        const float top = L.rowsY + r * L.rowPitch + sy;
+        if (top + L.rowPitch < clipTop || top > clipBottom)
+            continue;
+        for (int i = row.scroll; i < row.count && i <= row.scroll + L.across; ++i)
+        {
+            float x, y;
+            StoreRowTileRect(L, r, i, row.scroll, &x, &y);
+            y += sy;
+            const unsigned long tid = row.tiles[i].titleId;
+            D3DTexture *cover = StoreCoverFor(tid);
+            if (cover == NULL && tid != 0 && wantCount < MAX_STORE_COVERS)
+                wantCovers[wantCount++] = tid;
+            DrawTileArt(cover, NULL, x, y, L.rowTile, L.rowTile);
+            if (r == focusRow && i == focusPlace && view.focused)
+            {
+                if (cover != NULL)
+                    FillRoundGradient(x, y + L.rowTile * 0.55f, L.rowTile, L.rowTile * 0.45f, g_M.radius, 0x00000000,
+                                      0xD9000000, true);
+                FocusRing(x, y, L.rowTile, L.rowTile, g_M.radius);
+            }
+        }
+    }
+    RequestMissingStoreCovers(wantCovers, wantCount);
 
     ClearClip();
 
@@ -4144,6 +4262,36 @@ void RenderStoreFrame(StorePageView &view, const UiHint *hints, int hintCount)
             continue;
         char letter[2] = { view.letters[i], '\0' };
         TextMid(x + L.cell * 0.5f, cy, 1.2f, COL_TEXT, letter, ATGFONT_CENTER_X, 0.0f, true);
+    }
+
+    // Each row's name, and a game's under its focus - or on its tile, where
+    // there's no cover to show.
+    const float pad = S(12.0f);
+    for (int r = 0; r < rowCount; ++r)
+    {
+        const StoreRowView &row = view.rows[r];
+        const float top = L.rowsY + r * L.rowPitch + sy;
+        if (TextInClip(top, LineHeight(0.95f) * 1.2f))
+            Text(g_M.contentX, top, 0.95f, COL_TEXT, row.name, 0, 0.0f, true);
+        for (int i = row.scroll; i < row.count && i < row.scroll + L.across; ++i)
+        {
+            float x, y;
+            StoreRowTileRect(L, r, i, row.scroll, &x, &y);
+            y += sy;
+            const bool focused = (r == focusRow && i == focusPlace && view.focused);
+            const bool hasArt = StoreCoverFor(row.tiles[i].titleId) != NULL;
+            if (hasArt && focused)
+            {
+                const float nameY = y + L.rowTile - pad - LineHeight(0.78f) * 1.2f;
+                if (TextInClip(nameY, LineHeight(0.78f) * 1.2f))
+                    TextFit(x + pad, nameY, 0.78f, COL_TEXT, row.tiles[i].name, L.rowTile - pad * 2.0f, true);
+            }
+            else if (!hasArt && TextInClip(y + pad, L.rowTile - pad * 2.0f))
+            {
+                TextWrapped(x + pad, y + pad, 0.74f, focused ? COL_TEXT : COL_TEXT2, row.tiles[i].name,
+                            L.rowTile - pad * 2.0f, LineHeight(0.74f) * 1.2f, 4, true);
+            }
+        }
     }
 
     ClearClip();

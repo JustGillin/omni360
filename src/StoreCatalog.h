@@ -34,9 +34,18 @@ bool StoreDiscIsXbox(const StoreDisc *disc);
 bool IsXboxTitleId(unsigned long titleId);
 
 // One game by its title ID, any of its discs' - for the featured tiles, and
-// a library game's page: the 360's, then the Original Xbox's. False if no
-// game has it.
+// a library game's page: the 360's, then the Original Xbox's; of several
+// with it, a USA or World one first. False if no game has it.
 bool StoreGameByTitleId(unsigned long titleId, StoreGame *out);
+
+// The Store front page's rows under its A to Z - Popular, Top rated, a genre
+// each - from StoreRows.h (tools/make_store_rows.py).
+int StoreRowCount();
+const char *StoreRowName(int row);
+
+// A row's games, in order, as StoreGameByTitleId finds them. Returns how
+// many were written.
+int StoreRowGames(int row, StoreGame *out, int maxGames);
 
 // One of a game's versions, USA and World first; NULL out of range.
 const StoreRelease *StoreReleaseOf(const StoreGame *game, int version);

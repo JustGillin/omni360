@@ -2045,6 +2045,7 @@ struct Shell
     // it has scrolled, and whether its wallpapers have been asked for yet.
     int storeFocus;
     float storeScroll;
+    int storeRowScroll[STORE_ROWS_MAX]; // each row of games' first shown
     bool storeArtRequested;
 
     // A section's A-Z page - Xbox Live Arcade's, the Indie Games' or the
@@ -2182,12 +2183,58 @@ static const char *const kStoreButtonsSoon[STORE_BUTTON_COUNT] = {
 
 static const char kStoreLetters[] = "#ABCDEFGHIJKLMNOPQRSTUVWXYZ";
 
+// The rows under the A to Z - Popular, Top rated, a genre each - as
+// StoreRows.h has them, looked up once.
+static StoreGame g_rowGames[STORE_ROWS_MAX][STORE_ROW_TILES_MAX];
+static StoreTileView g_rowTiles[STORE_ROWS_MAX][STORE_ROW_TILES_MAX];
+static int g_rowCounts[STORE_ROWS_MAX];
+static int g_rowCount = 0;
+
+static void BuildStoreRows()
+{
+    g_rowCount = 0;
+    const int rows = StoreRowCount() < STORE_ROWS_MAX ? StoreRowCount() : STORE_ROWS_MAX;
+    for (int r = 0; r < rows; ++r)
+    {
+        const int n = StoreRowGames(r, g_rowGames[g_rowCount], STORE_ROW_TILES_MAX);
+        if (n == 0)
+            continue;
+        for (int i = 0; i < n; ++i)
+        {
+            StoreTileView &tile = g_rowTiles[g_rowCount][i];
+            tile.titleId = g_rowGames[g_rowCount][i].titleId;
+            tile.name = g_rowGames[g_rowCount][i].name;
+            tile.regions = 0;
+            tile.indie = false;
+        }
+        g_rowCounts[g_rowCount++] = n;
+    }
+}
+
+// Where focus is on a row: its game at `place`, kept to the row.
+static int StoreRowFocus(int row, int place)
+{
+    if (place >= g_rowCounts[row])
+        place = g_rowCounts[row] - 1;
+    if (place < 0)
+        place = 0;
+    return STORE_FOCUS_ROWS + row * STORE_ROW_TILES_MAX + place;
+}
+
 static StorePageView MakeStoreView(const Shell &shell)
 {
     StorePageView view;
     memset(&view, 0, sizeof(view));
     view.featuredLabel = g_featured.label;
     view.featuredCount = g_featuredCount;
+    view.rowCount = g_rowCount;
+    for (int r = 0; r < g_rowCount; ++r)
+    {
+        view.rows[r].name = StoreRowName(r);
+        view.rows[r].tiles = g_rowTiles[r];
+        view.rows[r].count = g_rowCounts[r];
+        view.rows[r].scroll = shell.storeRowScroll[r];
+    }
     for (int i = 0; i < g_featuredCount; ++i)
         view.featured[i] = g_featuredTiles[i];
 
@@ -2317,7 +2364,7 @@ static void StepStoreFocus(WORD nav, Shell &shell)
         else if (nav == XINPUT_GAMEPAD_DPAD_DOWN)
             i = STORE_FOCUS_LETTERS + (b * perRow * 2 + STORE_BUTTON_COUNT) / (STORE_BUTTON_COUNT * 2);
     }
-    else
+    else if (i < STORE_FOCUS_ROWS)
     {
         const int l = i - STORE_FOCUS_LETTERS;
         const int col = l % perRow;
@@ -2341,6 +2388,41 @@ static void StepStoreFocus(WORD nav, Shell &shell)
         {
             // Down onto a shorter last row lands on its last letter.
             i = (l + perRow < STORE_LETTER_COUNT) ? i + perRow : STORE_FOCUS_LETTERS + STORE_LETTER_COUNT - 1;
+        }
+        else if (nav == XINPUT_GAMEPAD_DPAD_DOWN && g_rowCount > 0)
+        {
+            // Into the first row of games, under about the same place.
+            i = StoreRowFocus(0, shell.storeRowScroll[0] + col * StoreRowTilesAcross() / perRow);
+        }
+    }
+    else
+    {
+        // A row of games: along it, or to the same place on screen in the
+        // row above or below.
+        const int r = (i - STORE_FOCUS_ROWS) / STORE_ROW_TILES_MAX;
+        const int place = (i - STORE_FOCUS_ROWS) % STORE_ROW_TILES_MAX;
+        const int onScreen = place - shell.storeRowScroll[r];
+        if (nav == XINPUT_GAMEPAD_DPAD_RIGHT && place + 1 < g_rowCounts[r])
+            i++;
+        else if (nav == XINPUT_GAMEPAD_DPAD_LEFT)
+        {
+            if (place == 0)
+                shell.sidebarFocused = true;
+            else
+                i--;
+        }
+        else if (nav == XINPUT_GAMEPAD_DPAD_DOWN && r + 1 < g_rowCount)
+            i = StoreRowFocus(r + 1, shell.storeRowScroll[r + 1] + onScreen);
+        else if (nav == XINPUT_GAMEPAD_DPAD_UP && r > 0)
+            i = StoreRowFocus(r - 1, shell.storeRowScroll[r - 1] + onScreen);
+        else if (nav == XINPUT_GAMEPAD_DPAD_UP)
+        {
+            // Back up to the letters' last row, under about the same place.
+            const int lastRowStart = ((STORE_LETTER_COUNT - 1) / perRow) * perRow;
+            int l = lastRowStart + onScreen * perRow / StoreRowTilesAcross();
+            if (l > STORE_LETTER_COUNT - 1)
+                l = STORE_LETTER_COUNT - 1;
+            i = STORE_FOCUS_LETTERS + l;
         }
     }
 
@@ -3427,9 +3509,16 @@ static bool ActOnStoreFocus(Shell &shell)
         else
             ShowShellToast("Coming soon", kStoreButtonsSoon[i - STORE_FOCUS_BUTTONS], UI_TOAST_INFO);
     }
-    else
+    else if (i < STORE_FOCUS_ROWS)
     {
         OpenStoreLetter(shell, kStoreLetters[i - STORE_FOCUS_LETTERS], -1);
+    }
+    else
+    {
+        const int r = (i - STORE_FOCUS_ROWS) / STORE_ROW_TILES_MAX;
+        const int place = (i - STORE_FOCUS_ROWS) % STORE_ROW_TILES_MAX;
+        if (r < g_rowCount && place < g_rowCounts[r])
+            OpenStoreGame(shell, g_rowGames[r][place]);
     }
     return false;
 }
@@ -4205,6 +4294,7 @@ int main()
     // shortly - see Featured.h.
     StartFeatured();
     RefreshFeatured();
+    BuildStoreRows();
 
     // The shell loop: read the controller, act on it, draw a frame.
     //
@@ -4600,7 +4690,8 @@ int main()
             else if (input.nav != 0)
                 StepStoreFocus(input.nav, shell);
 
-            if (!shell.storeInLetter && shell.storeFocus != focusBefore && shell.storeFocus >= STORE_FOCUS_LETTERS)
+            if (!shell.storeInLetter && shell.storeFocus != focusBefore && shell.storeFocus >= STORE_FOCUS_LETTERS &&
+                shell.storeFocus < STORE_FOCUS_ROWS)
                 PrefetchLetterCovers(kStoreLetters[shell.storeFocus - STORE_FOCUS_LETTERS], -1);
         }
         else if (shell.page == SHELL_PAGE_QUEUE)
@@ -4884,11 +4975,15 @@ int main()
                         if (!kStoreButtons[i - STORE_FOCUS_BUTTONS].disabled)
                             hintCount = AddHint(hints, hintCount, UI_BUTTON_A, L"Browse", L"Browse");
                     }
-                    else
+                    else if (i < STORE_FOCUS_ROWS)
                     {
                         _snwprintf(browse, 32, L"Browse %c", (WCHAR)kStoreLetters[i - STORE_FOCUS_LETTERS]);
                         browse[31] = L'\0';
                         hintCount = AddHint(hints, hintCount, UI_BUTTON_A, browse, L"Browse");
+                    }
+                    else
+                    {
+                        hintCount = AddHint(hints, hintCount, UI_BUTTON_A, L"View game", L"View");
                     }
                     hintCount = AddHint(hints, hintCount, UI_BUTTON_B, L"Back");
                 }
@@ -4897,6 +4992,8 @@ int main()
                 RenderStoreFrame(view, hints, hintCount);
                 shell.storeFocus = view.focus;
                 shell.storeScroll = view.scroll;
+                for (int r = 0; r < view.rowCount; ++r)
+                    shell.storeRowScroll[r] = view.rows[r].scroll;
             }
             break;
 

@@ -2,7 +2,9 @@
 #define XBOX_TITLES_DATA
 #define XBLA_TITLES_DATA
 #define XBLIG_TITLES_DATA
+#define STORE_ROWS_DATA
 #include "StoreCatalog.h"
+#include "StoreRows.h"
 
 #include <stdlib.h>
 #include <string.h>
@@ -74,14 +76,26 @@ int XboxGamesForLetter(char letter, StoreGame *out, int maxGames)
 // As StoreGameByTitleId, in one table.
 static bool FindByTitleId(const StoreGame *games, int count, unsigned long titleId, StoreGame *out)
 {
-    // The game it names first; else one with a disc that has it.
+    // The game it names first - a USA or World one, of several: Viva
+    // Pinata, not Japan's "Atsumare! Pinata" - else one with a disc that
+    // has it.
+    int found = -1;
     for (int i = 0; i < count; ++i)
     {
-        if (games[i].titleId == titleId)
+        if (games[i].titleId != titleId)
+            continue;
+        if (found < 0)
+            found = i;
+        if (games[i].regions & (STORE_REGION_USA | STORE_REGION_WORLD))
         {
-            *out = games[i];
-            return true;
+            found = i;
+            break;
         }
+    }
+    if (found >= 0)
+    {
+        *out = games[found];
+        return true;
     }
     for (int i = 0; i < count; ++i)
     {
@@ -402,4 +416,31 @@ int SearchStore(const char *query, StoreHit *out, int maxHits, int *outTotal)
     for (int i = 0; i < written; ++i)
         out[i] = g_matches[i].hit;
     return written;
+}
+
+// ---------------------------------------------------------------------------
+// The front page's rows
+// ---------------------------------------------------------------------------
+
+int StoreRowCount()
+{
+    return STORE_ROW_COUNT;
+}
+
+const char *StoreRowName(int row)
+{
+    return (row >= 0 && row < STORE_ROW_COUNT) ? kStoreRows[row].name : "";
+}
+
+int StoreRowGames(int row, StoreGame *out, int maxGames)
+{
+    if (row < 0 || row >= STORE_ROW_COUNT || out == NULL)
+        return 0;
+    int n = 0;
+    for (int i = 0; i < kStoreRows[row].count && n < maxGames; ++i)
+    {
+        if (StoreGameByTitleId(kStoreRowGames[kStoreRows[row].first + i], &out[n]))
+            n++;
+    }
+    return n;
 }
