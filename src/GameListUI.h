@@ -300,6 +300,7 @@ struct StoreButtonView
 
 struct StorePageView
 {
+    const char *featuredLabel; // over the featured tiles - "Featured", or an event's name
     StoreFeaturedView featured[STORE_FEATURED_COUNT];
     StoreButtonView buttons[STORE_BUTTON_COUNT];
     const char *letters;   // STORE_LETTER_COUNT characters

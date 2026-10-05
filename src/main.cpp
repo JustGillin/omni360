@@ -26,6 +26,7 @@ end-to-end on real hardware against a real 27-game library.
 #include "StfsParser.h"
 #include "FolderGames.h"
 #include "UiSound.h"
+#include "Featured.h"
 #include "GameListUI.h"
 #include "DownloadQueue.h"
 #include "SearchWorker.h"
@@ -2124,12 +2125,36 @@ static bool PageTakesFocus(const Shell &shell, ShellPage page)
 
 #define STORE_MIDDOT "  \xC2\xB7  "
 
-// Chosen by hand; the details are the Xbox Live catalog's.
-static const StoreFeaturedView kStoreFeatured[STORE_FEATURED_COUNT] = {
-    { 0x4D5307E6, "Halo 3", "Bungie Studios" STORE_MIDDOT "Shooter" },
-    { 0x545407D8, "BioShock", "2K Boston" STORE_MIDDOT "Shooter" },
-    { 0x4D530AA4, "Forza Horizon 2", "Sumo Digital" STORE_MIDDOT "Racing" },
-};
+// The featured games, from featured.json in the repository - an event's, or
+// the week's - as Featured.h has them. Picked up each frame; the details
+// under the large tile are the Xbox Live catalog's.
+static FeaturedSet g_featured;
+static unsigned long g_featuredChanges = (unsigned long)-1;
+static StoreFeaturedView g_featuredTiles[STORE_FEATURED_COUNT];
+static char g_featuredDetail[192];
+
+static void AppendText(char *out, size_t outSize, const char *separator, const char *text);
+
+// The latest set; true if it changed since the last call.
+static bool RefreshFeatured()
+{
+    unsigned long changes = 0;
+    FeaturedSet set;
+    GetFeatured(&set, &changes);
+    if (changes == g_featuredChanges)
+        return false;
+    g_featuredChanges = changes;
+    g_featured = set;
+    for (int i = 0; i < STORE_FEATURED_COUNT; ++i)
+    {
+        StoreGame game;
+        g_featuredTiles[i].titleId = set.titleIds[i];
+        g_featuredTiles[i].name = StoreGameByTitleId(set.titleIds[i], &game) ? game.name : "";
+        g_featuredTiles[i].detail = NULL;
+    }
+    RequestStoreDetails(set.titleIds[0]);
+    return true;
+}
 
 // The other ways in - those still to come marked SOON. DLC and title updates
 // are on each game's page instead.
@@ -2158,8 +2183,20 @@ static StorePageView MakeStoreView(const Shell &shell)
 {
     StorePageView view;
     memset(&view, 0, sizeof(view));
+    view.featuredLabel = g_featured.label;
     for (int i = 0; i < STORE_FEATURED_COUNT; ++i)
-        view.featured[i] = kStoreFeatured[i];
+        view.featured[i] = g_featuredTiles[i];
+
+    // Who made the large tile's game, and what it is, once the catalog says.
+    static StoreDetails details;
+    if (GetStoreDetails(g_featuredTiles[0].titleId, &details) == STORE_DETAILS_READY)
+    {
+        g_featuredDetail[0] = '\0';
+        AppendText(g_featuredDetail, sizeof(g_featuredDetail), "", details.developer);
+        if (details.genre[0] != '\0')
+            AppendText(g_featuredDetail, sizeof(g_featuredDetail), STORE_MIDDOT, details.genre);
+        view.featured[0].detail = g_featuredDetail[0] != '\0' ? g_featuredDetail : NULL;
+    }
     for (int i = 0; i < STORE_BUTTON_COUNT; ++i)
         view.buttons[i] = kStoreButtons[i];
     view.letters = kStoreLetters;
@@ -2524,7 +2561,7 @@ static void StepSectionFocus(WORD nav, Shell &shell)
 static void RequestFeaturedArt()
 {
     for (int i = 0; i < STORE_FEATURED_COUNT; ++i)
-        RequestStoreArt(kStoreFeatured[i].titleId, STORE_ART_BACKGROUND);
+        RequestStoreArt(g_featuredTiles[i].titleId, STORE_ART_BACKGROUND);
 }
 
 static void AppendText(char *out, size_t outSize, const char *separator, const char *text)
@@ -3299,7 +3336,7 @@ static bool ActOnStoreFocus(Shell &shell)
     const int i = shell.storeFocus;
     if (i < STORE_FOCUS_BUTTONS)
     {
-        const StoreFeaturedView &featured = kStoreFeatured[i - STORE_FOCUS_FEATURED];
+        const StoreFeaturedView &featured = g_featuredTiles[i - STORE_FOCUS_FEATURED];
         if (StoreGameByTitleId(featured.titleId, &g_storeGame))
             OpenStoreGame(shell, g_storeGame);
         else
@@ -4092,6 +4129,11 @@ int main()
     if (UpdateChecksOn())
         StartUpdateCheck();
 
+    // The Store's featured games: the kept featured.json now, GitHub's
+    // shortly - see Featured.h.
+    StartFeatured();
+    RefreshFeatured();
+
     // The shell loop: read the controller, act on it, draw a frame.
     //
     // It starts on the library, with focus in the list, since that's where
@@ -4173,11 +4215,13 @@ int main()
         PumpCoverArt();
         PumpStoreArt();
 
-        // The featured wallpapers, the first time the Store is shown.
-        if (shell.page == SHELL_PAGE_STORE && !shell.storeArtRequested)
+        // The featured games - new ones once featured.json has come - and
+        // their wallpapers, the first time the Store is shown and again when
+        // they change.
+        const bool featuredChanged = RefreshFeatured();
+        if (shell.page == SHELL_PAGE_STORE && (!shell.storeArtRequested || featuredChanged))
         {
-            for (int i = 0; i < STORE_FEATURED_COUNT; ++i)
-                RequestStoreArt(kStoreFeatured[i].titleId, STORE_ART_BACKGROUND);
+            RequestFeaturedArt();
             shell.storeArtRequested = true;
         }
 

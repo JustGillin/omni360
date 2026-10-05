@@ -1248,6 +1248,8 @@ struct HttpsSession
     // it's worth being able to see how many there were.
     int connectionsOpened;
     int requestsSent;
+
+    char lastDate[64]; // the last response's Date header
 };
 
 static int SessionRead(void *context, char *buf, int len)
@@ -1365,6 +1367,18 @@ void HttpsSessionClose(HttpsSession *session)
     free(session);
 }
 
+bool HttpsSessionServerDate(HttpsSession *session, char *out, size_t outSize)
+{
+    if (outSize == 0)
+        return false;
+    out[0] = '\0';
+    if (session == NULL || session->lastDate[0] == '\0')
+        return false;
+    _snprintf(out, outSize, "%s", session->lastDate);
+    out[outSize - 1] = '\0';
+    return true;
+}
+
 int HttpsSessionGet(HttpsSession *session, const std::string &url, const char *extraHeaderLines,
                     char *dataBuffer, unsigned long long *dataBufferSize)
 {
@@ -1461,6 +1475,8 @@ int HttpsSessionGet(HttpsSession *session, const std::string &url, const char *e
 
         if (!response.keepAlive)
             SessionDisconnect(session); // the server is closing it, or its framing ruled reuse out
+
+        memcpy(session->lastDate, response.date, sizeof(session->lastDate));
 
         status = response.status;
 

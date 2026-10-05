@@ -33,6 +33,7 @@ struct HttpResponseResult
     bool gotAnyBytes;           // false if the stream ended before a single byte - on a reused
                                 // connection, the sign the server had already closed it
     char location[HTTP_LOCATION_MAX]; // the Location header, if any (redirects)
+    char date[64];              // the Date header, if any: "Mon, 05 Oct 2026 15:20:00 GMT"
 };
 
 #define HTTP_STREAM_BUFFER 4096

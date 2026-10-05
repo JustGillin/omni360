@@ -98,4 +98,9 @@ void HttpsSessionClose(HttpsSession *session);
 int HttpsSessionGet(HttpsSession *session, const std::string &url, const char *extraHeaderLines,
                     char *dataBuffer, unsigned long long *dataBufferSize);
 
+/// The Date header of the session's last response - the server's idea of
+/// today, for when the console's clock can't be trusted. False, with out
+/// empty, if there was none.
+bool HttpsSessionServerDate(HttpsSession *session, char *out, size_t outSize);
+
 #endif

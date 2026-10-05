@@ -336,6 +336,16 @@ static bool ReadHeaders(Stream *s, Headers *h, HttpResponseResult *out)
             if (HasToken(value, "close"))
                 h->connectionClose = true;
         }
+        else if (NameIs(line, nameLen, "date"))
+        {
+            size_t n = strlen(value);
+            while (n > 0 && (value[n - 1] == ' ' || value[n - 1] == '\t'))
+                n--;
+            if (n >= sizeof(out->date))
+                n = 0; // not a date, then
+            memcpy(out->date, value, n);
+            out->date[n] = '\0';
+        }
         else if (NameIs(line, nameLen, "location"))
         {
             // A truncated URL is worse than none - it would send the next

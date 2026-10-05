@@ -4038,7 +4038,8 @@ void RenderStoreFrame(StorePageView &view, const UiHint *hints, int hintCount)
     SetClip(0.0f, clipTop, g_M.screenW, clipBottom - clipTop);
 
     if (TextInClip(L.labelY + sy, LineHeight(1.05f) * 1.2f))
-        Text(g_M.contentX, L.labelY + sy, 1.05f, COL_TEXT, "Featured", 0, 0.0f, true);
+        TextFit(g_M.contentX, L.labelY + sy, 1.05f, COL_TEXT,
+                view.featuredLabel != NULL ? view.featuredLabel : "Featured", g_M.contentW, true);
 
     for (int i = 0; i < STORE_FEATURED_COUNT; ++i)
     {
