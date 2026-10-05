@@ -25,6 +25,7 @@ end-to-end on real hardware against a real 27-game library.
 #include "Keyboard.h"
 #include "StfsParser.h"
 #include "FolderGames.h"
+#include "UiSound.h"
 #include "GameListUI.h"
 #include "DownloadQueue.h"
 #include "SearchWorker.h"
@@ -56,6 +57,7 @@ extern "C" NTSTATUS XexGetModuleHandle(PSZ moduleName, PHANDLE outHandle);
 #define SETTINGS_TEMP_FILE "game:\\settings.tmp"
 #define GAMES_PATH_KEY "games-path: "
 #define UPDATE_CHECK_KEY "check-updates: " // "off" stops the check at start
+#define SOUNDS_KEY "nav-sounds: "         // "off" silences the interface
 #define DISC_SPEED_KEY "disc-speed: "       // 1 to 4, DiscWorker's spindle speed for installs
 #define CREDENTIALS_FILE "game:\\ArchiveOrgKeys.txt"
 #define CONTENT_BASE_PATH_DEFAULT "Hdd1:\\Content\\0000000000000000"
@@ -251,6 +253,14 @@ static void ReadMoreGamesPaths()
         g_moreGamesPathCount++;
     }
     fclose(fd);
+}
+
+// Whether the interface makes sounds. On unless turned off.
+static bool UiSoundsSetting()
+{
+    char value[16];
+    GetSettingsPath(SOUNDS_KEY, "yes", value, sizeof(value));
+    return _stricmp(value, "off") != 0;
 }
 
 // Whether to ask GitHub for a newer version at start. On unless turned off.
@@ -1231,7 +1241,8 @@ enum SettingsRow
     SETTINGS_ROW_UPDATES,      // the version, and what's newer
     SETTINGS_ROW_UPDATE_CHECKS, // checking at start, on or off
     SETTINGS_ROW_LIBRARY_FOLDER, // one of g_folderRows: A adds or removes it
-    SETTINGS_ROW_ADD_FOLDER    // another library folder, typed
+    SETTINGS_ROW_ADD_FOLDER,   // another library folder, typed
+    SETTINGS_ROW_SOUNDS        // the interface's sounds, on or off
 };
 
 // Rescans with the library folders now in settings.txt.
@@ -1523,6 +1534,14 @@ static void StepDiscSpeed(int step)
     dprintf("Disc read speed set to %d (%s)\n", speed, DiscSpeedName(speed));
 }
 
+static void ToggleUiSounds()
+{
+    const bool on = !UiSoundsSetting();
+    if (!SetSettingsValue(SOUNDS_KEY, on ? "yes" : "off"))
+        ShowMessageUI("Not saved", "settings.txt could not be written.", NULL);
+    SetUiSoundsOn(on);
+}
+
 static void ToggleUpdateChecks()
 {
     const bool on = !UpdateChecksOn();
@@ -1741,6 +1760,11 @@ static void BuildSettingsPage(SettingsPage &page, const Library &lib, const char
                        "Asks GitHub for the latest version each time Omni360 starts.");
     page.rows[page.count - 1].controls[1].on = UpdateChecksOn();
 
+    AddSettingsRow(page, SETTINGS_VIEW_LINE, "Navigation sounds");
+    AddSettingsControl(page, SETTINGS_CONTROL_CHECK, NULL, SETTINGS_ROW_SOUNDS,
+                       "A soft tick as you move around, and a sound for A and B.");
+    page.rows[page.count - 1].controls[0].on = UiSoundsSetting();
+
     // The focus where it was, on a row that's still there.
     if (page.focusRow > page.count - 1)
         page.focusRow = page.count - 1;
@@ -1780,6 +1804,7 @@ static SettingsOutcome RunSettingsRow(SettingsRow row, int arg, Library &lib, ch
     case SETTINGS_ROW_UPDATE_CHECKS: ToggleUpdateChecks(); break;
     case SETTINGS_ROW_LIBRARY_FOLDER: ToggleLibraryFolder(arg, lib, gamesPath, outcome); break;
     case SETTINGS_ROW_ADD_FOLDER:   AddLibraryFolder(lib, gamesPath, outcome); break;
+    case SETTINGS_ROW_SOUNDS:       ToggleUiSounds(); break;
     default:                        break;
     }
 
@@ -3300,6 +3325,26 @@ static bool ActOnStoreFocus(Shell &shell)
     return false;
 }
 
+// Where focus is, as one number: a press that changes it moved something,
+// and makes a sound; one at the end of a list doesn't.
+static unsigned long FocusSignature(const Shell &shell)
+{
+    const int parts[] = {
+        shell.page, shell.sidebarFocused, shell.librarySelected, shell.libraryInGame,
+        shell.settings.focusRow, shell.settings.focusCol, DiscSpeedSetting(),
+        shell.picker.kind, shell.picker.selected, shell.queueSelected,
+        shell.storeFocus, shell.storeInSection, shell.storeSection, shell.sectionFocus[shell.storeSection],
+        shell.storeInLetter, shell.storeSelected, shell.storeInGame, shell.storeGameFocus, shell.storeVersionChosen,
+    };
+    unsigned long hash = 2166136261UL; // FNV-1a
+    for (size_t i = 0; i < sizeof(parts) / sizeof(parts[0]); ++i)
+    {
+        hash ^= (unsigned long)parts[i];
+        hash *= 16777619UL;
+    }
+    return hash;
+}
+
 static void RefreshShell(Shell &shell, Library &lib, const char *contentBasePath, const char *gamesPath)
 {
     // Which titles already have DLC, and which already have a title update,
@@ -3973,6 +4018,8 @@ int main()
     StartNetwork();
     LogNetworkStatus();
     SetDiscReadSpeed(DiscSpeedSetting());
+    if (StartUiSounds())
+        SetUiSoundsOn(UiSoundsSetting());
 
     if (!InitGameListUI())
     {
@@ -4146,6 +4193,7 @@ int main()
 
         bool acted = false; // something ran that took over the screen
         bool exitRequested = false;
+        const unsigned long focusBefore = (pressed != 0 || input.nav != 0) ? FocusSignature(shell) : 0;
 
         if (shell.sidebarFocused)
         {
@@ -4528,6 +4576,10 @@ int main()
                          SETTINGS_ROW_NONE)
             {
                 const int col = (row->kind == SETTINGS_VIEW_FOLDER) ? 0 : settings.focusCol;
+                // A tick in place takes over the screen only to rescan, so it
+                // sounds here; anything that opens something has its own.
+                if (row->kind == SETTINGS_VIEW_FOLDER || (control != NULL && control->kind == SETTINGS_CONTROL_CHECK))
+                    PlayUiSound(UI_SOUND_SELECT);
                 SettingsOutcome changed = RunSettingsRow(settings.actions[settings.focusRow][col],
                                                          settings.args[settings.focusRow], lib, gamesPath,
                                                          sizeof(gamesPath));
@@ -4558,6 +4610,18 @@ int main()
         {
             dprintf("Exiting\n");
             break;
+        }
+
+        // A sound for a press that changed something - none when a dialog
+        // or the keyboard took over, as those have their own.
+        if (!acted && (pressed != 0 || input.nav != 0) && FocusSignature(shell) != focusBefore)
+        {
+            if (pressed & XINPUT_GAMEPAD_A)
+                PlayUiSound(UI_SOUND_SELECT);
+            else if (pressed & XINPUT_GAMEPAD_B)
+                PlayUiSound(UI_SOUND_BACK);
+            else
+                PlayUiSound(UI_SOUND_MOVE);
         }
 
         if (acted)
