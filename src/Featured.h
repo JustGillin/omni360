@@ -11,7 +11,7 @@
 //   {
 //     "events": [
 //       { "from": "2026-10-05", "to": "2026-10-12", "label": "Gears of War: E-Day is out",
-//         "games": ["4D5307D5", "4D53082D", "4D53085B"] }
+//         "games": ["4D5307D5", "4D53082D", "4D5308AB"] }
 //     ],
 //     "rotation": [
 //       ["4D5307E6", "545407D8", "4D530AA4"],
@@ -19,7 +19,7 @@
 //     ]
 //   }
 //
-// An event's three games are featured from its first day to its last,
+// An event's games - one to five - are featured from its first day to its last,
 // inclusive; otherwise the week picks the next set from the rotation, so it
 // changes by itself every Monday. Only games the Store has count - a set
 // with a title ID it doesn't know is passed over - and with nothing usable,
@@ -29,11 +29,12 @@
 // can't start an event early. The file is kept in game:\Store, so offline
 // the last one fetched is used, with the console's clock.
 
-#define FEATURED_GAMES 3
+#define FEATURED_MAX_GAMES 5
 
 struct FeaturedSet
 {
-    unsigned long titleIds[FEATURED_GAMES];
+    unsigned long titleIds[FEATURED_MAX_GAMES];
+    int count;      // 1 to FEATURED_MAX_GAMES
     char label[64]; // over the tiles; "Featured" unless an event names itself
 };
 

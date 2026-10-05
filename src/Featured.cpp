@@ -26,7 +26,7 @@ DESCRIPTION : The Store's featured games, from featured.json in the
 #define FEATURED_MAX    (64 * 1024)
 
 // Until a file says otherwise.
-static const unsigned long kBuiltIn[FEATURED_GAMES] = { 0x4D5307E6, 0x545407D8, 0x4D530AA4 }; // Halo 3, BioShock, Forza Horizon 2
+static const unsigned long kBuiltIn[] = { 0x4D5307E6, 0x545407D8, 0x4D530AA4 }; // Halo 3, BioShock, Forza Horizon 2
 
 static CRITICAL_SECTION g_lock;
 static bool g_lockReady = false;
@@ -106,21 +106,24 @@ static long DateNumber(const char *text)
 // Choosing
 // ---------------------------------------------------------------------------
 
-// Three title IDs from a JSON array of hex strings - false unless all three
-// are games the Store has.
-static bool ReadGames(const cJSON *games, unsigned long out[FEATURED_GAMES])
+// One to five title IDs from a JSON array of hex strings - false unless
+// every one is a game the Store has. Past five are left off.
+static bool ReadGames(const cJSON *games, FeaturedSet *out)
 {
-    if (!cJSON_IsArray(games) || cJSON_GetArraySize(games) < FEATURED_GAMES)
+    const int count = cJSON_IsArray(games) ? cJSON_GetArraySize(games) : 0;
+    if (count < 1)
         return false;
-    for (int i = 0; i < FEATURED_GAMES; ++i)
+    out->count = count < FEATURED_MAX_GAMES ? count : FEATURED_MAX_GAMES;
+    unsigned long *ids = out->titleIds;
+    for (int i = 0; i < out->count; ++i)
     {
         const cJSON *id = cJSON_GetArrayItem(games, i);
         if (!cJSON_IsString(id) || id->valuestring == NULL)
             return false;
         char *end = NULL;
-        out[i] = strtoul(id->valuestring, &end, 16);
+        ids[i] = strtoul(id->valuestring, &end, 16);
         StoreGame game;
-        if (end == NULL || *end != '\0' || out[i] == 0 || !StoreGameByTitleId(out[i], &game))
+        if (end == NULL || *end != '\0' || ids[i] == 0 || !StoreGameByTitleId(ids[i], &game))
         {
             dprintf("[featured] %s isn't a game the Store has - set passed over\n", id->valuestring);
             return false;
@@ -153,7 +156,7 @@ static bool Choose(const char *text, size_t len, const Today &today, FeaturedSet
             const long last = DateNumber(cJSON_IsString(to) ? to->valuestring : NULL);
             if (first == 0 || last == 0 || now < first || now > last)
                 continue;
-            if (!ReadGames(cJSON_GetObjectItemCaseSensitive(event, "games"), out->titleIds))
+            if (!ReadGames(cJSON_GetObjectItemCaseSensitive(event, "games"), out))
                 continue;
             const cJSON *label = cJSON_GetObjectItemCaseSensitive(event, "label");
             _snprintf(out->label, sizeof(out->label), "%s",
@@ -176,7 +179,7 @@ static bool Choose(const char *text, size_t len, const Today &today, FeaturedSet
         for (int tried = 0; tried < sets && !chosen; ++tried)
         {
             const int pick = (int)((week + tried) % sets);
-            if (ReadGames(cJSON_GetArrayItem(rotation, pick), out->titleIds))
+            if (ReadGames(cJSON_GetArrayItem(rotation, pick), out))
             {
                 _snprintf(out->label, sizeof(out->label), "Featured");
                 dprintf("[featured] week %ld: set %d of %d\n", week, pick + 1, sets);
@@ -276,6 +279,7 @@ void StartFeatured()
     FeaturedSet set;
     memset(&set, 0, sizeof(set));
     memcpy(set.titleIds, kBuiltIn, sizeof(kBuiltIn));
+    set.count = sizeof(kBuiltIn) / sizeof(kBuiltIn[0]);
     _snprintf(set.label, sizeof(set.label), "Featured");
 
     FILE *in = fopen(FEATURED_CACHE, "rb");
@@ -308,6 +312,7 @@ void GetFeatured(FeaturedSet *out, unsigned long *changeCount)
     {
         memset(out, 0, sizeof(*out));
         memcpy(out->titleIds, kBuiltIn, sizeof(kBuiltIn));
+        out->count = sizeof(kBuiltIn) / sizeof(kBuiltIn[0]);
         _snprintf(out->label, sizeof(out->label), "Featured");
         if (changeCount != NULL)
             *changeCount = 0;

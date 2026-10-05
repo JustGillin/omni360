@@ -269,19 +269,21 @@ struct SettingsPageView
 
 void RenderSettingsFrame(SettingsPageView &view, const UiHint *hints, int hintCount);
 
-// The Store's front page: three featured games - one large tile, two small -
-// with their marketplace wallpaper, a row of four buttons, and the A-Z tiles.
+// The Store's front page: one to five featured games - one large tile, the
+// rest smaller beside it - with their marketplace wallpaper, a row of four
+// buttons, and the A-Z tiles.
 //
-// focus runs through them in that order: STORE_FOCUS_FEATURED + 0..2, then
-// STORE_FOCUS_BUTTONS + 0..3, then STORE_FOCUS_LETTERS + 0..26. The page
-// scrolls so the A-Z tiles come into view when one of them has focus; scroll
-// is the caller's to keep between frames, and the Render call eases it.
-#define STORE_FEATURED_COUNT 3
+// focus runs through them in that order: STORE_FOCUS_FEATURED + 0 to the
+// featured count less one, then STORE_FOCUS_BUTTONS + 0..3, then
+// STORE_FOCUS_LETTERS + 0..26. The page scrolls so the A-Z tiles come into
+// view when one of them has focus; scroll is the caller's to keep between
+// frames, and the Render call eases it.
+#define STORE_FEATURED_MAX   5
 #define STORE_BUTTON_COUNT   4
 #define STORE_LETTER_COUNT   27 // '#', then A to Z
 
 #define STORE_FOCUS_FEATURED 0
-#define STORE_FOCUS_BUTTONS  (STORE_FOCUS_FEATURED + STORE_FEATURED_COUNT)
+#define STORE_FOCUS_BUTTONS  (STORE_FOCUS_FEATURED + STORE_FEATURED_MAX) // some featured slots may be unused
 #define STORE_FOCUS_LETTERS  (STORE_FOCUS_BUTTONS + STORE_BUTTON_COUNT)
 #define STORE_FOCUS_COUNT    (STORE_FOCUS_LETTERS + STORE_LETTER_COUNT)
 
@@ -301,7 +303,8 @@ struct StoreButtonView
 struct StorePageView
 {
     const char *featuredLabel; // over the featured tiles - "Featured", or an event's name
-    StoreFeaturedView featured[STORE_FEATURED_COUNT];
+    StoreFeaturedView featured[STORE_FEATURED_MAX];
+    int featuredCount;         // 1 to STORE_FEATURED_MAX
     StoreButtonView buttons[STORE_BUTTON_COUNT];
     const char *letters;   // STORE_LETTER_COUNT characters
     int focus;
@@ -311,6 +314,16 @@ struct StorePageView
 
 // How many A-Z tiles fit across: they wrap onto as many rows as it takes.
 int StoreLettersPerRow();
+
+// Where featured tile i of count sits, before the page scrolls - and a
+// button's - for the D-pad to go to whichever is next to it.
+//   1: the large tile across the page
+//   2: the large tile and one as tall beside it
+//   3: the large tile and two stacked
+//   4: the large tile, one beside it, two half as wide under that
+//   5: the large tile and four beside it, two by two
+void StoreFeaturedTileRect(int count, int i, float *x, float *y, float *w, float *h);
+void StoreButtonRect(int i, float *x, float *y, float *w, float *h);
 
 void RenderStoreFrame(StorePageView &view, const UiHint *hints, int hintCount);
 

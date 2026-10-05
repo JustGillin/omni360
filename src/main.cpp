@@ -52,6 +52,7 @@ extern "C" NTSTATUS XexGetModuleHandle(PSZ moduleName, PHANDLE outHandle);
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <math.h> // fabsf, for the featured tiles
 #include <string>
 
 #define SETTINGS_FILE "game:\\settings.txt"
@@ -2130,7 +2131,8 @@ static bool PageTakesFocus(const Shell &shell, ShellPage page)
 // under the large tile are the Xbox Live catalog's.
 static FeaturedSet g_featured;
 static unsigned long g_featuredChanges = (unsigned long)-1;
-static StoreFeaturedView g_featuredTiles[STORE_FEATURED_COUNT];
+static StoreFeaturedView g_featuredTiles[STORE_FEATURED_MAX];
+static int g_featuredCount = 0;
 static char g_featuredDetail[192];
 
 static void AppendText(char *out, size_t outSize, const char *separator, const char *text);
@@ -2145,7 +2147,8 @@ static bool RefreshFeatured()
         return false;
     g_featuredChanges = changes;
     g_featured = set;
-    for (int i = 0; i < STORE_FEATURED_COUNT; ++i)
+    g_featuredCount = set.count < STORE_FEATURED_MAX ? set.count : STORE_FEATURED_MAX;
+    for (int i = 0; i < g_featuredCount; ++i)
     {
         StoreGame game;
         g_featuredTiles[i].titleId = set.titleIds[i];
@@ -2184,7 +2187,8 @@ static StorePageView MakeStoreView(const Shell &shell)
     StorePageView view;
     memset(&view, 0, sizeof(view));
     view.featuredLabel = g_featured.label;
-    for (int i = 0; i < STORE_FEATURED_COUNT; ++i)
+    view.featuredCount = g_featuredCount;
+    for (int i = 0; i < g_featuredCount; ++i)
         view.featured[i] = g_featuredTiles[i];
 
     // Who made the large tile's game, and what it is, once the catalog says.
@@ -2206,9 +2210,47 @@ static StorePageView MakeStoreView(const Shell &shell)
     return view;
 }
 
-// The D-pad on the front page. The featured tiles are one large one with
-// two stacked beside it; the buttons are one row under them; the letters
-// wrap, perRow to a row. Left from the first column goes to the sidebar.
+// The featured tile next to tile f in the D-pad's direction - the nearest
+// whose side faces it, its middle closest in line - or -1 for none.
+static int NextFeaturedTile(int f, WORD nav)
+{
+    float ax, ay, aw, ah;
+    StoreFeaturedTileRect(g_featuredCount, f, &ax, &ay, &aw, &ah);
+    const float acx = ax + aw * 0.5f, acy = ay + ah * 0.5f, slack = 2.0f;
+    int best = -1;
+    float bestScore = 0.0f;
+    for (int j = 0; j < g_featuredCount; ++j)
+    {
+        if (j == f)
+            continue;
+        float bx, by, bw, bh;
+        StoreFeaturedTileRect(g_featuredCount, j, &bx, &by, &bw, &bh);
+        const float bcx = bx + bw * 0.5f, bcy = by + bh * 0.5f;
+        float along, across;
+        if (nav == XINPUT_GAMEPAD_DPAD_RIGHT && bx >= ax + aw - slack)
+            along = bx - (ax + aw), across = fabsf(bcy - acy);
+        else if (nav == XINPUT_GAMEPAD_DPAD_LEFT && bx + bw <= ax + slack)
+            along = ax - (bx + bw), across = fabsf(bcy - acy);
+        else if (nav == XINPUT_GAMEPAD_DPAD_DOWN && by >= ay + ah - slack)
+            along = by - (ay + ah), across = fabsf(bcx - acx);
+        else if (nav == XINPUT_GAMEPAD_DPAD_UP && by + bh <= ay + slack)
+            along = ay - (by + bh), across = fabsf(bcx - acx);
+        else
+            continue;
+        const float score = along + across * 2.0f;
+        if (best < 0 || score < bestScore)
+        {
+            best = j;
+            bestScore = score;
+        }
+    }
+    return best;
+}
+
+// The D-pad on the front page. The featured tiles are a large one and up to
+// four beside it, gone between by where they are; the buttons are one row
+// under them; the letters wrap, perRow to a row. Left from the first column
+// goes to the sidebar.
 static void StepStoreFocus(WORD nav, Shell &shell)
 {
     const int perRow = StoreLettersPerRow();
@@ -2217,24 +2259,28 @@ static void StepStoreFocus(WORD nav, Shell &shell)
     if (i < STORE_FOCUS_BUTTONS)
     {
         const int f = i - STORE_FOCUS_FEATURED;
-        if (nav == XINPUT_GAMEPAD_DPAD_RIGHT && f == 0)
-            i = STORE_FOCUS_FEATURED + 1;
+        const int next = NextFeaturedTile(f, nav);
+        if (next >= 0)
+            i = STORE_FOCUS_FEATURED + next;
         else if (nav == XINPUT_GAMEPAD_DPAD_LEFT)
-        {
-            if (f == 0)
-                shell.sidebarFocused = true;
-            else
-                i = STORE_FOCUS_FEATURED;
-        }
+            shell.sidebarFocused = true;
         else if (nav == XINPUT_GAMEPAD_DPAD_DOWN)
         {
-            if (f == 1)
-                i = STORE_FOCUS_FEATURED + 2;
-            else
-                i = STORE_FOCUS_BUTTONS + (f == 0 ? 0 : STORE_BUTTON_COUNT - 1);
+            // The button under it: the first for the large tile, else the
+            // one under its middle.
+            float x, y, w, h;
+            StoreFeaturedTileRect(g_featuredCount, f, &x, &y, &w, &h);
+            const float under = (f == 0) ? x + 1.0f : x + w * 0.5f;
+            int b = 0;
+            for (int k = 0; k < STORE_BUTTON_COUNT; ++k)
+            {
+                float bx, by, bw, bh;
+                StoreButtonRect(k, &bx, &by, &bw, &bh);
+                if (under >= bx)
+                    b = k;
+            }
+            i = STORE_FOCUS_BUTTONS + b;
         }
-        else if (nav == XINPUT_GAMEPAD_DPAD_UP && f == 2)
-            i = STORE_FOCUS_FEATURED + 1;
     }
     else if (i < STORE_FOCUS_LETTERS)
     {
@@ -2249,7 +2295,25 @@ static void StepStoreFocus(WORD nav, Shell &shell)
                 i--;
         }
         else if (nav == XINPUT_GAMEPAD_DPAD_UP)
-            i = STORE_FOCUS_FEATURED + (b + 1 < STORE_BUTTON_COUNT ? 0 : 2); // the last is under the small tiles
+        {
+            // The lowest featured tile over the button's middle.
+            float bx, by, bw, bh;
+            StoreButtonRect(b, &bx, &by, &bw, &bh);
+            const float mid = bx + bw * 0.5f;
+            int best = 0;
+            float bestBottom = -1.0f;
+            for (int k = 0; k < g_featuredCount; ++k)
+            {
+                float x, y, w, h;
+                StoreFeaturedTileRect(g_featuredCount, k, &x, &y, &w, &h);
+                if (mid >= x && mid <= x + w && y + h > bestBottom)
+                {
+                    best = k;
+                    bestBottom = y + h;
+                }
+            }
+            i = STORE_FOCUS_FEATURED + best;
+        }
         else if (nav == XINPUT_GAMEPAD_DPAD_DOWN)
             i = STORE_FOCUS_LETTERS + (b * perRow * 2 + STORE_BUTTON_COUNT) / (STORE_BUTTON_COUNT * 2);
     }
@@ -2281,6 +2345,14 @@ static void StepStoreFocus(WORD nav, Shell &shell)
     }
 
     shell.storeFocus = i;
+}
+
+// A featured slot the current set doesn't fill - after featured.json brought
+// fewer games - isn't somewhere focus can be.
+static void KeepStoreFocusOnATile(Shell &shell)
+{
+    if (shell.storeFocus >= STORE_FOCUS_FEATURED + g_featuredCount && shell.storeFocus < STORE_FOCUS_BUTTONS)
+        shell.storeFocus = STORE_FOCUS_FEATURED;
 }
 
 // A section's name, for its page and its letters' headers.
@@ -2560,7 +2632,7 @@ static void StepSectionFocus(WORD nav, Shell &shell)
 // page, as a game page may have pushed them out.
 static void RequestFeaturedArt()
 {
-    for (int i = 0; i < STORE_FEATURED_COUNT; ++i)
+    for (int i = 0; i < g_featuredCount; ++i)
         RequestStoreArt(g_featuredTiles[i].titleId, STORE_ART_BACKGROUND);
 }
 
@@ -4219,6 +4291,8 @@ int main()
         // their wallpapers, the first time the Store is shown and again when
         // they change.
         const bool featuredChanged = RefreshFeatured();
+        if (featuredChanged)
+            KeepStoreFocusOnATile(shell);
         if (shell.page == SHELL_PAGE_STORE && (!shell.storeArtRequested || featuredChanged))
         {
             RequestFeaturedArt();

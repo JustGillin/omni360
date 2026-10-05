@@ -3858,16 +3858,57 @@ static StoreLayout LayOutStore()
     return L;
 }
 
-static void StoreFeaturedRect(const StoreLayout &L, int i, float *x, float *y, float *w, float *h)
+static void StoreFeaturedRect(const StoreLayout &L, int count, int i, float *x, float *y, float *w, float *h)
 {
     if (i == 0)
     {
-        *x = g_M.contentX; *y = L.top; *w = L.heroW; *h = L.heroH;
+        // Alone, it has the page's width.
+        *x = g_M.contentX; *y = L.top; *w = (count == 1) ? g_M.contentW : L.heroW; *h = L.heroH;
+        return;
     }
-    else
+
+    // The rest share the space beside it: a column of one or two, or rows of
+    // two side by side.
+    const float halfW = (L.sideW - L.gap) * 0.5f;
+    switch (count)
     {
+    case 2:
+        *x = L.sideX; *y = L.top; *w = L.sideW; *h = L.heroH;
+        break;
+    case 4:
+        if (i == 1)
+        {
+            *x = L.sideX; *y = L.top; *w = L.sideW; *h = L.sideH;
+        }
+        else
+        {
+            *x = L.sideX + (i - 2) * (halfW + L.gap); *y = L.top + L.sideH + L.gap; *w = halfW; *h = L.sideH;
+        }
+        break;
+    case 5:
+        *x = L.sideX + ((i - 1) % 2) * (halfW + L.gap);
+        *y = L.top + ((i - 1) / 2) * (L.sideH + L.gap);
+        *w = halfW;
+        *h = L.sideH;
+        break;
+    default: // 3
         *x = L.sideX; *y = L.top + (i - 1) * (L.sideH + L.gap); *w = L.sideW; *h = L.sideH;
+        break;
     }
+}
+
+void StoreFeaturedTileRect(int count, int i, float *x, float *y, float *w, float *h)
+{
+    StoreFeaturedRect(LayOutStore(), count, i, x, y, w, h);
+}
+
+void StoreButtonRect(int i, float *x, float *y, float *w, float *h)
+{
+    const StoreLayout L = LayOutStore();
+    *x = g_M.contentX + i * (L.btnW + L.gap);
+    *y = L.btnY;
+    *w = L.btnW;
+    *h = L.btnH;
 }
 
 // A button that's coming later: its label and a SOON pill after it, the two
@@ -3974,10 +4015,13 @@ void RenderStoreFrame(StorePageView &view, const UiHint *hints, int hintCount)
 
     SetClip(0.0f, clipTop, g_M.screenW, clipBottom - clipTop);
 
-    for (int i = 0; i < STORE_FEATURED_COUNT; ++i)
+    const int featuredCount = (view.featuredCount >= 1 && view.featuredCount <= STORE_FEATURED_MAX)
+                                  ? view.featuredCount
+                                  : 1;
+    for (int i = 0; i < featuredCount; ++i)
     {
         float x, y, w, h;
-        StoreFeaturedRect(L, i, &x, &y, &w, &h);
+        StoreFeaturedRect(L, featuredCount, i, &x, &y, &w, &h);
         y += sy;
 
         const StoreArtTexture *art = StoreArtFor(view.featured[i].titleId, STORE_ART_BACKGROUND);
@@ -4041,11 +4085,11 @@ void RenderStoreFrame(StorePageView &view, const UiHint *hints, int hintCount)
         TextFit(g_M.contentX, L.labelY + sy, 1.05f, COL_TEXT,
                 view.featuredLabel != NULL ? view.featuredLabel : "Featured", g_M.contentW, true);
 
-    for (int i = 0; i < STORE_FEATURED_COUNT; ++i)
+    for (int i = 0; i < featuredCount; ++i)
     {
         const StoreFeaturedView &f = view.featured[i];
         float x, y, w, h;
-        StoreFeaturedRect(L, i, &x, &y, &w, &h);
+        StoreFeaturedRect(L, featuredCount, i, &x, &y, &w, &h);
         y += sy;
 
         if (i == 0)
