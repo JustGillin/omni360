@@ -3,7 +3,7 @@
 A homebrew Xbox 360 app for getting games and their extras onto a modded console, with no PC needed once it's set up:
 
 - **Your Library** — your installed games as a grid of covers, read straight from the hard drive: Games on Demand and arcade packages, and games kept as extracted folders (`default.xex` or `default.xbe`) in any library folder.
-- **Store** — about 1,500 Xbox 360 disc games from archive.org, A to Z, each with its own page: wallpaper, description, screenshots and its regional versions. Install one and it downloads and installs as Games on Demand, playable from the dashboard or Aurora without the disc.
+- **Store** — about 1,500 Xbox 360 disc games from archive.org, A to Z, each with its own page: wallpaper, description, screenshots and its regional versions. Install one and it downloads and installs as Games on Demand, playable from the dashboard or Aurora without the disc. Games archived as uncompressed RARs, like BioShock Infinite, install the same way.
 - **Xbox Live Arcade** — about 740 arcade games from archive.org's `XBOX_360_XBLA` collection, A to Z, installed straight into the console's content folder.
 - **Xbox Live Indie Games** — about 3,450 indie games from archive.org's `XBOX_360_XBLIG` collections, A to Z. The update indie games need to start on a console offline from Xbox Live is installed with the first one.
 - **Original Xbox** — about 500 Original Xbox games the 360 can play, from archive.org's Redump collections, installed as Games on Demand. The 360's backward compatibility files need to be on the console.
@@ -32,14 +32,14 @@ A homebrew Xbox 360 app for getting games and their extras onto a modded console
 
 Omni360 began as a fork of [X-Store](https://github.com/951261/X-Store) by 951261, and still runs on its networking core: the HTTPS client and BearSSL/TLS wrapper, DNS lookups and drive mounting. Everything Vimm's Lair/full-game/ISO/updater-related has been stripped out; the library, the Store, the installers and the interface are new. See `docs/` for X-Store's own original architecture notes (still accurate for the networking layer this fork builds on).
 
-**Status: beta (0.7.0-beta), working on real hardware.** Installs from the Store, Xbox Live Arcade, Xbox Live Indie Games, Original Xbox, DLC, title updates and disc installs have all been run end to end on a modded console with a real library.
+**Status: beta (0.8.0-beta), working on real hardware.** Installs from the Store, Xbox Live Arcade, Xbox Live Indie Games, Original Xbox, DLC, title updates and disc installs have all been run end to end on a modded console with a real library.
 
 ## Using it
 
 The sidebar on the left has four pages; left on the D-pad reaches it from any page, and **B** steps back a level (B on the sidebar exits).
 
 - **Your Library** — **A** on a game opens its page. A game disc in the drive is the first tile: **A** installs it to the hard drive, **X** opens its page, and once it's installed **A** finds its DLC and **START** installs it again. **Y** is a shortcut to Settings.
-- **Store** — featured games, then A to Z. The featured games change by themselves: a week's theme, or the series of a big new release, from `featured.json` in this repository (see `docs/featured-instructions.md` and `tools/featured.py`). **A** on a letter shows its games; **A** on a game opens its page. **XBLA**, **XBLIG** and **Original Xbox** open their own A to Z. **Search** looks through every list at once by name (or title ID); **Y** on the results searches again.
+- **Store** — featured games, A to Z, then rows of games that scroll sideways: Popular, Top rated and a row for each genre, ranked by how many people rated each game on Xbox Live (`tools/make_store_rows.py`) — no one's downloads are counted. The featured games change by themselves: a week's theme, or the series of a big new release, from `featured.json` in this repository (see `docs/featured-instructions.md` and `tools/featured.py`). **A** on a letter shows its games; **A** on a game opens its page. **XBLA**, **XBLIG** and **Original Xbox** open their own A to Z. **Search** looks through every list at once by name (or title ID); **Y** on the results searches again.
 - **A game's page** — **Install** installs the chosen version, every disc of it; choose another version from the list beside the description first. The button shows Queued, Installing, Installed, or Install remaining for a multi-disc game partly installed. **Find DLC** and **Title updates** search archive.org and show what's there to pick from. **Uninstall** appears once something is installed, and removes the game but leaves its DLC and title updates.
 - **Queue** — what's downloading, waiting and done. **X** stops a download or install, or clears a finished one.
 - **Settings** — the library folders as a list of checkboxes, your archive.org keys, the disc read speed (left and right change it; lower it for a scratched disc that fails partway through), navigation sounds, and updates: Omni360 checks GitHub for a newer version when it starts (this can be turned off), shows what's new in it, and installs it and restarts when you choose Update. It only installs a release signed with the project's key (`tools/sign_release.py`), keeping the previous version beside it as `.old`.
@@ -81,7 +81,7 @@ Two optional `settings.txt` keys change where things go, and the games folder ca
 ## Known limitations
 
 - **Downloads are slow-ish** — about 3.5MB/s on average, so a game takes half an hour or more. archive.org's servers are the limit, not the console.
-- **Some games aren't in the Store.** Games only archived as RARs (in `XBOX_360_1`, such as Crackdown and the Dirt series) aren't listed, as the installer reads zips only; a few dozen more aren't on archive.org in either set.
+- **Some games aren't in the Store.** Games archived only as compressed RARs (in the `XBOX_360_*` items, such as the DiRT series and Deadpool) aren't listed, as the installer would have to unpack them first; uncompressed RARs, like BioShock Infinite's, install like any other game. A few dozen more aren't on archive.org at all.
 - **An interrupted game install starts over.** Pieces resume within a session, but quitting the app mid-download removes what was downloaded.
 - **A multi-disc game installed some other way** — from real discs, or another tool — can't be uninstalled by version from its Store page, since Omni360 can't tell which disc is which. Its own library entry still can be, if the Store hasn't got it.
 - **Key entry** on the on-screen keyboard isn't masked.
