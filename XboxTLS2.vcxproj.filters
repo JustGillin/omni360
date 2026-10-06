@@ -5,6 +5,27 @@
       <UniqueIdentifier>{4FC737F1-C7A5-4376-A066-2A32D752A2FF}</UniqueIdentifier>
       <Extensions>cpp;c;cxx;def;odl;idl;hpj;bat;asm;asmx</Extensions>
     </Filter>
+    <Filter Include="Source Files\Installs">
+      <UniqueIdentifier>{c7a5f2f4-0ff1-5e47-a93b-aa368475eeef}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="Source Files\Interface">
+      <UniqueIdentifier>{2d353db1-69b5-5838-b7d4-a98e080eb7a0}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="Source Files\Library">
+      <UniqueIdentifier>{6204fa1d-19cf-5d2c-97ef-d99afa36c84c}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="Source Files\Network">
+      <UniqueIdentifier>{30ae56b6-abb4-5ede-a076-91f04f82fd08}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="Source Files\Store">
+      <UniqueIdentifier>{d631db4f-7995-544d-a80e-fbcb78ddf362}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="Source Files\Support">
+      <UniqueIdentifier>{f5530c2e-ba43-5e4e-ad00-773c5459e7df}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="Media">
+      <UniqueIdentifier>{6ea44f33-aa10-518e-8007-4a557b29c8a6}</UniqueIdentifier>
+    </Filter>
     <Filter Include="SSL">
       <UniqueIdentifier>{53dcca93-f4af-4e93-8c00-f2c4e3ce86f3}</UniqueIdentifier>
     </Filter>
@@ -44,112 +65,128 @@
     <Filter Include="SSL\x509">
       <UniqueIdentifier>{028173a4-505c-4a43-aa84-8074f901b34d}</UniqueIdentifier>
     </Filter>
-    <Filter Include="Debug">
-      <UniqueIdentifier>{01f6c78f-7a4d-450c-98bb-214b8c745272}</UniqueIdentifier>
+    <Filter Include="zlib">
+      <UniqueIdentifier>{bdbeaf25-ac60-5c6a-8835-75c065f581f1}</UniqueIdentifier>
     </Filter>
   </ItemGroup>
   <ItemGroup>
-    <None Include="SSL\codec\pemdec.t0">
-      <Filter>SSL\codec</Filter>
-    </None>
-    <None Include="SSL\ssl\ssl_hs_client.t0">
-      <Filter>SSL\ssl</Filter>
-    </None>
-    <None Include="SSL\ssl\ssl_hs_common.t0">
-      <Filter>SSL\ssl</Filter>
-    </None>
-    <None Include="SSL\ssl\ssl_hs_server.t0">
-      <Filter>SSL\ssl</Filter>
-    </None>
-    <None Include="SSL\x509\asn1.t0">
-      <Filter>SSL\x509</Filter>
-    </None>
-    <None Include="SSL\x509\skey_decoder.t0">
-      <Filter>SSL\x509</Filter>
-    </None>
-    <None Include="SSL\x509\x509_decoder.t0">
-      <Filter>SSL\x509</Filter>
-    </None>
-    <None Include="SSL\x509\x509_minimal.t0">
-      <Filter>SSL\x509</Filter>
-    </None>
-  </ItemGroup>
-  <ItemGroup>
-    <ClInclude Include="SSL\inc\bearssl.h">
-      <Filter>SSL\inc</Filter>
-    </ClInclude>
-    <ClInclude Include="SSL\inc\bearssl_aead.h">
-      <Filter>SSL\inc</Filter>
-    </ClInclude>
-    <ClInclude Include="SSL\inc\bearssl_block.h">
-      <Filter>SSL\inc</Filter>
-    </ClInclude>
-    <ClInclude Include="SSL\inc\bearssl_ec.h">
-      <Filter>SSL\inc</Filter>
-    </ClInclude>
-    <ClInclude Include="SSL\inc\bearssl_hash.h">
-      <Filter>SSL\inc</Filter>
-    </ClInclude>
-    <ClInclude Include="SSL\inc\bearssl_hmac.h">
-      <Filter>SSL\inc</Filter>
-    </ClInclude>
-    <ClInclude Include="SSL\inc\bearssl_kdf.h">
-      <Filter>SSL\inc</Filter>
-    </ClInclude>
-    <ClInclude Include="SSL\inc\bearssl_pem.h">
-      <Filter>SSL\inc</Filter>
-    </ClInclude>
-    <ClInclude Include="SSL\inc\bearssl_prf.h">
-      <Filter>SSL\inc</Filter>
-    </ClInclude>
-    <ClInclude Include="SSL\inc\bearssl_rand.h">
-      <Filter>SSL\inc</Filter>
-    </ClInclude>
-    <ClInclude Include="SSL\inc\bearssl_rsa.h">
-      <Filter>SSL\inc</Filter>
-    </ClInclude>
-    <ClInclude Include="SSL\inc\bearssl_ssl.h">
-      <Filter>SSL\inc</Filter>
-    </ClInclude>
-    <ClInclude Include="SSL\inc\bearssl_x509.h">
-      <Filter>SSL\inc</Filter>
-    </ClInclude>
-    <ClInclude Include="SSL\config.h">
-      <Filter>SSL</Filter>
-    </ClInclude>
-    <ClInclude Include="SSL\inner.h">
-      <Filter>SSL</Filter>
-    </ClInclude>
-    <ClInclude Include="src\Debug.h">
-      <Filter>Debug</Filter>
-    </ClInclude>
-    <ClInclude Include="src\XboxTLS.h">
-      <Filter>Source Files</Filter>
-    </ClInclude>
-    <ClInclude Include="src\downloadFile.h">
-      <Filter>Source Files</Filter>
-    </ClInclude>
-    <ClInclude Include="archiveOrgCert.h">
-      <Filter>Source Files</Filter>
-    </ClInclude>
-    <ClInclude Include="src\dns.h">
-      <Filter>Source Files</Filter>
-    </ClInclude>
-    <ClInclude Include="src\parsing.h">
-      <Filter>Source Files</Filter>
-    </ClInclude>
-    <ClInclude Include="src\driveMount.h">
-      <Filter>Source Files</Filter>
-    </ClInclude>
-    <ClInclude Include="src\OutputConsole.h">
-      <Filter>Source Files</Filter>
-    </ClInclude>
-    <ClInclude Include="githubCert.h" />
-    <ClInclude Include="xblaParsing.h">
-      <Filter>Source Files</Filter>
-    </ClInclude>
-  </ItemGroup>
-  <ItemGroup>
+    <ClCompile Include="src\ArchiveOrgDLC.cpp">
+      <Filter>Source Files\Installs</Filter>
+    </ClCompile>
+    <ClCompile Include="src\cJSON.c">
+      <Filter>Source Files\Support</Filter>
+    </ClCompile>
+    <ClCompile Include="zlib\adler32.c">
+      <Filter>zlib</Filter>
+    </ClCompile>
+    <ClCompile Include="zlib\crc32.c">
+      <Filter>zlib</Filter>
+    </ClCompile>
+    <ClCompile Include="zlib\inffast.c">
+      <Filter>zlib</Filter>
+    </ClCompile>
+    <ClCompile Include="zlib\inflate.c">
+      <Filter>zlib</Filter>
+    </ClCompile>
+    <ClCompile Include="zlib\inftrees.c">
+      <Filter>zlib</Filter>
+    </ClCompile>
+    <ClCompile Include="zlib\zutil.c">
+      <Filter>zlib</Filter>
+    </ClCompile>
+    <ClCompile Include="src\driveMount.c">
+      <Filter>Source Files\Support</Filter>
+    </ClCompile>
+    <ClCompile Include="src\Debug.cpp">
+      <Filter>Source Files\Support</Filter>
+    </ClCompile>
+    <ClCompile Include="src\dns.cpp">
+      <Filter>Source Files\Network</Filter>
+    </ClCompile>
+    <ClCompile Include="src\downloadFile.cpp">
+      <Filter>Source Files\Network</Filter>
+    </ClCompile>
+    <ClCompile Include="src\GameListUI.cpp">
+      <Filter>Source Files\Interface</Filter>
+    </ClCompile>
+    <ClCompile Include="src\HttpResponse.cpp">
+      <Filter>Source Files\Network</Filter>
+    </ClCompile>
+    <ClCompile Include="src\Keyboard.cpp">
+      <Filter>Source Files\Interface</Filter>
+    </ClCompile>
+    <ClCompile Include="src\main.cpp">
+      <Filter>Source Files\Interface</Filter>
+    </ClCompile>
+    <ClCompile Include="src\OutputConsole.cpp">
+      <Filter>Source Files\Interface</Filter>
+    </ClCompile>
+    <ClCompile Include="src\PngDecode.cpp">
+      <Filter>Source Files\Interface</Filter>
+    </ClCompile>
+    <ClCompile Include="src\GodConvert.cpp">
+      <Filter>Source Files\Installs</Filter>
+    </ClCompile>
+    <ClCompile Include="src\DiscSource.cpp">
+      <Filter>Source Files\Installs</Filter>
+    </ClCompile>
+    <ClCompile Include="src\ReadAhead.cpp">
+      <Filter>Source Files\Installs</Filter>
+    </ClCompile>
+    <ClCompile Include="src\DiscWorker.cpp">
+      <Filter>Source Files\Installs</Filter>
+    </ClCompile>
+    <ClCompile Include="src\GameInstaller.cpp">
+      <Filter>Source Files\Installs</Filter>
+    </ClCompile>
+    <ClCompile Include="src\HttpPlain.cpp">
+      <Filter>Source Files\Network</Filter>
+    </ClCompile>
+    <ClCompile Include="src\StoreCatalog.cpp">
+      <Filter>Source Files\Store</Filter>
+    </ClCompile>
+    <ClCompile Include="src\StoreArt.cpp">
+      <Filter>Source Files\Store</Filter>
+    </ClCompile>
+    <ClCompile Include="src\UpdateCheck.cpp">
+      <Filter>Source Files\Network</Filter>
+    </ClCompile>
+    <ClCompile Include="src\InflateSource.cpp">
+      <Filter>Source Files\Installs</Filter>
+    </ClCompile>
+    <ClCompile Include="src\DownloadQueue.cpp">
+      <Filter>Source Files\Installs</Filter>
+    </ClCompile>
+    <ClCompile Include="src\SearchWorker.cpp">
+      <Filter>Source Files\Store</Filter>
+    </ClCompile>
+    <ClCompile Include="src\CoverArt.cpp">
+      <Filter>Source Files\Library</Filter>
+    </ClCompile>
+    <ClCompile Include="src\ImageDecode.cpp">
+      <Filter>Source Files\Interface</Filter>
+    </ClCompile>
+    <ClCompile Include="src\RarHeaders.cpp">
+      <Filter>Source Files\Installs</Filter>
+    </ClCompile>
+    <ClCompile Include="src\parsing.cpp">
+      <Filter>Source Files\Support</Filter>
+    </ClCompile>
+    <ClCompile Include="src\StfsParser.cpp">
+      <Filter>Source Files\Library</Filter>
+    </ClCompile>
+    <ClCompile Include="src\FolderGames.cpp">
+      <Filter>Source Files\Library</Filter>
+    </ClCompile>
+    <ClCompile Include="src\UiSound.cpp">
+      <Filter>Source Files\Interface</Filter>
+    </ClCompile>
+    <ClCompile Include="src\Featured.cpp">
+      <Filter>Source Files\Store</Filter>
+    </ClCompile>
+    <ClCompile Include="src\UiText.cpp">
+      <Filter>Source Files\Interface</Filter>
+    </ClCompile>
     <ClCompile Include="SSL\aead\ccm.c">
       <Filter>SSL\aead</Filter>
     </ClCompile>
@@ -203,6 +240,54 @@
     </ClCompile>
     <ClCompile Include="SSL\codec\pemenc.c">
       <Filter>SSL\codec</Filter>
+    </ClCompile>
+    <ClCompile Include="SSL\ec\ecdsa_atr.c">
+      <Filter>SSL\ec</Filter>
+    </ClCompile>
+    <ClCompile Include="SSL\ec\ecdsa_default_sign_asn1.c">
+      <Filter>SSL\ec</Filter>
+    </ClCompile>
+    <ClCompile Include="SSL\ec\ecdsa_default_sign_raw.c">
+      <Filter>SSL\ec</Filter>
+    </ClCompile>
+    <ClCompile Include="SSL\ec\ecdsa_default_vrfy_asn1.c">
+      <Filter>SSL\ec</Filter>
+    </ClCompile>
+    <ClCompile Include="SSL\ec\ecdsa_default_vrfy_raw.c">
+      <Filter>SSL\ec</Filter>
+    </ClCompile>
+    <ClCompile Include="SSL\ec\ecdsa_i15_bits.c">
+      <Filter>SSL\ec</Filter>
+    </ClCompile>
+    <ClCompile Include="SSL\ec\ecdsa_i15_sign_asn1.c">
+      <Filter>SSL\ec</Filter>
+    </ClCompile>
+    <ClCompile Include="SSL\ec\ecdsa_i15_sign_raw.c">
+      <Filter>SSL\ec</Filter>
+    </ClCompile>
+    <ClCompile Include="SSL\ec\ecdsa_i15_vrfy_asn1.c">
+      <Filter>SSL\ec</Filter>
+    </ClCompile>
+    <ClCompile Include="SSL\ec\ecdsa_i15_vrfy_raw.c">
+      <Filter>SSL\ec</Filter>
+    </ClCompile>
+    <ClCompile Include="SSL\ec\ecdsa_i31_bits.c">
+      <Filter>SSL\ec</Filter>
+    </ClCompile>
+    <ClCompile Include="SSL\ec\ecdsa_i31_sign_asn1.c">
+      <Filter>SSL\ec</Filter>
+    </ClCompile>
+    <ClCompile Include="SSL\ec\ecdsa_i31_sign_raw.c">
+      <Filter>SSL\ec</Filter>
+    </ClCompile>
+    <ClCompile Include="SSL\ec\ecdsa_i31_vrfy_asn1.c">
+      <Filter>SSL\ec</Filter>
+    </ClCompile>
+    <ClCompile Include="SSL\ec\ecdsa_i31_vrfy_raw.c">
+      <Filter>SSL\ec</Filter>
+    </ClCompile>
+    <ClCompile Include="SSL\ec\ecdsa_rta.c">
+      <Filter>SSL\ec</Filter>
     </ClCompile>
     <ClCompile Include="SSL\ec\ec_all_m15.c">
       <Filter>SSL\ec</Filter>
@@ -265,54 +350,6 @@
       <Filter>SSL\ec</Filter>
     </ClCompile>
     <ClCompile Include="SSL\ec\ec_secp521r1.c">
-      <Filter>SSL\ec</Filter>
-    </ClCompile>
-    <ClCompile Include="SSL\ec\ecdsa_atr.c">
-      <Filter>SSL\ec</Filter>
-    </ClCompile>
-    <ClCompile Include="SSL\ec\ecdsa_default_sign_asn1.c">
-      <Filter>SSL\ec</Filter>
-    </ClCompile>
-    <ClCompile Include="SSL\ec\ecdsa_default_sign_raw.c">
-      <Filter>SSL\ec</Filter>
-    </ClCompile>
-    <ClCompile Include="SSL\ec\ecdsa_default_vrfy_asn1.c">
-      <Filter>SSL\ec</Filter>
-    </ClCompile>
-    <ClCompile Include="SSL\ec\ecdsa_default_vrfy_raw.c">
-      <Filter>SSL\ec</Filter>
-    </ClCompile>
-    <ClCompile Include="SSL\ec\ecdsa_i15_bits.c">
-      <Filter>SSL\ec</Filter>
-    </ClCompile>
-    <ClCompile Include="SSL\ec\ecdsa_i15_sign_asn1.c">
-      <Filter>SSL\ec</Filter>
-    </ClCompile>
-    <ClCompile Include="SSL\ec\ecdsa_i15_sign_raw.c">
-      <Filter>SSL\ec</Filter>
-    </ClCompile>
-    <ClCompile Include="SSL\ec\ecdsa_i15_vrfy_asn1.c">
-      <Filter>SSL\ec</Filter>
-    </ClCompile>
-    <ClCompile Include="SSL\ec\ecdsa_i15_vrfy_raw.c">
-      <Filter>SSL\ec</Filter>
-    </ClCompile>
-    <ClCompile Include="SSL\ec\ecdsa_i31_bits.c">
-      <Filter>SSL\ec</Filter>
-    </ClCompile>
-    <ClCompile Include="SSL\ec\ecdsa_i31_sign_asn1.c">
-      <Filter>SSL\ec</Filter>
-    </ClCompile>
-    <ClCompile Include="SSL\ec\ecdsa_i31_sign_raw.c">
-      <Filter>SSL\ec</Filter>
-    </ClCompile>
-    <ClCompile Include="SSL\ec\ecdsa_i31_vrfy_asn1.c">
-      <Filter>SSL\ec</Filter>
-    </ClCompile>
-    <ClCompile Include="SSL\ec\ecdsa_i31_vrfy_raw.c">
-      <Filter>SSL\ec</Filter>
-    </ClCompile>
-    <ClCompile Include="SSL\ec\ecdsa_rta.c">
       <Filter>SSL\ec</Filter>
     </ClCompile>
     <ClCompile Include="SSL\hash\dig_oid.c">
@@ -723,6 +760,9 @@
     <ClCompile Include="SSL\rsa\rsa_ssl_decrypt.c">
       <Filter>SSL\rsa</Filter>
     </ClCompile>
+    <ClCompile Include="SSL\settings.c">
+      <Filter>SSL</Filter>
+    </ClCompile>
     <ClCompile Include="SSL\ssl\prf.c">
       <Filter>SSL\ssl</Filter>
     </ClCompile>
@@ -867,24 +907,6 @@
     <ClCompile Include="SSL\symcipher\aes_ct.c">
       <Filter>SSL\symcipher</Filter>
     </ClCompile>
-    <ClCompile Include="SSL\symcipher\aes_ct_cbcdec.c">
-      <Filter>SSL\symcipher</Filter>
-    </ClCompile>
-    <ClCompile Include="SSL\symcipher\aes_ct_cbcenc.c">
-      <Filter>SSL\symcipher</Filter>
-    </ClCompile>
-    <ClCompile Include="SSL\symcipher\aes_ct_ctr.c">
-      <Filter>SSL\symcipher</Filter>
-    </ClCompile>
-    <ClCompile Include="SSL\symcipher\aes_ct_ctrcbc.c">
-      <Filter>SSL\symcipher</Filter>
-    </ClCompile>
-    <ClCompile Include="SSL\symcipher\aes_ct_dec.c">
-      <Filter>SSL\symcipher</Filter>
-    </ClCompile>
-    <ClCompile Include="SSL\symcipher\aes_ct_enc.c">
-      <Filter>SSL\symcipher</Filter>
-    </ClCompile>
     <ClCompile Include="SSL\symcipher\aes_ct64.c">
       <Filter>SSL\symcipher</Filter>
     </ClCompile>
@@ -904,6 +926,24 @@
       <Filter>SSL\symcipher</Filter>
     </ClCompile>
     <ClCompile Include="SSL\symcipher\aes_ct64_enc.c">
+      <Filter>SSL\symcipher</Filter>
+    </ClCompile>
+    <ClCompile Include="SSL\symcipher\aes_ct_cbcdec.c">
+      <Filter>SSL\symcipher</Filter>
+    </ClCompile>
+    <ClCompile Include="SSL\symcipher\aes_ct_cbcenc.c">
+      <Filter>SSL\symcipher</Filter>
+    </ClCompile>
+    <ClCompile Include="SSL\symcipher\aes_ct_ctr.c">
+      <Filter>SSL\symcipher</Filter>
+    </ClCompile>
+    <ClCompile Include="SSL\symcipher\aes_ct_ctrcbc.c">
+      <Filter>SSL\symcipher</Filter>
+    </ClCompile>
+    <ClCompile Include="SSL\symcipher\aes_ct_dec.c">
+      <Filter>SSL\symcipher</Filter>
+    </ClCompile>
+    <ClCompile Include="SSL\symcipher\aes_ct_enc.c">
       <Filter>SSL\symcipher</Filter>
     </ClCompile>
     <ClCompile Include="SSL\symcipher\aes_pwr8.c">
@@ -993,9 +1033,6 @@
     <ClCompile Include="SSL\symcipher\poly1305_i15.c">
       <Filter>SSL\symcipher</Filter>
     </ClCompile>
-    <ClCompile Include="SSL\settings.c">
-      <Filter>SSL</Filter>
-    </ClCompile>
     <ClCompile Include="SSL\x509\asn1enc.c">
       <Filter>SSL\x509</Filter>
     </ClCompile>
@@ -1026,35 +1063,248 @@
     <ClCompile Include="SSL\x509\x509_minimal_full.c">
       <Filter>SSL\x509</Filter>
     </ClCompile>
-    <ClCompile Include="src\Debug.cpp">
-      <Filter>Debug</Filter>
-    </ClCompile>
     <ClCompile Include="src\XboxTLS.cpp">
-      <Filter>Source Files</Filter>
-    </ClCompile>
-    <ClCompile Include="src\downloadFile.cpp">
-      <Filter>Source Files</Filter>
-    </ClCompile>
-    <ClCompile Include="src\main.cpp">
-      <Filter>Source Files</Filter>
-    </ClCompile>
-    <ClCompile Include="src\dns.cpp">
-      <Filter>Source Files</Filter>
-    </ClCompile>
-    <ClCompile Include="src\parsing.cpp">
-      <Filter>Source Files</Filter>
-    </ClCompile>
-    <ClCompile Include="src\driveMount.c">
-      <Filter>Source Files</Filter>
-    </ClCompile>
-    <ClCompile Include="src\OutputConsole.cpp">
-      <Filter>Source Files</Filter>
-    </ClCompile>
-    <ClCompile Include="xblaParsing.cpp">
-      <Filter>Source Files</Filter>
+      <Filter>Source Files\Network</Filter>
     </ClCompile>
   </ItemGroup>
   <ItemGroup>
-    <CustomBuild Include="Media\Fonts\uifont_16.rdf" />
+    <ClInclude Include="src\ArchiveOrgDLC.h">
+      <Filter>Source Files\Installs</Filter>
+    </ClInclude>
+    <ClInclude Include="src\cJSON.h">
+      <Filter>Source Files\Support</Filter>
+    </ClInclude>
+    <ClInclude Include="src\driveMount.h">
+      <Filter>Source Files\Support</Filter>
+    </ClInclude>
+    <ClInclude Include="src\Debug.h">
+      <Filter>Source Files\Support</Filter>
+    </ClInclude>
+    <ClInclude Include="src\dns.h">
+      <Filter>Source Files\Network</Filter>
+    </ClInclude>
+    <ClInclude Include="src\downloadFile.h">
+      <Filter>Source Files\Network</Filter>
+    </ClInclude>
+    <ClInclude Include="src\GameListUI.h">
+      <Filter>Source Files\Interface</Filter>
+    </ClInclude>
+    <ClInclude Include="src\HttpResponse.h">
+      <Filter>Source Files\Network</Filter>
+    </ClInclude>
+    <ClInclude Include="src\ButtonAtlas.h">
+      <Filter>Source Files\Interface</Filter>
+    </ClInclude>
+    <ClInclude Include="src\BoxArtBanner.h">
+      <Filter>Source Files\Interface</Filter>
+    </ClInclude>
+    <ClInclude Include="src\SelawikBold.h">
+      <Filter>Source Files\Interface</Filter>
+    </ClInclude>
+    <ClInclude Include="src\Keyboard.h">
+      <Filter>Source Files\Interface</Filter>
+    </ClInclude>
+    <ClInclude Include="src\OutputConsole.h">
+      <Filter>Source Files\Interface</Filter>
+    </ClInclude>
+    <ClInclude Include="src\PngDecode.h">
+      <Filter>Source Files\Interface</Filter>
+    </ClInclude>
+    <ClInclude Include="src\GodConvert.h">
+      <Filter>Source Files\Installs</Filter>
+    </ClInclude>
+    <ClInclude Include="src\DiscSource.h">
+      <Filter>Source Files\Installs</Filter>
+    </ClInclude>
+    <ClInclude Include="src\ReadAhead.h">
+      <Filter>Source Files\Installs</Filter>
+    </ClInclude>
+    <ClInclude Include="src\DiscWorker.h">
+      <Filter>Source Files\Installs</Filter>
+    </ClInclude>
+    <ClInclude Include="zlib\crc32.h">
+      <Filter>zlib</Filter>
+    </ClInclude>
+    <ClInclude Include="zlib\inffast.h">
+      <Filter>zlib</Filter>
+    </ClInclude>
+    <ClInclude Include="zlib\inffixed.h">
+      <Filter>zlib</Filter>
+    </ClInclude>
+    <ClInclude Include="zlib\inflate.h">
+      <Filter>zlib</Filter>
+    </ClInclude>
+    <ClInclude Include="zlib\inftrees.h">
+      <Filter>zlib</Filter>
+    </ClInclude>
+    <ClInclude Include="zlib\zutil.h">
+      <Filter>zlib</Filter>
+    </ClInclude>
+    <ClInclude Include="zlib\zlib.h">
+      <Filter>zlib</Filter>
+    </ClInclude>
+    <ClInclude Include="zlib\zconf.h">
+      <Filter>zlib</Filter>
+    </ClInclude>
+    <ClInclude Include="zlib\gzguts.h">
+      <Filter>zlib</Filter>
+    </ClInclude>
+    <ClInclude Include="src\GameInstaller.h">
+      <Filter>Source Files\Installs</Filter>
+    </ClInclude>
+    <ClInclude Include="src\HttpPlain.h">
+      <Filter>Source Files\Network</Filter>
+    </ClInclude>
+    <ClInclude Include="src\StoreCatalog.h">
+      <Filter>Source Files\Store</Filter>
+    </ClInclude>
+    <ClInclude Include="src\StoreArt.h">
+      <Filter>Source Files\Store</Filter>
+    </ClInclude>
+    <ClInclude Include="src\UpdateCheck.h">
+      <Filter>Source Files\Network</Filter>
+    </ClInclude>
+    <ClInclude Include="src\UpdateKey.h">
+      <Filter>Source Files\Network</Filter>
+    </ClInclude>
+    <ClInclude Include="src\StoreTitles.h">
+      <Filter>Source Files\Store</Filter>
+    </ClInclude>
+    <ClInclude Include="src\XboxTitles.h">
+      <Filter>Source Files\Store</Filter>
+    </ClInclude>
+    <ClInclude Include="src\XbligTitles.h">
+      <Filter>Source Files\Store</Filter>
+    </ClInclude>
+    <ClInclude Include="src\XblaTitles.h">
+      <Filter>Source Files\Store</Filter>
+    </ClInclude>
+    <ClInclude Include="src\InflateSource.h">
+      <Filter>Source Files\Installs</Filter>
+    </ClInclude>
+    <ClInclude Include="src\DownloadQueue.h">
+      <Filter>Source Files\Installs</Filter>
+    </ClInclude>
+    <ClInclude Include="src\SearchWorker.h">
+      <Filter>Source Files\Store</Filter>
+    </ClInclude>
+    <ClInclude Include="src\CoverArt.h">
+      <Filter>Source Files\Library</Filter>
+    </ClInclude>
+    <ClInclude Include="src\ImageDecode.h">
+      <Filter>Source Files\Interface</Filter>
+    </ClInclude>
+    <ClInclude Include="src\stb_image.h">
+      <Filter>Source Files\Interface</Filter>
+    </ClInclude>
+    <ClInclude Include="src\TitleNames.h">
+      <Filter>Source Files\Store</Filter>
+    </ClInclude>
+    <ClInclude Include="src\RarHeaders.h">
+      <Filter>Source Files\Installs</Filter>
+    </ClInclude>
+    <ClInclude Include="src\parsing.h">
+      <Filter>Source Files\Support</Filter>
+    </ClInclude>
+    <ClInclude Include="src\settings.h">
+      <Filter>Source Files\Support</Filter>
+    </ClInclude>
+    <ClInclude Include="src\StfsParser.h">
+      <Filter>Source Files\Library</Filter>
+    </ClInclude>
+    <ClInclude Include="src\FolderGames.h">
+      <Filter>Source Files\Library</Filter>
+    </ClInclude>
+    <ClInclude Include="src\UiSound.h">
+      <Filter>Source Files\Interface</Filter>
+    </ClInclude>
+    <ClInclude Include="src\Featured.h">
+      <Filter>Source Files\Store</Filter>
+    </ClInclude>
+    <ClInclude Include="src\TrustAnchors.h">
+      <Filter>Source Files\Network</Filter>
+    </ClInclude>
+    <ClInclude Include="src\UiText.h">
+      <Filter>Source Files\Interface</Filter>
+    </ClInclude>
+    <ClInclude Include="SSL\config.h">
+      <Filter>SSL</Filter>
+    </ClInclude>
+    <ClInclude Include="SSL\inc\bearssl.h">
+      <Filter>SSL\inc</Filter>
+    </ClInclude>
+    <ClInclude Include="SSL\inc\bearssl_aead.h">
+      <Filter>SSL\inc</Filter>
+    </ClInclude>
+    <ClInclude Include="SSL\inc\bearssl_block.h">
+      <Filter>SSL\inc</Filter>
+    </ClInclude>
+    <ClInclude Include="SSL\inc\bearssl_ec.h">
+      <Filter>SSL\inc</Filter>
+    </ClInclude>
+    <ClInclude Include="SSL\inc\bearssl_hash.h">
+      <Filter>SSL\inc</Filter>
+    </ClInclude>
+    <ClInclude Include="SSL\inc\bearssl_hmac.h">
+      <Filter>SSL\inc</Filter>
+    </ClInclude>
+    <ClInclude Include="SSL\inc\bearssl_kdf.h">
+      <Filter>SSL\inc</Filter>
+    </ClInclude>
+    <ClInclude Include="SSL\inc\bearssl_pem.h">
+      <Filter>SSL\inc</Filter>
+    </ClInclude>
+    <ClInclude Include="SSL\inc\bearssl_prf.h">
+      <Filter>SSL\inc</Filter>
+    </ClInclude>
+    <ClInclude Include="SSL\inc\bearssl_rand.h">
+      <Filter>SSL\inc</Filter>
+    </ClInclude>
+    <ClInclude Include="SSL\inc\bearssl_rsa.h">
+      <Filter>SSL\inc</Filter>
+    </ClInclude>
+    <ClInclude Include="SSL\inc\bearssl_ssl.h">
+      <Filter>SSL\inc</Filter>
+    </ClInclude>
+    <ClInclude Include="SSL\inc\bearssl_x509.h">
+      <Filter>SSL\inc</Filter>
+    </ClInclude>
+    <ClInclude Include="SSL\inner.h">
+      <Filter>SSL</Filter>
+    </ClInclude>
+    <ClInclude Include="src\XboxTLS.h">
+      <Filter>Source Files\Network</Filter>
+    </ClInclude>
+  </ItemGroup>
+  <ItemGroup>
+    <None Include="SSL\codec\pemdec.t0">
+      <Filter>SSL\codec</Filter>
+    </None>
+    <None Include="SSL\ssl\ssl_hs_client.t0">
+      <Filter>SSL\ssl</Filter>
+    </None>
+    <None Include="SSL\ssl\ssl_hs_common.t0">
+      <Filter>SSL\ssl</Filter>
+    </None>
+    <None Include="SSL\ssl\ssl_hs_server.t0">
+      <Filter>SSL\ssl</Filter>
+    </None>
+    <None Include="SSL\x509\asn1.t0">
+      <Filter>SSL\x509</Filter>
+    </None>
+    <None Include="SSL\x509\skey_decoder.t0">
+      <Filter>SSL\x509</Filter>
+    </None>
+    <None Include="SSL\x509\x509_decoder.t0">
+      <Filter>SSL\x509</Filter>
+    </None>
+    <None Include="SSL\x509\x509_minimal.t0">
+      <Filter>SSL\x509</Filter>
+    </None>
+  </ItemGroup>
+  <ItemGroup>
+    <CustomBuild Include="Media\Fonts\uifont_16.rdf">
+      <Filter>Media</Filter>
+    </CustomBuild>
   </ItemGroup>
 </Project>

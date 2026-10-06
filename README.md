@@ -117,7 +117,6 @@ Nothing downloads without you choosing it, and a popup says when each job finish
 - **Key entry** on the on-screen keyboard isn't masked.
 - **DLC matching is deliberately loose** — it has to cope with release-group names like `Halo.1.Combat.Evolved.Anniversary...` and abbreviated display names like `CoD: World at War`. It scores candidates 0-100 on how much of the game's name appears in the filename, and penalises a missing number heavily so "Halo 3" doesn't offer "Halo 4". You always confirm the pack yourself.
 - **Display names** are decoded as UTF-8 or UTF-16BE, whichever each package turns out to use; characters outside the BMP become `?`.
-- The `.vcxproj.filters` file still lists X-Store's old folder groupings (Solution Explorer only; it doesn't affect the build).
 
 <br>
 
