@@ -357,6 +357,7 @@
     <ClInclude Include="src\HttpResponse.h" />
     <ClInclude Include="src\ButtonAtlas.h" />
     <ClInclude Include="src\BoxArtBanner.h" />
+    <ClInclude Include="src\Wordmark.h" />
     <ClInclude Include="src\SelawikBold.h" />
     <ClInclude Include="src\Keyboard.h" />
     <ClInclude Include="src\OutputConsole.h" />

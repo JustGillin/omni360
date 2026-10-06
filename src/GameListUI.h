@@ -183,6 +183,17 @@ void PumpCoverArt();
 // covers.
 void ReleaseGameListIcons();
 
+// Builds up to maxNew of the library's icons that aren't built yet, so the
+// first library frame doesn't have to. True once they're all done.
+bool PrepareGameListIcons(const InstalledGame *games, int gameCount, int maxNew);
+
+// The startup screen, one frame per call: a bouncing dot for as long as
+// loaded is false, then the Omni360 mark forming and resting. True once it
+// has finished; FadeOutStartupScreen then lays the mark over every frame
+// that follows, fading, until the app shows through.
+bool RenderStartupFrame(bool loaded);
+void FadeOutStartupScreen();
+
 // A list of text rows with an optional second line each: Settings, and the
 // DLC pack and title update pickers.
 //

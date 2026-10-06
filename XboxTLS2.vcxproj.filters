@@ -1098,6 +1098,9 @@
     <ClInclude Include="src\BoxArtBanner.h">
       <Filter>Source Files\Interface</Filter>
     </ClInclude>
+    <ClInclude Include="src\Wordmark.h">
+      <Filter>Source Files\Interface</Filter>
+    </ClInclude>
     <ClInclude Include="src\SelawikBold.h">
       <Filter>Source Files\Interface</Filter>
     </ClInclude>

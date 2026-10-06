@@ -43,6 +43,7 @@ end-to-end on real hardware against a real 27-game library.
 #include "ReadAhead.h"
 #include "TitleNames.h"
 #include "dns.h"         // StartNetwork, LogNetworkStatus
+#include "ImageDecode.h" // ImageTimerMs, for the startup timing lines
 
 // Kernel exports with no XDK header.
 extern "C" BOOL XexCheckExecutablePrivilege(DWORD privilege);
@@ -1157,21 +1158,25 @@ static int KeepNewTitles(Library &lib, int from, int found)
 static int ScanLibraryFolder(Library &lib, const char *path)
 {
     int added = 0;
+    const double start = ImageTimerMs();
     int found = EnumerateInstalledGames(path, lib.games + lib.count, MAX_INSTALLED_GAMES - lib.count, dprintf);
     if (found > 0)
         added += KeepNewTitles(lib, lib.count, found);
+    const double packagesDone = ImageTimerMs();
     found = EnumerateFolderGames(path, lib.games + lib.count, MAX_INSTALLED_GAMES - lib.count, dprintf);
     if (found > 0)
         added += KeepNewTitles(lib, lib.count, found);
+    dprintf("[timing] scan %s: packages %.1f + folder games %.1f ms (%d games)\n", path,
+            packagesDone - start, ImageTimerMs() - packagesDone, added);
     return added;
 }
 
-static void ScanLibrary(Library &lib, const char *gamesPath)
+// The library's folders read into the list, named and sorted. Nothing drawn
+// and nothing asked of the UI, so startup runs it on a thread of its own
+// while the loading screen animates; the icons made from the old list must
+// already be released.
+static void ReadLibrary(Library &lib, const char *gamesPath)
 {
-    RenderStatusFrame("Scanning", "Reading your installed games", gamesPath);
-
-    // The cover cache was built from the old scan's images - drop both.
-    ReleaseGameListIcons();
     FreeInstalledGames(lib.games, lib.count);
     lib.count = 0;
 
@@ -1191,6 +1196,7 @@ static void ScanLibrary(Library &lib, const char *gamesPath)
 
     // A folder game is named for its folder, which may be anything - the
     // bundled list's name, or the Store's, where they have it.
+    const double namingStart = ImageTimerMs();
     for (int i = 0; i < lib.count; ++i)
     {
         InstalledGame &game = lib.games[i];
@@ -1219,6 +1225,16 @@ static void ScanLibrary(Library &lib, const char *gamesPath)
         dprintf("Found %d installed games under %s\n", lib.count, gamesPath);
     else
         dprintf("No installed games found under %s\n", gamesPath);
+    dprintf("[timing] scan: names + sort %.1f ms\n", ImageTimerMs() - namingStart);
+}
+
+static void ScanLibrary(Library &lib, const char *gamesPath)
+{
+    RenderStatusFrame("Scanning", "Reading your installed games", gamesPath);
+
+    // The cover cache was built from the old scan's images - drop both.
+    ReleaseGameListIcons();
+    ReadLibrary(lib, gamesPath);
 
     // Box art, in the library's order so the first screenful comes first.
     RequestLibraryCovers(lib);
@@ -2038,6 +2054,8 @@ struct Shell
     // only when something may have changed it - on the way back from any
     // action, or when a download finishes - rather than on every frame.
     bool stale;
+    bool settingsStale; // only the Settings page needs building again
+    bool flagsFresh;    // the DLC/update flags were just read - startup reads them behind its loading screen
     bool keysSaved;
     StorageStatus storage;
 
@@ -3548,7 +3566,11 @@ static void RefreshShell(Shell &shell, Library &lib, const char *contentBasePath
     // Which titles already have DLC, and which already have a title update,
     // on the console - so a marker appears the moment a download finishes
     // rather than on the next launch.
-    RefreshInstalledFlags(contentBasePath, lib.games, lib.count, lib.dlcInstalled, lib.updateInstalled);
+    const double start = ImageTimerMs();
+    if (!shell.flagsFresh)
+        RefreshInstalledFlags(contentBasePath, lib.games, lib.count, lib.dlcInstalled, lib.updateInstalled);
+    shell.flagsFresh = false;
+    const double flagsDone = ImageTimerMs();
 
     // The banner goes as soon as keys are added in Settings, and comes back
     // if they're removed.
@@ -3557,15 +3579,21 @@ static void RefreshShell(Shell &shell, Library &lib, const char *contentBasePath
 
     // Where DLC and title updates install, not where the games are - that's
     // the drive that fills up.
+    const double keysDone = ImageTimerMs();
     ReadStorageStatus(contentBasePath, &shell.storage);
+    const double storageDone = ImageTimerMs();
 
     // An install, or a new games folder, can change whether the disc is in it.
     if (shell.hasDisc && shell.disc.state == DISC_READY)
         shell.discInstalled = IsDiscInstalled(gamesPath, shell.disc.titleId, shell.disc.mediaId);
 
+    const double discDone = ImageTimerMs();
     BuildSettingsPage(shell.settings, lib, gamesPath);
+    dprintf("[timing] refresh: DLC/update flags %.1f, keys %.1f, storage %.1f, disc check %.1f, settings page %.1f ms\n",
+            flagsDone - start, keysDone - flagsDone, storageDone - keysDone, discDone - storageDone, ImageTimerMs() - discDone);
 
     shell.stale = false;
+    shell.settingsStale = false;
 }
 
 // Every frame, so the blocking screens - a search, a key check - show the
@@ -3969,7 +3997,9 @@ static void PollUpdateCheck(Shell &shell)
     if (changes == seen)
         return;
     seen = changes;
-    shell.stale = true; // the Settings row
+    // Just the Settings row - a whole refresh walks every game's folders
+    // again, which froze the library for most of a second.
+    shell.settingsStale = true;
 
     if (state == UPDATE_AVAILABLE && !announced)
     {
@@ -4188,11 +4218,57 @@ static bool EnsureAuthHeader(bool &haveAuth, char *authHeader, unsigned long lon
     return true;
 }
 
+// Startup timing: each step's time and the total since main() began, so a
+// launch log shows where the wait before the library goes.
+static double g_startupStart = 0.0;
+static double g_startupLast = 0.0;
+
+static void StartupStep(const char *step)
+{
+    const double now = ImageTimerMs();
+    dprintf("[timing] startup: %s %.1f ms (%.1f ms since launch)\n", step, now - g_startupLast, now - g_startupStart);
+    g_startupLast = now;
+}
+
+// What startup reads off the UI thread, behind the loading screen: the
+// library, which games have DLC or an update installed, and the Store's rows.
+// Seconds on a hard drive, nearly all of it waiting on the disk.
+struct StartupLoad
+{
+    Library *lib;
+    const char *contentBasePath;
+    const char *gamesPath;
+};
+
+static DWORD WINAPI StartupLoadEntry(LPVOID param)
+{
+    StartupLoad &load = *(StartupLoad *)param;
+    Library &lib = *load.lib;
+
+    const double start = ImageTimerMs();
+    ReadLibrary(lib, load.gamesPath);
+    const double read = ImageTimerMs();
+    RefreshInstalledFlags(load.contentBasePath, lib.games, lib.count, lib.dlcInstalled, lib.updateInstalled);
+    const double flagged = ImageTimerMs();
+    BuildStoreRows();
+    dprintf("[timing] startup thread: library %.1f, DLC/update flags %.1f, Store rows %.1f ms\n",
+            read - start, flagged - read, ImageTimerMs() - flagged);
+    return 0;
+}
+
 int main()
 {
+    g_startupStart = g_startupLast = ImageTimerMs();
+
     remove(LOG_FILE_PATH);
 
     MakeConsole("embed:\\font", CONSOLE_COLOR_BLACK, CONSOLE_COLOR_WHITE);
+    StartupStep("console");
+
+    // The log goes to the file but not the screen: a flash of white log text
+    // before the loading screen is just noise. The console is only shown if
+    // the UI fails to start, below.
+    SetConsoleQuiet(true);
 
     if (!CheckGameMounted())
         dprintf("Warning: Some paths may not be mounted\n");
@@ -4210,28 +4286,28 @@ int main()
         dprintf("Stays open when the disc tray opens (no-force-reboot privilege): %s; DashLaunch %s\n",
                 XexCheckExecutablePrivilege(0) ? "yes" : "NO", haveDashLaunch ? "loaded" : "not loaded");
     }
+    StartupStep("mount check + log header");
 
     // The network stack, kept up for the session, and the network as the app
     // sees it - the first thing to read when a download won't connect.
     StartNetwork();
     LogNetworkStatus();
+    StartupStep("network");
     SetDiscReadSpeed(DiscSpeedSetting());
     if (StartUiSounds())
         SetUiSoundsOn(UiSoundsSetting());
+    StartupStep("disc speed + sounds");
 
     if (!InitGameListUI())
     {
+        SetConsoleQuiet(false);
         dprintf("ERROR: failed to initialize the icon-list UI (D3D device not ready?)\n");
+        dprintf("The full log is in " LOG_FILE_PATH "\n");
         WaitForExit();
         return EXIT_FAILURE;
     }
 
-    // The drawn UI is up and confirmed working, so hand it the screen. Every
-    // dprintf from here on still writes the log and still reaches the debug
-    // channel - it just stops repainting the console over whatever the UI has
-    // presented. Deliberately AFTER the check above, so a UI that failed to
-    // initialize still has a visible way to say so.
-    SetConsoleQuiet(true);
+    StartupStep("UI init");
 
     char contentBasePath[MAX_TEXT_LENGTH];
     GetContentBasePath(contentBasePath, sizeof(contentBasePath));
@@ -4246,6 +4322,7 @@ int main()
     // back before anything else checks for room. (It was never listed: the
     // header is written last, and without one the library doesn't see it.)
     CleanUpInterruptedInstall();
+    StartupStep("paths + interrupted-install cleanup");
 
     // From here on the screen belongs to the UI rather than the debug console.
     // The dprintf calls stay - they're the log, and the log is still how
@@ -4282,19 +4359,96 @@ int main()
     // Also clears out what an install interrupted last time left staged.
     if (!StartGameInstaller(gamesPath))
         dprintf("ERROR: the game installer didn't start - games can't be installed\n");
+    StartupStep("art, disc and installer workers");
 
-    ScanLibrary(lib, gamesPath);
+    // The startup screen: the library, its DLC/update flags and the Store's
+    // rows are read on a thread of their own while this one keeps the dot
+    // bouncing - and starts everything else, one step a frame, in between.
+    // The bouncing lasts exactly as long as that takes; then the mark forms
+    // and rests (about 2.5 s, see GameListUI.cpp) and fades into the app.
+    StartupLoad load;
+    load.lib = &lib;
+    load.contentBasePath = contentBasePath;
+    load.gamesPath = gamesPath;
+    HANDLE loader = CreateThread(NULL, 256 * 1024, StartupLoadEntry, &load, CREATE_SUSPENDED, NULL);
+    if (loader == NULL)
+    {
+        dprintf("[startup] CreateThread failed (%lu) - reading the library on this thread\n", GetLastError());
+        RenderStartupFrame(false);
+        StartupLoadEntry(&load);
+    }
+    else
+    {
+#ifdef _XBOX
+        // Hardware thread 2, core 1's first - the read-ahead's, which only
+        // runs during an install. This is nearly all waiting on the disk.
+        XSetThreadProcessor(loader, 2);
+#endif
+        ResumeThread(loader);
+    }
 
-    // One request to GitHub, on its own thread; the Settings page says how it
-    // went, and a newer version gets a popup.
-    if (UpdateChecksOn())
-        StartUpdateCheck();
+    bool downloadsStarted = false, searchStarted = false;
+    bool loaded = false;
+    for (int step = 0;; ++step)
+    {
+        if (RenderStartupFrame(loaded))
+            break;
 
-    // The Store's featured games: the kept featured.json now, GitHub's
-    // shortly - see Featured.h.
-    StartFeatured();
-    RefreshFeatured();
-    BuildStoreRows();
+        if (loaded)
+        {
+            // The mark is forming and resting; nothing left to do.
+        }
+        else if (step == 0)
+        {
+            // One request to GitHub, on its own thread; the Settings page
+            // says how it went, and a newer version gets a popup.
+            if (UpdateChecksOn())
+                StartUpdateCheck();
+        }
+        else if (step == 1)
+        {
+            // The Store's featured games: the kept featured.json now,
+            // GitHub's shortly - see Featured.h.
+            StartFeatured();
+        }
+        else if (step == 2)
+            RefreshFeatured();
+        else if (step == 3)
+        {
+            // Not fatal if it fails: everything but downloading still works,
+            // and choosing a download then says why it can't.
+            downloadsStarted = StartDownloadQueue(contentBasePath);
+        }
+        else if (step == 4)
+        {
+            // Likewise: without it, a search says archive.org can't be
+            // reached.
+            searchStarted = StartSearchWorker();
+        }
+        else if (loader == NULL || WaitForSingleObject(loader, 0) == WAIT_OBJECT_0)
+        {
+            // Then the icons, a few a frame, so the library's first frame
+            // has nothing left to build.
+            if (PrepareGameListIcons(lib.games, lib.count, 4))
+            {
+                loaded = true;
+                StartupStep("loading (the dot bouncing)");
+
+                // Box art, in the library's order so the first screenful
+                // comes first - fetching while the mark forms.
+                RequestLibraryCovers(lib);
+            }
+        }
+
+        Sleep(16);
+    }
+    if (loader != NULL)
+        CloseHandle(loader);
+    if (!downloadsStarted)
+        dprintf("ERROR: the download worker didn't start - downloads are unavailable\n");
+    if (!searchStarted)
+        dprintf("ERROR: the search worker didn't start - searches are unavailable\n");
+    StartupStep("the mark forming and resting");
 
     // The shell loop: read the controller, act on it, draw a frame.
     //
@@ -4328,18 +4482,12 @@ int main()
     shell.queueSelectedId = 0;
     shell.queueScroll = -1;
     shell.stale = true;
+    shell.flagsFresh = true; // read behind the loading screen
 
     char authHeader[IAS3_AUTH_HEADER_MAX];
     bool haveAuth = false;
 
-    // Not fatal if it fails: everything but downloading still works, and
-    // choosing a download then says why it can't.
-    if (!StartDownloadQueue(contentBasePath))
-        dprintf("ERROR: the download worker didn't start - downloads are unavailable\n");
-
-    // Likewise: without it, a search says archive.org can't be reached.
-    if (!StartSearchWorker())
-        dprintf("ERROR: the search worker didn't start - searches are unavailable\n");
+    FadeOutStartupScreen();
 
     ResyncUiInput();
 
@@ -4355,6 +4503,7 @@ int main()
         if (lastFrame != 0 && frameStart - lastFrame > slowFrameMs)
             dprintf("[timing] slow frame: %lu ms (page %d)\n", (unsigned long)(frameStart - lastFrame), (int)shell.page);
         lastFrame = frameStart;
+        const double partStart = ImageTimerMs();
 
         // Finished downloads first, since they can make the rest stale.
         HandleFinishedDownloads(shell, haveAuth);
@@ -4367,15 +4516,24 @@ int main()
             shell.stale = true;
         }
 
+        const double partDisc = ImageTimerMs();
         UpdateDisc(shell, lib, gamesPath);
 
+        const double partRefresh = ImageTimerMs();
         if (shell.stale)
             RefreshShell(shell, lib, contentBasePath, gamesPath);
+        else if (shell.settingsStale)
+        {
+            BuildSettingsPage(shell.settings, lib, gamesPath);
+            shell.settingsStale = false;
+        }
+        const double partPumps = ImageTimerMs();
 
         SnapshotQueue(shell, lib);
         PollPickerSearch(shell.picker);
         PumpCoverArt();
         PumpStoreArt();
+        const double partRest = ImageTimerMs();
 
         // The featured games - new ones once featured.json has come - and
         // their wallpapers, the first time the Store is shown and again when
@@ -5069,6 +5227,20 @@ int main()
         default:
             break;
         }
+
+        static bool firstFrameLogged = false;
+        if (!firstFrameLogged)
+        {
+            StartupStep("first library frame");
+            firstFrameLogged = true;
+        }
+
+        // Which part of a slow frame took the time. Screens that wait on the
+        // user land in "input + draw".
+        const double partEnd = ImageTimerMs();
+        if (partEnd - partStart > slowFrameMs)
+            dprintf("[timing] frame parts: downloads/update/rescan %.1f, disc %.1f, refresh %.1f, art pumps %.1f, input + draw %.1f ms\n",
+                    partDisc - partStart, partRefresh - partDisc, partPumps - partRefresh, partRest - partPumps, partEnd - partRest);
 
         // Device is created with D3DPRESENT_INTERVAL_IMMEDIATE (no vsync), so
         // pace the loop by hand instead of hammering Present() as fast as the
