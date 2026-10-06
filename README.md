@@ -18,7 +18,7 @@ Browse thousands of games, DLC and title updates, install them in the background
 
 <br>
 
-<img src="docs/screenshots/store.png" alt="The Store: featured games and the A to Z lists" width="100%">
+<img src="docs/screenshots/startup-animation.gif" alt="Omni360 starting up: a green dot bounces, rolls into the O of the Omni360 logo, and the BETA badge rises in" width="100%">
 
 </div>
 
@@ -46,6 +46,11 @@ Browse thousands of games, DLC and title updates, install them in the background
 <p align="center">
   <img src="docs/screenshots/library.png" alt="Your Library: installed games as a grid of covers" width="100%"><br>
   <sub><b>Your Library</b>: every installed game, Xbox 360 and Original Xbox, with its DLC and title updates marked.</sub>
+</p>
+
+<p align="center">
+  <img src="docs/screenshots/store.png" alt="The Store: featured games and the A to Z lists" width="100%"><br>
+  <sub><b>Store</b>: this week's featured games up top, then every game A to Z.</sub>
 </p>
 
 <table>
