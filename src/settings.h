@@ -3,7 +3,7 @@
 #ifndef SETTINGS_H
 #define SETTINGS_H
 
-#define CURRENT_VERSION "0.8.0-beta"
+#define CURRENT_VERSION "0.9.0-beta"
 
 // Should be large enough (I hope)
 #define MAX_TEXT_LENGTH 512

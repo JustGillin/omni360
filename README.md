@@ -37,7 +37,7 @@ Browse thousands of games, DLC and title updates, install them in the background
 | **Queue** | Everything downloads and installs in the background while you carry on browsing. |
 | **Updates itself** | Checks GitHub for a new version, shows what's new, and installs it. Only releases signed with the project's key are accepted. |
 
-**Status: beta (0.8.0-beta), working on real hardware.** Every kind of install above has been run end to end on a modded console with a real library.
+**Status: beta (0.9.0-beta), working on real hardware.** Every kind of install above has been run end to end on a modded console with a real library.
 
 <br>
 
