@@ -1,5 +1,7 @@
 <div align="center">
 
+<img src="docs/screenshots/startup-animation.gif" alt="Omni360 starting up: a green dot bounces, rolls into the O of the Omni360 logo, and the BETA badge rises in" width="70%">
+
 # Omni360
 
 ### Get games onto your modded Xbox 360, from the Xbox 360
@@ -15,10 +17,6 @@ Browse thousands of games, DLC and title updates, install them in the background
 [![License: AGPL-3.0](https://img.shields.io/badge/license-AGPL--3.0-blue)](LICENSE)
 
 **[Quick start](#quick-start)** &nbsp;·&nbsp; **[Features](#what-it-does)** &nbsp;·&nbsp; **[Screenshots](#screenshots)** &nbsp;·&nbsp; **[How to use it](#how-to-use-it)** &nbsp;·&nbsp; **[Docs](docs/docs.md)**
-
-<br>
-
-<img src="docs/screenshots/startup-animation.gif" alt="Omni360 starting up: a green dot bounces, rolls into the O of the Omni360 logo, and the BETA badge rises in" width="100%">
 
 </div>
 
