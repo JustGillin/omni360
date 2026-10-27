@@ -126,7 +126,29 @@ static bool ActiveJobCancelled()
     return cancelled;
 }
 
-static void SetActivePhase(const char *phase, int fileIndex, int fileCount, float fraction)
+// A DLC pack's two steps, and each one's share of the whole job's
+// percentage - and of the Queue's bar (SnapshotQueue's kPackWidths): reading
+// the file list walks the archive's headers, a request each; the files are
+// the rest. A title update is one step.
+enum PackStep
+{
+    PACK_STEP_LISTING,
+    PACK_STEP_FILES,
+    PACK_STEP_COUNT
+};
+static const float kPackStepShares[PACK_STEP_COUNT] = { 0.10f, 0.90f };
+
+// The active job's progress, under the lock: as a pack's step, or as the
+// whole of a title update.
+static void SetJobProgress(QueueJob &job, float stepFraction)
+{
+    job.view.stepFraction = stepFraction;
+    job.view.fraction = (job.view.stepCount > 1) ? JobFraction(kPackStepShares, job.view.step, stepFraction)
+                                                 : stepFraction;
+}
+
+// stepCount is PACK_STEP_COUNT for a pack, or 1 for a title update.
+static void SetActivePhase(const char *phase, int step, int stepCount, int fileIndex, int fileCount, float stepFraction)
 {
     EnterCriticalSection(&g_lock);
     if (g_activeSlot >= 0)
@@ -139,7 +161,9 @@ static void SetActivePhase(const char *phase, int fileIndex, int fileCount, floa
         job.view.bytesTotal = 0;
         job.view.bytesPerSec = 0;
         job.view.secondsLeft = 0;
-        job.view.fraction = fraction;
+        job.view.step = step;
+        job.view.stepCount = stepCount;
+        SetJobProgress(job, stepFraction);
     }
     LeaveCriticalSection(&g_lock);
 }
@@ -168,7 +192,7 @@ static bool WorkerDownloadProgress(unsigned long long bytesDone, unsigned long l
         if (job.fileCount > 0)
         {
             float withinFile = (bytesTotal > 0) ? (float)((double)bytesDone / (double)bytesTotal) : 0.0f;
-            job.view.fraction = ((float)job.fileIndex + withinFile) / (float)job.fileCount;
+            SetJobProgress(job, ((float)job.fileIndex + withinFile) / (float)job.fileCount);
         }
 
         if (job.kind == QUEUE_JOB_TITLE_UPDATE)
@@ -196,7 +220,7 @@ static bool WorkerListProgress(unsigned long long bytesScanned, unsigned long lo
     if (g_activeSlot >= 0)
     {
         QueueJob &job = g_jobs[g_activeSlot];
-        job.view.fraction = (archiveSize > 0) ? (float)((double)bytesScanned / (double)archiveSize) : -1.0f;
+        SetJobProgress(job, (archiveSize > 0) ? (float)((double)bytesScanned / (double)archiveSize) : -1.0f);
         keepGoing = !job.cancelRequested && !g_shutdown;
     }
     LeaveCriticalSection(&g_lock);
@@ -235,7 +259,7 @@ static void RunDlcPack(const QueueJob &job, JobResult &result)
     const DlcRarMatch &pack = job.pack;
     const char *auth = job.authHeader;
 
-    SetActivePhase("Reading the file list", 0, 0, -1.0f);
+    SetActivePhase("Reading the file list", PACK_STEP_LISTING, PACK_STEP_COUNT, 0, 0, -1.0f);
 
     int memberCount = ListDlcMembers(pack, g_members, MAX_DLC_MEMBERS, auth, dprintf, WorkerListProgress);
 
@@ -314,7 +338,7 @@ static void RunDlcPack(const QueueJob &job, JobResult &result)
         char phase[64];
         _snprintf(phase, sizeof(phase), "File %d of %d", f + 1, memberCount);
         phase[sizeof(phase) - 1] = '\0';
-        SetActivePhase(phase, f, memberCount, (float)f / (float)memberCount);
+        SetActivePhase(phase, PACK_STEP_FILES, PACK_STEP_COUNT, f, memberCount, (float)f / (float)memberCount);
 
         if (DownloadDlcMember(pack, g_members[f], g_contentBasePath, auth, dprintf,
                               WorkerDownloadProgress))
@@ -387,7 +411,7 @@ static void RunTitleUpdate(const QueueJob &job, JobResult &result)
 {
     // One file. The phase becomes "Downloading" with the first progress
     // report, once DownloadTitleUpdate has read the update's own file list.
-    SetActivePhase("Reading the update", 0, 1, -1.0f);
+    SetActivePhase("Reading the update", 0, 1, 0, 1, -1.0f);
 
     if (DownloadTitleUpdate(job.update, job.view.titleId, g_contentBasePath, job.authHeader, dprintf,
                             WorkerDownloadProgress))

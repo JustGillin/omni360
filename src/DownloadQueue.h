@@ -73,6 +73,15 @@ struct QueueJobSnapshot
     unsigned long long secondsLeft;
     float fraction;                   // the whole job, 0..1; negative when unknown
 
+    // A job of more than one step - finding a game's files, downloading,
+    // installing - says which it's on, as the Queue's bar has a segment for
+    // each. fraction is then across all of them, each counted by its share
+    // of the usual time (JobFraction), so 100% is only ever the end.
+    // stepCount 0 or 1 is a job of one step, whose fraction is all there is.
+    int step;                         // 0-based
+    int stepCount;
+    float stepFraction;               // this step, 0..1; negative when unknown
+
     // Once finished: a short verdict ("Installed", "Not enough space") and
     // the line under it.
     char resultText[64];
@@ -83,6 +92,19 @@ struct QueueJobSnapshot
     // refused, which already raised one.
     bool notify;
 };
+
+// The whole job's fraction for a job of steps: the steps before this one in
+// full, and this one as far as it's got (nothing, while that's unknown).
+// shares are each step's part of the usual time, adding up to 1.
+inline float JobFraction(const float *shares, int step, float stepFraction)
+{
+    float done = 0.0f;
+    for (int i = 0; i < step; ++i)
+        done += shares[i];
+    if (stepFraction > 0.0f)
+        done += shares[step] * (stepFraction > 1.0f ? 1.0f : stepFraction);
+    return done;
+}
 
 // Starts the worker. contentBasePath is where DLC and title updates install.
 // Returns false if the thread couldn't be created - every Enqueue call then

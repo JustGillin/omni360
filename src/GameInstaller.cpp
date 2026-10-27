@@ -896,8 +896,21 @@ static void Finish(GameJob *job, QueueOutcome outcome, const char *text, const c
     s.resultDetail[sizeof(s.resultDetail) - 1] = '\0';
 }
 
-static void SetPhase(GameJob *job, const char *phase, unsigned long long done, unsigned long long total,
-                     unsigned long long bytesPerSec)
+// A game's three steps, and each one's share of the whole job's percentage -
+// the same as its segment's share of the Queue's bar (SnapshotQueue's
+// kGameWidths), so the number always agrees with how much bar is filled.
+// Downloading is the long wait, so it's most of both.
+enum GameStep
+{
+    GAME_STEP_FINDING,
+    GAME_STEP_DOWNLOADING,
+    GAME_STEP_INSTALLING,
+    GAME_STEP_COUNT
+};
+static const float kGameStepShares[GAME_STEP_COUNT] = { 0.05f, 0.90f, 0.05f };
+
+static void SetPhase(GameJob *job, GameStep step, const char *phase, unsigned long long done,
+                     unsigned long long total, unsigned long long bytesPerSec)
 {
     EnterCriticalSection(&g_lock);
     QueueJobSnapshot &s = job->snap;
@@ -907,7 +920,10 @@ static void SetPhase(GameJob *job, const char *phase, unsigned long long done, u
     s.bytesTotal = total;
     s.bytesPerSec = bytesPerSec;
     s.secondsLeft = (bytesPerSec > 0 && total > done) ? (total - done) / bytesPerSec : 0;
-    s.fraction = (total > 0) ? (float)((double)done / (double)total) : -1.0f;
+    s.step = step;
+    s.stepCount = GAME_STEP_COUNT;
+    s.stepFraction = (total > 0) ? (float)((double)done / (double)total) : -1.0f;
+    s.fraction = JobFraction(kGameStepShares, step, s.stepFraction);
     LeaveCriticalSection(&g_lock);
 }
 
@@ -921,7 +937,7 @@ static bool ConvertProgressFn(unsigned long long done, unsigned long long total,
 {
     ConvertProgress *p = (ConvertProgress *)context;
     DWORD ms = GetTickCount() - p->started;
-    SetPhase(p->job, "Installing", done, total, ms > 3000 ? done * 1000 / ms : 0);
+    SetPhase(p->job, GAME_STEP_INSTALLING, "Installing", done, total, ms > 3000 ? done * 1000 / ms : 0);
 
     EnterCriticalSection(&g_lock);
     bool keepGoing = !p->job->cancel && !g_shutdown;
@@ -1074,7 +1090,7 @@ static void RunJob(GameJob *job, const char *gamesPath)
     const GameRequest &req = job->request;
     const char *auth = job->auth;
 
-    SetPhase(job, "Starting", 0, 0, 0);
+    SetPhase(job, GAME_STEP_FINDING, "Starting", 0, 0, 0);
 
     char encodedZip[700];
     if (!UrlEncodeFormValue(req.zipName, encodedZip, sizeof(encodedZip)))
@@ -1103,7 +1119,7 @@ static void RunJob(GameJob *job, const char *gamesPath)
         return;
     }
 
-    SetPhase(job, "Finding the fastest server", 0, 0, 0);
+    SetPhase(job, GAME_STEP_FINDING, "Finding the fastest server", 0, 0, 0);
     std::string servers[MAX_SERVERS];
     const int serverCount = RankServers(job, url, req.item, encodedZip, auth, req.zipSize, servers, MAX_SERVERS);
     url = servers[0];
@@ -1293,7 +1309,7 @@ static void RunJob(GameJob *job, const char *gamesPath)
             LeaveCriticalSection(&g_lock);
 
             DWORD ms = GetTickCount() - downloadStart;
-            SetPhase(job, "Downloading", bytes, needed, ms > 3000 ? bytes * 1000 / ms : 0);
+            SetPhase(job, GAME_STEP_DOWNLOADING, "Downloading", bytes, needed, ms > 3000 ? bytes * 1000 / ms : 0);
 
             if (ready || stop)
             {
@@ -1421,7 +1437,7 @@ static void RunJob(GameJob *job, const char *gamesPath)
     ConvertProgress progress;
     progress.job = job;
     progress.started = GetTickCount();
-    SetPhase(job, "Installing", 0, info.usedSize, 0);
+    SetPhase(job, GAME_STEP_INSTALLING, "Installing", 0, info.usedSize, 0);
 
     // The game's icon for the package, so the dashboard and Aurora show it.
     // Without one the install goes ahead, with the dashboard's placeholder.

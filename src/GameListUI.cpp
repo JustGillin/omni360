@@ -2813,21 +2813,44 @@ static void DrawTileArt(D3DTexture *boxArt, const Icon *icon, float x, float y, 
 
 // A small square cover - the queue's. The icon fills it, over its average
 // colour in case it has transparency.
-static void DrawCoverSquare(D3DTexture *boxArt, const Icon *icon, float x, float y, float size)
+// A cover over x,y,w,h, the texture's u running 0..u1 across it - past 1 only
+// for DrawCoverFlushLeft, which clips the extra off.
+static void DrawCoverRect(D3DTexture *boxArt, const Icon *icon, float x, float y, float w, float h, float radius,
+                          float u1)
 {
     if (boxArt != NULL)
     {
-        TextureRound(boxArt, x, y, size, size, R(4.0f), 0.0f, 0.0f, 1.0f, 1.0f, 0xFFFFFFFF, 0xFFFFFFFF);
+        TextureRound(boxArt, x, y, w, h, radius, 0.0f, 0.0f, u1, 1.0f, 0xFFFFFFFF, 0xFFFFFFFF);
         return;
     }
 
     if (icon != NULL && icon->average != NULL)
-        TextureRound(icon->average, x, y, size, size, R(4.0f), 0.0f, 0.0f, 1.0f, 1.0f, 0xFFFFFFFF, 0xFF808080);
+        TextureRound(icon->average, x, y, w, h, radius, 0.0f, 0.0f, u1, 1.0f, 0xFFFFFFFF, 0xFF808080);
     else
-        FillRound(x, y, size, size, R(4.0f), COL_SURFACE_HI);
+        FillRound(x, y, w, h, radius, COL_SURFACE_HI);
 
     if (icon != NULL && icon->texture != NULL)
-        TextureRound(icon->texture, x, y, size, size, R(4.0f), 0.0f, 0.0f, 1.0f, 1.0f, 0xFFFFFFFF, 0xFFFFFFFF);
+        TextureRound(icon->texture, x, y, w, h, radius, 0.0f, 0.0f, u1, 1.0f, 0xFFFFFFFF, 0xFFFFFFFF);
+}
+
+static void DrawCoverSquare(D3DTexture *boxArt, const Icon *icon, float x, float y, float size)
+{
+    DrawCoverRect(boxArt, icon, x, y, size, size, R(4.0f), 1.0f);
+}
+
+// A cover filling the left end of a card whose corners are `radius`: rounded
+// on the left to match it, square on the right where the card carries on.
+// The shapes round all four corners, so it's drawn a radius wider and the
+// right-hand ones clipped off.
+static void DrawCoverFlushLeft(D3DTexture *boxArt, const Icon *icon, float x, float y, float size, float radius)
+{
+    const bool wasOn = g_clipOn;
+    const RECT was = g_clipRect;
+    SetClip(x, y, size, size);
+    DrawCoverRect(boxArt, icon, x, y, size + radius, size, radius, (size + radius) / size);
+    g_clipOn = wasOn;
+    g_clipRect = was;
+    ApplyClip(); // the device's scissor too, for whatever draws next
 }
 
 // What's installed for a game, as the label in its tile's corner. NULL for
@@ -5615,8 +5638,8 @@ void RenderQueueFrame(QueuePageView &view, const UiHint *hints, int hintCount)
 
     const float rowH = QueueRowHeight();
     const float plateH = rowH - QueueRowGap();
-    const float coverSize = S(84.0f);
-    const float coverInset = (plateH - coverSize) * 0.5f;
+    // The cover fills the card's left end, top to bottom.
+    const float coverSize = plateH;
 
     int visibleRows = (int)((g_M.footerY - S(30.0f) - g_M.listY + QueueRowGap()) / rowH);
     if (visibleRows < 1) visibleRows = 1;
@@ -5632,7 +5655,7 @@ void RenderQueueFrame(QueuePageView &view, const UiHint *hints, int hintCount)
     const bool showScroll = (count > visibleRows);
     const float plateW = g_M.contentW - (showScroll ? ScrollGutter() : 0.0f);
 
-    const float coverX = g_M.contentX + coverInset;
+    const float coverX = g_M.contentX;
     const float textX = coverX + coverSize + S(22.0f);
     const float textRight = g_M.contentX + plateW - S(24.0f);
     const float barH = S(6.0f);
@@ -5677,9 +5700,32 @@ void RenderQueueFrame(QueuePageView &view, const UiHint *hints, int hintCount)
         const Icon *icon = (icons != NULL && inLibrary) ? &icons[q.libraryIndex] : NULL;
         // The library's, else the Store's - or an indie game's tile.
         D3DTexture *boxArt = (q.titleId == INDIE_TITLE_ID) ? IndieTile() : StoreCoverFor(q.titleId);
-        DrawCoverSquare(boxArt, icon, coverX, y + coverInset, coverSize);
+        DrawCoverFlushLeft(boxArt, icon, coverX, y, coverSize, g_M.radius);
 
-        if (q.showBar)
+        if (q.showBar && q.stepCount > 1)
+        {
+            // A segment a step, as the console's own update shows its
+            // download, install and restart - each as wide as its share.
+            const float barY = y + barOffsetY;
+            const float gap = S(8.0f);
+            const float widthToShare = textRight - textX - gap * (q.stepCount - 1);
+            float segX = textX;
+            for (int s = 0; s < q.stepCount; ++s)
+            {
+                const float segW = widthToShare * q.stepWidths[s];
+                FillRound(segX, barY, segW, barH, barH * 0.5f, COL_TRACK);
+
+                float fill = 0.0f;
+                if (s < q.step)
+                    fill = 1.0f;
+                else if (s == q.step && q.stepFraction > 0.0f)
+                    fill = (q.stepFraction > 1.0f) ? 1.0f : q.stepFraction;
+                if (fill > 0.0f)
+                    FillRoundGradient(segX, barY, segW * fill, barH, barH * 0.5f, COL_GREEN_HI, COL_GREEN, true);
+                segX += segW + gap;
+            }
+        }
+        else if (q.showBar)
         {
             const float barY = y + barOffsetY;
             const float barW = textRight - textX;

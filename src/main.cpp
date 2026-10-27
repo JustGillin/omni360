@@ -4146,6 +4146,9 @@ static void SnapshotQueue(Shell &shell, const Library &lib)
         row.numbers = NULL;
         row.libraryIndex = LibraryIndexForTitle(lib, job.titleId);
         row.titleId = job.titleId;
+        row.step = 0;
+        row.stepCount = 0;
+        row.stepFraction = -1.0f;
         numbers[0] = '\0';
 
         if (job.state == QUEUE_WAITING)
@@ -4157,12 +4160,34 @@ static void SnapshotQueue(Shell &shell, const Library &lib)
         }
         else if (job.state == QUEUE_ACTIVE)
         {
-            _snprintf(status, statusSize, "%s", job.phase[0] != '\0' ? job.phase : "Starting");
+            const char *phase = job.phase[0] != '\0' ? job.phase : "Starting";
+            if (job.stepCount > 1 && job.stepFraction >= 0.0f)
+                _snprintf(status, statusSize, "Step %d of %d: %s (%d%%)", job.step + 1, job.stepCount, phase,
+                          (int)((job.stepFraction > 1.0f ? 1.0f : job.stepFraction) * 100.0f));
+            else if (job.stepCount > 1)
+                _snprintf(status, statusSize, "Step %d of %d: %s", job.step + 1, job.stepCount, phase);
+            else
+                _snprintf(status, statusSize, "%s", phase);
             FormatTransferNumbers(job, numbers, sizeof(shell.queueNumbers[i]));
             row.numbers = numbers;
             row.tone = QUEUE_ROW_ACTIVE;
             row.showBar = true;
             row.fraction = job.fraction;
+            row.step = job.step;
+            row.stepCount = job.stepCount > 4 ? 4 : job.stepCount;
+            row.stepFraction = job.stepFraction;
+
+            // The segments' widths: the download is the long wait, so its
+            // segment is most of the bar. The same as each step's share of
+            // the percentage (kGameStepShares, kPackStepShares), so the two
+            // agree.
+            static const float kGameWidths[3] = { 0.05f, 0.90f, 0.05f };
+            static const float kPackWidths[2] = { 0.10f, 0.90f };
+            const float *widths = (job.kind == QUEUE_JOB_GAME_INSTALL && row.stepCount == 3) ? kGameWidths
+                                  : (row.stepCount == 2)                                  ? kPackWidths
+                                                                                          : NULL;
+            for (int s = 0; s < row.stepCount; ++s)
+                row.stepWidths[s] = widths != NULL ? widths[s] : 1.0f / row.stepCount;
         }
         else
         {

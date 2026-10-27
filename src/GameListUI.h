@@ -487,8 +487,17 @@ struct QueueRowView
     const char *gameName;
     const char *status;   // coloured by tone: "Waiting", "File 2 of 5", "Installed - restart your dashboard..."
     const char *numbers;  // right-aligned beside the status while downloading; may be NULL
-    float fraction;       // the bar, 0..1; negative for no fill (unknown, or not started)
+    float fraction;       // the whole job, 0..1, the percentage beside the title; negative for none
     bool showBar;
+
+    // A job of more than one step draws its bar in that many segments, as
+    // the console's own update does: those before step full, step's as far
+    // as stepFraction (negative: none yet), the rest empty. stepCount 0 or 1
+    // draws one bar, filled to fraction.
+    int step;
+    int stepCount;
+    float stepFraction;
+    float stepWidths[4]; // each segment's share of the bar's width, adding up to 1
     int libraryIndex;     // whose icon to draw, into the view's games; -1 for none
     unsigned long titleId; // whose box art - found even for a game that isn't in the library
     QueueRowTone tone;
