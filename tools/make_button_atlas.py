@@ -40,7 +40,7 @@ SS = 8              # supersampling factor
 CELL = 64           # atlas cell, in final pixels
 FACE_D = 52         # face button diameter; the rest of the cell is shadow margin
 BUMPER_H = 42       # shoulder button height - a little shorter than a face button, as on the pad
-ATLAS_W, ATLAS_H = 256, 128   # powers of two, so there's no question of NPOT support on the GPU
+ATLAS_W, ATLAS_H = 256, 256   # powers of two, so there's no question of NPOT support on the GPU
 
 # Face colours, sampled from the dashboard's own prompts and nudged to hold up
 # at small sizes. The letter is a deep shade of the same hue - dark green on
@@ -239,6 +239,18 @@ def main():
     atlas.alpha_composite(img, (start_x, CELL))
     sprites.append(("START", start_x, CELL, CELL, CELL, bm, bm, BUMPER_H, BUMPER_H))
     print("rendered START")
+
+    # Triggers: LT and RT as one sprite, as the shoulders are - the footer
+    # only shows them as a pair ("letter back / on"). The same capsules, a row
+    # down.
+    x = 0
+    for text in ("LT", "RT"):
+        w = cap_w + 2 * bm
+        img = render_button(w, CELL, r, (cap_w - BUMPER_H) / 2.0, BUMPER_BASE, text, BUMPER_TEXT, False)
+        atlas.alpha_composite(img, (x, 2 * CELL))
+        x += cap_w + gap
+        print("rendered", text)
+    sprites.append(("LTRT", 0, 2 * CELL, sprite_w, CELL, bm, bm, cap_w + gap + cap_w, BUMPER_H))
 
     atlas.save(OUT_PNG, optimize=True)
     png = open(OUT_PNG, "rb").read()

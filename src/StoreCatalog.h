@@ -14,9 +14,12 @@
 // The archive.org item a disc is in, e.g. "microsoft_xbox360_b_part2".
 const char *StoreItemOf(const StoreDisc *disc);
 
-// The games under one letter tile ('A' to 'Z', or '#'), in the order shown.
-// Only retail games - demos, betas, magazine discs and the like aren't
-// listed. Returns how many were written.
+// The A to Z tile that lists every game, for the ...ForLetter calls below.
+#define STORE_LETTER_ALL '*'
+
+// The games under one letter tile ('A' to 'Z', or '#'; STORE_LETTER_ALL for
+// every one), in the order shown. Only retail games - demos, betas, magazine
+// discs and the like aren't listed. Returns how many were written.
 int StoreGamesForLetter(char letter, StoreGame *out, int maxGames);
 
 // The same for the Original Xbox games the 360 runs, from XboxTitles.h
@@ -53,6 +56,45 @@ const StoreRelease *StoreReleaseOf(const StoreGame *game, int version);
 // A version's discs, in disc order; NULL out of range.
 const StoreDisc *StoreReleaseDisc(const StoreRelease *release, int disc);
 
+// ---------------------------------------------------------------------------
+// The letter pages' filters
+// ---------------------------------------------------------------------------
+
+#include "StoreRows.h" // StoreGameInfo, STORE_GENRE_COUNT, STORE_TAG_*
+
+// A 360 game's genre, tags and rating, by title ID. False for one the
+// catalog hasn't got - and for every Original Xbox game, which it has none
+// of.
+bool StoreGameInfoOf(unsigned long titleId, StoreGameInfo *out);
+
+// A main genre's shown name: 1 to STORE_GENRE_COUNT, as StoreGameInfo's.
+const char *StoreGenreName(int genre);
+
+// The languages filtered by, English first.
+#define STORE_LANGUAGE_COUNT 12
+const char *StoreLanguageName(int language);
+
+// A version's languages, as bits: 1 << language. What its detail lists -
+// "En, Fr, De" - or if it lists none, as Redump leaves them off a release
+// with its region's one language, its regions': USA's English, Japan's
+// Japanese and so on.
+unsigned long StoreReleaseLanguages(const StoreRelease *release);
+
+// Every one of a game's versions'.
+unsigned long StoreGameLanguages(const StoreGame *game);
+
+// A version's regions: every one of its discs', STORE_REGION_*.
+unsigned short StoreReleaseRegions(const StoreRelease *release);
+
+// The regions as the Store groups them, for its tiles' tags and its letter
+// pages' filter. World is region free: it's tagged USA, and every filter
+// lets it through.
+#define STORE_REGIONS_USA  (STORE_REGION_USA | STORE_REGION_WORLD)
+#define STORE_REGIONS_EUR  (STORE_REGION_EUROPE | STORE_REGION_UK | STORE_REGION_GERMANY | STORE_REGION_FRANCE | \
+                            STORE_REGION_SPAIN | STORE_REGION_ITALY | STORE_REGION_AUSTRALIA | STORE_REGION_RUSSIA)
+#define STORE_REGIONS_JPN  STORE_REGION_JAPAN
+#define STORE_REGIONS_ASIA (STORE_REGION_ASIA | STORE_REGION_KOREA | STORE_REGION_CHINA | STORE_REGION_TAIWAN)
+
 // The Xbox Live Arcade and Indie Games lists, from XblaTitles.h and
 // XbligTitles.h (tools/make_xbla_titles.py): one RAR a game, in archive.org's
 // XBOX_360_XBLA and XBOX_360_XBLIG_1 to _5, sorted by name.
@@ -72,8 +114,8 @@ enum ArcadeSet
 ArcadeSet ArcadeSetOf(const XblaGame *game);
 const char *ArcadeItemOf(const XblaGame *game);
 
-// The games under one letter tile ('A' to 'Z', or '#'), in the order shown.
-// Returns how many were written.
+// The games under one letter tile ('A' to 'Z', or '#'; STORE_LETTER_ALL for
+// every one), in the order shown. Returns how many were written.
 int ArcadeGamesForLetter(ArcadeSet set, char letter, const XblaGame **out, int maxGames);
 
 // The arcade game with this title ID, or NULL - the first, if several share

@@ -79,9 +79,8 @@ static bool ReadImage(FILE *f, unsigned char **image, unsigned long *size)
     return true;
 }
 
-bool SaveLibraryCache(const char *folders, const InstalledGame *games, int count,
-                      const bool *dlcInstalled, const bool *updateInstalled,
-                      const int *folderFound, int folderCount)
+bool SaveLibraryCache(const char *folders, const InstalledGame *games, int count, const int *folderFound,
+                      int folderCount)
 {
     FILE *f = fopen(LIBRARY_CACHE_TEMP_FILE, "wb");
     if (f == NULL)
@@ -99,7 +98,9 @@ bool SaveLibraryCache(const char *folders, const InstalledGame *games, int count
     for (int i = 0; ok && i < count; ++i)
     {
         const InstalledGame &g = games[i];
-        const unsigned char flags = (g.folder ? 1 : 0) | (dlcInstalled[i] ? 2 : 0) | (updateInstalled[i] ? 4 : 0);
+        // 2 and 4 were the DLC and title update flags, no longer kept; older
+        // files' are ignored.
+        const unsigned char flags = g.folder ? 1 : 0;
         ok = WriteLong(f, g.titleId) && WriteLong(f, g.contentType) && WriteBytes(f, &flags, 1) &&
              WriteString(f, g.displayName) && WriteString(f, g.packagePath) &&
              WriteLong(f, g.titleThumbnailSize) && WriteBytes(f, g.titleThumbnail, g.titleThumbnailSize) &&
@@ -124,9 +125,7 @@ bool SaveLibraryCache(const char *folders, const InstalledGame *games, int count
     return true;
 }
 
-int LoadLibraryCache(const char *folders, InstalledGame *games, int maxGames,
-                     bool *dlcInstalled, bool *updateInstalled,
-                     int *folderFound, int folderCount)
+int LoadLibraryCache(const char *folders, InstalledGame *games, int maxGames, int *folderFound, int folderCount)
 {
     FILE *f = fopen(LIBRARY_CACHE_FILE, "rb");
     if (f == NULL)
@@ -170,8 +169,6 @@ int LoadLibraryCache(const char *folders, InstalledGame *games, int maxGames,
             break;
         }
         g.folder = (flags & 1) != 0;
-        dlcInstalled[count] = (flags & 2) != 0;
-        updateInstalled[count] = (flags & 4) != 0;
         count++;
     }
     fclose(f);

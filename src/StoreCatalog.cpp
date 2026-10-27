@@ -49,7 +49,7 @@ int StoreGamesForLetter(char letter, StoreGame *out, int maxGames)
     int count = 0;
     for (int i = 0; i < STORE_GAME_COUNT && count < maxGames; ++i)
     {
-        if (kStoreGames[i].letter == letter)
+        if (letter == STORE_LETTER_ALL || kStoreGames[i].letter == letter)
             out[count++] = kStoreGames[i];
         else if (count > 0)
             break;
@@ -65,7 +65,7 @@ int XboxGamesForLetter(char letter, StoreGame *out, int maxGames)
     int count = 0;
     for (int i = 0; i < XBOX_GAME_COUNT && count < maxGames; ++i)
     {
-        if (kXboxGames[i].letter == letter)
+        if (letter == STORE_LETTER_ALL || kXboxGames[i].letter == letter)
             out[count++] = kXboxGames[i];
         else if (count > 0)
             break;
@@ -152,6 +152,18 @@ const StoreDisc *StoreReleaseDisc(const StoreRelease *release, int disc)
     return (index < COUNT_OF(kStoreDiscs)) ? &kStoreDiscs[index] : NULL;
 }
 
+unsigned short StoreReleaseRegions(const StoreRelease *release)
+{
+    unsigned short regions = 0;
+    for (int d = 0; release != NULL && d < release->discCount; ++d)
+    {
+        const StoreDisc *disc = StoreReleaseDisc(release, d);
+        if (disc != NULL)
+            regions |= disc->regions;
+    }
+    return regions;
+}
+
 static bool IsXblig(const XblaGame *game)
 {
     return game >= kXbligGames && game < kXbligGames + XBLIG_GAME_COUNT;
@@ -184,7 +196,7 @@ int ArcadeGamesForLetter(ArcadeSet set, char letter, const XblaGame **out, int m
     int count = 0;
     for (int i = 0; i < total && count < maxGames; ++i)
     {
-        if (games[i].letter == letter)
+        if (letter == STORE_LETTER_ALL || games[i].letter == letter)
             out[count++] = &games[i];
     }
     return count;
@@ -420,6 +432,123 @@ int SearchStore(const char *query, StoreHit *out, int maxHits, int *outTotal)
 
 // ---------------------------------------------------------------------------
 // The front page's rows
+// ---------------------------------------------------------------------------
+// The letter pages' filters
+// ---------------------------------------------------------------------------
+
+bool StoreGameInfoOf(unsigned long titleId, StoreGameInfo *out)
+{
+    int lo = 0, hi = STORE_INFO_COUNT - 1;
+    while (titleId != 0 && lo <= hi)
+    {
+        const int mid = (lo + hi) / 2;
+        if (kStoreGameInfo[mid].titleId == titleId)
+        {
+            *out = kStoreGameInfo[mid];
+            return true;
+        }
+        if (kStoreGameInfo[mid].titleId < titleId)
+            lo = mid + 1;
+        else
+            hi = mid - 1;
+    }
+    return false;
+}
+
+const char *StoreGenreName(int genre)
+{
+    return (genre >= 1 && genre <= STORE_GENRE_COUNT) ? kStoreGenres[genre - 1] : "";
+}
+
+// Redump's codes for them, and the regions whose releases have that one
+// language when they list none.
+static const struct { const char *code; const char *name; unsigned short regions; } kLanguages[STORE_LANGUAGE_COUNT] =
+{
+    { "En", "English",    STORE_REGION_USA | STORE_REGION_WORLD | STORE_REGION_EUROPE | STORE_REGION_UK |
+                          STORE_REGION_AUSTRALIA },
+    { "Fr", "French",     STORE_REGION_FRANCE },
+    { "De", "German",     STORE_REGION_GERMANY },
+    { "Es", "Spanish",    STORE_REGION_SPAIN },
+    { "It", "Italian",    STORE_REGION_ITALY },
+    { "Ja", "Japanese",   STORE_REGION_JAPAN },
+    { "Pt", "Portuguese", 0 },
+    { "Ru", "Russian",    STORE_REGION_RUSSIA },
+    { "Pl", "Polish",     0 },
+    { "Ko", "Korean",     STORE_REGION_KOREA },
+    { "Nl", "Dutch",      0 },
+    { "Zh", "Chinese",    STORE_REGION_CHINA | STORE_REGION_TAIWAN },
+};
+
+const char *StoreLanguageName(int language)
+{
+    return (language >= 0 && language < STORE_LANGUAGE_COUNT) ? kLanguages[language].name : "";
+}
+
+// One part of a detail, len long: if it's a list of languages - "En, Fr, De"
+// - their bits, with LISTED; else 0. Codes not filtered by count toward a
+// list but add no bit.
+#define LANGUAGES_LISTED 0x80000000UL
+
+static unsigned long LanguagesIn(const char *s, int len)
+{
+    unsigned long bits = LANGUAGES_LISTED;
+    int i = 0;
+    for (;;)
+    {
+        if (i + 2 > len || s[i] < 'A' || s[i] > 'Z' || s[i + 1] < 'a' || s[i + 1] > 'z')
+            return 0;
+        for (int l = 0; l < STORE_LANGUAGE_COUNT; ++l)
+        {
+            if (s[i] == kLanguages[l].code[0] && s[i + 1] == kLanguages[l].code[1])
+                bits |= 1UL << l;
+        }
+        i += 2;
+        if (i == len)
+            return bits;
+        if (i + 2 > len || s[i] != ',' || s[i + 1] != ' ')
+            return 0;
+        i += 2;
+    }
+}
+
+unsigned long StoreReleaseLanguages(const StoreRelease *release)
+{
+    if (release == NULL)
+        return 0;
+
+    // The detail's parts are joined as make_store_titles.py's MIDDOT.
+    static const char kMiddot[] = "  \xC2\xB7  ";
+    const int middotLen = (int)sizeof(kMiddot) - 1;
+
+    const char *part = release->detail != NULL ? release->detail : "";
+    while (*part != '\0')
+    {
+        const char *end = strstr(part, kMiddot);
+        const int len = end != NULL ? (int)(end - part) : (int)strlen(part);
+        const unsigned long listed = LanguagesIn(part, len);
+        if (listed != 0)
+            return listed & ~LANGUAGES_LISTED;
+        part = end != NULL ? end + middotLen : part + len;
+    }
+
+    unsigned long bits = 0;
+    const unsigned short regions = StoreReleaseRegions(release);
+    for (int l = 0; l < STORE_LANGUAGE_COUNT; ++l)
+    {
+        if (regions & kLanguages[l].regions)
+            bits |= 1UL << l;
+    }
+    return bits;
+}
+
+unsigned long StoreGameLanguages(const StoreGame *game)
+{
+    unsigned long bits = 0;
+    for (int v = 0; game != NULL && v < game->versionCount; ++v)
+        bits |= StoreReleaseLanguages(StoreReleaseOf(game, v));
+    return bits;
+}
+
 // ---------------------------------------------------------------------------
 
 int StoreRowCount()

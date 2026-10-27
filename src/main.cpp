@@ -64,6 +64,7 @@ extern "C" NTSTATUS XexGetModuleHandle(PSZ moduleName, PHANDLE outHandle);
 #define UPDATE_CHECK_KEY "check-updates: " // "off" stops the check at start
 #define SOUNDS_KEY "nav-sounds: "         // "off" silences the interface
 #define DISC_SPEED_KEY "disc-speed: "       // 1 to 4, DiscWorker's spindle speed for installs
+#define STORE_FILTER_KEY "store-filter: "   // the Store letters' filters and order: "sort=a-z;regions=usa,eur;..."
 #define CREDENTIALS_FILE "game:\\ArchiveOrgKeys.txt"
 #define CONTENT_BASE_PATH_DEFAULT "Hdd1:\\Content\\0000000000000000"
 #define GAMES_PATH_DEFAULT CONTENT_BASE_PATH_DEFAULT // where the dashboard itself keeps installed games
@@ -552,66 +553,6 @@ static int CompareGamesByName(const void *a, const void *b)
 // ---------------------------------------------------------------------------
 // "Already installed" detection for the game list
 // ---------------------------------------------------------------------------
-
-// True if this title has at least one file under the given content-type
-// folder, i.e. {contentBase}\{TitleID}\{contentType}\*.
-//
-// Deliberately a shallow, purely LOCAL check. Answering "is this exact pack
-// installed?" would mean walking every candidate archive's RAR headers over
-// the network just to draw a marker - dozens of requests before the list could
-// even be shown. A folder test costs one directory open per title and answers
-// the question people actually have at that screen: have I already got this,
-// or not.
-static bool HasInstalledContent(const char *contentBasePath, unsigned long titleId,
-                                unsigned long contentType)
-{
-    char pattern[512];
-    _snprintf(pattern, sizeof(pattern), "%s\\%08lX\\%08lX\\*",
-              contentBasePath, titleId, contentType);
-    pattern[sizeof(pattern) - 1] = '\0';
-
-    WIN32_FIND_DATAA findData;
-    HANDLE hFind = FindFirstFileA(pattern, &findData);
-    if (hFind == INVALID_HANDLE_VALUE)
-        return false;
-
-    bool foundFile = false;
-
-    do
-    {
-        if (findData.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY)
-            continue; // skips "." and ".." along with any stray subfolder
-
-        foundFile = true;
-        break;
-    } while (FindNextFileA(hFind, &findData));
-
-    FindClose(hFind);
-    return foundFile;
-}
-
-// Recomputed rather than updated incrementally, and cheap enough to just redo
-// after every download - two directory opens per title, no network.
-//
-// KNOWN GAP on the title-update flag: this only sees updates that installed
-// into {TitleID}\000B0000\. Uppercase "TU_..." updates go to {device}\Cache\
-// instead, where the filenames are not reliably attributable to a title, so a
-// game whose update landed in Cache shows no marker. The flag means "an update
-// is definitely installed", never "no update exists" - which is the safe way
-// round for a hint whose only job is to stop you re-downloading.
-static void RefreshInstalledFlags(const char *contentBasePath, const InstalledGame *games,
-                                  int gameCount, bool *outDlcFlags, bool *outUpdateFlags)
-{
-    for (int i = 0; i < gameCount; ++i)
-    {
-        if (outDlcFlags != NULL)
-            outDlcFlags[i] = HasInstalledContent(contentBasePath, games[i].titleId,
-                                                 STFS_CONTENT_MARKETPLACE);
-        if (outUpdateFlags != NULL)
-            outUpdateFlags[i] = HasInstalledContent(contentBasePath, games[i].titleId,
-                                                    STFS_CONTENT_TITLE_UPDATE);
-    }
-}
 
 // ---------------------------------------------------------------------------
 // Archive.org auth - IAS3 access key + secret key (archive.org's official,
@@ -1105,15 +1046,11 @@ static void PollPickerSearch(Picker &picker)
 // The installed library
 // ---------------------------------------------------------------------------
 
-// The scanned library and its per-title markers, kept together because they
-// are only meaningful together: the marker arrays index into games, and all
-// three are replaced whenever the games folder changes.
+// The scanned library, replaced whenever the games folder changes.
 struct Library
 {
     InstalledGame *games; // MAX_INSTALLED_GAMES entries, allocated once
     int count;
-    bool dlcInstalled[MAX_INSTALLED_GAMES];
-    bool updateInstalled[MAX_INSTALLED_GAMES];
 
     // How many games each folder added at the scan: the install folder's,
     // then each more folder's, as g_moreGamesPaths lists them.
@@ -1260,8 +1197,7 @@ static void SaveLibrary(Library &lib, const char *gamesPath)
 {
     char folders[2048];
     LibraryFoldersKey(gamesPath, folders, sizeof(folders));
-    SaveLibraryCache(folders, lib.games, lib.count, lib.dlcInstalled, lib.updateInstalled,
-                     lib.folderFound, 1 + g_moreGamesPathCount);
+    SaveLibraryCache(folders, lib.games, lib.count, lib.folderFound, 1 + g_moreGamesPathCount);
     lib.cacheDirty = false;
 }
 
@@ -2094,7 +2030,6 @@ struct Shell
     // action, or when a download finishes - rather than on every frame.
     bool stale;
     bool settingsStale; // only the Settings page needs building again
-    bool flagsFresh;    // the DLC/update flags were just read - startup reads them behind its loading screen
     bool keysSaved;
     StorageStatus storage;
 
@@ -2128,6 +2063,13 @@ struct Shell
     int storeSelected;
     int storeLetterScroll;
 
+    // The Filter and sort panel, open over a letter of disc games: its
+    // focused row (FILTER_ROW_*), and whether a filter changed - saved to
+    // settings.txt when it closes.
+    bool storeFilterOpen;
+    int storeFilterFocus;
+    bool storeFilterChanged;
+
     // A game's page, open over the letter or the front page - or over the
     // library, with libraryInGame. The page is the same either way.
     bool storeInGame;
@@ -2138,14 +2080,17 @@ struct Shell
     bool storeShotsAsked;   // its screenshots, once its details came
 };
 
-// One letter's games and their tiles - as many as the biggest letter has.
-#define MAX_STORE_GAMES (STORE_MAX_LETTER_GAMES > ARCADE_MAX_LETTER_GAMES ? STORE_MAX_LETTER_GAMES \
-                                                                       : ARCADE_MAX_LETTER_GAMES)
+// One letter's games and their tiles - or the All tile's, every game of a
+// list: as many as the biggest list has.
+#define MAX_OF(a, b) ((a) > (b) ? (a) : (b))
+#define MAX_STORE_GAMES MAX_OF(MAX_OF(STORE_GAME_COUNT, XBOX_GAME_COUNT), MAX_OF(XBLA_GAME_COUNT, XBLIG_GAME_COUNT))
+// A search shows the best this many - as many as the biggest letter has.
+#define MAX_SEARCH_HITS MAX_OF(STORE_MAX_LETTER_GAMES, ARCADE_MAX_LETTER_GAMES)
 static StoreGame g_storeGames[MAX_STORE_GAMES];
 static const XblaGame *g_arcadeGames[MAX_STORE_GAMES];
 static StoreTileView g_storeTiles[MAX_STORE_GAMES];
-static StoreHit g_searchHits[MAX_STORE_GAMES];
-static int g_searchTotal = 0; // every match, of which the first MAX_STORE_GAMES are shown
+static StoreHit g_searchHits[MAX_SEARCH_HITS];
+static int g_searchTotal = 0; // every match, of which the first MAX_SEARCH_HITS are shown
 // How many games each letter of a section has, counted when its page first
 // opens - a letter with none is drawn faded. By SECTION_*.
 static int g_sectionLetterCounts[SECTION_COUNT][STORE_LETTER_COUNT];
@@ -2238,7 +2183,17 @@ static const char *const kStoreButtonsSoon[STORE_BUTTON_COUNT] = {
     "Original Xbox games, A to Z",
 };
 
-static const char kStoreLetters[] = "#ABCDEFGHIJKLMNOPQRSTUVWXYZ";
+static const char kStoreLetters[] = "*#ABCDEFGHIJKLMNOPQRSTUVWXYZ"; // STORE_LETTER_ALL first
+
+// A to Z tile's hint: "Browse B", or "Browse all".
+static void BrowseHint(WCHAR *out, int outSize, char letter)
+{
+    if (letter == STORE_LETTER_ALL)
+        _snwprintf(out, outSize, L"Browse all");
+    else
+        _snwprintf(out, outSize, L"Browse %c", (WCHAR)letter);
+    out[outSize - 1] = L'\0';
+}
 
 // The rows under the A to Z - Popular, Top rated, a genre each - as
 // StoreRows.h has them, looked up once.
@@ -2261,7 +2216,7 @@ static void BuildStoreRows()
             StoreTileView &tile = g_rowTiles[g_rowCount][i];
             tile.titleId = g_rowGames[g_rowCount][i].titleId;
             tile.name = g_rowGames[g_rowCount][i].name;
-            tile.regions = 0;
+            tile.letter = g_rowGames[g_rowCount][i].letter;
             tile.indie = false;
         }
         g_rowCounts[g_rowCount++] = n;
@@ -2505,6 +2460,383 @@ static const char *SectionName(int section)
     }
 }
 
+// The Store letters' filters and order, chosen on the Filter and sort panel -
+// Y on a letter of disc games. The regions, language and order are someone's
+// preferences, kept in settings.txt; genre, rating and Hide installed are
+// what they're looking for now, and are cleared when they leave the Store.
+// Arcade and indie games have nothing to filter by, so their letters show
+// everything, A to Z - and the Original Xbox's have no genres or ratings.
+enum StoreSort
+{
+    STORE_SORT_AZ,
+    STORE_SORT_POPULAR, // by how many people rated it on Xbox Live
+    STORE_SORT_RATED,   // by its stars
+    STORE_SORT_COUNT
+};
+static const char *const kSortKeys[STORE_SORT_COUNT] = { "a-z", "popular", "rated" };
+static const char *const kSortNames[STORE_SORT_COUNT] = { "A to Z", "Most popular", "Top rated" };
+
+// The region checkboxes; none ticked is every region. A region-free (World)
+// game is under every one.
+static const struct { const char *key; const char *name; unsigned short mask; } kFilterRegions[] =
+{
+    { "usa",  "USA",    STORE_REGIONS_USA },
+    { "eur",  "Europe", STORE_REGIONS_EUR },
+    { "jpn",  "Japan",  STORE_REGIONS_JPN },
+    { "asia", "Asia",   STORE_REGIONS_ASIA },
+};
+#define FILTER_REGION_COUNT (int)(sizeof(kFilterRegions) / sizeof(kFilterRegions[0]))
+
+// Genre's values: Any, the main genres, then the two tags with rows of their
+// own on the front page.
+#define FILTER_GENRE_FAMILY (STORE_GENRE_COUNT + 1)
+#define FILTER_GENRE_KINECT (STORE_GENRE_COUNT + 2)
+#define FILTER_GENRE_VALUES (STORE_GENRE_COUNT + 3)
+
+static const char *const kRatingNames[] = { "Any", "3 stars and up", "4 stars and up" };
+#define FILTER_RATING_VALUES 3
+
+// Top rated puts games fewer people rated than this after the rest - five
+// stars from three people isn't top rated.
+#define TOP_RATED_MIN_RATINGS 100
+
+struct StoreFilter
+{
+    int sort;              // STORE_SORT_*
+    unsigned int regions;  // bits of kFilterRegions; 0 for every region
+    int genre;             // 0 for any; a main genre, 1 to STORE_GENRE_COUNT; or FILTER_GENRE_FAMILY/KINECT
+    int language;          // 0 for any, else 1 + StoreLanguageName's
+    int rating;            // into kRatingNames: at least 2 + rating stars
+    bool hideInstalled;
+};
+static StoreFilter g_filter;
+static bool g_filterRead = false;
+
+// main's library, for Hide installed.
+static const Library *g_storeLib = NULL;
+
+static const char *GenreValueName(int genre)
+{
+    if (genre == FILTER_GENRE_FAMILY)
+        return "For the family";
+    if (genre == FILTER_GENRE_KINECT)
+        return "Kinect";
+    return genre > 0 ? StoreGenreName(genre) : "Any";
+}
+
+// "name=" in settings.txt's line, up to the next ';', into out.
+static void FilterPart(const char *line, const char *name, char *out, size_t outSize)
+{
+    out[0] = '\0';
+    const size_t nameLen = strlen(name);
+    for (const char *at = line; at != NULL && *at != '\0'; at = strchr(at, ';'), at = at ? at + 1 : NULL)
+    {
+        if (strncmp(at, name, nameLen) == 0 && at[nameLen] == '=')
+        {
+            const char *value = at + nameLen + 1;
+            size_t len = strcspn(value, ";");
+            if (len > outSize - 1)
+                len = outSize - 1;
+            memcpy(out, value, len);
+            out[len] = '\0';
+            return;
+        }
+    }
+}
+
+static const StoreFilter &Filter()
+{
+    if (g_filterRead)
+        return g_filter;
+    g_filterRead = true;
+    memset(&g_filter, 0, sizeof(g_filter));
+
+    char line[256], part[64];
+    GetSettingsPath(STORE_FILTER_KEY, "sort=a-z", line, sizeof(line));
+
+    FilterPart(line, "sort", part, sizeof(part));
+    for (int i = 0; i < STORE_SORT_COUNT; ++i)
+    {
+        if (_stricmp(part, kSortKeys[i]) == 0)
+            g_filter.sort = i;
+    }
+    FilterPart(line, "regions", part, sizeof(part));
+    for (int i = 0; i < FILTER_REGION_COUNT; ++i)
+    {
+        if (strstr(part, kFilterRegions[i].key) != NULL)
+            g_filter.regions |= 1u << i;
+    }
+    FilterPart(line, "language", part, sizeof(part));
+    for (int l = 0; l < STORE_LANGUAGE_COUNT && part[0] != '\0'; ++l)
+    {
+        if (_stricmp(part, StoreLanguageName(l)) == 0)
+            g_filter.language = 1 + l;
+    }
+    return g_filter;
+}
+
+static void SaveFilter()
+{
+    const StoreFilter &f = Filter();
+    char regions[32] = "";
+    for (int i = 0; i < FILTER_REGION_COUNT; ++i)
+    {
+        if (f.regions & (1u << i))
+            AppendText(regions, sizeof(regions), regions[0] != '\0' ? "," : "", kFilterRegions[i].key);
+    }
+    char line[256];
+    _snprintf(line, sizeof(line), "sort=%s;regions=%s;language=%s", kSortKeys[f.sort], regions,
+              f.language > 0 ? StoreLanguageName(f.language - 1) : "");
+    line[sizeof(line) - 1] = '\0';
+    if (!SetSettingsValue(STORE_FILTER_KEY, line))
+        ShowMessageUI("Not saved", "settings.txt could not be written.", NULL);
+}
+
+// Whether anything but the order is chosen.
+static bool FilterNarrows(const StoreFilter &f)
+{
+    return f.regions != 0 || f.genre != 0 || f.language != 0 || f.rating != 0 || f.hideInstalled;
+}
+
+// Clears genre, rating and Hide installed. True if any was set.
+static bool ClearSessionFilters()
+{
+    Filter(); // read before it's changed
+    if (g_filter.genre == 0 && g_filter.rating == 0 && !g_filter.hideInstalled)
+        return false;
+    g_filter.genre = 0;
+    g_filter.rating = 0;
+    g_filter.hideInstalled = false;
+    return true;
+}
+
+// Whether a section's letters can be sorted and filtered by genre and
+// rating: not the Original Xbox's, which the catalog has none of.
+static bool SectionHasInfo(int section)
+{
+    return section != SECTION_XBOX;
+}
+
+// The filters as they apply to a section's letters: section as
+// OpenStoreLetter's.
+static StoreFilter FilterFor(int section)
+{
+    StoreFilter f = Filter();
+    if (!SectionHasInfo(section))
+    {
+        f.sort = STORE_SORT_AZ;
+        f.genre = 0;
+        f.rating = 0;
+    }
+    return f;
+}
+
+// The regions ticked, as STORE_REGION_* bits, World included; 0 for every
+// region.
+static unsigned short FilterRegionMask(const StoreFilter &f)
+{
+    unsigned short mask = 0;
+    for (int i = 0; i < FILTER_REGION_COUNT; ++i)
+    {
+        if (f.regions & (1u << i))
+            mask |= kFilterRegions[i].mask;
+    }
+    return mask != 0 ? (unsigned short)(mask | STORE_REGION_WORLD) : 0;
+}
+
+// Installed: in the library by its title ID, or any of its discs installed
+// from the Store.
+static bool StoreGameInstalled(const StoreGame &game)
+{
+    for (int i = 0; g_storeLib != NULL && game.titleId != 0 && i < g_storeLib->count; ++i)
+    {
+        if (g_storeLib->games[i].titleId == game.titleId)
+            return true;
+    }
+    for (int v = 0; v < game.versionCount; ++v)
+    {
+        const StoreRelease *release = StoreReleaseOf(&game, v);
+        for (int d = 0; release != NULL && d < release->discCount; ++d)
+        {
+            const StoreDisc *disc = StoreReleaseDisc(release, d);
+            if (disc != NULL && IsGameZipInstalled(disc->zip))
+                return true;
+        }
+    }
+    return false;
+}
+
+static bool FilterLets(const StoreFilter &f, const StoreGame &game, const StoreGameInfo *info)
+{
+    const unsigned short regions = FilterRegionMask(f);
+    if (regions != 0 && !(game.regions & regions))
+        return false;
+    if (f.genre != 0)
+    {
+        if (info == NULL)
+            return false;
+        if (f.genre == FILTER_GENRE_FAMILY ? !(info->tags & STORE_TAG_FAMILY)
+            : f.genre == FILTER_GENRE_KINECT ? !(info->tags & STORE_TAG_KINECT)
+            : info->genre != f.genre)
+            return false;
+    }
+    if (f.language != 0 && !(StoreGameLanguages(&game) & (1UL << (f.language - 1))))
+        return false;
+    if (f.rating != 0 && (info == NULL || info->stars < (f.rating + 2) * 10))
+        return false;
+    if (f.hideInstalled && StoreGameInstalled(game))
+        return false;
+    return true;
+}
+
+// Whether a goes before b in the sort - both have info or not as given; a
+// game the catalog hasn't got goes last.
+static bool SortsBefore(int sort, const StoreGameInfo &a, bool aKnown, const StoreGameInfo &b, bool bKnown)
+{
+    if (aKnown != bKnown)
+        return aKnown;
+    if (!aKnown)
+        return false;
+    if (sort == STORE_SORT_RATED)
+    {
+        const bool aMany = a.ratings >= TOP_RATED_MIN_RATINGS, bMany = b.ratings >= TOP_RATED_MIN_RATINGS;
+        if (aMany != bMany)
+            return aMany;
+        if (a.stars != b.stars)
+            return a.stars > b.stars;
+    }
+    return a.ratings > b.ratings;
+}
+
+// What CompareForSort sorts by: qsort takes no context of its own.
+static const StoreGameInfo *g_sortInfo;
+static const bool *g_sortKnown;
+static int g_sortBy;
+
+// For qsort, of positions into g_sortInfo: by SortsBefore, then position.
+static int CompareForSort(const void *a, const void *b)
+{
+    const int i = *(const int *)a, j = *(const int *)b;
+    if (SortsBefore(g_sortBy, g_sortInfo[i], g_sortKnown[i], g_sortInfo[j], g_sortKnown[j]))
+        return -1;
+    if (SortsBefore(g_sortBy, g_sortInfo[j], g_sortKnown[j], g_sortInfo[i], g_sortKnown[i]))
+        return 1;
+    return i - j;
+}
+
+// A disc letter's games that the filters let through, in the chosen order,
+// into g_storeGames - the front page's, or the Original Xbox's with section
+// SECTION_XBOX.
+static int FilteredGamesForLetter(char letter, int section)
+{
+    const int all = (section == SECTION_XBOX) ? XboxGamesForLetter(letter, g_storeGames, MAX_STORE_GAMES)
+                                              : StoreGamesForLetter(letter, g_storeGames, MAX_STORE_GAMES);
+    const StoreFilter f = FilterFor(section);
+    if (!FilterNarrows(f) && f.sort == STORE_SORT_AZ)
+        return all;
+
+    static StoreGameInfo info[MAX_STORE_GAMES];
+    static bool known[MAX_STORE_GAMES];
+    static int order[MAX_STORE_GAMES];
+    static StoreGame sorted[MAX_STORE_GAMES];
+    int count = 0;
+    for (int i = 0; i < all; ++i)
+    {
+        StoreGameInfo gi;
+        const bool has = StoreGameInfoOf(g_storeGames[i].titleId, &gi);
+        if (!FilterLets(f, g_storeGames[i], has ? &gi : NULL))
+            continue;
+        g_storeGames[count] = g_storeGames[i];
+        info[count] = gi;
+        known[count] = has;
+        count++;
+    }
+
+    if (f.sort == STORE_SORT_AZ)
+        return count;
+
+    // Sorted by position, then put back in that order: equals keep their
+    // place, A to Z, which qsort alone doesn't promise.
+    for (int i = 0; i < count; ++i)
+        order[i] = i;
+    g_sortInfo = info;
+    g_sortKnown = known;
+    g_sortBy = f.sort;
+    qsort(order, count, sizeof(order[0]), CompareForSort);
+    for (int i = 0; i < count; ++i)
+        sorted[i] = g_storeGames[order[i]];
+    memcpy(g_storeGames, sorted, count * sizeof(sorted[0]));
+    return count;
+}
+
+// What's chosen for a section's letters - "USA, Europe, Shooters, Top
+// rated"; NULL for nothing but A to Z. With full false, for the header: two
+// at most, then how many more.
+static const char *FilterSummary(int section, bool full)
+{
+    const StoreFilter f = FilterFor(section);
+    const char *parts[FILTER_REGION_COUNT + 5];
+    int n = 0;
+    for (int i = 0; i < FILTER_REGION_COUNT; ++i)
+    {
+        if (f.regions & (1u << i))
+            parts[n++] = kFilterRegions[i].name;
+    }
+    if (f.genre != 0)
+        parts[n++] = GenreValueName(f.genre);
+    if (f.language != 0)
+        parts[n++] = StoreLanguageName(f.language - 1);
+    if (f.rating != 0)
+        parts[n++] = kRatingNames[f.rating];
+    if (f.hideInstalled)
+        parts[n++] = "Not installed";
+    if (f.sort != STORE_SORT_AZ)
+        parts[n++] = kSortNames[f.sort];
+    if (n == 0)
+        return NULL;
+
+    static char summaries[2][160];
+    char *summary = summaries[full ? 1 : 0];
+    const size_t summarySize = sizeof(summaries[0]);
+    const int shown = full ? n : 2;
+    summary[0] = '\0';
+    for (int i = 0; i < n && i < shown; ++i)
+        AppendText(summary, summarySize, ", ", parts[i]);
+    if (n > shown)
+    {
+        char more[16];
+        _snprintf(more, sizeof(more), " +%d", n - 2);
+        more[sizeof(more) - 1] = '\0';
+        AppendText(summary, summarySize, "", more);
+    }
+    return summary;
+}
+
+// Of a game's versions, the one that best fits the filters: in a region
+// ticked, and in the language chosen. The first, if none fits better - the
+// versions are USA and World first already.
+static int BestVersionForFilter(const StoreGame &game)
+{
+    const StoreFilter &f = Filter();
+    const unsigned short regions = FilterRegionMask(f);
+    int best = 0, bestScore = 0;
+    for (int v = 0; (regions != 0 || f.language != 0) && v < game.versionCount; ++v)
+    {
+        const StoreRelease *release = StoreReleaseOf(&game, v);
+        int score = 0;
+        if (regions != 0 && (StoreReleaseRegions(release) & regions))
+            score++;
+        if (f.language != 0 && (StoreReleaseLanguages(release) & (1UL << (f.language - 1))))
+            score++;
+        if (score > bestScore)
+        {
+            best = v;
+            bestScore = score;
+        }
+    }
+    return best;
+}
+
 // A section's games under one letter, counted - for its A-Z page's faded
 // letters.
 static int SectionGamesForLetter(int section, char letter)
@@ -2531,19 +2863,18 @@ static void OpenStoreLetter(Shell &shell, char letter, int section)
         {
             g_storeTiles[i].titleId = indie ? 0 : g_arcadeGames[i]->titleId;
             g_storeTiles[i].name = g_arcadeGames[i]->name;
-            g_storeTiles[i].regions = 0; // the RARs don't say
+            g_storeTiles[i].letter = g_arcadeGames[i]->letter;
             g_storeTiles[i].indie = indie;
         }
     }
     else
     {
-        shell.storeGameCount = (section == SECTION_XBOX) ? XboxGamesForLetter(letter, g_storeGames, MAX_STORE_GAMES)
-                                                         : StoreGamesForLetter(letter, g_storeGames, MAX_STORE_GAMES);
+        shell.storeGameCount = FilteredGamesForLetter(letter, section);
         for (int i = 0; i < shell.storeGameCount; ++i)
         {
             g_storeTiles[i].titleId = g_storeGames[i].titleId;
             g_storeTiles[i].name = g_storeGames[i].name;
-            g_storeTiles[i].regions = g_storeGames[i].regions;
+            g_storeTiles[i].letter = g_storeGames[i].letter;
             g_storeTiles[i].indie = false;
         }
     }
@@ -2554,6 +2885,187 @@ static void OpenStoreLetter(Shell &shell, char letter, int section)
     shell.storeSelected = 0;
     shell.storeLetterScroll = 0;
     shell.storeInLetter = true;
+    shell.storeFilterOpen = false;
+}
+
+// The open letter's games again, after the filters changed - on the same
+// game if it's still there.
+static void RefilterLetter(Shell &shell)
+{
+    const char *was = (shell.storeGameCount > 0) ? g_storeTiles[shell.storeSelected].name : NULL;
+    const bool panelOpen = shell.storeFilterOpen;
+    OpenStoreLetter(shell, shell.storeLetter, shell.storeLetterSection);
+    shell.storeFilterOpen = panelOpen;
+    for (int i = 0; was != NULL && i < shell.storeGameCount; ++i)
+    {
+        if (g_storeTiles[i].name == was)
+        {
+            shell.storeSelected = i;
+            break;
+        }
+    }
+}
+
+// Whether the filters left the open letter with nothing - X resets them.
+static bool LetterFiltersEmptied(const Shell &shell)
+{
+    return shell.storeGameCount == 0 && !shell.storeSearch && !shell.storeLetterArcade &&
+           FilterNarrows(FilterFor(shell.storeLetterSection));
+}
+
+// The Filter and sort panel's rows.
+enum
+{
+    FILTER_ROW_SORT,
+    FILTER_ROW_REGIONS, // a checkbox a region, FILTER_REGION_COUNT of them
+    FILTER_ROW_GENRE = FILTER_ROW_REGIONS + FILTER_REGION_COUNT,
+    FILTER_ROW_LANGUAGE,
+    FILTER_ROW_RATING,
+    FILTER_ROW_HIDE_INSTALLED,
+    FILTER_ROW_RESET,
+    FILTER_ROW_COUNT
+};
+
+static void FilterValueRow(StoreFilterRowView &row, const char *label, const char *value, int index, int count)
+{
+    row.kind = STORE_FILTER_VALUE;
+    row.label = label;
+    row.value = value;
+    row.canDown = index > 0;
+    row.canUp = index + 1 < count;
+}
+
+static void FilterCheckRow(StoreFilterRowView &row, const char *label, bool on)
+{
+    row.kind = STORE_FILTER_CHECK;
+    row.label = label;
+    row.on = on;
+}
+
+// Whether a row does nothing on this letter: sorting, genre and rating on
+// the Original Xbox's.
+static bool FilterRowDisabled(const Shell &shell, int row)
+{
+    return !SectionHasInfo(shell.storeLetterSection) &&
+           (row == FILTER_ROW_SORT || row == FILTER_ROW_GENRE || row == FILTER_ROW_RATING);
+}
+
+static const StoreFilterView *MakeFilterPanel(const Shell &shell)
+{
+    static StoreFilterRowView rows[FILTER_ROW_COUNT];
+    static StoreFilterView panel;
+    const StoreFilter f = FilterFor(shell.storeLetterSection);
+    memset(rows, 0, sizeof(rows));
+
+    FilterValueRow(rows[FILTER_ROW_SORT], "Sort by", kSortNames[f.sort], f.sort, STORE_SORT_COUNT);
+    for (int i = 0; i < FILTER_REGION_COUNT; ++i)
+        FilterCheckRow(rows[FILTER_ROW_REGIONS + i], kFilterRegions[i].name, (f.regions & (1u << i)) != 0);
+    rows[FILTER_ROW_REGIONS].heading = "Regions";
+    FilterValueRow(rows[FILTER_ROW_GENRE], "Genre", GenreValueName(f.genre), f.genre, FILTER_GENRE_VALUES);
+    rows[FILTER_ROW_GENRE].heading = "Show only";
+    FilterValueRow(rows[FILTER_ROW_LANGUAGE], "Language", f.language > 0 ? StoreLanguageName(f.language - 1) : "Any",
+                   f.language, 1 + STORE_LANGUAGE_COUNT);
+    FilterValueRow(rows[FILTER_ROW_RATING], "Rating", kRatingNames[f.rating], f.rating, FILTER_RATING_VALUES);
+    FilterCheckRow(rows[FILTER_ROW_HIDE_INSTALLED], "Hide installed games", f.hideInstalled);
+    rows[FILTER_ROW_RESET].kind = STORE_FILTER_BUTTON;
+    rows[FILTER_ROW_RESET].label = "Reset filters";
+    for (int r = 0; r < FILTER_ROW_COUNT; ++r)
+    {
+        if (!FilterRowDisabled(shell, r))
+            continue;
+        rows[r].disabled = true;
+        rows[r].canDown = rows[r].canUp = false;
+        if (r != FILTER_ROW_SORT)
+            rows[r].value = "Not for Original Xbox";
+    }
+
+    panel.rows = rows;
+    panel.count = FILTER_ROW_COUNT;
+    panel.focus = shell.storeFilterFocus;
+    return &panel;
+}
+
+// A value stepped by step: round from one end to the other with wrap (A),
+// else stopping at the ends. False if it didn't move.
+static bool StepFilterValue(int &value, int count, int step, bool wrap)
+{
+    int next = value + step;
+    if (next < 0 || next >= count)
+    {
+        if (!wrap)
+            return false;
+        next = (next + count) % count;
+    }
+    value = next;
+    return true;
+}
+
+// The D-pad and A on the panel. True if a filter changed.
+static bool StepFilterPanel(const UiInput &input, Shell &shell)
+{
+    int &focus = shell.storeFilterFocus;
+    if (input.nav == XINPUT_GAMEPAD_DPAD_UP || input.nav == XINPUT_GAMEPAD_DPAD_DOWN)
+    {
+        // To the next row that does something here.
+        const int step = (input.nav == XINPUT_GAMEPAD_DPAD_UP) ? -1 : 1;
+        for (int r = focus + step; r >= 0 && r < FILTER_ROW_COUNT; r += step)
+        {
+            if (!FilterRowDisabled(shell, r))
+            {
+                focus = r;
+                break;
+            }
+        }
+        return false;
+    }
+    if (FilterRowDisabled(shell, focus))
+        return false;
+
+    int step = 0;
+    const bool a = (input.pressed & XINPUT_GAMEPAD_A) != 0;
+    if (input.nav == XINPUT_GAMEPAD_DPAD_LEFT)
+        step = -1;
+    else if (input.nav == XINPUT_GAMEPAD_DPAD_RIGHT || a)
+        step = 1;
+    if (step == 0)
+        return false;
+
+    Filter(); // read before it's changed
+    StoreFilter &f = g_filter;
+    switch (focus)
+    {
+    case FILTER_ROW_SORT:
+        return StepFilterValue(f.sort, STORE_SORT_COUNT, step, a);
+    case FILTER_ROW_GENRE:
+        return StepFilterValue(f.genre, FILTER_GENRE_VALUES, step, a);
+    case FILTER_ROW_LANGUAGE:
+        return StepFilterValue(f.language, 1 + STORE_LANGUAGE_COUNT, step, a);
+    case FILTER_ROW_RATING:
+        return StepFilterValue(f.rating, FILTER_RATING_VALUES, step, a);
+    case FILTER_ROW_HIDE_INSTALLED:
+        if (!a)
+            return false;
+        f.hideInstalled = !f.hideInstalled;
+        return true;
+    case FILTER_ROW_RESET:
+        if (!a || (!FilterNarrows(f) && f.sort == STORE_SORT_AZ))
+            return false;
+        memset(&f, 0, sizeof(f));
+        return true;
+    default:
+        if (!a)
+            return false;
+        f.regions ^= 1u << (focus - FILTER_ROW_REGIONS);
+        return true;
+    }
+}
+
+// The filters, for FocusSignature: a change is a press that did something.
+static int FilterSignature()
+{
+    const StoreFilter &f = Filter();
+    return f.sort | (f.regions << 2) | (f.genre << 6) | (f.language << 11) | (f.rating << 16) |
+           ((f.hideInstalled ? 1 : 0) << 18);
 }
 
 // Search on the front page: the keyboard, then every list's games that
@@ -2571,7 +3083,7 @@ static bool OpenStoreSearch(Shell &shell)
     if (typed.empty())
         return true;
 
-    const int shown = SearchStore(typed.c_str(), g_searchHits, MAX_STORE_GAMES, &g_searchTotal);
+    const int shown = SearchStore(typed.c_str(), g_searchHits, MAX_SEARCH_HITS, &g_searchTotal);
     dprintf("[store] search \"%s\": %d match(es)\n", typed.c_str(), g_searchTotal);
     _snprintf(shell.storeQuery, sizeof(shell.storeQuery), "%s", typed.c_str());
     shell.storeQuery[sizeof(shell.storeQuery) - 1] = '\0';
@@ -2589,7 +3101,7 @@ static bool OpenStoreSearch(Shell &shell)
         {
             tile.titleId = hit.game->titleId;
             tile.name = hit.game->name;
-            tile.regions = hit.game->regions;
+            tile.letter = hit.game->letter;
             tile.indie = false;
         }
         else
@@ -2597,7 +3109,7 @@ static bool OpenStoreSearch(Shell &shell)
             tile.indie = (hit.kind == STORE_HIT_XBLIG);
             tile.titleId = tile.indie ? 0 : hit.arcade->titleId;
             tile.name = hit.arcade->name;
-            tile.regions = 0;
+            tile.letter = hit.arcade->letter;
         }
     }
     shell.storeGameCount = shown;
@@ -2608,6 +3120,13 @@ static bool OpenStoreSearch(Shell &shell)
     shell.storeLetterScroll = 0;
     shell.storeInLetter = true;
     return true;
+}
+
+// Whether LT and RT jump a letter: on All games, in A to Z order.
+static bool LetterJumps(const Shell &shell)
+{
+    return shell.storeLetter == STORE_LETTER_ALL && !shell.storeSearch && shell.storeGameCount > 0 &&
+           (shell.storeLetterArcade || FilterFor(shell.storeLetterSection).sort == STORE_SORT_AZ);
 }
 
 static StoreLetterView MakeStoreLetterView(const Shell &shell)
@@ -2630,6 +3149,11 @@ static StoreLetterView MakeStoreLetterView(const Shell &shell)
         view.title = title;
         view.section = section;
     }
+    const bool filtered = !shell.storeSearch && !shell.storeLetterArcade;
+    view.filter = filtered ? FilterSummary(shell.storeLetterSection, false) : NULL;
+    view.filterAll = filtered ? FilterSummary(shell.storeLetterSection, true) : NULL;
+    view.panel = shell.storeFilterOpen ? MakeFilterPanel(shell) : NULL;
+    view.letterJumps = LetterJumps(shell);
     view.tiles = g_storeTiles;
     view.count = shell.storeGameCount;
     view.selected = shell.storeSelected;
@@ -2638,9 +3162,46 @@ static StoreLetterView MakeStoreLetterView(const Shell &shell)
     return view;
 }
 
-// The D-pad and shoulders on a letter's grid, as on the library's.
+// LT and RT: to the first game of the letter before or after the focused
+// one's, its row at the top. LT on a letter's later games goes to its first.
+static void JumpLetter(Shell &shell, int step)
+{
+    const int count = shell.storeGameCount;
+    int &sel = shell.storeSelected;
+    const char at = g_storeTiles[sel].letter;
+    int i = sel;
+    if (step > 0)
+    {
+        while (i < count && g_storeTiles[i].letter == at)
+            i++;
+        if (i >= count)
+            return;
+    }
+    else
+    {
+        while (i > 0 && g_storeTiles[i - 1].letter == at)
+            i--;
+        if (i == sel && i > 0)
+        {
+            const char before = g_storeTiles[i - 1].letter;
+            while (i > 0 && g_storeTiles[i - 1].letter == before)
+                i--;
+        }
+    }
+    sel = i;
+    shell.storeLetterScroll = sel / LibraryGridColumns();
+}
+
+// The D-pad and shoulders on a letter's grid, as on the library's - and on
+// All games, the triggers.
 static void StepStoreLetter(const UiInput &input, Shell &shell)
 {
+    if (LetterJumps(shell) && input.triggers != 0)
+    {
+        JumpLetter(shell, (input.triggers & UI_TRIGGER_RIGHT) ? 1 : -1);
+        return;
+    }
+
     const int cols = LibraryGridColumns();
     const int count = shell.storeGameCount;
     int &sel = shell.storeSelected;
@@ -2700,8 +3261,7 @@ static void PrefetchLetterCovers(char letter, int section)
     }
     else
     {
-        const int n = (section == SECTION_XBOX) ? XboxGamesForLetter(letter, g_storeGames, MAX_STORE_GAMES)
-                                                : StoreGamesForLetter(letter, g_storeGames, MAX_STORE_GAMES);
+        const int n = FilteredGamesForLetter(letter, section);
         for (int i = 0; i < n && idCount < 24; ++i)
         {
             if (g_storeGames[i].titleId != 0)
@@ -2811,7 +3371,7 @@ static void OpenStoreGame(Shell &shell, const StoreGame &game)
     else
         shell.storeInGame = true;
     shell.storeGameFocus = STORE_GAME_FOCUS_BUTTONS;
-    shell.storeVersionChosen = 0;
+    shell.storeVersionChosen = BestVersionForFilter(g_storeGame);
     shell.storeVersionScroll = 0;
     shell.storeShotsAsked = false;
 
@@ -3724,6 +4284,7 @@ static unsigned long FocusSignature(const Shell &shell)
         shell.picker.kind, shell.picker.selected, shell.queueSelected,
         shell.storeFocus, shell.storeInSection, shell.storeSection, shell.sectionFocus[shell.storeSection],
         shell.storeInLetter, shell.storeSelected, shell.storeInGame, shell.storeGameFocus, shell.storeVersionChosen,
+        shell.storeFilterOpen, shell.storeFilterFocus, FilterSignature(),
     };
     unsigned long hash = 2166136261UL; // FNV-1a
     for (size_t i = 0; i < sizeof(parts) / sizeof(parts[0]); ++i)
@@ -3736,26 +4297,11 @@ static unsigned long FocusSignature(const Shell &shell)
 
 static void RefreshShell(Shell &shell, Library &lib, const char *contentBasePath, const char *gamesPath)
 {
-    // Which titles already have DLC, and which already have a title update,
-    // on the console - so a marker appears the moment a download finishes
-    // rather than on the next launch.
+    // Kept for the next start.
     const double start = ImageTimerMs();
-    if (!shell.flagsFresh)
-    {
-        static bool dlcBefore[MAX_INSTALLED_GAMES], updateBefore[MAX_INSTALLED_GAMES];
-        memcpy(dlcBefore, lib.dlcInstalled, sizeof(dlcBefore));
-        memcpy(updateBefore, lib.updateInstalled, sizeof(updateBefore));
-        RefreshInstalledFlags(contentBasePath, lib.games, lib.count, lib.dlcInstalled, lib.updateInstalled);
-        if (memcmp(dlcBefore, lib.dlcInstalled, lib.count * sizeof(bool)) != 0 ||
-            memcmp(updateBefore, lib.updateInstalled, lib.count * sizeof(bool)) != 0)
-            lib.cacheDirty = true;
-    }
-    shell.flagsFresh = false;
-
-    // Kept for the next start, once the flags agree with the list.
     if (lib.cacheDirty)
         SaveLibrary(lib, gamesPath);
-    const double flagsDone = ImageTimerMs();
+    const double savedDone = ImageTimerMs();
 
     // The banner goes as soon as keys are added in Settings, and comes back
     // if they're removed.
@@ -3774,8 +4320,8 @@ static void RefreshShell(Shell &shell, Library &lib, const char *contentBasePath
 
     const double discDone = ImageTimerMs();
     BuildSettingsPage(shell.settings, lib, gamesPath);
-    dprintf("[timing] refresh: DLC/update flags %.1f, keys %.1f, storage %.1f, disc check %.1f, settings page %.1f ms\n",
-            flagsDone - start, keysDone - flagsDone, storageDone - keysDone, discDone - storageDone, ImageTimerMs() - discDone);
+    dprintf("[timing] refresh: library cache %.1f, keys %.1f, storage %.1f, disc check %.1f, settings page %.1f ms\n",
+            savedDone - start, keysDone - savedDone, storageDone - keysDone, discDone - storageDone, ImageTimerMs() - discDone);
 
     shell.stale = false;
     shell.settingsStale = false;
@@ -3808,8 +4354,6 @@ static LibraryPageView MakeLibraryView(const Shell &shell, const Library &lib, c
     view.count = lib.count;
     view.selected = shell.librarySelected;
     view.scroll = shell.libraryScroll;
-    view.hasDlcInstalled = lib.dlcInstalled;
-    view.hasUpdateInstalled = lib.updateInstalled;
     view.gamesPath = gamesPath;
     view.bannerText = shell.keysSaved ? NULL : "Add your archive.org keys in Settings to start downloading.";
     view.focused = !shell.sidebarFocused;
@@ -4460,7 +5004,6 @@ struct StartupLoad
 {
     Library *lib;
     Library *fresh;   // NULL with no cache
-    const char *contentBasePath;
     const char *gamesPath;
     char morePaths[MAX_MORE_GAMES_PATHS][MAX_TEXT_LENGTH];
     int moreCount;
@@ -4482,8 +5025,6 @@ static DWORD WINAPI StartupLoadEntry(LPVOID param)
     const double rows = ImageTimerMs();
     ReadLibrary(lib, load.gamesPath, load.morePaths, load.moreCount);
     const double read = ImageTimerMs();
-    RefreshInstalledFlags(load.contentBasePath, lib.games, lib.count, lib.dlcInstalled, lib.updateInstalled);
-    const double flagged = ImageTimerMs();
     if (load.fresh == NULL)
     {
         BuildStoreRows();
@@ -4493,14 +5034,14 @@ static DWORD WINAPI StartupLoadEntry(LPVOID param)
     {
         InterlockedExchange(&load.freshRead, 1);
     }
-    dprintf("[timing] startup thread%s: library %.1f, DLC/update flags %.1f, Store rows %.1f ms\n",
-            load.fresh != NULL ? " (behind the cached library)" : "", read - rows, flagged - read,
-            load.fresh != NULL ? rows - start : ImageTimerMs() - flagged);
+    dprintf("[timing] startup thread%s: library %.1f, Store rows %.1f ms\n",
+            load.fresh != NULL ? " (behind the cached library)" : "", read - rows,
+            load.fresh != NULL ? rows - start : ImageTimerMs() - read);
     return 0;
 }
 
 // Whether two reads of the library found the same: the same games, at the same
-// paths, with the same flags.
+// paths.
 static bool SameLibrary(const Library &a, const Library &b, int folderCount)
 {
     if (a.count != b.count || memcmp(a.folderFound, b.folderFound, folderCount * sizeof(int)) != 0)
@@ -4509,8 +5050,7 @@ static bool SameLibrary(const Library &a, const Library &b, int folderCount)
     {
         const InstalledGame &x = a.games[i], &y = b.games[i];
         if (x.titleId != y.titleId || x.contentType != y.contentType || x.folder != y.folder ||
-            strcmp(x.packagePath, y.packagePath) != 0 || strcmp(x.displayName, y.displayName) != 0 ||
-            a.dlcInstalled[i] != b.dlcInstalled[i] || a.updateInstalled[i] != b.updateInstalled[i])
+            strcmp(x.packagePath, y.packagePath) != 0 || strcmp(x.displayName, y.displayName) != 0)
             return false;
     }
     return true;
@@ -4546,8 +5086,6 @@ static void TakeFreshLibrary(Shell &shell, Library &lib, Library &fresh, const c
     InstalledGame *spare = lib.games;
     lib.games = fresh.games;
     lib.count = fresh.count;
-    memcpy(lib.dlcInstalled, fresh.dlcInstalled, sizeof(lib.dlcInstalled));
-    memcpy(lib.updateInstalled, fresh.updateInstalled, sizeof(lib.updateInstalled));
     memcpy(lib.folderFound, fresh.folderFound, sizeof(lib.folderFound));
     fresh.games = spare;
     fresh.count = 0;
@@ -4565,7 +5103,6 @@ static void TakeFreshLibrary(Shell &shell, Library &lib, Library &fresh, const c
 
     RequestLibraryCovers(lib);
     SaveLibrary(lib, gamesPath);
-    shell.flagsFresh = true;
     shell.stale = true;
 }
 
@@ -4643,6 +5180,7 @@ int main()
     // actually waits on now draws a real frame instead of leaving whatever
     // was last on screen.
     Library lib;
+    g_storeLib = &lib;
     lib.count = 0;
     memset(lib.folderFound, 0, sizeof(lib.folderFound));
     lib.cacheDirty = false;
@@ -4692,8 +5230,8 @@ int main()
         char folders[2048];
         LibraryFoldersKey(gamesPath, folders, sizeof(folders));
         const double start = ImageTimerMs();
-        const int cached = LoadLibraryCache(folders, lib.games, MAX_INSTALLED_GAMES, lib.dlcInstalled,
-                                            lib.updateInstalled, lib.folderFound, 1 + g_moreGamesPathCount);
+        const int cached =
+            LoadLibraryCache(folders, lib.games, MAX_INSTALLED_GAMES, lib.folderFound, 1 + g_moreGamesPathCount);
         if (cached >= 0)
         {
             fresh.games = (InstalledGame *)malloc(sizeof(InstalledGame) * MAX_INSTALLED_GAMES);
@@ -4713,7 +5251,6 @@ int main()
     StartupLoad load;
     load.lib = &lib;
     load.fresh = fresh.games != NULL ? &fresh : NULL;
-    load.contentBasePath = contentBasePath;
     load.gamesPath = gamesPath;
     memcpy(load.morePaths, g_moreGamesPaths, sizeof(load.morePaths));
     load.moreCount = g_moreGamesPathCount;
@@ -4835,7 +5372,6 @@ int main()
     shell.queueSelectedId = 0;
     shell.queueScroll = -1;
     shell.stale = true;
-    shell.flagsFresh = true; // read behind the loading screen
 
     char authHeader[IAS3_AUTH_HEADER_MAX];
     bool haveAuth = false;
@@ -5142,6 +5678,21 @@ int main()
                 StepStoreGame(input.nav, shell, lib);
             }
         }
+        else if (shell.page == SHELL_PAGE_STORE && shell.storeInLetter && shell.storeFilterOpen)
+        {
+            if (pressed & (XINPUT_GAMEPAD_B | XINPUT_GAMEPAD_Y))
+            {
+                shell.storeFilterOpen = false;
+                if (shell.storeFilterChanged)
+                    SaveFilter();
+                shell.storeFilterChanged = false;
+            }
+            else if (StepFilterPanel(input, shell))
+            {
+                shell.storeFilterChanged = true;
+                RefilterLetter(shell);
+            }
+        }
         else if (shell.page == SHELL_PAGE_STORE && shell.storeInLetter)
         {
             if (pressed & XINPUT_GAMEPAD_B)
@@ -5155,13 +5706,30 @@ int main()
             {
                 acted = OpenStoreSearch(shell);
             }
+            else if ((pressed & XINPUT_GAMEPAD_Y) && !shell.storeLetterArcade)
+            {
+                shell.storeFilterOpen = true;
+                if (FilterRowDisabled(shell, shell.storeFilterFocus))
+                    shell.storeFilterFocus = FILTER_ROW_REGIONS;
+            }
+            else if ((pressed & XINPUT_GAMEPAD_X) && LetterFiltersEmptied(shell))
+            {
+                // Reset, as the panel's button.
+                memset(&g_filter, 0, sizeof(g_filter));
+                SaveFilter();
+                RefilterLetter(shell);
+            }
             else if ((pressed & XINPUT_GAMEPAD_A) && shell.storeGameCount > 0)
             {
-                const StoreHit &hit = g_searchHits[shell.storeSelected];
-                if (shell.storeSearch && hit.game != NULL)
-                    OpenStoreGame(shell, *hit.game);
-                else if (shell.storeSearch)
-                    OpenArcadeGame(shell, *hit.arcade);
+                if (shell.storeSearch)
+                {
+                    // Only a search's results are in g_searchHits - All games has more.
+                    const StoreHit &hit = g_searchHits[shell.storeSelected];
+                    if (hit.game != NULL)
+                        OpenStoreGame(shell, *hit.game);
+                    else
+                        OpenArcadeGame(shell, *hit.arcade);
+                }
                 else if (shell.storeLetterArcade)
                     OpenArcadeGame(shell, *g_arcadeGames[shell.storeSelected]);
                 else
@@ -5334,6 +5902,21 @@ int main()
             break;
         }
 
+        // Genre, rating and Hide installed last only while the Store's open.
+        // A letter left open behind is shown again without them.
+        if (shell.page != SHELL_PAGE_STORE)
+        {
+            if (shell.storeFilterOpen)
+            {
+                shell.storeFilterOpen = false;
+                if (shell.storeFilterChanged)
+                    SaveFilter();
+                shell.storeFilterChanged = false;
+            }
+            if (ClearSessionFilters() && shell.storeInLetter && !shell.storeSearch && !shell.storeLetterArcade)
+                RefilterLetter(shell);
+        }
+
         // A sound for a press that changed something - none when a dialog
         // or the keyboard took over, as those have their own.
         if (!acted && (pressed != 0 || input.nav != 0) && FocusSignature(shell) != focusBefore)
@@ -5438,15 +6021,26 @@ int main()
             }
             else if (shell.storeInLetter)
             {
-                if (!shell.sidebarFocused)
+                if (shell.storeFilterOpen)
+                {
+                    hintCount = AddHint(hints, hintCount, UI_BUTTON_A, L"Select");
+                    hintCount = AddHint(hints, hintCount, UI_BUTTON_B, L"Done");
+                }
+                else if (!shell.sidebarFocused)
                 {
                     if (shell.storeGameCount > 0)
                         hintCount = AddHint(hints, hintCount, UI_BUTTON_A, L"View game", L"View");
                     hintCount = AddHint(hints, hintCount, UI_BUTTON_B, L"Store");
                     if (shell.storeSearch)
                         hintCount = AddHint(hints, hintCount, UI_BUTTON_Y, L"Search again", L"Search");
+                    else if (!shell.storeLetterArcade)
+                        hintCount = AddHint(hints, hintCount, UI_BUTTON_Y, L"Filter and sort", L"Filter");
+                    if (LetterFiltersEmptied(shell))
+                        hintCount = AddHint(hints, hintCount, UI_BUTTON_X, L"Reset filters", L"Reset");
                     if (shell.storeGameCount > StoreLetterVisibleRows() * LibraryGridColumns())
                         hintCount = AddHint(hints, hintCount, UI_BUTTON_LBRB, L"Page");
+                    if (LetterJumps(shell))
+                        hintCount = AddHint(hints, hintCount, UI_BUTTON_LTRT, L"Letter");
                 }
 
                 StoreLetterView view = MakeStoreLetterView(shell);
@@ -5462,8 +6056,7 @@ int main()
                     static WCHAR browse[32];
                     if (g_sectionLetterCounts[shell.storeSection][l] > 0)
                     {
-                        _snwprintf(browse, 32, L"Browse %c", (WCHAR)kStoreLetters[l]);
-                        browse[31] = L'\0';
+                        BrowseHint(browse, 32, kStoreLetters[l]);
                         hintCount = AddHint(hints, hintCount, UI_BUTTON_A, browse, L"Browse");
                     }
                     hintCount = AddHint(hints, hintCount, UI_BUTTON_B, L"Store");
@@ -5492,8 +6085,7 @@ int main()
                     }
                     else if (i < STORE_FOCUS_ROWS)
                     {
-                        _snwprintf(browse, 32, L"Browse %c", (WCHAR)kStoreLetters[i - STORE_FOCUS_LETTERS]);
-                        browse[31] = L'\0';
+                        BrowseHint(browse, 32, kStoreLetters[i - STORE_FOCUS_LETTERS]);
                         hintCount = AddHint(hints, hintCount, UI_BUTTON_A, browse, L"Browse");
                     }
                     else

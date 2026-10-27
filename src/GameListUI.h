@@ -66,11 +66,16 @@ void SetShellSidebar(const ShellSidebar &sidebar);
 //             direction is first pushed and then repeatedly while it's held,
 //             so holding down scrolls a long list. The left stick counts as
 //             the D-pad here, whichever axis it's pushed further along.
+// The triggers, as buttons in UiInput's triggers: pulled past halfway.
+#define UI_TRIGGER_LEFT  0x01
+#define UI_TRIGGER_RIGHT 0x02
+
 struct UiInput
 {
     WORD held;
     WORD pressed;
     WORD nav;
+    BYTE triggers; // UI_TRIGGER_*: those pulled since the last call
 };
 
 // Call once per frame.
@@ -93,7 +98,8 @@ enum UiButton
     UI_BUTTON_X,
     UI_BUTTON_Y,
     UI_BUTTON_LBRB,
-    UI_BUTTON_START
+    UI_BUTTON_START,
+    UI_BUTTON_LTRT
 };
 
 // One button hint in the footer. shortLabel, when non-NULL, is used for every
@@ -126,13 +132,6 @@ enum LibraryDiscTile
 // and the Render call moves it so the selected row stays on screen. Pass -1
 // to have it start with the selection in the middle of the view.
 //
-// hasDlcInstalled and hasUpdateInstalled, when non-NULL, are caller-owned
-// arrays of `count` flags marking which titles already have DLC, and which
-// already have a title update, on the console. Those rows get an "INSTALLED"
-// marker naming whichever is present. The caller works this out rather than
-// this screen doing it, because it is a question about content paths on disk
-// and this file has no business knowing where content lives.
-//
 // count may be 0. The page then says the library is empty and names gamesPath
 // as the folder that was searched.
 //
@@ -148,8 +147,6 @@ struct LibraryPageView
     int count;
     int selected;
     int scroll;
-    const bool *hasDlcInstalled;
-    const bool *hasUpdateInstalled;
     const char *gamesPath;
     const char *bannerText;
     bool focused; // false while the sidebar has focus
@@ -291,7 +288,7 @@ void RenderSettingsFrame(SettingsPageView &view, const UiHint *hints, int hintCo
 // frames, and the Render call eases it.
 #define STORE_FEATURED_MAX   5
 #define STORE_BUTTON_COUNT   4
-#define STORE_LETTER_COUNT   27 // '#', then A to Z
+#define STORE_LETTER_COUNT   28 // All (STORE_LETTER_ALL), '#', then A to Z
 
 #define STORE_FOCUS_FEATURED 0
 #define STORE_FOCUS_BUTTONS  (STORE_FOCUS_FEATURED + STORE_FEATURED_MAX) // some featured slots may be unused
@@ -378,15 +375,42 @@ void RenderStoreSectionFrame(StoreSectionView &view, const UiHint *hints, int hi
 // per frame, as PumpCoverArt.
 void PumpStoreArt();
 
-// One letter's games: a grid of cover tiles like the library's, each with
-// its regions in the corner. The covers on screen and the row after are
+// One letter's games: a grid of cover tiles like the library's. The covers on screen and the row after are
 // asked for as they come into view, and only those are kept.
 struct StoreTileView
 {
     unsigned long titleId;  // for its cover; 0 for none
     const char *name;
-    unsigned short regions; // STORE_REGION_*
+    char letter;            // its A to Z tile's
     bool indie;             // an indie game: no cover, so the indie banner beside its name
+};
+
+// The Filter and sort panel, down the right over a letter's grid: a row each
+// for a value left and right step through, a checkbox, or a button. Some
+// start a group, with a heading over them.
+enum StoreFilterRowKind
+{
+    STORE_FILTER_VALUE,
+    STORE_FILTER_CHECK,
+    STORE_FILTER_BUTTON
+};
+
+struct StoreFilterRowView
+{
+    StoreFilterRowKind kind;
+    const char *heading; // over the row; NULL for none
+    const char *label;
+    const char *value;   // a value's
+    bool canDown, canUp; // a value's: whether left and right go anywhere
+    bool on;             // a checkbox's
+    bool disabled;       // greyed out: it does nothing here
+};
+
+struct StoreFilterView
+{
+    const StoreFilterRowView *rows;
+    int count;
+    int focus;
 };
 
 struct StoreLetterView
@@ -394,6 +418,10 @@ struct StoreLetterView
     char letter;
     const char *title;   // in place of the letter - a search's; NULL for the letter
     const char *section; // before the count in the header - "Xbox Live Arcade"; NULL for none
+    const char *filter;  // the filters chosen - "USA, Shooters +2"; NULL for none
+    const char *filterAll; // every one of them, for a letter they've left empty
+    const StoreFilterView *panel; // open over the grid; NULL when it's closed
+    bool letterJumps;    // All games in A to Z order: the header names the focused game's letter
     const StoreTileView *tiles;
     int count;
     int selected;
