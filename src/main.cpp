@@ -26,6 +26,7 @@ end-to-end on real hardware against a real 27-game library.
 #include "StfsParser.h"
 #include "FolderGames.h"
 #include "Launch.h"
+#include "LibraryCache.h"
 #include "UiSound.h"
 #include "Featured.h"
 #include "GameListUI.h"
@@ -226,8 +227,6 @@ static void GetGamesPath(char *outPath, size_t outPathSize)
 #define MAX_MORE_GAMES_PATHS 7
 static char g_moreGamesPaths[MAX_MORE_GAMES_PATHS][MAX_TEXT_LENGTH];
 static int g_moreGamesPathCount = 0;
-static int g_moreGamesFound[MAX_MORE_GAMES_PATHS]; // the games each added, at the last scan
-static int g_installFolderFound = 0;               // and the folder games install to
 
 static void ReadMoreGamesPaths()
 {
@@ -483,7 +482,8 @@ static bool IsSuggestedFolder(const char *path)
     return false;
 }
 
-static void FindLibraryFolders(const char *gamesPath)
+// moreFound: how many games each of g_moreGamesPaths added at the last scan.
+static void FindLibraryFolders(const char *gamesPath, const int *moreFound)
 {
     g_folderRowCount = 0;
     for (int p = 0; p < g_moreGamesPathCount && g_folderRowCount < MAX_FOLDER_ROWS; ++p)
@@ -496,7 +496,7 @@ static void FindLibraryFolders(const char *gamesPath)
         row.scanned = true;
         row.suggested = IsSuggestedFolder(row.path);
         row.exists = FolderExists(row.path);
-        row.games = g_moreGamesFound[p];
+        row.games = moreFound[p];
     }
 
     for (int d = 0; d < 4; ++d)
@@ -1114,7 +1114,18 @@ struct Library
     int count;
     bool dlcInstalled[MAX_INSTALLED_GAMES];
     bool updateInstalled[MAX_INSTALLED_GAMES];
+
+    // How many games each folder added at the scan: the install folder's,
+    // then each more folder's, as g_moreGamesPaths lists them.
+    int folderFound[1 + MAX_MORE_GAMES_PATHS];
+
+    // Changed since Library.cache was written - kept again at the next refresh.
+    bool cacheDirty;
 };
+
+// Goes up with every scan on the UI thread, so a scan startup left running
+// behind the library can tell it's been overtaken.
+static int g_libraryGeneration = 0;
 
 // The disc in the drive's title ID, while there's a game disc in it - its
 // box art is asked for ahead of the library's, as it's the first tile.
@@ -1174,25 +1185,27 @@ static int ScanLibraryFolder(Library &lib, const char *path)
 
 // The library's folders read into the list, named and sorted. Nothing drawn
 // and nothing asked of the UI, so startup runs it on a thread of its own
-// while the loading screen animates; the icons made from the old list must
-// already be released.
-static void ReadLibrary(Library &lib, const char *gamesPath)
+// while the loading screen animates, or behind the library kept from last
+// time; the icons made from the old list must already be released.
+// morePaths are the more folders from settings.txt, a copy of them for a
+// scan on another thread, as Settings can change g_moreGamesPaths meanwhile.
+static void ReadLibrary(Library &lib, const char *gamesPath, const char (*morePaths)[MAX_TEXT_LENGTH], int moreCount)
 {
     FreeInstalledGames(lib.games, lib.count);
     lib.count = 0;
+    memset(lib.folderFound, 0, sizeof(lib.folderFound));
 
-    g_installFolderFound = ScanLibraryFolder(lib, gamesPath);
+    lib.folderFound[0] = ScanLibraryFolder(lib, gamesPath);
 
-    // Then each more folder from settings.txt. A game in two of them -
-    // copied to a USB drive, say - is listed once, from the first.
-    ReadMoreGamesPaths();
-    for (int p = 0; p < g_moreGamesPathCount && lib.count < MAX_INSTALLED_GAMES; ++p)
+    // Then each more folder. A game in two of them - copied to a USB drive,
+    // say - is listed once, from the first.
+    for (int p = 0; p < moreCount && lib.count < MAX_INSTALLED_GAMES; ++p)
     {
-        g_moreGamesFound[p] = ScanLibraryFolder(lib, g_moreGamesPaths[p]);
-        if (g_moreGamesFound[p] == 0)
-            dprintf("No installed games found under %s\n", g_moreGamesPaths[p]);
+        lib.folderFound[1 + p] = ScanLibraryFolder(lib, morePaths[p]);
+        if (lib.folderFound[1 + p] == 0)
+            dprintf("No installed games found under %s\n", morePaths[p]);
         else
-            dprintf("Found %d more installed games under %s\n", g_moreGamesFound[p], g_moreGamesPaths[p]);
+            dprintf("Found %d more installed games under %s\n", lib.folderFound[1 + p], morePaths[p]);
     }
 
     // A folder game is named for its folder, which may be anything - the
@@ -1229,13 +1242,39 @@ static void ReadLibrary(Library &lib, const char *gamesPath)
     dprintf("[timing] scan: names + sort %.1f ms\n", ImageTimerMs() - namingStart);
 }
 
+// The folders a library is read from, as one string - Library.cache keeps
+// the one it was read with, and is only used for the same.
+static void LibraryFoldersKey(const char *gamesPath, char *out, size_t outSize)
+{
+    _snprintf(out, outSize, "%s", gamesPath);
+    out[outSize - 1] = '\0';
+    for (int p = 0; p < g_moreGamesPathCount; ++p)
+    {
+        const size_t len = strlen(out);
+        _snprintf(out + len, outSize - len, "|%s", g_moreGamesPaths[p]);
+        out[outSize - 1] = '\0';
+    }
+}
+
+static void SaveLibrary(Library &lib, const char *gamesPath)
+{
+    char folders[2048];
+    LibraryFoldersKey(gamesPath, folders, sizeof(folders));
+    SaveLibraryCache(folders, lib.games, lib.count, lib.dlcInstalled, lib.updateInstalled,
+                     lib.folderFound, 1 + g_moreGamesPathCount);
+    lib.cacheDirty = false;
+}
+
 static void ScanLibrary(Library &lib, const char *gamesPath)
 {
     RenderStatusFrame("Scanning", "Reading your installed games", gamesPath);
 
     // The cover cache was built from the old scan's images - drop both.
     ReleaseGameListIcons();
-    ReadLibrary(lib, gamesPath);
+    ReadMoreGamesPaths();
+    ReadLibrary(lib, gamesPath, g_moreGamesPaths, g_moreGamesPathCount);
+    g_libraryGeneration++;
+    lib.cacheDirty = true;
 
     // Box art, in the library's order so the first screenful comes first.
     RequestLibraryCovers(lib);
@@ -1662,7 +1701,7 @@ static void BuildSettingsPage(SettingsPage &page, const Library &lib, const char
 
     // Where games install: always scanned.
     _snprintf(page.installStatus, sizeof(page.installStatus), "Installs here" SETTINGS_MIDDOT "%d game%s",
-              g_installFolderFound, g_installFolderFound == 1 ? "" : "s");
+              lib.folderFound[0], lib.folderFound[0] == 1 ? "" : "s");
     page.installStatus[sizeof(page.installStatus) - 1] = '\0';
     {
         SettingsRowView &row = AddSettingsRow(page, SETTINGS_VIEW_FOLDER, gamesPath);
@@ -1674,8 +1713,7 @@ static void BuildSettingsPage(SettingsPage &page, const Library &lib, const char
     }
 
     // The other folders the library looks in, and the likely ones it could.
-    (void)lib;
-    FindLibraryFolders(gamesPath);
+    FindLibraryFolders(gamesPath, lib.folderFound + 1);
     for (int i = 0; i < g_folderRowCount; ++i)
     {
         const LibraryFolderRow &folder = g_folderRows[i];
@@ -3703,8 +3741,20 @@ static void RefreshShell(Shell &shell, Library &lib, const char *contentBasePath
     // rather than on the next launch.
     const double start = ImageTimerMs();
     if (!shell.flagsFresh)
+    {
+        static bool dlcBefore[MAX_INSTALLED_GAMES], updateBefore[MAX_INSTALLED_GAMES];
+        memcpy(dlcBefore, lib.dlcInstalled, sizeof(dlcBefore));
+        memcpy(updateBefore, lib.updateInstalled, sizeof(updateBefore));
         RefreshInstalledFlags(contentBasePath, lib.games, lib.count, lib.dlcInstalled, lib.updateInstalled);
+        if (memcmp(dlcBefore, lib.dlcInstalled, lib.count * sizeof(bool)) != 0 ||
+            memcmp(updateBefore, lib.updateInstalled, lib.count * sizeof(bool)) != 0)
+            lib.cacheDirty = true;
+    }
     shell.flagsFresh = false;
+
+    // Kept for the next start, once the flags agree with the list.
+    if (lib.cacheDirty)
+        SaveLibrary(lib, gamesPath);
     const double flagsDone = ImageTimerMs();
 
     // The banner goes as soon as keys are added in Settings, and comes back
@@ -4373,30 +4423,125 @@ static void StartupStep(const char *step)
     g_startupLast = now;
 }
 
-// What startup reads off the UI thread, behind the loading screen: the
-// library, which games have DLC or an update installed, and the Store's rows.
-// Seconds on a hard drive, nearly all of it waiting on the disk.
+// What startup reads off the UI thread: the library, which games have DLC or
+// an update installed, and the Store's rows. Seconds on a hard drive, nearly
+// all of it waiting on the disk.
+//
+// With no Library.cache, all of it is behind the loading screen, read into
+// lib. With one, lib is already the cached list, so the loading screen waits
+// only for the Store's rows; the library is then read into fresh while the
+// app runs, and the shell loop swaps it in if anything changed.
 struct StartupLoad
 {
     Library *lib;
+    Library *fresh;   // NULL with no cache
     const char *contentBasePath;
     const char *gamesPath;
+    char morePaths[MAX_MORE_GAMES_PATHS][MAX_TEXT_LENGTH];
+    int moreCount;
+    volatile LONG ready;     // the loading screen can end
+    volatile LONG freshRead; // fresh is read, and lib can be compared with it
 };
 
 static DWORD WINAPI StartupLoadEntry(LPVOID param)
 {
     StartupLoad &load = *(StartupLoad *)param;
-    Library &lib = *load.lib;
+    Library &lib = load.fresh != NULL ? *load.fresh : *load.lib;
 
     const double start = ImageTimerMs();
-    ReadLibrary(lib, load.gamesPath);
+    if (load.fresh != NULL)
+    {
+        BuildStoreRows();
+        InterlockedExchange(&load.ready, 1);
+    }
+    const double rows = ImageTimerMs();
+    ReadLibrary(lib, load.gamesPath, load.morePaths, load.moreCount);
     const double read = ImageTimerMs();
     RefreshInstalledFlags(load.contentBasePath, lib.games, lib.count, lib.dlcInstalled, lib.updateInstalled);
     const double flagged = ImageTimerMs();
-    BuildStoreRows();
-    dprintf("[timing] startup thread: library %.1f, DLC/update flags %.1f, Store rows %.1f ms\n",
-            read - start, flagged - read, ImageTimerMs() - flagged);
+    if (load.fresh == NULL)
+    {
+        BuildStoreRows();
+        InterlockedExchange(&load.ready, 1);
+    }
+    else
+    {
+        InterlockedExchange(&load.freshRead, 1);
+    }
+    dprintf("[timing] startup thread%s: library %.1f, DLC/update flags %.1f, Store rows %.1f ms\n",
+            load.fresh != NULL ? " (behind the cached library)" : "", read - rows, flagged - read,
+            load.fresh != NULL ? rows - start : ImageTimerMs() - flagged);
     return 0;
+}
+
+// Whether two reads of the library found the same: the same games, at the same
+// paths, with the same flags.
+static bool SameLibrary(const Library &a, const Library &b, int folderCount)
+{
+    if (a.count != b.count || memcmp(a.folderFound, b.folderFound, folderCount * sizeof(int)) != 0)
+        return false;
+    for (int i = 0; i < a.count; ++i)
+    {
+        const InstalledGame &x = a.games[i], &y = b.games[i];
+        if (x.titleId != y.titleId || x.contentType != y.contentType || x.folder != y.folder ||
+            strcmp(x.packagePath, y.packagePath) != 0 || strcmp(x.displayName, y.displayName) != 0 ||
+            a.dlcInstalled[i] != b.dlcInstalled[i] || a.updateInstalled[i] != b.updateInstalled[i])
+            return false;
+    }
+    return true;
+}
+
+// The library read behind the cached one, once it's done: swapped in if it
+// differs, keeping the selected game selected - unless the library was
+// scanned again meanwhile, which is newer.
+static void TakeFreshLibrary(Shell &shell, Library &lib, Library &fresh, const char *gamesPath)
+{
+    if (g_libraryGeneration != 0)
+    {
+        dprintf("[library cache] the library was read again meanwhile; the startup read is dropped\n");
+        FreeInstalledGames(fresh.games, fresh.count);
+        fresh.count = 0;
+        return;
+    }
+    if (SameLibrary(lib, fresh, 1 + g_moreGamesPathCount))
+    {
+        dprintf("[library cache] the drive agrees with it\n");
+        FreeInstalledGames(fresh.games, fresh.count);
+        fresh.count = 0;
+        return;
+    }
+
+    dprintf("[library cache] the drive has changed: %d games, were %d\n", fresh.count, lib.count);
+    const int discItems = shell.hasDisc ? 1 : 0;
+    const int was = shell.librarySelected - discItems;
+    const unsigned long selectedTitle = (was >= 0 && was < lib.count) ? lib.games[was].titleId : 0;
+
+    ReleaseGameListIcons();
+    FreeInstalledGames(lib.games, lib.count);
+    InstalledGame *spare = lib.games;
+    lib.games = fresh.games;
+    lib.count = fresh.count;
+    memcpy(lib.dlcInstalled, fresh.dlcInstalled, sizeof(lib.dlcInstalled));
+    memcpy(lib.updateInstalled, fresh.updateInstalled, sizeof(lib.updateInstalled));
+    memcpy(lib.folderFound, fresh.folderFound, sizeof(lib.folderFound));
+    fresh.games = spare;
+    fresh.count = 0;
+
+    if (selectedTitle != 0)
+    {
+        for (int i = 0; i < lib.count; ++i)
+            if (lib.games[i].titleId == selectedTitle)
+                shell.librarySelected = discItems + i;
+    }
+    if (shell.librarySelected > discItems + lib.count - 1)
+        shell.librarySelected = discItems + lib.count - 1;
+    if (shell.librarySelected < 0)
+        shell.librarySelected = 0;
+
+    RequestLibraryCovers(lib);
+    SaveLibrary(lib, gamesPath);
+    shell.flagsFresh = true;
+    shell.stale = true;
 }
 
 int main()
@@ -4474,6 +4619,8 @@ int main()
     // was last on screen.
     Library lib;
     lib.count = 0;
+    memset(lib.folderFound, 0, sizeof(lib.folderFound));
+    lib.cacheDirty = false;
     lib.games = (InstalledGame *)malloc(sizeof(InstalledGame) * MAX_INSTALLED_GAMES);
 
     if (lib.games == NULL)
@@ -4509,10 +4656,44 @@ int main()
     // bouncing - and starts everything else, one step a frame, in between.
     // The bouncing lasts exactly as long as that takes; then the mark forms
     // and rests (about 2.5 s, see GameListUI.cpp) and fades into the app.
+    //
+    // With the library kept from last time, the bouncing waits only for the
+    // Store's rows, and the drive is read behind the library instead.
+    ReadMoreGamesPaths();
+    Library fresh;
+    fresh.count = 0;
+    fresh.games = NULL;
+    {
+        char folders[2048];
+        LibraryFoldersKey(gamesPath, folders, sizeof(folders));
+        const double start = ImageTimerMs();
+        const int cached = LoadLibraryCache(folders, lib.games, MAX_INSTALLED_GAMES, lib.dlcInstalled,
+                                            lib.updateInstalled, lib.folderFound, 1 + g_moreGamesPathCount);
+        if (cached >= 0)
+        {
+            fresh.games = (InstalledGame *)malloc(sizeof(InstalledGame) * MAX_INSTALLED_GAMES);
+            if (fresh.games == NULL)
+            {
+                // Read the drive behind the loading screen, as with no cache.
+                FreeInstalledGames(lib.games, cached);
+            }
+            else
+            {
+                lib.count = cached;
+                dprintf("[library cache] %d games, read in %.1f ms\n", cached, ImageTimerMs() - start);
+            }
+        }
+    }
+
     StartupLoad load;
     load.lib = &lib;
+    load.fresh = fresh.games != NULL ? &fresh : NULL;
     load.contentBasePath = contentBasePath;
     load.gamesPath = gamesPath;
+    memcpy(load.morePaths, g_moreGamesPaths, sizeof(load.morePaths));
+    load.moreCount = g_moreGamesPathCount;
+    load.ready = 0;
+    load.freshRead = 0;
     HANDLE loader = CreateThread(NULL, 256 * 1024, StartupLoadEntry, &load, CREATE_SUSPENDED, NULL);
     if (loader == NULL)
     {
@@ -4568,7 +4749,7 @@ int main()
             // reached.
             searchStarted = StartSearchWorker();
         }
-        else if (loader == NULL || WaitForSingleObject(loader, 0) == WAIT_OBJECT_0)
+        else if (load.ready)
         {
             // Then the icons, a few a frame, so the library's first frame
             // has nothing left to build.
@@ -4586,7 +4767,11 @@ int main()
         Sleep(16);
     }
     if (loader != NULL)
-        CloseHandle(loader);
+        CloseHandle(loader); // it may still be reading the drive; load and fresh outlive it
+
+    // Read from the drive, so kept for next time at the first refresh.
+    if (load.fresh == NULL)
+        lib.cacheDirty = true;
     if (!downloadsStarted)
         dprintf("ERROR: the download worker didn't start - downloads are unavailable\n");
     if (!searchStarted)
@@ -4657,6 +4842,13 @@ int main()
             shell.rescanLibrary = false;
             ScanLibrary(lib, gamesPath);
             shell.stale = true;
+        }
+
+        // The drive, read behind the library kept from last time.
+        if (load.fresh != NULL && load.freshRead)
+        {
+            TakeFreshLibrary(shell, lib, fresh, gamesPath);
+            load.fresh = NULL;
         }
 
         const double partDisc = ImageTimerMs();

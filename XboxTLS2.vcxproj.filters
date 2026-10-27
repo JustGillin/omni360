@@ -181,6 +181,9 @@
     <ClCompile Include="src\Launch.cpp">
       <Filter>Source Files\Library</Filter>
     </ClCompile>
+    <ClCompile Include="src\LibraryCache.cpp">
+      <Filter>Source Files\Library</Filter>
+    </ClCompile>
     <ClCompile Include="src\UiSound.cpp">
       <Filter>Source Files\Interface</Filter>
     </ClCompile>
@@ -1222,6 +1225,9 @@
       <Filter>Source Files\Library</Filter>
     </ClInclude>
     <ClInclude Include="src\Launch.h">
+      <Filter>Source Files\Library</Filter>
+    </ClInclude>
+    <ClInclude Include="src\LibraryCache.h">
       <Filter>Source Files\Library</Filter>
     </ClInclude>
     <ClInclude Include="src\UiSound.h">
