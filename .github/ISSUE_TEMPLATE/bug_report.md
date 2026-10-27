@@ -11,7 +11,7 @@ assignees: ''
 A clear and concise description of what the bug/problem is.
 
 **Console exploit type**
-RGH, JTAG, BadUpdate, ABadAvatar, etc...
+RGH, JTAG, BadUpdate, ABadAvatar, PeerPressure, etc...
 
 **Dashboard version**
 My console is running Aurora/Freestyle Dash/XEXMenu/other with firmware version 17559/other

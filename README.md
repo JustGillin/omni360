@@ -16,26 +16,46 @@ Browse thousands of games, DLC and title updates, install them in the background
 [![Built with C++](https://img.shields.io/badge/built%20with-C%2B%2B-00599c?logo=cplusplus&logoColor=white)](COMPILING.md)
 [![License: AGPL-3.0](https://img.shields.io/badge/license-AGPL--3.0-blue)](LICENSE)
 
-**[Quick start](#quick-start)** &nbsp;·&nbsp; **[Features](#what-it-does)** &nbsp;·&nbsp; **[Screenshots](#screenshots)** &nbsp;·&nbsp; **[How to use it](#how-to-use-it)** &nbsp;·&nbsp; **[Docs](docs/docs.md)**
+**[Quick start](#quick-start)** &nbsp;·&nbsp; **[What it does](#what-it-does)** &nbsp;·&nbsp; **[Screenshots](#screenshots)** &nbsp;·&nbsp; **[Docs](docs/docs.md)**
 
 </div>
 
 <br>
 
+## Quick start
+
+**You need:**
+
+- A soft-modded (BadUpdate, ABadAvatar, PeerPressure) or hard-modded (RGH, JTAG) Xbox 360, connected to the internet. Ethernet is recommended.
+- An archive.org account, and its IAS3 access key and secret key. Every collection Omni360 downloads from is marked private, so archive.org refuses downloads without them.
+- Free space for installing games: the download and the installed game both, while it installs — around 7GB plus 3-8GB for a typical game. The download is removed once it's installed.
+
+**Then:**
+
+1. Download `Omni360.xex` from the [latest release](https://github.com/JustGillin/omni360/releases).
+2. Get your archive.org keys at [archive.org/account/s3.php](https://archive.org/account/s3.php), logged in with your normal account. These are archive.org's official script-friendly credentials, the same pair their `ia` tool uses — not your password. Put them in a plain text file, `ArchiveOrgKeys.txt`, access key on line 1 and secret key on line 2. (Or type them in on the console, in Settings — painful with a controller, but it works.)
+3. Copy `Omni360.xex` and `ArchiveOrgKeys.txt` into a folder of their own on the console, and launch it.
+
+The [Setup Guide](docs/Setup%20Guide.md) covers the whole thing step by step.
+
+<details>
+<summary><b>Choosing where things go</b></summary>
+<br>
+
+Two optional `settings.txt` keys change where things go, and the games folder can also be changed on the console in Settings:
+
+- `games-path:` — where games install, and where the library is scanned. Defaults to `Hdd1:\Content\0000000000000000`, where the dashboard keeps Games on Demand and arcade titles. Add more `games-path:` lines to scan more folders, such as `Usb0:\Content\0000000000000000` — the first is still where games install. See the Setup Guide.
+- `xbla-path:` — where DLC, title updates, arcade games and indie games are written. Same default. (The name is inherited from X-Store, which used the same key.)
+
+</details>
+
+<br>
+
 ## What it does
 
-| | |
-|---|---|
-| **Your Library** | Your installed games as a grid of covers, read straight from the hard drive: Games on Demand, arcade packages, and games kept as extracted folders (`default.xex` or `default.xbe`). |
-| **Store** | About 1,500 Xbox 360 disc games from archive.org, each with its own page: wallpaper, description, screenshots and every regional version. Installs as Games on Demand, playable without the disc. |
-| **Arcade and indie games** | About 740 Xbox Live Arcade games and 3,450 Xbox Live Indie Games, A to Z, installed straight into the console's content folder. |
-| **Original Xbox** | About 500 Original Xbox games the 360 can play, installed as Games on Demand. |
-| **DLC and title updates** | Found for any game and installed where the console expects them. |
-| **Disc installs** | Put a game disc in the drive, Xbox 360 or Original Xbox, and copy it to the hard drive as Games on Demand. |
-| **Queue** | Everything downloads and installs in the background while you carry on browsing. |
-| **Updates itself** | Checks GitHub for a new version, shows what's new, and installs it. Only releases signed with the project's key are accepted. |
+Omni360 is a store and a library in one app on the console. **Your Library** shows every installed game, read straight from the hard drive, and the **Store** lists about 1,500 Xbox 360 disc games, 740 Xbox Live Arcade games, 3,450 indie games and 500 Original Xbox games from archive.org, along with DLC and title updates for any of them. Everything downloads and installs in the background while you keep browsing, with disc games installed as Games on Demand, and a game disc in the drive can be copied to the hard drive the same way. Omni360 also keeps itself up to date, installing only releases signed with the project's key. Nothing downloads without you choosing it, and a popup says when each job finishes or fails.
 
-**Status: beta (0.9.0-beta), working on real hardware.** Every kind of install above has been run end to end on a modded console with a real library.
+**Status: beta (0.9.0-beta), working on real hardware.** Every kind of install has been run end to end on a modded console with a real library.
 
 <br>
 
@@ -68,55 +88,13 @@ Browse thousands of games, DLC and title updates, install them in the background
 
 <br>
 
-## Quick start
-
-**You need:**
-
-- A soft-modded (BadUpdate, ABadAvatar) or hard-modded (RGH, JTAG) Xbox 360, connected to the internet. Ethernet is recommended.
-- An archive.org account, and its IAS3 access key and secret key. Every collection Omni360 downloads from is marked private, so archive.org refuses downloads without them.
-- Free space for installing games: the download and the installed game both, while it installs — around 7GB plus 3-8GB for a typical game. The download is removed once it's installed.
-
-**Then:**
-
-1. Download `Omni360.xex` from the [latest release](https://github.com/JustGillin/omni360/releases).
-2. Get your archive.org keys at [archive.org/account/s3.php](https://archive.org/account/s3.php), logged in with your normal account. These are archive.org's official script-friendly credentials, the same pair their `ia` tool uses — not your password. Put them in a plain text file, `ArchiveOrgKeys.txt`, access key on line 1 and secret key on line 2. (Or type them in on the console, in Settings — painful with a controller, but it works.)
-3. Copy `Omni360.xex` and `ArchiveOrgKeys.txt` into a folder of their own on the console, and launch it.
-
-The [Setup Guide](docs/Setup%20Guide.md) covers the whole thing step by step.
-
-<details>
-<summary><b>Choosing where things go</b></summary>
-<br>
-
-Two optional `settings.txt` keys change where things go, and the games folder can also be changed on the console in Settings:
-
-- `games-path:` — where games install, and where the library is scanned. Defaults to `Hdd1:\Content\0000000000000000`, where the dashboard keeps Games on Demand and arcade titles. Add more `games-path:` lines to scan more folders, such as `Usb0:\Content\0000000000000000` — the first is still where games install. See the Setup Guide.
-- `xbla-path:` — where DLC, title updates, arcade games and indie games are written. Same default. (The name is inherited from X-Store, which used the same key.)
-
-</details>
-
-<br>
-
-## How to use it
-
-The sidebar on the left has four pages; left on the D-pad reaches it from any page, and **B** steps back a level (B on the sidebar exits).
-
-- **Your Library** — **A** on a game opens its page. A game disc in the drive is the first tile: **A** installs it to the hard drive, **X** opens its page, and once it's installed **A** finds its DLC and **START** installs it again. **Y** is a shortcut to Settings.
-- **Store** — featured games, A to Z, then rows of games that scroll sideways: Popular, Top rated and a row for each genre, ranked by how many people rated each game on Xbox Live (`tools/make_store_rows.py`) — no one's downloads are counted. The featured games change by themselves: a week's theme, or the series of a big new release, from `featured.json` in this repository (see `docs/featured-instructions.md` and `tools/featured.py`). **A** on a letter shows its games; **A** on a game opens its page. **XBLA**, **XBLIG** and **Original Xbox** open their own A to Z. **Search** looks through every list at once by name (or title ID); **Y** on the results searches again.
-- **A game's page** — **Install** installs the chosen version, every disc of it; choose another version from the list beside the description first. The button shows Queued, Installing, Installed, or Install remaining for a multi-disc game partly installed. **Find DLC** and **Title updates** search archive.org and show what's there to pick from. **Uninstall** appears once something is installed, and removes the game but leaves its DLC and title updates.
-- **Queue** — what's downloading, waiting and done. **X** stops a download or install, or clears a finished one.
-- **Settings** — the library folders as a list of checkboxes, your archive.org keys, the disc read speed (left and right change it; lower it for a scratched disc that fails partway through), navigation sounds, and updates: Omni360 checks GitHub for a newer version when it starts (this can be turned off), shows what's new in it, and installs it and restarts when you choose Update. It only installs a release signed with the project's key (`tools/sign_release.py`), keeping the previous version beside it as `.old`.
-
-Nothing downloads without you choosing it, and a popup says when each job finishes or fails.
-
-<br>
-
 ## Known limitations
 
 - **Downloads are slow-ish** — about 3.5MB/s on average, so a game takes half an hour or more. archive.org's servers are the limit, not the console.
 - **Some games aren't in the Store.** Games archived only as compressed RARs (in the `XBOX_360_*` items, such as the DiRT series and Deadpool) aren't listed, as the installer would have to unpack them first; uncompressed RARs, like BioShock Infinite's, install like any other game. A few dozen more aren't on archive.org at all.
 - **An interrupted game install starts over.** Pieces resume within a session, but quitting the app mid-download removes what was downloaded.
 - **A multi-disc game installed some other way** — from real discs, or another tool — can't be uninstalled by version from its Store page, since Omni360 can't tell which disc is which. Its own library entry still can be, if the Store hasn't got it.
+- **A scratched disc can fail partway through a disc install.** Lower the disc read speed in Settings and try again.
 - **Key entry** on the on-screen keyboard isn't masked.
 - **DLC matching is deliberately loose** — it has to cope with release-group names like `Halo.1.Combat.Evolved.Anniversary...` and abbreviated display names like `CoD: World at War`. It scores candidates 0-100 on how much of the game's name appears in the filename, and penalises a missing number heavily so "Halo 3" doesn't offer "Halo 4". You always confirm the pack yourself.
 - **Display names** are decoded as UTF-8 or UTF-16BE, whichever each package turns out to use; characters outside the BMP become `?`.
@@ -141,16 +119,11 @@ Nothing downloads without you choosing it, and a popup says when each job finish
 
 </details>
 
-<details>
-<summary><b>Why this exists instead of just using X-Store or Aurora</b></summary>
 <br>
 
-- **An Aurora Lua script** got further than expected, but Aurora's `Http` library doesn't keep cookies between requests and can't attach custom headers — confirmed on hardware — and archive.org's login wall needs both.
-- **X-Store as-is** (pointed at Vimm's Lair) broke with `404`s from Vimm's own anti-scraping measures.
+## Check out X-Store too
 
-A native `.xex` was the only option with full control over HTTP requests.
-
-</details>
+Omni360 began as a modified version of [X-Store](https://github.com/951261/X-Store) by 951261, and X-Store is still a great app in its own right, now with Internet Archive support of its own. It's well worth trying alongside Omni360.
 
 <br>
 

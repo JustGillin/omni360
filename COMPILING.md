@@ -7,7 +7,7 @@ Sadly, there is extremely little information around creating native Xbox 360 pro
 * A computer running Windows 7 or higher
 * Microsoft Visual Studio 2010
 * The official Microsoft Xbox 360 XDK
-* An Xbox capable of running homebrew (BadUpdate, JTAG or RGH) preferably with the XBDM plugin
+* An Xbox capable of running homebrew (BadUpdate, ABadAvatar, PeerPressure, JTAG or RGH) preferably with the XBDM plugin
 
 1. Install Visual Studio 2010 and the official XDK
 2. Clone this Git Repository

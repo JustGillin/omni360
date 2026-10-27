@@ -5,7 +5,7 @@ Start-to-finish setup for a console you already have modded. Adapted from X-Stor
 ## Prerequisites
 
 **Required:**
-- A soft-modded (BadUpdate, ABadAvatar) or hard-modded (RGH, JTAG) Xbox 360.
+- A soft-modded (BadUpdate, ABadAvatar, PeerPressure) or hard-modded (RGH, JTAG) Xbox 360.
 - A working internet connection on the console. Ethernet recommended — game downloads are several gigabytes.
 - An archive.org account. Every collection Omni360 downloads from is marked private, so an anonymous request gets a hard 401 — the keys below are genuinely required, not optional.
 - Room on the drive your games go to, if you'll install games: while a game installs, both its download (around 7GB) and the installed game (3-8GB) are on the drive. The download is removed once it's installed.
