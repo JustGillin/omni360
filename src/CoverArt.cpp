@@ -51,6 +51,13 @@ DESCRIPTION : Box art from Xbox Live, else xboxunity.net, looked up, cut to a ti
 #define MAX_REQUESTED      256
 #define MAX_READY          4  // a library tile is 1MB - don't run far ahead of the UI
 
+// Workers fetching covers side by side. A cover is a few hundred
+// milliseconds of waiting on a new connection and its download for a few tens
+// of decoding, so one worker left the Store's tiles arriving one by one;
+// three keep three downloads going. Each holds a cover's buffers while it
+// works - a few MB at most, for xboxunity's big inserts.
+#define COVER_WORKERS      3
+
 // A cover's steps are timed, and logged when the whole takes this long.
 #define TIMING_LOG_MS      4.0
 
@@ -64,7 +71,8 @@ struct CoverFileHeader
 
 static CRITICAL_SECTION g_lock;
 static HANDLE g_wake = NULL;
-static HANDLE g_thread = NULL;
+static HANDLE g_threads[COVER_WORKERS];
+static int g_threadCount = 0;
 static bool g_running = false;
 static bool g_shutdown = false;
 
@@ -84,7 +92,25 @@ static unsigned long g_storeRequested[MAX_STORE_REQUESTED];
 static int g_storeRequestedCount = 0;
 static int g_nextStoreRequest = 0;
 
-static CoverData g_ready[MAX_READY];
+// The covers a worker is on, and which tiles each owes: the Store's, the
+// library's, or both, when one asks for a cover while it's on its way to the
+// other. A cover is on one worker at a time, so two never write its cache
+// file at once.
+struct CoverJob
+{
+    unsigned long titleId;
+    bool forStore;
+    bool forLibrary;
+};
+static CoverJob g_jobs[COVER_WORKERS];
+static int g_jobCount = 0;
+
+// Each job holds a place among the MAX_READY until its first tile's handed
+// over. The second tile of a cover asked for both ways goes over the top, so
+// there's room for one of those a worker.
+static int g_reserved = 0;
+
+static CoverData g_ready[MAX_READY + COVER_WORKERS];
 static int g_readyCount = 0;
 
 // ---------------------------------------------------------------------------
@@ -457,15 +483,17 @@ static bool IsArcadeTitle(unsigned long titleId)
 // it: a disc game's [BANNER_DISC], an arcade game's and an Original Xbox
 // game's. NULL if one wouldn't decode - or while there isn't one - and a
 // tile then gets the disc banner, or failing that a plain green strip. Only
-// the worker uses them, and StopCoverArt lets them go once the worker's
-// stopped.
+// the workers use them, the first to want one decoding it under
+// g_bannerLock, and StopCoverArt lets them go once the workers have stopped.
 #define BANNER_DISC   0
 #define BANNER_ARCADE 1
 #define BANNER_XBOX   2
 #define BANNER_COUNT  3
 static unsigned long *g_bannerPixels[BANNER_COUNT] = { NULL, NULL, NULL };
 static bool g_bannerTried[BANNER_COUNT] = { false, false, false };
+static CRITICAL_SECTION g_bannerLock;
 
+// Under g_bannerLock.
 static const unsigned long *DecodeBanner(int which)
 {
     if (g_bannerTried[which])
@@ -500,10 +528,16 @@ static const unsigned long *DecodeBanner(int which)
     return pixels;
 }
 
+// Once decoded, a banner isn't written again until StopCoverArt, so the
+// pixels are read outside the lock.
 static const unsigned long *Banner(int which)
 {
+    EnterCriticalSection(&g_bannerLock);
     const unsigned long *banner = (which != BANNER_DISC) ? DecodeBanner(which) : NULL;
-    return banner != NULL ? banner : DecodeBanner(BANNER_DISC);
+    if (banner == NULL)
+        banner = DecodeBanner(BANNER_DISC);
+    LeaveCriticalSection(&g_bannerLock);
+    return banner;
 }
 
 // Which banner a game's tile gets.
@@ -579,14 +613,16 @@ static unsigned long *DecodeFront(unsigned long titleId, const char *source, Dow
 // The front of a game's cover: Xbox Live's box art, else xboxunity's - also
 // when Xbox Live's download isn't an image. *outFailed: a source couldn't be
 // asked, so it's worth trying again another time; otherwise a NULL means
-// neither has a cover for it.
+// neither has a cover for it. *fetchMs: the time spent on the network.
 static unsigned long *FetchFront(unsigned long titleId, unsigned long *downloaded, int *imageW, int *imageH,
-                                 double *decodeMs, double *cutMs, bool *outFailed)
+                                 double *fetchMs, double *decodeMs, double *cutMs, bool *outFailed)
 {
     *outFailed = false;
     Download download = {NULL, 0};
 
+    double fetchStarted = ImageTimerMs();
     const FetchResult xboxLive = FetchBoxArt(titleId, &download);
+    *fetchMs = ImageTimerMs() - fetchStarted;
     if (xboxLive == FETCH_OK)
     {
         *downloaded = download.size;
@@ -595,7 +631,9 @@ static unsigned long *FetchFront(unsigned long titleId, unsigned long *downloade
             return front;
     }
 
+    fetchStarted = ImageTimerMs();
     const FetchResult xboxUnity = FetchXboxUnityCover(titleId, &download);
+    *fetchMs += ImageTimerMs() - fetchStarted;
     if (xboxUnity == FETCH_OK)
     {
         *downloaded = download.size;
@@ -632,8 +670,170 @@ static void Deliver(const CoverData &data)
         g_delivered[g_deliveredCount++] = data.titleId;
 }
 
-static DWORD WINAPI CoverEntry(LPVOID)
+// Under the lock. The job a worker is on for this cover, or NULL.
+static CoverJob *JobFor(unsigned long titleId)
 {
+    for (int i = 0; i < g_jobCount; ++i)
+    {
+        if (g_jobs[i].titleId == titleId)
+            return &g_jobs[i];
+    }
+    return NULL;
+}
+
+// Under the lock.
+static void EndJob(unsigned long titleId)
+{
+    for (int i = 0; i < g_jobCount; ++i)
+    {
+        if (g_jobs[i].titleId == titleId)
+        {
+            g_jobs[i] = g_jobs[--g_jobCount];
+            return;
+        }
+    }
+}
+
+// Under the lock: whether there's a cover waiting and room for its tile.
+static bool WorkWaiting()
+{
+    const bool asked = (g_nextStoreRequest < g_storeRequestedCount || g_nextRequest < g_requestedCount);
+    return asked && g_readyCount + g_reserved < MAX_READY;
+}
+
+// The banner beside the front, and the Store's halved. malloc'd, or NULL.
+static unsigned long *MakeTile(const unsigned long *front, unsigned long titleId, bool forStore)
+{
+    unsigned long *tile = ComposeTile(front, BannerFor(titleId));
+    if (tile != NULL && forStore)
+    {
+        unsigned long *half = HalveArgb(tile, COVER_SIZE, COVER_SIZE);
+        free(tile);
+        tile = half;
+    }
+    return tile;
+}
+
+// Under the lock. The Store's isn't marked delivered: it may ask again.
+static void HandOver(unsigned long titleId, unsigned long *tile, bool forStore)
+{
+    CoverData data;
+    data.titleId = titleId;
+    data.pixels = tile;
+    data.side = forStore ? COVER_STORE_SIZE : COVER_SIZE;
+    data.forStore = forStore;
+    if (forStore)
+        g_ready[g_readyCount++] = data;
+    else
+        Deliver(data);
+}
+
+// The front of a cover: from the cache, else downloaded, decoded and cut.
+// NULL when there's none to be had. *outFresh: it was downloaded, so it's
+// still to be cached.
+static unsigned long *LoadFront(unsigned long titleId, bool forStore, int worker, bool *outFresh)
+{
+    unsigned long *front = (unsigned long *)ReadCachedCover(titleId);
+    *outFresh = (front == NULL);
+    if (front != NULL)
+        return front;
+
+    if (RecentlyMissing(titleId))
+    {
+        // Once a session each, so the log says why a tile has no cover.
+        if (!forStore)
+            dprintf("[covers] %08lX: no cover was found within the last week - not asking again yet\n", titleId);
+        return NULL;
+    }
+
+    double fetchMs = 0.0, decodeMs = 0.0, cutMs = 0.0;
+    int imageW = 0, imageH = 0;
+    unsigned long downloaded = 0;
+    bool failed = false;
+    front = FetchFront(titleId, &downloaded, &imageW, &imageH, &fetchMs, &decodeMs, &cutMs, &failed);
+    if (front == NULL)
+    {
+        // Neither has one - or neither's would decode - so it isn't asked
+        // about on every launch. A source that couldn't be asked is tried
+        // again next time.
+        if (!failed)
+            WriteCoverFile(titleId, NULL);
+        return NULL;
+    }
+
+    if (fetchMs + decodeMs + cutMs >= TIMING_LOG_MS)
+        dprintf("[timing] cover %08lX (%dx%d, %lu KB, %s, worker %d): fetch %.1f, then decode %.1f + cut %.1f = %.1f ms\n",
+                titleId, imageW, imageH, downloaded / 1024, forStore ? "Store" : "library", worker, fetchMs, decodeMs,
+                cutMs, decodeMs + cutMs);
+    return front;
+}
+
+// One cover, start to finish: its front loaded, a tile made for each that
+// asked for it, and the front cached if it was downloaded. The job ends only
+// once the cache is written, so no other worker reads it half-written.
+static void RunJob(unsigned long titleId, bool forStore, int worker)
+{
+    bool fresh = false;
+    unsigned long *front = LoadFront(titleId, forStore, worker, &fresh);
+
+    bool storeDone = false, libraryDone = false, reserved = true, cached = (front == NULL || !fresh);
+    for (;;)
+    {
+        EnterCriticalSection(&g_lock);
+        const CoverJob *job = JobFor(titleId);
+        const bool wantStore = front != NULL && job->forStore && !storeDone;
+        const bool wantLibrary = front != NULL && job->forLibrary && !libraryDone;
+        if (!wantStore && !wantLibrary && cached)
+        {
+            if (reserved)
+                g_reserved--; // no tile came of it
+            EndJob(titleId);
+            LeaveCriticalSection(&g_lock);
+            break;
+        }
+        LeaveCriticalSection(&g_lock);
+
+        const double tileStarted = ImageTimerMs();
+        unsigned long *storeTile = wantStore ? MakeTile(front, titleId, true) : NULL;
+        unsigned long *libraryTile = wantLibrary ? MakeTile(front, titleId, false) : NULL;
+        const double tileMs = ImageTimerMs() - tileStarted;
+        if (tileMs >= TIMING_LOG_MS)
+            dprintf("[timing] cover %08lX (%s, worker %d): tile %.1f ms\n", titleId,
+                    wantStore ? "Store" : "library", worker, tileMs);
+
+        EnterCriticalSection(&g_lock);
+        storeDone = storeDone || wantStore;
+        libraryDone = libraryDone || wantLibrary;
+        if (storeTile != NULL)
+            HandOver(titleId, storeTile, true);
+        if (libraryTile != NULL)
+            HandOver(titleId, libraryTile, false);
+        if (reserved && (storeTile != NULL || libraryTile != NULL))
+        {
+            g_reserved--;
+            reserved = false;
+        }
+        LeaveCriticalSection(&g_lock);
+        if (storeTile != NULL || libraryTile != NULL)
+            SetEvent(g_wake); // room for another worker's
+
+        // Cached after it's handed over, so the tile isn't kept waiting on
+        // the disk.
+        if (!cached)
+        {
+            WriteCoverFile(titleId, front);
+            cached = true;
+        }
+    }
+
+    if (front != NULL)
+        free(front);
+}
+
+static DWORD WINAPI CoverEntry(LPVOID param)
+{
+    const int worker = (int)(INT_PTR)param;
+
     for (;;)
     {
         EnterCriticalSection(&g_lock);
@@ -641,12 +841,12 @@ static DWORD WINAPI CoverEntry(LPVOID)
         if (g_shutdown)
         {
             LeaveCriticalSection(&g_lock);
+            SetEvent(g_wake); // so the next worker sees it too
             break;
         }
 
         // Nothing to do, or the UI hasn't caught up: wait to be woken.
-        const bool storeWaiting = (g_nextStoreRequest < g_storeRequestedCount);
-        if ((!storeWaiting && g_nextRequest >= g_requestedCount) || g_readyCount >= MAX_READY)
+        if (!WorkWaiting())
         {
             LeaveCriticalSection(&g_lock);
             WaitForSingleObject(g_wake, INFINITE);
@@ -654,88 +854,38 @@ static DWORD WINAPI CoverEntry(LPVOID)
         }
 
         // The Store's first: they're on screen now.
-        const bool forStore = storeWaiting;
-        unsigned long titleId = forStore ? g_storeRequested[g_nextStoreRequest++] : g_requested[g_nextRequest++];
+        const bool forStore = (g_nextStoreRequest < g_storeRequestedCount);
+        const unsigned long titleId = forStore ? g_storeRequested[g_nextStoreRequest++]
+                                               : g_requested[g_nextRequest++];
+
+        // A cover another worker is on is left to it, which makes this tile
+        // too once it has the front.
         bool skip = !forStore && AlreadyDelivered(titleId);
-        LeaveCriticalSection(&g_lock);
-
-        if (skip)
-            continue;
-
-        // The front: from the cache, else downloaded, decoded and cut.
-        unsigned long *front = (unsigned long *)ReadCachedCover(titleId);
-        const bool fresh = (front == NULL);
-        double decodeMs = 0.0, cutMs = 0.0;
-        int imageW = 0, imageH = 0;
-        unsigned long downloaded = 0;
-        if (fresh)
+        CoverJob *running = skip ? NULL : JobFor(titleId);
+        if (running != NULL)
         {
-            if (RecentlyMissing(titleId))
-            {
-                // Once a session each, so the log says why a tile has no cover.
-                if (!forStore)
-                    dprintf("[covers] %08lX: no cover was found within the last week - not asking again yet\n",
-                            titleId);
-                continue;
-            }
-
-            bool failed = false;
-            front = FetchFront(titleId, &downloaded, &imageW, &imageH, &decodeMs, &cutMs, &failed);
-            if (front == NULL)
-            {
-                // Neither has one - or neither's would decode - so it isn't
-                // asked about on every launch. A source that couldn't be
-                // asked is tried again next time.
-                if (!failed)
-                    WriteCoverFile(titleId, NULL);
-                continue;
-            }
-        }
-
-        // The banner beside it, and the Store's halved.
-        const double tileStarted = ImageTimerMs();
-        unsigned long *tile = ComposeTile(front, BannerFor(titleId));
-        if (tile != NULL && forStore)
-        {
-            unsigned long *half = HalveArgb(tile, COVER_SIZE, COVER_SIZE);
-            free(tile);
-            tile = half;
-        }
-        const double tileMs = ImageTimerMs() - tileStarted;
-        if (tile == NULL)
-        {
-            free(front);
-            continue;
-        }
-
-        if (decodeMs + cutMs + tileMs >= TIMING_LOG_MS)
-        {
-            if (fresh)
-                dprintf("[timing] cover %08lX (%dx%d, %lu KB, %s, worker): decode %.1f + cut %.1f + tile %.1f = %.1f ms\n",
-                        titleId, imageW, imageH, downloaded / 1024, forStore ? "Store" : "library", decodeMs, cutMs,
-                        tileMs, decodeMs + cutMs + tileMs);
+            if (forStore)
+                running->forStore = true;
             else
-                dprintf("[timing] cover %08lX (cached, %s, worker): tile %.1f ms\n", titleId,
-                        forStore ? "Store" : "library", tileMs);
+                running->forLibrary = true;
+            skip = true;
+        }
+        if (!skip)
+        {
+            CoverJob job = {titleId, forStore, !forStore};
+            g_jobs[g_jobCount++] = job;
+            g_reserved++;
         }
 
-        CoverData data;
-        data.titleId = titleId;
-        data.pixels = tile;
-        data.side = forStore ? COVER_STORE_SIZE : COVER_SIZE;
-        data.forStore = forStore;
-        EnterCriticalSection(&g_lock);
-        if (forStore)
-            g_ready[g_readyCount++] = data; // not marked delivered: the Store may ask again
-        else
-            Deliver(data);
+        // An event wakes one waiting worker, so each passes it on while
+        // there's more for the others.
+        const bool more = WorkWaiting();
         LeaveCriticalSection(&g_lock);
+        if (more)
+            SetEvent(g_wake);
 
-        // Cached after it's handed over, so the tile isn't kept waiting on
-        // the disk.
-        if (fresh)
-            WriteCoverFile(titleId, front);
-        free(front);
+        if (!skip)
+            RunJob(titleId, forStore, worker);
     }
 
     return 0;
@@ -747,6 +897,7 @@ bool StartCoverArt()
         return true;
 
     InitializeCriticalSection(&g_lock);
+    InitializeCriticalSection(&g_bannerLock);
 
     g_wake = CreateEvent(NULL, FALSE, FALSE, NULL); // auto-reset
     if (g_wake == NULL)
@@ -755,28 +906,44 @@ bool StartCoverArt()
         return false;
     }
 
-    // The same stack as the other workers, for the same HTTP and TLS buffers.
-    g_thread = CreateThread(NULL, 256 * 1024, CoverEntry, NULL, CREATE_SUSPENDED, NULL);
-    if (g_thread == NULL)
+#ifdef _XBOX
+    // Hardware threads 5 and 4, core 2's - the download worker's core - and
+    // 2, core 1's first. A cover is a moment of TLS and a few tens of
+    // milliseconds of decoding between long waits on the network, so they
+    // hardly meet what else runs there. Core 0, the UI's, is left alone, and
+    // the search worker keeps hardware thread 3 for matching.
+    static const DWORD kProcessors[COVER_WORKERS] = { 5, 4, 2 };
+#endif
+
+    g_threadCount = 0;
+    for (int i = 0; i < COVER_WORKERS; ++i)
     {
-        dprintf("[covers] CreateThread failed (%lu)\n", GetLastError());
+        // The same stack as the other workers, for the same HTTP and TLS
+        // buffers.
+        HANDLE thread = CreateThread(NULL, 256 * 1024, CoverEntry, (LPVOID)(INT_PTR)(i + 1), CREATE_SUSPENDED, NULL);
+        if (thread == NULL)
+        {
+            // Fewer workers only means covers come in more slowly.
+            dprintf("[covers] CreateThread failed (%lu)\n", GetLastError());
+            break;
+        }
+#ifdef _XBOX
+        XSetThreadProcessor(thread, kProcessors[i]);
+#endif
+        g_threads[g_threadCount++] = thread;
+    }
+    if (g_threadCount == 0)
+    {
         CloseHandle(g_wake);
         g_wake = NULL;
         return false;
     }
 
-#ifdef _XBOX
-    // Hardware thread 5, core 2's second - the download worker's core, but
-    // a cover is a moment of TLS and a few tens of milliseconds of decoding
-    // between long waits on the network, so the two hardly meet. The search
-    // worker has core 1 to itself for matching.
-    XSetThreadProcessor(g_thread, 5);
-#endif
-
     g_running = true;
-    ResumeThread(g_thread);
+    for (int i = 0; i < g_threadCount; ++i)
+        ResumeThread(g_threads[i]);
 
-    dprintf("[covers] cover worker started\n");
+    dprintf("[covers] %d cover workers started\n", g_threadCount);
     return true;
 }
 
@@ -790,15 +957,17 @@ bool StopCoverArt(DWORD timeoutMs)
     LeaveCriticalSection(&g_lock);
     SetEvent(g_wake);
 
-    bool stopped = (WaitForSingleObject(g_thread, timeoutMs) == WAIT_OBJECT_0);
+    // timeoutMs is for all of them: they're stopping at the same time.
+    bool stopped = (WaitForMultipleObjects(g_threadCount, g_threads, TRUE, timeoutMs) == WAIT_OBJECT_0);
     if (!stopped)
     {
         dprintf("[covers] still running after %lums - leaving anyway\n", timeoutMs);
         return false;
     }
 
-    CloseHandle(g_thread);
-    g_thread = NULL;
+    for (int i = 0; i < g_threadCount; ++i)
+        CloseHandle(g_threads[i]);
+    g_threadCount = 0;
     g_running = false;
 
     // Anything never collected.

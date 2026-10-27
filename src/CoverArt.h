@@ -36,10 +36,10 @@
 // Both are cut to the front the same way. Covers already cached stay as they
 // were fetched.
 //
-// A worker thread looks covers up, downloads them, decodes and cuts them
-// (ImageDecode, not D3DX, so it needs no device), and reads the ones already
-// cached - then puts the banner beside each and hands over the finished
-// tile, so the UI thread only copies it into a texture:
+// Three worker threads, side by side, look covers up, download them, decode
+// and cut them (ImageDecode, not D3DX, so they need no device), and read the
+// ones already cached - then put the banner beside each and hand over the
+// finished tile, so the UI thread only copies it into a texture:
 //
 //   game:\Covers\XXXXXXXX.bin   the front of the case, 418x512 ARGB pixels
 //   game:\Covers\XXXXXXXX.none2 neither had anything; asked again after a week
