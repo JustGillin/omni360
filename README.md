@@ -6,7 +6,7 @@
 
 ### Get games onto your modded Xbox 360, from the Xbox 360
 
-Browse thousands of games, DLC and title updates, install them in the background, and play them from the dashboard or Aurora. No PC needed once it's set up.
+Browse thousands of games, DLC and title updates, install them in the background, and play them right from Omni360 - or from the dashboard or Aurora. No PC needed once it's set up.
 
 <br>
 
@@ -53,9 +53,9 @@ Two optional `settings.txt` keys change where things go, and the games folder ca
 
 ## What it does
 
-Omni360 is a store and a library in one app on the console. **Your Library** shows every installed game, read straight from the hard drive, and the **Store** lists about 1,500 Xbox 360 disc games, 740 Xbox Live Arcade games, 3,450 indie games and 500 Original Xbox games from archive.org, along with DLC and title updates for any of them. Everything downloads and installs in the background while you keep browsing, with disc games installed as Games on Demand, and a game disc in the drive can be copied to the hard drive the same way. Omni360 also keeps itself up to date, installing only releases signed with the project's key. Nothing downloads without you choosing it, and a popup says when each job finishes or fails.
+Omni360 is a store and a library in one app on the console. **Your Library** shows every installed game, read straight from the hard drive, and plays them - or the disc in the drive - with **A**, and the **Store** lists about 1,500 Xbox 360 disc games, 740 Xbox Live Arcade games, 3,450 indie games and 500 Original Xbox games from archive.org, along with DLC and title updates for any of them. Everything downloads and installs in the background while you keep browsing, with disc games installed as Games on Demand, and a game disc in the drive can be copied to the hard drive the same way. Omni360 also keeps itself up to date, installing only releases signed with the project's key. Nothing downloads without you choosing it, and a popup says when each job finishes or fails.
 
-**Status: beta (0.9.0-beta), working on real hardware.** Every kind of install has been run end to end on a modded console with a real library.
+**Status: beta (0.10.0-beta), working on real hardware.** Every kind of install has been run end to end on a modded console with a real library.
 
 <br>
 
