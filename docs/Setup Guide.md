@@ -48,6 +48,13 @@ games-path: Usb0:\Content\0000000000000000
 
 Each folder needs the `{TitleID}\{ContentType}\...` layout — Games on Demand, arcade games, installed packages. Extracted XEX games (a folder with a `default.xex`) aren't found yet. A drive the dashboard formatted as Xbox storage keeps its files in a container Omni360 can't reach.
 
+**Other apps to exit to.** **B** from the sidebar asks where to go: back to the dashboard the console starts with, or Microsoft's Xbox Dashboard. Add an `app:` line, a name and a path, for each other place you want listed there: an `.xex`, or a package such as XeXMenu's:
+
+```
+app: Aurora = Hdd1:\Aurora\Aurora.xex
+app: XeXMenu = Hdd1:\Content\0000000000000000\C0DE9999\00080000\C0DE99990F586558
+```
+
 ## 4. Transfer files to the console
 
 Copy `Omni360.xex`, `ArchiveOrgKeys.txt`, and `settings.txt` if you made one, into a single folder on the console — something like `Hdd1:\Apps\Omni360\` or `Usb0:\Apps\Omni360\`. Keep them together, and do not put any other `.xex` in that folder. Omni360 keeps its caches beside them, in `Covers\` and `Store\`.

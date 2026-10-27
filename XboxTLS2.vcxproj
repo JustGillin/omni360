@@ -397,6 +397,7 @@
     <ClInclude Include="src\settings.h" />
     <ClInclude Include="src\StfsParser.h" />
     <ClInclude Include="src\FolderGames.h" />
+    <ClInclude Include="src\Launch.h" />
     <ClInclude Include="src\UiSound.h" />
     <ClInclude Include="src\Featured.h" />
     <ClInclude Include="src\TrustAnchors.h" />
@@ -455,6 +456,7 @@
     <ClCompile Include="src\parsing.cpp" />
     <ClCompile Include="src\StfsParser.cpp" />
     <ClCompile Include="src\FolderGames.cpp" />
+    <ClCompile Include="src\Launch.cpp" />
     <ClCompile Include="src\UiSound.cpp" />
     <ClCompile Include="src\Featured.cpp" />
     <ClCompile Include="src\UiText.cpp" />

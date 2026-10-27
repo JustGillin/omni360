@@ -25,6 +25,7 @@ end-to-end on real hardware against a real 27-game library.
 #include "Keyboard.h"
 #include "StfsParser.h"
 #include "FolderGames.h"
+#include "Launch.h"
 #include "UiSound.h"
 #include "Featured.h"
 #include "GameListUI.h"
@@ -3232,10 +3233,133 @@ static void OpenGameByTitleId(Shell &shell, const Library &lib, unsigned long ti
     }
 }
 
-// A on a library game.
+// X on a library game.
 static void OpenLibraryGame(Shell &shell, const Library &lib, const InstalledGame &chosen)
 {
     OpenGameByTitleId(shell, lib, chosen.titleId, chosen.displayName);
+}
+
+// The library's game by its title ID - the one the scan kept, as it keeps
+// one a title. NULL if it isn't installed.
+static const InstalledGame *LibraryGameByTitleId(const Library &lib, unsigned long titleId)
+{
+    for (int i = 0; i < lib.count; ++i)
+        if (lib.games[i].titleId == titleId)
+            return &lib.games[i];
+    return NULL;
+}
+
+// Leaving stops the queue, so it asks first when there's anything in it
+// still to do. True to go ahead.
+static bool ConfirmLeaving()
+{
+    int pending = PendingDownloadCount() + PendingDiscJobCount() + PendingGameJobCount();
+    if (pending == 0)
+        return true;
+
+    char message[96];
+    _snprintf(message, sizeof(message), "%d job%s still in the queue.",
+              pending, pending == 1 ? " is" : "s are");
+    message[sizeof(message) - 1] = '\0';
+
+    return ShowConfirmUI("Leave Omni360?", message,
+                         "Leaving stops them. Files that already finished stay installed; "
+                         "a disc install is removed.",
+                         "Leave");
+}
+
+// A on a library game, or Play on its page. Returns only if it didn't start,
+// having said so.
+static void PlayLibraryGame(const InstalledGame &game)
+{
+    if (!ConfirmLeaving())
+        return;
+    dprintf("Playing: %s (Title ID %08lX)\n", game.displayName, game.titleId);
+    RenderStatusFrame("Starting", game.displayName, NULL);
+    LaunchInstalledGame(game);
+    ShowMessageUI("Couldn't start this game", game.displayName, "The console's loader refused it - see the log.");
+}
+
+// Settings.txt's "app:" lines - "app: Aurora = Hdd1:\Aurora\Aurora.xex" -
+// the Exit menu's other places to go.
+#define APP_KEY "app: "
+#define MAX_APPS 8
+static char g_appNames[MAX_APPS][64];
+static char g_appPaths[MAX_APPS][MAX_TEXT_LENGTH];
+
+static int ReadApps()
+{
+    int count = 0;
+    FILE *fd = fopen(SETTINGS_FILE, "r");
+    if (fd == NULL)
+        return 0;
+
+    char line[512];
+    const size_t keyLen = strlen(APP_KEY);
+    while (fgets(line, sizeof(line), fd) != NULL && count < MAX_APPS)
+    {
+        if (line[0] == '#' || strncmp(line, APP_KEY, keyLen) != 0)
+            continue;
+        char *value = line + keyLen;
+        value[strcspn(value, "\r\n")] = '\0';
+        char *equals = strchr(value, '=');
+        if (equals == NULL)
+            continue;
+
+        // Both sides, without the spaces around the "=".
+        char *nameEnd = equals;
+        while (nameEnd > value && nameEnd[-1] == ' ')
+            nameEnd--;
+        *nameEnd = '\0';
+        char *path = equals + 1;
+        while (*path == ' ')
+            path++;
+        if (value[0] == '\0' || strlen(path) < 3)
+            continue;
+
+        _snprintf(g_appNames[count], sizeof(g_appNames[count]), "%s", value);
+        g_appNames[count][sizeof(g_appNames[count]) - 1] = '\0';
+        _snprintf(g_appPaths[count], sizeof(g_appPaths[count]), "%s", path);
+        g_appPaths[count][sizeof(g_appPaths[count]) - 1] = '\0';
+        count++;
+    }
+    fclose(fd);
+    return count;
+}
+
+// B from the sidebar: where to go. True if Omni360 should just end - what
+// leaving always did, which takes the console wherever DashLaunch says.
+static bool ExitMenu()
+{
+    const int apps = ReadApps();
+
+    const char *labels[MAX_APPS + 2];
+    const char *sublabels[MAX_APPS + 2];
+    int count = 0;
+    labels[count] = "Leave Omni360";
+    sublabels[count++] = "To the dashboard the console starts with";
+    labels[count] = "Xbox Dashboard";
+    sublabels[count++] = "Microsoft's own, whatever the console starts with";
+    for (int i = 0; i < apps; ++i)
+    {
+        labels[count] = g_appNames[i];
+        sublabels[count++] = g_appPaths[i];
+    }
+
+    const int chosen = ShowChoiceUI("Exit to", "Add more places with \"app:\" lines in settings.txt.",
+                                    labels, sublabels, count, L"Go");
+    if (chosen < 0 || !ConfirmLeaving())
+        return false;
+    if (chosen == 0)
+        return true;
+
+    RenderStatusFrame("Starting", labels[chosen], NULL);
+    if (chosen == 1)
+        LaunchXboxDashboard();
+    else
+        LaunchApp(g_appPaths[chosen - 2]);
+    ShowMessageUI("Couldn't start it", labels[chosen], "The console's loader refused it - see the log.");
+    return false;
 }
 
 static StoreGameView MakeStoreGameView(Shell &shell, const Library &lib)
@@ -3296,7 +3420,8 @@ static StoreGameView MakeStoreGameView(Shell &shell, const Library &lib)
         }
         break;
     case STORE_INSTALL_INSTALLED:
-        view.buttons[0] = "Installed";
+        // Played from here too, where the library has it to play.
+        view.buttons[0] = LibraryGameByTitleId(lib, g_storeGame.titleId) != NULL ? "Play" : "Installed";
         break;
     default:
         view.buttons[0] = partial ? "Install remaining" : "Install";
@@ -3332,6 +3457,16 @@ static StoreGameView MakeStoreGameView(Shell &shell, const Library &lib)
     view.focus = shell.storeGameFocus;
     view.focused = !shell.sidebarFocused;
     return view;
+}
+
+// Whether a game page's first button is Play: the chosen version is
+// installed, and the library has the game to start.
+static bool GamePagePlays(const Shell &shell, const Library &lib)
+{
+    float fraction = 0.0f;
+    bool partial = false;
+    return StoreVersionState(lib, shell.storeVersionChosen, &fraction, &partial) == STORE_INSTALL_INSTALLED &&
+           LibraryGameByTitleId(lib, g_storeGame.titleId) != NULL;
 }
 
 // The D-pad on a game page: along the buttons, and down the versions beside
@@ -4122,7 +4257,7 @@ static void RenderGamePageFrame(Shell &shell, const Library &lib, UiHint *hints,
         if (f >= STORE_GAME_FOCUS_VERSIONS)
             hintCount = AddHint(hints, hintCount, UI_BUTTON_A, L"Choose this version", L"Choose");
         else if (f == STORE_GAME_FOCUS_BUTTONS && StoreVersionCount() > 0)
-            hintCount = AddHint(hints, hintCount, UI_BUTTON_A, L"Install", L"Install");
+            hintCount = AddHint(hints, hintCount, UI_BUTTON_A, GamePagePlays(shell, lib) ? L"Play" : L"Install");
         else if (f == STORE_GAME_FOCUS_BUTTONS + 1 && !StoreGameIsIndie() && !StoreGameIsXbox())
             hintCount = AddHint(hints, hintCount, UI_BUTTON_A, L"Find DLC", L"DLC");
         else if (f == STORE_GAME_FOCUS_BUTTONS + 2 && !StoreGameIsIndie() && !StoreGameIsXbox())
@@ -4572,26 +4707,8 @@ int main()
                 shell.sidebarFocused = false;
             else if (pressed & XINPUT_GAMEPAD_B)
             {
-                // Leaving stops the queue, so it asks first when there's
-                // anything in it still to do.
-                int pending = PendingDownloadCount() + PendingDiscJobCount() + PendingGameJobCount();
-                if (pending == 0)
-                {
-                    exitRequested = true;
-                }
-                else
-                {
-                    char message[96];
-                    _snprintf(message, sizeof(message), "%d job%s still in the queue.",
-                              pending, pending == 1 ? " is" : "s are");
-                    message[sizeof(message) - 1] = '\0';
-
-                    exitRequested = ShowConfirmUI("Leave Omni360?", message,
-                                                  "Leaving stops them. Files that already finished stay installed; "
-                                                  "a disc install is removed.",
-                                                  "Leave");
-                    acted = !exitRequested;
-                }
+                exitRequested = ExitMenu();
+                acted = !exitRequested;
             }
         }
         else if (shell.picker.kind != PICKER_NONE && shell.page == shell.picker.page)
@@ -4711,7 +4828,15 @@ int main()
             }
             else if ((pressed & XINPUT_GAMEPAD_A) && lib.count > 0 && !onDisc)
             {
-                // Its page, with its DLC and title updates a button away.
+                // The library is what you have, so A plays it - as the
+                // dashboard and Aurora do.
+                PlayLibraryGame(lib.games[shell.librarySelected - discItems]);
+                acted = true;
+            }
+            else if ((pressed & XINPUT_GAMEPAD_X) && lib.count > 0 && !onDisc)
+            {
+                // Its page, with its DLC and title updates a button away - X,
+                // as on the disc's tile.
                 const InstalledGame &chosen = lib.games[shell.librarySelected - discItems];
                 dprintf("Selected: %s (Title ID %08lX)\n", chosen.displayName, chosen.titleId);
                 OpenLibraryGame(shell, lib, chosen);
@@ -4746,6 +4871,11 @@ int main()
                 if (f >= STORE_GAME_FOCUS_VERSIONS)
                 {
                     shell.storeVersionChosen = f - STORE_GAME_FOCUS_VERSIONS;
+                }
+                else if (f == STORE_GAME_FOCUS_BUTTONS && StoreVersionCount() > 0 && GamePagePlays(shell, lib))
+                {
+                    PlayLibraryGame(*LibraryGameByTitleId(lib, g_storeGame.titleId));
+                    acted = true;
                 }
                 else if (f == STORE_GAME_FOCUS_BUTTONS && StoreVersionCount() > 0 &&
                          installState != STORE_INSTALL_AVAILABLE)
@@ -5056,7 +5186,8 @@ int main()
                     }
                     else if (lib.count > 0)
                     {
-                        hintCount = AddHint(hints, hintCount, UI_BUTTON_A, L"View game", L"View");
+                        hintCount = AddHint(hints, hintCount, UI_BUTTON_A, L"Play");
+                        hintCount = AddHint(hints, hintCount, UI_BUTTON_X, L"View game", L"View");
                     }
                     hintCount = AddHint(hints, hintCount, UI_BUTTON_B, L"Back");
                     if (itemCount > LibraryPageVisibleRows(view) * LibraryGridColumns())

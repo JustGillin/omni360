@@ -576,4 +576,9 @@ bool ShowNotesUI(const char *heading, const char *title, const char *body, const
 bool ShowConfirmUI(const char *heading, const char *message, const char *detailLine,
                    const char *confirmLabel);
 
+// A short list over the page, as Settings draws one, and waits: A picks a
+// row and returns its index, B returns -1. sublabels may be NULL.
+int ShowChoiceUI(const char *heading, const char *subheading, const char **labels, const char **sublabels,
+                 int count, const WCHAR *chooseLabel);
+
 #endif
