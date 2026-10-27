@@ -46,3 +46,7 @@ Media/Fonts/Selawik_*
 tools/cache/
 
 __pycache__/
+
+# Local tool state: Claude Code's preview launcher, the design checker's cache
+.claude/
+.impeccable/
