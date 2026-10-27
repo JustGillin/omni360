@@ -672,8 +672,7 @@ static void Utf8ToWide(const char *in, WCHAR *out, int outSize)
 // The Xbox Series dashboard's look: charcoal surfaces with no colour cast,
 // white text, a white ring round whatever has focus, and one green spent only
 // where something is current or in progress - the page you're on, a download
-// bar, the storage ring, a count of waiting downloads. The tokens match the
-// Phase 4 mockup (docs/phase4-mockup.html) one for one.
+// bar, the storage ring, a count of waiting downloads.
 #define COL_BG_TOP         0xFF1C1C1C // the page wash, lightest at the top
 #define COL_BG_BOTTOM      0xFF0E0E0E
 #define COL_RAIL           0xFF161616 // the sidebar
@@ -2387,11 +2386,12 @@ static void BeginFrame()
 // Startup screen
 // ---------------------------------------------------------------------------
 //
-// docs/startup-mockup.html has it moving. While loading, a green dot bounces
-// in the middle of the screen, for exactly as long as loading takes. Then it
-// drops onto the O of "Omni360" and rolls once around it, the O appearing in
-// its wake; "mni360" slides out of the O, the BETA pill rises in while the
-// mark rests under a swelling glow, and the whole screen fades into the app.
+// docs/screenshots/startup-animation.gif has it moving. While loading, a
+// green dot bounces in the middle of the screen, for exactly as long as
+// loading takes. Then it drops onto the O of "Omni360" and rolls once around
+// it, the O appearing in its wake; "mni360" slides out of the O, the BETA
+// pill rises in while the mark rests under a swelling glow, and the whole
+// screen fades into the app.
 //
 // The word is baked to images by tools/make_wordmark.py (Wordmark.h) rather
 // than drawn as text: XUI's glyph cache cuts letters off at the baseline at
@@ -3332,7 +3332,7 @@ static float CardTop(bool asPage, float cardH)
 
 static void DrawCardQuads(float y, float h)
 {
-    // Lit from the left, the way the mockup's Store banner is.
+    // Lit from the left: a green glow fading into the card.
     FillRoundGradient(g_M.contentX, y, g_M.contentW, h, g_M.radius, COL_STORE_GLOW, COL_SURFACE, false);
 }
 
