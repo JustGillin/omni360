@@ -68,8 +68,6 @@ DESCRIPTION : Downloads a file. If the file is larger than 4GB, it splits it int
 #define ERROR(s) (log_printf("\nERROR: %s\n", s))
 #define DEBUG_PRINT(s) (log_printf(s));
 
-unsigned long long outputBufferPointer = 0;
-
 // Yeah yeah, I know I already have this in 7z decompression
 bool FormatBytes(
     unsigned long long bytes,
@@ -187,8 +185,11 @@ static bool WriteBody(FILE *file, const char *data, int len, unsigned long long 
     }
     else
     {
-        memcpy(outputBuffer + outputBufferPointer, data, len);
-        outputBufferPointer += len;
+        // At this request's own count, not a global one: a global was shared
+        // by every request on every thread, so two buffer downloads at once -
+        // two covers from xboxunity - each moved the other's place on, and
+        // one wrote past the end of its buffer.
+        memcpy(outputBuffer + *totalWritten, data, len);
     }
 
     *totalWritten += len;
@@ -397,8 +398,6 @@ int DumpResponse(XboxTLSContext *ctx,
     {
         outputBufferSizeConst = *outputBufferSize;
     }
-
-    outputBufferPointer = 0; // Whether writing to a buffer or not, it doesn't hurt to clear this
 
     const unsigned long long BUFFER_SIZE = 4 * 1024 * 1024;
     const unsigned long long MAX_FILE_SIZE = 0xF0000000;
