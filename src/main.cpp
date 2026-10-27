@@ -3888,23 +3888,31 @@ static bool DiscTileAction(Shell &shell, const Library &lib, const char *gamesPa
         return false;
     }
 
-    // X is the game's page, installed or not - its details, versions, DLC
-    // and updates. Once installed, A is its DLC and START installs it again.
+    // A plays it, as A does any library game. X is the game's page,
+    // installed or not - its details, versions, DLC and updates - and START
+    // installs it, or installs it again.
+    if (pressed & XINPUT_GAMEPAD_A)
+    {
+        if (ConfirmLeaving())
+        {
+            dprintf("Playing the disc: %s (Title ID %08lX)\n", shell.discName, disc.titleId);
+            RenderStatusFrame("Starting", shell.discName, NULL);
+            // Nothing may be reading the drive as the game starts from it.
+            StopDiscWorker(3000);
+            LaunchDisc(disc.original);
+            ShowMessageUI("Couldn't start this disc", shell.discName, "The console's loader refused it - see the log.");
+        }
+        return true;
+    }
+
     if (pressed & XINPUT_GAMEPAD_X)
     {
         OpenGameByTitleId(shell, lib, disc.titleId, shell.discName);
         return false;
     }
 
-    const bool install = (!shell.discInstalled && (pressed & XINPUT_GAMEPAD_A)) ||
-                         (shell.discInstalled && (pressed & XINPUT_GAMEPAD_START));
-
-    if (!install)
-    {
-        if (shell.discInstalled && (pressed & XINPUT_GAMEPAD_A))
-            OpenPicker(shell.picker, PICKER_DLC, shell.discName, disc.titleId);
+    if (!(pressed & XINPUT_GAMEPAD_START))
         return false;
-    }
 
     if (shell.discInstalled &&
         !ShowConfirmUI("Install again?", shell.discName,
@@ -5166,11 +5174,12 @@ int main()
                         switch (view.discTile)
                         {
                         case DISC_TILE_READY:
-                            hintCount = AddHint(hints, hintCount, UI_BUTTON_A, L"Install to hard drive", L"Install");
+                            hintCount = AddHint(hints, hintCount, UI_BUTTON_A, L"Play");
                             hintCount = AddHint(hints, hintCount, UI_BUTTON_X, L"View game", L"View");
+                            hintCount = AddHint(hints, hintCount, UI_BUTTON_START, L"Install to hard drive", L"Install");
                             break;
                         case DISC_TILE_INSTALLED:
-                            hintCount = AddHint(hints, hintCount, UI_BUTTON_A, L"Find DLC", L"DLC");
+                            hintCount = AddHint(hints, hintCount, UI_BUTTON_A, L"Play");
                             hintCount = AddHint(hints, hintCount, UI_BUTTON_X, L"View game", L"View");
                             hintCount = AddHint(hints, hintCount, UI_BUTTON_START, L"Install again", L"Reinstall");
                             break;

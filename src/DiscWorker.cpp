@@ -197,6 +197,7 @@ static bool ProbeDisc(bool lastChance)
         g_disc.outputSize = info.outputSize;
         memcpy(g_disc.name, info.title.name, sizeof(g_disc.name));
         g_disc.name[sizeof(g_disc.name) - 1] = '\0';
+        g_disc.original = (info.title.contentType == GOD_CONTENT_XBOX_ORIGINAL);
         g_disc.reason[0] = '\0';
         SetDiscState(DISC_READY);
         g_disc.changeCount++; // a different game is a change even from READY to READY

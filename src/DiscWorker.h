@@ -48,6 +48,7 @@ struct DiscInfo
     // disc. main.cpp looks a name up first - the bundled title list
     // (TitleNames.h), then the Store's lists - and falls back on this.
     char name[96];
+    bool original;            // an Original Xbox disc, which starts from default.xbe
     bool installing;          // a job for this disc is waiting or running
 };
 

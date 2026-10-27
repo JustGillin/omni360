@@ -10,6 +10,7 @@ DESCRIPTION : Starting games and other apps. See Launch.h.
 #include <xtl.h>
 #include <stdio.h>
 #include <string.h>
+#include "driveMount.h" // mount, for the disc's drive
 
 // NTSTATUSes, which xtl.h doesn't define.
 extern "C" LONG XexGetModuleHandle(PSZ moduleName, PHANDLE outHandle);
@@ -126,6 +127,19 @@ void LaunchApp(const char *path)
         LaunchExecutable(path);
     else
         LaunchPackage(path, "default.xex");
+}
+
+void LaunchDisc(bool original)
+{
+    // By a drive named for it, as FreeStyle Dash starts discs. Neither the
+    // device's own path ("\Device\Cdrom0\default.xex" - back to the
+    // dashboard) nor one from the root as the XDK documents ("default.xex" -
+    // looked for beside Omni360, so "The game couldn't start") works.
+    mount("Dvd:", "\\Device\\Cdrom0");
+    const char *exe = original ? "dvd:\\default.xbe" : "dvd:\\default.xex";
+    dprintf("[launch] %s\n", exe);
+    XLaunchNewImage(exe, 0);
+    dprintf("[launch] the loader refused %s\n", exe);
 }
 
 void LaunchXboxDashboard()

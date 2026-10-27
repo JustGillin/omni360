@@ -113,7 +113,7 @@ struct UiHint
 // What the disc's tile shows.
 enum LibraryDiscTile
 {
-    DISC_TILE_READY,       // a game disc, not installed - A installs it
+    DISC_TILE_READY,       // a game disc, not installed - A plays it, START installs it
     DISC_TILE_INSTALLED,   // already in the games folder
     DISC_TILE_INSTALLING,  // on the Queue page now
     DISC_TILE_READING,     // just gone in

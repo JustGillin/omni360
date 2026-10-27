@@ -20,6 +20,10 @@ void LaunchInstalledGame(const InstalledGame &game);
 // package (XeXMenu is one), started as a library game's would be.
 void LaunchApp(const char *path);
 
+// The game disc in the drive - default.xex, or an Original Xbox disc's
+// default.xbe - as the dashboard starts one.
+void LaunchDisc(bool original);
+
 // The Xbox Dashboard itself, past DashLaunch's default - by its path rather
 // than XLaunchNewImage's dashboard keyword, which DashLaunch sends to
 // whatever it's set to start.
