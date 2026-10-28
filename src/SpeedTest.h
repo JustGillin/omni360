@@ -6,7 +6,10 @@
 //
 //   1. the network, with no encryption - a plain-HTTP file from a CDN, for
 //      10 seconds. The most the console can receive at all; its Ethernet is
-//      100 Mbit, so about 11 MB/s at best.
+//      100 Mbit, so about 11 MB/s at best. Then the same from a server in the
+//      UK, as far away as archive.org's: if that's much slower, distance is
+//      what holds a download back. The log has each server's round trip and
+//      the receive buffer the console gives a socket.
 //   2. decrypting on one core - BearSSL's ChaCha20-Poly1305 and AES-128-GCM,
 //      the implementations a download's TLS uses, over a buffer in memory.
 //      The most one connection can take in, whatever the network.

@@ -34,11 +34,21 @@ TLS handshakes) and times the bytes after, over MEASURE_MS.
 #define RECV_BUFFER     (4 * 1024 * 1024) // as XboxTLS asks for, so the two compare
 #define XBOX_SO_BYPASS_SECURITY 0x5801
 
-// CacheFly's test file is on a CDN, so it's near wherever the console is;
-// thinkbroadband's (in the UK) is the fallback. Both serve plain HTTP - and
-// archive.org doesn't, its servers send everything to HTTPS.
-static const char *const kPlainHosts[] = { "cachefly.cachefly.net", "ipv4.download.thinkbroadband.com" };
-static const char *const kPlainPaths[] = { "/100mb.test", "/1GB.zip" };
+// Two plain-HTTP files - archive.org doesn't serve plain HTTP, its servers
+// send everything to HTTPS. CacheFly's is on a CDN, so it's near wherever the
+// console is; thinkbroadband's is in the UK, as far from a US console as
+// archive.org's servers in California, or further. A connection carries at
+// most its receive window per round trip, so if the console's TCP keeps its
+// window small, the far one is slower however fast the line is - which would
+// say distance, not archive.org, is what holds a download back.
+enum PlainHost
+{
+    PLAIN_NEAR,
+    PLAIN_FAR,
+    PLAIN_COUNT
+};
+static const char *const kPlainHosts[PLAIN_COUNT] = { "cachefly.cachefly.net", "ipv4.download.thinkbroadband.com" };
+static const char *const kPlainPaths[PLAIN_COUNT] = { "/100mb.test", "/1GB.zip" };
 
 // Deadpool's RAR: 8.4GB, so no connection reaches its end in 10 seconds.
 #define ARCHIVE_TEST_URL "https://archive.org/download/XBOX_360_1/Deadpool%20%5BRF%5D.rar"
@@ -62,8 +72,8 @@ static const int kRunSuites[RUN_COUNT] = { XBOXTLS_SUITES_SERVER_CHOICE, XBOXTLS
 
 struct SpeedResults
 {
-    double plain;           // MB/s; negative: failed
-    const char *plainHost;
+    double plain;           // MB/s from the near server; negative: failed
+    double plainFar;        // and from the far one
     double chacha, gcm;     // MB/s on one core; negative: not run
     double archive[RUN_COUNT];       // MB/s; negative: not run or failed
     unsigned short suite[RUN_COUNT]; // what the first connection settled on
@@ -157,8 +167,10 @@ static double Measure(int slots)
 // 1. The network, with no encryption
 // ---------------------------------------------------------------------------
 
-// Connects to host:80. INVALID_SOCKET if it can't.
-static SOCKET ConnectPlain(const char *host)
+// Connects to host:port. INVALID_SOCKET if it can't. With logDetails, logs
+// how long connecting took - one round trip, so how far away it is - and the
+// receive buffer the console actually gave the socket, against what it asked.
+static SOCKET ConnectPlain(const char *host, unsigned short port, bool logDetails)
 {
     char ip[64] = "";
     if (!ResolveDNS(host, ip, sizeof(ip)) && searchDnsCache(host, ip, sizeof(ip)) != 0)
@@ -179,20 +191,30 @@ static SOCKET ConnectPlain(const char *host)
     sockaddr_in sa;
     memset(&sa, 0, sizeof(sa));
     sa.sin_family = AF_INET;
-    sa.sin_port = htons(80);
+    sa.sin_port = htons(port);
     sa.sin_addr.s_addr = inet_addr(ip);
+    const DWORD started = GetTickCount();
     if (connect(s, (sockaddr *)&sa, sizeof(sa)) == SOCKET_ERROR)
     {
         closesocket(s);
         return INVALID_SOCKET;
+    }
+
+    if (logDetails)
+    {
+        int granted = 0, size = sizeof(granted);
+        getsockopt(s, SOL_SOCKET, SO_RCVBUF, (char *)&granted, &size);
+        dprintf("[speedtest] %s (%s): connected in %lu ms; receive buffer %d KB (asked for %d KB)\n", host, ip,
+                GetTickCount() - started, granted / 1024, RECV_BUFFER / 1024);
     }
     return s;
 }
 
 struct PlainArgs
 {
-    int host; // into kPlainHosts
+    int host; // PLAIN_*
     bool failed;
+    bool logged; // its connection details, once
 };
 
 // Fetches the file over and over until told to stop - the console may get
@@ -205,7 +227,8 @@ static DWORD WINAPI PlainEntry(LPVOID param)
 
     while (buffer != NULL && !InterlockedCompareExchange(&g_stopTransfers, 0, 0) && failures < 3)
     {
-        SOCKET s = ConnectPlain(kPlainHosts[a->host]);
+        SOCKET s = ConnectPlain(kPlainHosts[a->host], 80, !a->logged);
+        a->logged = true;
         if (s == INVALID_SOCKET)
         {
             failures++;
@@ -237,43 +260,53 @@ static DWORD WINAPI PlainEntry(LPVOID param)
     return 0;
 }
 
-static double TestPlain(const char **outHost)
+// XNet and Winsock, for the plain tests and the archive.org round trip:
+// counted, like httpRequestHTTPS's.
+static bool NetUp()
 {
     XNetStartupParams xnsp;
     memset(&xnsp, 0, sizeof(xnsp));
     xnsp.cfgSizeOfStruct = sizeof(xnsp);
     xnsp.cfgFlags = XNET_STARTUP_BYPASS_SECURITY;
     if (XNetStartup(&xnsp) != 0)
-        return -1.0;
+        return false;
     WSADATA wsadata;
     if (WSAStartup(MAKEWORD(2, 2), &wsadata) != 0)
     {
         XNetCleanup();
-        return -1.0;
+        return false;
     }
+    return true;
+}
 
+static void NetDown()
+{
+    WSACleanup();
+    XNetCleanup();
+}
+
+static double TestPlain(int host)
+{
+    if (!NetUp())
+        return -1.0;
+
+    g_slotBytes[0] = 0;
+    InterlockedExchange(&g_stopTransfers, 0);
+    PlainArgs args = { host, false, false };
     double rate = -1.0;
-    for (int host = 0; host < 2 && rate < 0.0 && !Cancelled(); ++host)
+    HANDLE t = CreateThread(NULL, 64 * 1024, PlainEntry, &args, CREATE_SUSPENDED, NULL);
+    if (t != NULL)
     {
-        g_slotBytes[0] = 0;
-        InterlockedExchange(&g_stopTransfers, 0);
-        PlainArgs args = { host, false };
-        HANDLE t = CreateThread(NULL, 64 * 1024, PlainEntry, &args, CREATE_SUSPENDED, NULL);
-        if (t == NULL)
-            break;
         XSetThreadProcessor(t, 1); // a download connection's core
         ResumeThread(t);
         rate = Measure(1);
         WaitForSingleObject(t, INFINITE);
         CloseHandle(t);
-        if (rate >= 0.0)
-            *outHost = kPlainHosts[host];
-        else
-            dprintf("[speedtest] %s didn't answer\n", kPlainHosts[host]);
     }
+    if (rate < 0.0)
+        dprintf("[speedtest] %s didn't answer\n", kPlainHosts[host]);
 
-    WSACleanup();
-    XNetCleanup();
+    NetDown();
     return rate;
 }
 
@@ -433,6 +466,25 @@ static bool ResolveArchiveUrl()
     return true;
 }
 
+// How far away the archive.org server is: a plain connect to its HTTPS port,
+// timed and closed again.
+static void LogArchiveRoundTrip()
+{
+    const char *at = strstr(g_archiveUrl.c_str(), "://");
+    if (at == NULL)
+        return;
+    std::string host(at + 3);
+    const size_t slash = host.find('/');
+    if (slash != std::string::npos)
+        host = host.substr(0, slash);
+    if (!NetUp())
+        return;
+    SOCKET s = ConnectPlain(host.c_str(), 443, true);
+    if (s != INVALID_SOCKET)
+        closesocket(s);
+    NetDown();
+}
+
 static double TestArchive(int connections, int suites, unsigned short *outSuite)
 {
     static const DWORD kCores[MAX_SLOTS] = { 1, 4, 2 }; // the installer's two, then the spare core
@@ -481,9 +533,16 @@ static double TestArchive(int connections, int suites, unsigned short *outSuite)
 static DWORD WINAPI SpeedTestEntry(LPVOID)
 {
     SetPhase("Checking your internet connection");
-    g_results.plain = TestPlain(&g_results.plainHost);
-    dprintf("[speedtest] network, no encryption: %.2f MB/s (%s)\n", g_results.plain,
-            g_results.plainHost != NULL ? g_results.plainHost : "no server answered");
+    g_results.plain = TestPlain(PLAIN_NEAR);
+    dprintf("[speedtest] network, no encryption, nearby (%s): %.2f MB/s\n", kPlainHosts[PLAIN_NEAR], g_results.plain);
+
+    if (!Cancelled())
+    {
+        SetPhase("Checking your internet connection, further away");
+        g_results.plainFar = TestPlain(PLAIN_FAR);
+        dprintf("[speedtest] network, no encryption, far away (%s): %.2f MB/s\n", kPlainHosts[PLAIN_FAR],
+                g_results.plainFar);
+    }
 
     if (!Cancelled())
     {
@@ -495,6 +554,7 @@ static DWORD WINAPI SpeedTestEntry(LPVOID)
 
     if (g_auth != NULL && !Cancelled() && ResolveArchiveUrl())
     {
+        LogArchiveRoundTrip();
         for (int run = 0; run < RUN_COUNT && !Cancelled(); ++run)
         {
             // On screen, just which of the runs; the log says what each one is.
@@ -564,11 +624,18 @@ static std::string Verdict(const SpeedResults &r)
     if (console > 0.0 && (others < 0.0 || console < others))
         others = console;
 
+    // Far away is as slow as archive.org: distance, not archive.org - the
+    // 360 can't keep much data on its way at once (see the README's Known
+    // limitations), which tells over a long way. Said without the why.
+    const double farAway = r.plainFar; // not "far": windows.h defines that away
+    if (farAway > 0.0 && internet > 0.0 && farAway < internet * 0.6 && archive >= farAway * 0.7)
+        return "Your internet and console are fine. The Xbox 360 just can't download as fast from far-away "
+               "servers as a PC can, and archive.org's are a long way off - so this is as fast as it gets.";
     if (others < 0.0 || archive < others * 0.8)
-        return "archive.org is the slowest part: it only sends so fast to each home. Your console and internet "
-               "can go faster, so downloads can't get any quicker than this.";
+        return "Your internet and console are fine. archive.org doesn't send any faster to your console, "
+               "so this is as fast as it gets.";
     if (internet > 0.0 && internet <= console)
-        return "Your internet connection is the slowest part: downloads can't get quicker than it.";
+        return "Your internet connection is the slowest part, so downloads can't get any quicker than it.";
     return "Your console is the slowest part: it can't keep up with any more than this.";
 }
 
@@ -582,13 +649,13 @@ void RunSpeedTestUI(const char *authHeader, const char *scratchPath)
     }
 
     memset(&g_results, 0, sizeof(g_results));
-    g_results.plain = g_results.chacha = g_results.gcm = -1.0;
+    g_results.plain = g_results.plainFar = g_results.chacha = g_results.gcm = -1.0;
     for (int i = 0; i < RUN_COUNT; ++i)
         g_results.archive[i] = -1.0;
     g_auth = authHeader;
     g_phase[0] = '\0';
     g_step = 0;
-    g_steps = (authHeader != NULL) ? 2 + RUN_COUNT : 2;
+    g_steps = (authHeader != NULL) ? 3 + RUN_COUNT : 3;
     g_live = 0.0;
     g_cancel = 0;
     g_finished = 0;
@@ -659,6 +726,8 @@ void RunSpeedTestUI(const char *authHeader, const char *scratchPath)
 
     // Three numbers anyone can read; the log has every run, and the ciphers.
     std::string body;
+    // The far-away server's speed is for the verdict and the log, not here:
+    // a second internet number only puzzles.
     AppendRate(body, "Your internet connection", g_results.plain);
     AppendRate(body, "What your console can keep up with", g_results.chacha);
     if (authHeader != NULL)

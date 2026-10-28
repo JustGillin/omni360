@@ -90,7 +90,32 @@ Omni360 is a store and a library in one app on the console. **Your Library** sho
 
 ## Known limitations
 
-- **Downloads are slow-ish** — about 3.5MB/s on average, so a game takes half an hour or more. archive.org's servers are the limit, not the console.
+- **Downloads are slower than on a PC** — usually 2-4 MB/s from archive.org, so a game takes half an hour or more, where a PC on the same internet gets 5-8 MB/s. It's the 360's own networking, not your internet or Omni360. **Settings → Download speed** checks your console in about a minute.
+
+  <details>
+  <summary><b>Why the 360 is slower over distance</b></summary>
+  <br>
+
+  A download connection can only have so much data on its way at once — its *receive buffer* — before it has to wait for the next round trip to the server. So one connection's top speed is that buffer divided by the round trip.
+
+  The 360's networking won't give a connection more than **255 KB** of receive buffer, however much an app asks for: the setting is a single byte, counted in KB (`cfgSockDefaultRecvBufsizeInK` in the XDK's `winsockx.h`). Windows grows its buffer to several MB on a long connection, so a PC isn't held back the same way.
+
+  Measured on a console with Settings' speed test (October 2026):
+
+  | Server | Round trip | 255 KB ÷ round trip | Measured |
+  |---|---|---|---|
+  | CacheFly, a nearby CDN, plain HTTP | 4 ms | ~60 MB/s — the 100 Mbit port is the limit instead | 11.1 MB/s |
+  | thinkbroadband, UK, plain HTTP | 100 ms | ~2.5 MB/s | 2.3 MB/s |
+  | archive.org's storage server | 52 ms | ~4.8 MB/s | 2.2-3.4 MB/s |
+
+  What it isn't:
+
+  - **Your internet or the console's network port** — the nearby server reaches the 100 Mbit port's full 11 MB/s.
+  - **The console's processor** — it decrypts HTTPS at about 25 MB/s per core with ChaCha20-Poly1305, which Omni360 asks archive.org for. (archive.org's servers would otherwise pick AES-GCM, which the console only manages at about 5 MB/s.)
+  - **Something more connections would fix** — each connection gets its own buffer, but archive.org drops or stalls extra parallel requests from one console, so game installs use two.
+
+  </details>
+
 - **Games kept as compressed RARs install slowly.** About 20 games archive.org only has as compressed RARs (in the `XBOX_360_*` items, such as the DiRT series and Deadpool) are unpacked on the console as they download, with `dmc_unrar` - it keeps pace with the download, but Deadpool still took 64 minutes before its install. The Store marks them, and asks before starting one. Uncompressed RARs, like BioShock Infinite's, install like any other game. A few dozen games aren't on archive.org at all.
 - **An interrupted game install starts over.** Pieces resume within a session, but quitting the app mid-download removes what was downloaded.
 - **A multi-disc game installed some other way** — from real discs, or another tool — can't be uninstalled by version from its Store page, since Omni360 can't tell which disc is which. Its own library entry still can be, if the Store hasn't got it.
