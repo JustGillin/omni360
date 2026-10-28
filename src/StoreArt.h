@@ -55,6 +55,12 @@ struct StoreArtData
 // The next image ready, if there is one. The UI thread calls this.
 bool TakeStoreArt(StoreArtData *out);
 
+// True while an image asked for is still on its way - waiting its turn,
+// being fetched or decoded, or ready to take. False once it's been taken,
+// or the worker gave up on it: the marketplace has nothing, or it couldn't
+// be reached.
+bool StoreArtPending(unsigned long titleId, StoreArtKind kind);
+
 // A game's catalog entry, as the game page shows it. Strings are UTF-8 and
 // may be empty.
 struct StoreDetails

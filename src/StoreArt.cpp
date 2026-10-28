@@ -53,6 +53,7 @@ static bool g_shutdown = false;
 
 static ArtRequest g_requests[MAX_REQUESTS];
 static int g_requestCount = 0;
+static ArtRequest g_working; // the one being fetched or decoded; done when there's none
 
 static StoreArtData g_ready[MAX_READY];
 static int g_readyCount = 0;
@@ -581,20 +582,26 @@ static DWORD WINAPI StoreArtEntry(LPVOID)
         }
         ArtRequest request = g_requests[next];
         g_requests[next].done = true;
+        g_working = request;
         LeaveCriticalSection(&g_lock);
 
         unsigned long size = 0;
         unsigned char *bytes = LoadArt(request.titleId, request.kind, &size);
-        if (bytes == NULL)
-            continue;
-
+        unsigned long *pixels = NULL;
         int w = 0, h = 0;
-        unsigned long *pixels = DecodeArt(request.titleId, request.kind, bytes, size, &w, &h);
-        free(bytes);
-        if (pixels == NULL)
-            continue;
+        if (bytes != NULL)
+        {
+            pixels = DecodeArt(request.titleId, request.kind, bytes, size, &w, &h);
+            free(bytes);
+        }
 
         EnterCriticalSection(&g_lock);
+        g_working.done = true;
+        if (pixels == NULL)
+        {
+            LeaveCriticalSection(&g_lock);
+            continue;
+        }
         StoreArtData &data = g_ready[g_readyCount++];
         data.titleId = request.titleId;
         data.kind = request.kind;
@@ -612,6 +619,7 @@ bool StartStoreArt()
         return true;
 
     InitializeCriticalSection(&g_lock);
+    g_working.done = true;
     g_wake = CreateEvent(NULL, FALSE, FALSE, NULL);
     if (g_wake == NULL)
     {
@@ -704,6 +712,21 @@ void RequestStoreArt(unsigned long titleId, StoreArtKind kind)
 
     if (slot >= 0)
         SetEvent(g_wake);
+}
+
+bool StoreArtPending(unsigned long titleId, StoreArtKind kind)
+{
+    if (!g_running)
+        return false;
+
+    EnterCriticalSection(&g_lock);
+    bool pending = !g_working.done && g_working.titleId == titleId && g_working.kind == kind;
+    for (int i = 0; i < g_requestCount && !pending; ++i)
+        pending = !g_requests[i].done && g_requests[i].titleId == titleId && g_requests[i].kind == kind;
+    for (int i = 0; i < g_readyCount && !pending; ++i)
+        pending = g_ready[i].titleId == titleId && g_ready[i].kind == kind;
+    LeaveCriticalSection(&g_lock);
+    return pending;
 }
 
 bool TakeStoreArt(StoreArtData *out)

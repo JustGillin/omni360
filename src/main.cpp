@@ -4009,7 +4009,7 @@ static void PlayLibraryGame(const InstalledGame &game)
     if (!ConfirmLeaving())
         return;
     dprintf("Playing: %s (Title ID %08lX)\n", game.displayName, game.titleId);
-    RenderStatusFrame("Starting", game.displayName, NULL);
+    RenderLaunchFrame("Starting", game.displayName, game.titleId);
     LaunchInstalledGame(game);
     ShowMessageUI("Couldn't start this game", game.displayName, "The console's loader refused it - see the log.");
 }
@@ -4644,7 +4644,7 @@ static bool DiscTileAction(Shell &shell, const Library &lib, const char *gamesPa
         if (ConfirmLeaving())
         {
             dprintf("Playing the disc: %s (Title ID %08lX)\n", shell.discName, disc.titleId);
-            RenderStatusFrame("Starting", shell.discName, NULL);
+            RenderLaunchFrame("Starting", shell.discName, disc.titleId);
             // Nothing may be reading the drive as the game starts from it.
             StopDiscWorker(3000);
             LaunchDisc(disc.original);

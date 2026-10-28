@@ -4830,6 +4830,85 @@ static void DrawStoreArt(const StoreArtTexture *art, float x, float y, float w, 
     TextureRound(art->texture, x, y, w, h, g_M.radius, u0, v0, u1, v1, tint, tint);
 }
 
+// ---------------------------------------------------------------------------
+// Starting a game
+// ---------------------------------------------------------------------------
+
+#define LAUNCH_ART_WAIT_MS 3000.0 // the longest a launch waits for the wallpaper
+#define LAUNCH_ART_HOLD_MS 800.0  // how long it's on screen, fade included, before the game starts
+
+// The game's wallpaper across the whole screen, cut to its shape without
+// stretching, fading in from black if it's only just arrived. Black alone
+// while it's on its way.
+static void RenderLaunchArtFrame(const StoreArtTexture *art)
+{
+    BeginFrame();
+    FillRound(0.0f, 0.0f, g_M.screenW, g_M.screenH, 0.0f, 0xFF000000);
+    if (art != NULL)
+    {
+        float u0 = 0.0f, v0 = 0.0f, u1 = 1.0f, v1 = 1.0f;
+        const float screenAspect = g_M.screenW / g_M.screenH, artAspect = art->width / art->height;
+        if (screenAspect > artAspect)
+        {
+            const float keep = artAspect / screenAspect;
+            v0 = (1.0f - keep) * 0.5f;
+            v1 = v0 + keep;
+        }
+        else
+        {
+            const float keep = screenAspect / artAspect;
+            u0 = (1.0f - keep) * 0.5f;
+            u1 = u0 + keep;
+        }
+        const D3DCOLOR tint = WithAlpha(0xFFFFFFFF, ArtFade(art->texture));
+        TextureRound(art->texture, 0.0f, 0.0f, g_M.screenW, g_M.screenH, 0.0f, u0, v0, u1, v1, tint, tint);
+    }
+    EndFrame();
+}
+
+void RenderLaunchFrame(const char *heading, const char *name, unsigned long titleId)
+{
+    if (!g_Initialized)
+        return;
+
+    // The wallpaper the Store shows, from its cache or the marketplace -
+    // already loaded if the game's page was just open. Only as long as the
+    // worker is still looking: a game with none starts without the wait.
+    if (titleId != 0 && StoreArtFor(titleId, STORE_ART_BACKGROUND) == NULL)
+    {
+        RequestStoreArt(titleId, STORE_ART_BACKGROUND);
+        const double started = TimerMs();
+        bool waited = false;
+        while (StoreArtFor(titleId, STORE_ART_BACKGROUND) == NULL && StoreArtPending(titleId, STORE_ART_BACKGROUND) &&
+               TimerMs() - started < LAUNCH_ART_WAIT_MS)
+        {
+            if (!waited)
+                RenderLaunchArtFrame(NULL);
+            waited = true;
+            PumpStoreArt();
+            Sleep(16);
+        }
+    }
+
+    const StoreArtTexture *art = titleId != 0 ? StoreArtFor(titleId, STORE_ART_BACKGROUND) : NULL;
+    if (art == NULL)
+    {
+        RenderStatusFrame(heading, name, NULL);
+        return;
+    }
+
+    // Faded in if it's only just arrived, and held a moment: the loader
+    // blanks the screen soon after the game is handed to it, so without the
+    // hold it's gone almost as soon as it's seen.
+    const double shownAt = TimerMs();
+    while (ArtFade(art->texture) < 1.0f || TimerMs() - shownAt < LAUNCH_ART_HOLD_MS)
+    {
+        RenderLaunchArtFrame(art);
+        Sleep(16);
+    }
+    RenderLaunchArtFrame(art);
+}
+
 // Where each row and the Collections are drawn from: eased towards the
 // first shown, so they glide sideways. Placed on the first frame.
 static float g_rowShown[STORE_ROWS_MAX];

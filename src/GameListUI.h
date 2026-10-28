@@ -626,6 +626,12 @@ void RenderProgressFrame(const char *title, const char *statusLine,
 // detailLine may be NULL. Call it before starting the slow work, not after.
 void RenderStatusFrame(const char *heading, const char *message, const char *detailLine);
 
+// The frame left on screen as a game starts: its Xbox Live wallpaper - the
+// one the Store's game page shows - filling the screen, waiting a moment
+// for it if it isn't loaded. The name, as RenderStatusFrame draws it, for a
+// game the marketplace has no wallpaper for. titleId may be 0.
+void RenderLaunchFrame(const char *heading, const char *name, unsigned long titleId);
+
 // Draws a message and waits for B. For terminal states (nothing found, an
 // error, finished) that previously just printed a line and dropped the user
 // back to a console screen.
