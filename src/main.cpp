@@ -3473,26 +3473,22 @@ static bool GamePageOpen(const Shell &shell)
            (shell.page == SHELL_PAGE_LIBRARY && shell.libraryInGame);
 }
 
-// Minutes a version takes to download and unpack, or 0 if none of its discs
-// is a compressed RAR (STORE_FLAG_UNPACKS). The console unpacks at about
-// 3 MB/s as it downloads, so whichever is slower sets the pace - for Deadpool
-// it was the download, 7.8 GB in 64 minutes, about 2 MB/s. The GoD install
-// comes after: 7 minutes more.
-static int UnpackMinutes(const StoreRelease *release)
+// Whether any disc of a version is a compressed RAR (STORE_FLAG_UNPACKS),
+// unpacked on the console as it downloads. That's slow - Deadpool took 64
+// minutes to download and unpack, then 7 to install - so the page says so,
+// and Install asks first. Without a time: past one, people take a slow
+// install for a stuck one.
+static bool ReleaseUnpacks(const StoreRelease *release)
 {
     if (release == NULL)
-        return 0;
-    unsigned long long bytes = 0;
+        return false;
     for (int d = 0; d < release->discCount; ++d)
     {
         const StoreDisc *disc = StoreReleaseDisc(release, d);
         if (disc != NULL && (disc->flags & STORE_FLAG_UNPACKS))
-            bytes += disc->zipSize;
+            return true;
     }
-    if (bytes == 0)
-        return 0;
-    const int minutes = (int)(bytes / (2ULL * 1024 * 1024) / 60);
-    return minutes < 5 ? 5 : (minutes + 4) / 5 * 5;
+    return false;
 }
 
 // Opens a game's page over the current page - the Store's, or the library's.
@@ -3503,7 +3499,7 @@ static void OpenStoreGame(Shell &shell, const StoreGame &game)
     for (int v = 0; v < g_storeGame.versionCount; ++v)
     {
         // The labels are the generator's; only the size is formatted here -
-        // and, for one unpacked on the console, how long that takes.
+        // and, for one unpacked on the console, a word that it's slow.
         const StoreRelease *release = StoreReleaseOf(&g_storeGame, v);
         g_storeVersionSize[v][0] = '\0';
         if (release != NULL)
@@ -3512,12 +3508,11 @@ static void OpenStoreGame(Shell &shell, const StoreGame &game)
         g_storeVersions[v].detail = release != NULL ? release->detail : "";
         g_storeVersions[v].size = g_storeVersionSize[v];
 
-        const int minutes = UnpackMinutes(release);
-        if (minutes > 0)
+        if (ReleaseUnpacks(release))
         {
             const char *detail = g_storeVersions[v].detail;
-            _snprintf(g_storeVersionDetail[v], sizeof(g_storeVersionDetail[v]), "%s%sSlow install: unpacked on the console, about %d min",
-                      detail, detail[0] != '\0' ? "  \xC2\xB7  " : "", minutes);
+            _snprintf(g_storeVersionDetail[v], sizeof(g_storeVersionDetail[v]), "%s%sSlow install: a compressed .rar",
+                      detail, detail[0] != '\0' ? "  \xC2\xB7  " : "");
             g_storeVersionDetail[v][sizeof(g_storeVersionDetail[v]) - 1] = '\0';
             g_storeVersions[v].detail = g_storeVersionDetail[v];
         }
@@ -4352,8 +4347,8 @@ static void InstallArcadeGame(const char *authHeader)
 
 // Install on a game page: every disc of the chosen version that isn't
 // installed or on its way, in disc order, queued for GameInstaller. One that's
-// unpacked on the console asks first, as it takes the best part of an hour or
-// more. True if that question took over the screen.
+// unpacked on the console asks first, as it takes a lot longer. True if that
+// question took over the screen.
 static bool InstallStoreVersion(const Shell &shell, const Library &lib, const char *authHeader)
 {
     if (g_storeArcade != NULL)
@@ -4366,15 +4361,16 @@ static bool InstallStoreVersion(const Shell &shell, const Library &lib, const ch
     if (release == NULL)
         return false;
 
-    const int minutes = UnpackMinutes(release);
-    if (minutes > 0)
+    const bool unpacks = ReleaseUnpacks(release);
+    if (unpacks)
     {
-        char message[192], detail[128];
-        _snprintf(message, sizeof(message), "%s is unpacked on the console as it downloads.", g_storeGame.name);
+        char message[192];
+        _snprintf(message, sizeof(message), "archive.org only has %s as a compressed .rar file.", g_storeGame.name);
         message[sizeof(message) - 1] = '\0';
-        _snprintf(detail, sizeof(detail), "That takes about %d minutes, then it installs as usual.", minutes);
-        detail[sizeof(detail) - 1] = '\0';
-        if (!ShowConfirmUI("Slow install", message, detail, "Install"))
+        if (!ShowConfirmUI("Slow install", message,
+                           "It can still be installed, but it has to be unpacked on your console first, "
+                           "so it takes a lot longer than other games.",
+                           "Install"))
             return true;
     }
 
@@ -4428,7 +4424,7 @@ static bool InstallStoreVersion(const Shell &shell, const Library &lib, const ch
         ShowShellToast("Added to the queue", g_storeGame.name, UI_TOAST_INFO);
     else
         ShowShellToast("Already in the queue", g_storeGame.name, UI_TOAST_INFO);
-    return minutes > 0;
+    return unpacks;
 }
 
 // A on the front page. True if something took over the screen.

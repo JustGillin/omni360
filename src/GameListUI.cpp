@@ -3898,39 +3898,193 @@ bool ShowNotesUI(const char *heading, const char *title, const char *body, const
     }
 }
 
-bool ShowConfirmUI(const char *heading, const char *message, const char *detailLine,
-                   const char *confirmLabel)
+// ---------------------------------------------------------------------------
+// Alerts
+// ---------------------------------------------------------------------------
+//
+// A card over the page, not a page of its own: the screen as it was when the
+// alert opened stays behind it, dimmed. The alert is a loop of its own, like
+// every waiting screen here, so it can't redraw that page - instead the last
+// frame shown is copied once, as it opens, and drawn behind every frame of it.
+
+#define ALERT_W         560.0f
+#define ALERT_PAD       30.0f
+#define ALERT_BUTTON_H  48.0f
+#define ALERT_BUTTON_W  140.0f // at least; wider for a longer label
+#define ALERT_OPEN_MS   150.0f
+#define COL_ALERT_DIM   0xB0000000
+#define COL_ALERT_BTN   0xFF383838 // the other button - as COL_BUTTON, defined further down
+#define COL_ALERT_BTN_HI 0xFF4A4A4A
+
+// The last frame presented, copied into a texture of its own - the front
+// buffer is overwritten by the alert's own frames. NULL if it couldn't be.
+static D3DTexture *SnapshotFrontBuffer()
+{
+    D3DTexture *front = NULL;
+    if (FAILED(g_pd3dDevice->GetFrontBuffer(&front)) || front == NULL)
+        return NULL;
+
+    D3DSURFACE_DESC desc;
+    front->GetLevelDesc(0, &desc);
+
+    D3DTexture *copy = NULL;
+    if (FAILED(g_pd3dDevice->CreateTexture((UINT)g_M.screenW, (UINT)g_M.screenH, 1, 0, D3DFMT_A8R8G8B8,
+                                           D3DPOOL_DEFAULT, &copy, NULL)))
+    {
+        front->Release();
+        return NULL;
+    }
+
+    // Drawn into the render target, then resolved out of it into the copy.
+    BeginFrame();
+    DrawQuad(front, 0.0f, 0.0f, g_M.screenW, g_M.screenH, 0xFFFFFFFF);
+    g_pd3dDevice->Resolve(D3DRESOLVE_RENDERTARGET0, NULL, copy, NULL, 0, 0, NULL, 0.0f, 0, NULL);
+    g_pd3dDevice->Suspend();
+    front->Release();
+    return copy;
+}
+
+// The colour with its alpha scaled by a (0..1) - for the alert fading in.
+static D3DCOLOR Faded(D3DCOLOR color, float a)
+{
+    const unsigned long alpha = (unsigned long)(((color >> 24) & 0xFF) * a);
+    return (color & 0x00FFFFFF) | (alpha << 24);
+}
+
+bool ShowAlertUI(const char *heading, const char *message, const char *detailLine, const char *confirmLabel,
+                 const char *cancelLabel)
 {
     if (!g_Initialized)
         return false;
 
-    WCHAR wideConfirm[32];
-    Utf8ToWide(confirmLabel != NULL ? confirmLabel : "Confirm", wideConfirm, 32);
+    const char *confirm = (confirmLabel != NULL) ? confirmLabel : "OK";
+    const bool twoButtons = (cancelLabel != NULL);
+    const bool hasDetail = (detailLine != NULL && detailLine[0] != '\0');
 
-    // Seeded from the current pad state like every screen here, so the A
-    // press that opened this can't also confirm it.
-    WORD prevButtons = CurrentButtons();
+    D3DTexture *backdrop = SnapshotFrontBuffer();
 
+    // The card's size, from how much its text needs.
+    const float cardW = S(ALERT_W), pad = S(ALERT_PAD);
+    const float textW = cardW - pad * 2.0f;
+    const float titleH = LineHeight(1.15f);
+    const float messageLineH = LineHeight(0.9f) * 1.15f;
+    const float detailLineH = LineHeight(0.76f) * 1.15f;
+    const int messageLines = TextWrappedLines(message, textW, 0.9f, 5);
+    const int detailLines = hasDetail ? TextWrappedLines(detailLine, textW, 0.76f, 4) : 0;
+    const float buttonH = S(ALERT_BUTTON_H);
+    const float cardH = pad + titleH + S(12.0f) + messageLines * messageLineH +
+                        (hasDetail ? S(8.0f) + detailLines * detailLineH : 0.0f) + S(24.0f) + buttonH + pad;
+    const float cardX = (g_M.screenW - cardW) * 0.5f;
+    const float restY = (g_M.screenH - cardH) * 0.5f;
+
+    // The buttons, at the card's foot on the right: confirm last, as the
+    // 360's own dialogs and the web's put it.
+    float confirmW = TextWidth(confirm, 0.85f, true) + S(48.0f);
+    if (confirmW < S(ALERT_BUTTON_W))
+        confirmW = S(ALERT_BUTTON_W);
+    float cancelW = twoButtons ? TextWidth(cancelLabel, 0.85f, true) + S(48.0f) : 0.0f;
+    if (twoButtons && cancelW < S(ALERT_BUTTON_W))
+        cancelW = S(ALERT_BUTTON_W);
+    const float gap = S(14.0f);
+    const float confirmX = cardX + cardW - pad - confirmW;
+    const float cancelX = confirmX - gap - cancelW;
+
+    bool onConfirm = true;
+    bool result = false;
+    const DWORD opened = GetTickCount();
+
+    // As every screen here, so the press that opened it can't also answer it.
+    ResyncUiInput();
     for (;;)
     {
-        WORD buttons = CurrentButtons();
-        WORD pressed = buttons & ~prevButtons;
-        prevButtons = buttons;
+        const UiInput input = PollUiInput();
+        if (input.pressed & XINPUT_GAMEPAD_A)
+        {
+            PlayUiSound(onConfirm ? UI_SOUND_SELECT : UI_SOUND_BACK);
+            result = onConfirm;
+            break;
+        }
+        if (input.pressed & XINPUT_GAMEPAD_B)
+        {
+            PlayUiSound(UI_SOUND_BACK);
+            result = !twoButtons; // a lone OK is all B can mean
+            break;
+        }
+        if (twoButtons && (input.nav == XINPUT_GAMEPAD_DPAD_LEFT || input.nav == XINPUT_GAMEPAD_DPAD_RIGHT))
+        {
+            const bool toConfirm = (input.nav == XINPUT_GAMEPAD_DPAD_RIGHT);
+            if (toConfirm != onConfirm)
+            {
+                onConfirm = toConfirm;
+                PlayUiSound(UI_SOUND_MOVE);
+            }
+        }
 
-        if (pressed & XINPUT_GAMEPAD_A)
-            return true;
-        if (pressed & XINPUT_GAMEPAD_B)
-            return false;
+        // Opening: the page dims and the card rises a little into place.
+        float t = (float)(GetTickCount() - opened) / ALERT_OPEN_MS;
+        if (t > 1.0f)
+            t = 1.0f;
+        const float a = EaseInOut(t);
+        const float cardY = restY + S(16.0f) * (1.0f - a);
 
-        ButtonHint hints[2];
-        hints[0].sprite = BUTTON_SPRITE_A;
-        hints[0].label = wideConfirm;
-        hints[1].sprite = BUTTON_SPRITE_B;
-        hints[1].label = L"Cancel";
+        BeginFrame();
+        if (backdrop != NULL)
+            DrawQuad(backdrop, 0.0f, 0.0f, g_M.screenW, g_M.screenH, 0xFFFFFFFF);
+        else
+            DrawBackground();
+        DrawRect(0.0f, 0.0f, g_M.screenW, g_M.screenH, Faded(COL_ALERT_DIM, a));
 
-        RenderStatusFrameInternal(heading, message, detailLine, hints, 2);
+        ShadowRound(cardX, cardY + S(6.0f), cardW, cardH, g_M.radius, S(28.0f), Faded(COL_SHADOW, a));
+        FillRound(cardX, cardY, cardW, cardH, g_M.radius, Faded(COL_SURFACE, a));
+
+        const float buttonY = cardY + cardH - pad - buttonH;
+        if (onConfirm)
+            FillRoundGradient(confirmX, buttonY, confirmW, buttonH, buttonH * 0.5f, Faded(COL_GREEN_HI, a),
+                              Faded(COL_GREEN, a), true);
+        else
+            FillRound(confirmX, buttonY, confirmW, buttonH, buttonH * 0.5f, Faded(COL_ALERT_BTN, a));
+        if (twoButtons)
+            FillRound(cancelX, buttonY, cancelW, buttonH, buttonH * 0.5f,
+                      Faded(onConfirm ? COL_ALERT_BTN : COL_ALERT_BTN_HI, a));
+        if (t >= 1.0f)
+        {
+            if (onConfirm)
+                FocusRing(confirmX, buttonY, confirmW, buttonH, buttonH * 0.5f);
+            else
+                FocusRing(cancelX, buttonY, cancelW, buttonH, buttonH * 0.5f);
+        }
+
+        TextBegin();
+        const float innerX = cardX + pad;
+        float y = cardY + pad;
+        Text(innerX, y, 1.15f, Faded(COL_TEXT, a), heading, ATGFONT_TRUNCATED, textW, true);
+        y += titleH + S(12.0f);
+        TextWrapped(innerX, y, 0.9f, Faded(COL_TEXT, a), message, textW, messageLineH, 5);
+        y += messageLines * messageLineH;
+        if (hasDetail)
+            TextWrapped(innerX, y + S(8.0f), 0.76f, Faded(COL_DIM, a), detailLine, textW, detailLineH, 4);
+
+        TextMid(confirmX + confirmW * 0.5f, buttonY + buttonH * 0.5f, 0.85f, Faded(COL_TEXT, a), confirm,
+                ATGFONT_CENTER_X, 0.0f, true);
+        if (twoButtons)
+            TextMid(cancelX + cancelW * 0.5f, buttonY + buttonH * 0.5f, 0.85f,
+                    Faded(onConfirm ? COL_TEXT2 : COL_TEXT, a), cancelLabel, ATGFONT_CENTER_X, 0.0f, true);
+        TextEnd();
+
+        EndFrame();
         Sleep(16);
     }
+
+    if (backdrop != NULL)
+        backdrop->Release();
+    ResyncUiInput();
+    return result;
+}
+
+bool ShowConfirmUI(const char *heading, const char *message, const char *detailLine,
+                   const char *confirmLabel)
+{
+    return ShowAlertUI(heading, message, detailLine, confirmLabel != NULL ? confirmLabel : "Confirm", "Cancel");
 }
 
 int ShowChoiceUI(const char *heading, const char *subheading, const char **labels, const char **sublabels,

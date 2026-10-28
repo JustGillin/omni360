@@ -644,9 +644,17 @@ void ShowMessageUI(const char *heading, const char *message, const char *detailL
 bool ShowNotesUI(const char *heading, const char *title, const char *body, const char *footLine,
                  const WCHAR *actionLabel = NULL);
 
-// Draws a message and waits for A (returns true) or B (returns false). For
-// actions that can't be undone, like removing the saved archive.org keys.
-// confirmLabel names what A does, e.g. "Remove".
+// An alert over the page, like the web's window.alert or SweetAlert: the page
+// as it was stays behind it, dimmed, and a card in the middle holds heading,
+// a few wrapped lines of message, an optional dimmer detailLine, and its
+// buttons. Left and right move between them, A presses the one with focus, B
+// cancels. Returns true for confirmLabel. With no cancelLabel there's only
+// the one button - an OK - and B closes it too.
+bool ShowAlertUI(const char *heading, const char *message, const char *detailLine, const char *confirmLabel,
+                 const char *cancelLabel);
+
+// An alert asking to go ahead - confirmLabel names what that does, e.g.
+// "Remove" - or Cancel. For actions that take long or can't be undone.
 bool ShowConfirmUI(const char *heading, const char *message, const char *detailLine,
                    const char *confirmLabel);
 
