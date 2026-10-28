@@ -130,6 +130,18 @@ struct DlcMember
     // dropped download picks up where it stopped. See DownloadDlcMember.
     bool stored;
     unsigned long long dataStart;
+
+    // For unpacking it on the console instead (see RarUnpack.h): where its
+    // header starts in the RAR, and where its data ends. headLen is how much
+    // of the RAR comes before the first entry - its signature and main header.
+    // A solid member is decoded carrying on from the ones before it, so its
+    // download starts at headLen instead of at its own header. canUnpack is
+    // false for encrypted members and ones split across volumes.
+    bool canUnpack;
+    bool solid;
+    unsigned long long headerStart;
+    unsigned long long dataEnd;
+    unsigned long headLen;
 };
 
 #define MAX_DLC_RAR_MATCHES 16
@@ -184,12 +196,17 @@ int ListDlcMembers(const DlcRarMatch &pack,
                    const char *authHeader, void printFunction(const char *_format, ...),
                    ListMembersProgressFn progressFn = NULL);
 
-// Downloads one already-identified DLC member (via archive.org's
-// /download/{item}/{rarfile}/{urlencoded internal path} virtual-path URL,
-// which serves the file already-extracted server-side - no RAR decompression
-// needed on our end) and writes it to contentBasePath + "\" + member's own
-// internal path from its TitleID folder on (which mirrors the
+// Downloads one already-identified DLC member and writes it to
+// contentBasePath + "\" + member's own internal path from its TitleID folder
+// on (which mirrors the
 // Content\0000000000000000\{TitleID}\{ContentType}\{ContentID} layout).
+//
+// Its bytes come straight out of the RAR with Range requests, so a dropped
+// download picks up where it stopped: a stored member's bytes are the file,
+// and a compressed one is unpacked on the console (RarUnpack.h). Only what the
+// console can't unpack goes through archive.org's own extraction - the
+// /download/{item}/{rarfile}/{urlencoded internal path} virtual-path URL -
+// which can't resume and gives out at 1 GiB (see ArchiveOrgDlcTooLarge).
 //
 // progressFn, if non-NULL, is forwarded down to the HTTP layer and called
 // periodically with live byte counts for this one member, so the caller can

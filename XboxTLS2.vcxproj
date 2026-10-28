@@ -393,6 +393,9 @@
     <ClInclude Include="src\stb_image.h" />
     <ClInclude Include="src\TitleNames.h" />
     <ClInclude Include="src\RarHeaders.h" />
+    <ClInclude Include="src\RarUnpack.h" />
+    <ClInclude Include="dmc_unrar\dmc_unrar.c" />
+    <ClInclude Include="dmc_unrar\xbox\intrin.h" />
     <ClInclude Include="src\parsing.h" />
     <ClInclude Include="src\settings.h" />
     <ClInclude Include="src\StfsParser.h" />
@@ -454,6 +457,10 @@
     <ClCompile Include="src\CoverArt.cpp" />
     <ClCompile Include="src\ImageDecode.cpp" />
     <ClCompile Include="src\RarHeaders.cpp" />
+    <ClCompile Include="src\RarUnpack.cpp">
+      <AdditionalIncludeDirectories>$(ProjectDir)dmc_unrar\xbox;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+      <PrecompiledHeader>NotUsing</PrecompiledHeader>
+    </ClCompile>
     <ClCompile Include="src\parsing.cpp" />
     <ClCompile Include="src\StfsParser.cpp" />
     <ClCompile Include="src\FolderGames.cpp" />

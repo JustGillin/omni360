@@ -68,6 +68,9 @@
     <Filter Include="zlib">
       <UniqueIdentifier>{bdbeaf25-ac60-5c6a-8835-75c065f581f1}</UniqueIdentifier>
     </Filter>
+    <Filter Include="dmc_unrar">
+      <UniqueIdentifier>{6f1c2b8e-3d4a-4e5f-9a7b-1c2d3e4f5a6b}</UniqueIdentifier>
+    </Filter>
   </ItemGroup>
   <ItemGroup>
     <ClCompile Include="src\ArchiveOrgDLC.cpp">
@@ -167,6 +170,9 @@
       <Filter>Source Files\Interface</Filter>
     </ClCompile>
     <ClCompile Include="src\RarHeaders.cpp">
+      <Filter>Source Files\Installs</Filter>
+    </ClCompile>
+    <ClCompile Include="src\RarUnpack.cpp">
       <Filter>Source Files\Installs</Filter>
     </ClCompile>
     <ClCompile Include="src\parsing.cpp">
@@ -1211,6 +1217,15 @@
     </ClInclude>
     <ClInclude Include="src\RarHeaders.h">
       <Filter>Source Files\Installs</Filter>
+    </ClInclude>
+    <ClInclude Include="src\RarUnpack.h">
+      <Filter>Source Files\Installs</Filter>
+    </ClInclude>
+    <ClInclude Include="dmc_unrar\dmc_unrar.c">
+      <Filter>dmc_unrar</Filter>
+    </ClInclude>
+    <ClInclude Include="dmc_unrar\xbox\intrin.h">
+      <Filter>dmc_unrar</Filter>
     </ClInclude>
     <ClInclude Include="src\parsing.h">
       <Filter>Source Files\Support</Filter>

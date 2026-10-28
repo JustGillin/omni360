@@ -25,6 +25,7 @@ rather than a scraped browser login session.
 #include "parsing.h"
 #include "cJSON.h"
 #include "RarHeaders.h"
+#include "RarUnpack.h"
 #include "settings.h"
 
 #include <xtl.h>
@@ -907,6 +908,7 @@ int ListDlcMembers(const DlcRarMatch &pack,
     int skippedAvatar = 0;
     bool isFirstChunk = true;
     RarFormat format = RAR_FORMAT_UNKNOWN; // known after the first chunk
+    unsigned long headLen = 0;             // see DlcMember::headLen
 
     // Resolved once (on the first Range request below) and reused for every
     // subsequent one against this same rarFilename, instead of re-resolving
@@ -1022,6 +1024,11 @@ int ListDlcMembers(const DlcRarMatch &pack,
 
         nextPos += headerStart; // measured from the chunk's start, signature included
 
+        // The first header is the main archive header, and everything up to
+        // its end is what an unpacked member's download needs ahead of it.
+        if (headLen == 0)
+            headLen = (unsigned long)(pos + nextPos);
+
         // FATX can't hold a file of 4GB or more, so a member that size could
         // never be installed - and DlcMember's sizes are 32-bit. Log it and
         // leave it out rather than truncate its size.
@@ -1041,6 +1048,11 @@ int ListDlcMembers(const DlcRarMatch &pack,
             member.unpSize = (unsigned long)entry.unpSize;
             member.stored = entry.stored && !entry.encrypted && !entry.split && entry.packSize == entry.unpSize;
             member.dataStart = pos + headerStart + entry.dataOffset;
+            member.canUnpack = !entry.encrypted && !entry.split;
+            member.solid = entry.solid;
+            member.headerStart = pos + headerStart;
+            member.dataEnd = member.dataStart + entry.packSize;
+            member.headLen = headLen;
         }
 
         // A file outside any TitleID\ContentType folders - a readme beside
@@ -1419,47 +1431,45 @@ static bool ResumedProgress(unsigned long long bytesDone, unsigned long long byt
     return g_resumeProgressFn(g_resumeBase + bytesDone, g_resumeTotal, bytesPerSec, secondsRemaining);
 }
 
-// Downloads a stored member's bytes straight out of the RAR, which is served
-// as a plain file and so honours Range: each attempt asks only for what the
-// staging copy doesn't have yet and adds it to the end. A connection that
+// Downloads bytes [from, from + length) of the RAR into tempPath. The RAR is
+// served as a plain file and so honours Range: each attempt asks only for
+// what tempPath doesn't have yet and adds it to the end. A connection that
 // drops at 80% costs the last few MB, not the whole file.
 //
-// The staging copy is kept when this gives up, so the next try - even from a
-// new queue job - carries on from it. The name is the package's content ID,
-// so a file there can only be an earlier piece of this same member.
-static int DownloadStoredMember(const std::string &rarUrl, const DlcMember &member, const std::string &destPath,
-                                const char *authHeader, void printFunction(const char *_format, ...),
-                                DownloadProgressFn progressFn)
+// tempPath is kept when this gives up, so the next try - even from a new
+// queue job - carries on from it. Its name is the package's content ID, so a
+// file there can only be an earlier piece of this same member.
+//
+// alsoNeeds is space wanted on top of the range itself (the unpacked file,
+// when the range is compressed data). Progress is reported against
+// reportTotal, with the range as its first `length` bytes. Returns 206 once
+// tempPath holds the whole range, or the status that stopped it.
+static int DownloadRarRange(const std::string &rarUrl, unsigned long long from, unsigned long long length,
+                            const std::string &tempPath, const std::string &destPath, unsigned long long alsoNeeds,
+                            const char *authHeader, void printFunction(const char *_format, ...),
+                            DownloadProgressFn progressFn, unsigned long long reportTotal)
 {
-    const std::string tempPath = StagingPathFor(destPath);
-    if (tempPath.empty())
-    {
-        printFunction("ERROR: no drive in destination path: %s\n", destPath.c_str());
-        return -1;
-    }
-
-    const unsigned long long size = member.unpSize;
     unsigned long long staged = 0;
-    if (FileSizeOnDisk(tempPath.c_str(), &staged) && staged > size)
+    if (FileSizeOnDisk(tempPath.c_str(), &staged) && staged > length)
     {
-        printFunction("  The staged copy is larger than the file (%I64u of %I64u bytes) - starting over\n", staged, size);
+        printFunction("  The staged copy is larger than the download (%I64u of %I64u bytes) - starting over\n", staged, length);
         DeleteFileA(tempPath.c_str());
         staged = 0;
     }
     else if (staged > 0)
     {
-        printFunction("  Picking up an earlier download at %I64u of %I64u bytes\n", staged, size);
+        printFunction("  Picking up an earlier download at %I64u of %I64u bytes\n", staged, length);
     }
 
     g_diskFull = false;
-    g_diskNeeded = size;
+    g_diskNeeded = length + alsoNeeds;
     g_diskFree = 0;
 
     unsigned long long freeSpace = 0;
-    if (DriveFreeSpace(destPath, &freeSpace) && freeSpace + staged < size + DISK_SPACE_MARGIN)
+    if (DriveFreeSpace(destPath, &freeSpace) && freeSpace + staged < length + alsoNeeds + DISK_SPACE_MARGIN)
     {
         printFunction("ERROR: not enough space - needs %I64u more bytes, the drive has %I64u free\n",
-                      size - staged, freeSpace);
+                      length + alsoNeeds - staged, freeSpace);
         g_diskFull = true;
         g_diskFree = freeSpace + staged;
         return -2;
@@ -1471,13 +1481,13 @@ static int DownloadStoredMember(const std::string &rarUrl, const DlcMember &memb
     const int MAX_FRUITLESS = 3;
     const int MAX_TOTAL = 30;
     int fruitless = 0;
-    int httpStatus = 0;
+    int httpStatus = 206;
 
-    for (int attempt = 1; staged < size && attempt <= MAX_TOTAL && fruitless < MAX_FRUITLESS; ++attempt)
+    for (int attempt = 1; staged < length && attempt <= MAX_TOTAL && fruitless < MAX_FRUITLESS; ++attempt)
     {
         if (attempt > 1)
         {
-            printFunction("  Resuming at %I64u of %I64u bytes (attempt %d)\n", staged, size, attempt);
+            printFunction("  Resuming at %I64u of %I64u bytes (attempt %d)\n", staged, length, attempt);
             Sleep(2000);
         }
 
@@ -1508,15 +1518,15 @@ static int DownloadStoredMember(const std::string &rarUrl, const DlcMember &memb
 
         char headers[IAS3_AUTH_HEADER_MAX + 96];
         _snprintf(headers, sizeof(headers), "%sRange: bytes=%I64u-%I64u\r\n", authHeader != NULL ? authHeader : "",
-                  member.dataStart + staged, member.dataStart + size - 1);
+                  from + staged, from + length - 1);
         headers[sizeof(headers) - 1] = '\0';
 
         g_resumeProgressFn = progressFn;
         g_resumeBase = staged;
-        g_resumeTotal = size;
+        g_resumeTotal = reportTotal;
 
         httpStatus = httpRequestHTTPS(fileUrl, HTTP_GET, NULL, headers, tempPath, NULL, NULL, true,
-                                      NULL, 0, printFunction, size - staged,
+                                      NULL, 0, printFunction, length - staged,
                                       progressFn != NULL ? ResumedProgress : NULL, true);
         NoteAuthStatus(httpStatus, authHeader);
 
@@ -1527,11 +1537,11 @@ static int DownloadStoredMember(const std::string &rarUrl, const DlcMember &memb
         if (httpStatus == HTTP_STATUS_CANCELLED || httpStatus == 401 || httpStatus == 403 || httpStatus == 404)
             break;
 
-        if (staged > size)
+        if (staged > length)
         {
             // Can't happen with a 206 for the range asked; if it somehow does,
             // the copy is no good.
-            printFunction("ERROR: the staged copy overran the file (%I64u of %I64u bytes)\n", staged, size);
+            printFunction("ERROR: the staged copy overran the download (%I64u of %I64u bytes)\n", staged, length);
             DeleteFileA(tempPath.c_str());
             return -1;
         }
@@ -1541,7 +1551,8 @@ static int DownloadStoredMember(const std::string &rarUrl, const DlcMember &memb
         else
             fruitless++;
 
-        if (DriveFreeSpace(destPath, &freeSpace) && staged < size && freeSpace < (size - staged) + DISK_SPACE_MARGIN)
+        if (DriveFreeSpace(destPath, &freeSpace) && staged < length &&
+            freeSpace < (length - staged) + alsoNeeds + DISK_SPACE_MARGIN)
         {
             printFunction("ERROR: the drive filled up during the download\n");
             g_diskFull = true;
@@ -1552,13 +1563,166 @@ static int DownloadStoredMember(const std::string &rarUrl, const DlcMember &memb
 
     g_resumeProgressFn = NULL;
 
-    if (staged != size)
+    if (staged != length)
     {
-        printFunction("  Stopped at %I64u of %I64u bytes - kept, the next try carries on from there\n", staged, size);
+        printFunction("  Stopped at %I64u of %I64u bytes - kept, the next try carries on from there\n", staged, length);
         return (httpStatus == 200 || httpStatus == 206) ? -1 : httpStatus;
     }
 
+    return 206;
+}
+
+// A stored member's bytes are the file, so the range is the file.
+static int DownloadStoredMember(const std::string &rarUrl, const DlcMember &member, const std::string &destPath,
+                                const char *authHeader, void printFunction(const char *_format, ...),
+                                DownloadProgressFn progressFn)
+{
+    const std::string tempPath = StagingPathFor(destPath);
+    if (tempPath.empty())
+    {
+        printFunction("ERROR: no drive in destination path: %s\n", destPath.c_str());
+        return -1;
+    }
+
+    int status = DownloadRarRange(rarUrl, member.dataStart, member.unpSize, tempPath, destPath, 0,
+                                  authHeader, printFunction, progressFn, member.unpSize);
+    if (status != 206)
+        return status;
+
     return MoveIntoPlace(tempPath, destPath, printFunction) ? 206 : -1;
+}
+
+// Where a compressed member's download waits to be unpacked: a folder of its
+// own inside the staging folder, since the unpacked copy uses the same name.
+static std::string PackedPathFor(const std::string &destPath)
+{
+    std::string staged = StagingPathFor(destPath);
+    size_t lastSep = staged.find_last_of('\\');
+    if (staged.empty() || lastSep == std::string::npos)
+        return "";
+
+    std::string folder = staged.substr(0, lastSep) + "\\packed";
+    CreateDirectoryA(folder.c_str(), NULL); // fine if it already exists
+    return folder + staged.substr(lastSep);
+}
+
+// Unpacking reports to the same bar as the download before it: the download
+// is the first part of g_unpackTotal, the unpacked bytes the rest.
+static DownloadProgressFn g_unpackProgressFn = NULL;
+static unsigned long long g_unpackBase = 0;
+static unsigned long long g_unpackTotal = 0;
+static DWORD g_unpackStart = 0;
+
+static bool UnpackProgress(unsigned long long written, unsigned long long total)
+{
+    DWORD elapsed = GetTickCount() - g_unpackStart;
+    unsigned long long speed = elapsed > 0 ? written * 1000 / elapsed : 0;
+    unsigned long long remaining = (speed > 0 && total > written) ? (total - written) / speed : 0;
+    return g_unpackProgressFn(g_unpackBase + written, g_unpackTotal, speed, remaining);
+}
+
+// Unpacked on the console - see RarUnpack.h. The member's compressed bytes are
+// downloaded as a range of the RAR (resumable, like a stored member), and the
+// start of the RAR is fetched to go in front of them. A solid member needs
+// every member before it as well, so its range starts after that head.
+//
+// Returns 206 when the file is in place, or UNPACK_UNSUPPORTED for one
+// dmc_unrar can't do, for the caller to try archive.org's extraction instead.
+#define UNPACK_UNSUPPORTED (-4)
+#define MAX_HEAD_LEN (64 * 1024)
+
+static int DownloadPackedMember(const std::string &rarUrl, const DlcMember &member, const std::string &destPath,
+                                const char *authHeader, void printFunction(const char *_format, ...),
+                                DownloadProgressFn progressFn)
+{
+    const std::string tempPath = StagingPathFor(destPath);
+    const std::string packedPath = PackedPathFor(destPath);
+    if (tempPath.empty() || packedPath.empty())
+    {
+        printFunction("ERROR: no drive in destination path: %s\n", destPath.c_str());
+        return -1;
+    }
+    if (member.headLen == 0 || member.headLen > MAX_HEAD_LEN || member.headLen > member.headerStart)
+    {
+        printFunction("ERROR: the RAR's main header isn't where it should be (%lu bytes)\n", member.headLen);
+        return UNPACK_UNSUPPORTED;
+    }
+
+    const unsigned long long from = member.solid ? member.headLen : member.headerStart;
+    const unsigned long long length = member.dataEnd - from;
+    if (member.solid)
+        printFunction("  Solid archive: downloading everything before it too (%I64u bytes)\n", length);
+
+    int status = DownloadRarRange(rarUrl, from, length, packedPath, destPath, member.unpSize,
+                                  authHeader, printFunction, progressFn, length + member.unpSize);
+    if (status != 206)
+        return status;
+
+    // The signature and main header, fetched again rather than kept from the
+    // file list - a few dozen bytes, one request.
+    unsigned char *head = (unsigned char *)malloc(MAX_HEAD_LEN + 1);
+    if (head == NULL)
+        return -1;
+    unsigned long long headLen = MAX_HEAD_LEN;
+    char range[64];
+    _snprintf(range, sizeof(range), "Range: bytes=0-%lu\r\n", member.headLen - 1);
+    range[sizeof(range) - 1] = '\0';
+    status = HttpGetFollowRedirect(rarUrl, (char *)head, &headLen, range, authHeader, printFunction);
+    if ((status != 206 && status != 200) || headLen != member.headLen)
+    {
+        printFunction("ERROR: couldn't read the start of the RAR (status %d, %I64u bytes)\n", status, headLen);
+        free(head);
+        return (status == 206 || status == 200) ? -1 : status;
+    }
+
+    printFunction("  Unpacking %s (%I64u bytes downloaded, %lu unpacked)\n", member.internalPath, length, member.unpSize);
+    g_unpackProgressFn = progressFn;
+    g_unpackBase = length;
+    g_unpackTotal = length + member.unpSize;
+    g_unpackStart = GetTickCount();
+
+    RarUnpackResult unpacked = RarUnpackMember(head, member.headLen, packedPath.c_str(), member.internalPath,
+                                               tempPath.c_str(), progressFn != NULL ? UnpackProgress : NULL,
+                                               printFunction);
+    g_unpackProgressFn = NULL;
+    free(head);
+
+    DWORD seconds = (GetTickCount() - g_unpackStart) / 1000;
+    printFunction("  Unpacking took %lu:%02lu (result %d)\n", (unsigned long)(seconds / 60),
+                  (unsigned long)(seconds % 60), (int)unpacked);
+
+    switch (unpacked)
+    {
+    case RAR_UNPACK_OK:
+        DeleteFileA(packedPath.c_str());
+        return MoveIntoPlace(tempPath, destPath, printFunction) ? 206 : -1;
+
+    case RAR_UNPACK_CANCELLED:
+        // The download is kept; only the unpacking starts again.
+        return HTTP_STATUS_CANCELLED;
+
+    case RAR_UNPACK_WRITE_FAILED:
+    {
+        unsigned long long freeSpace = 0;
+        if (DriveFreeSpace(destPath, &freeSpace) && freeSpace < member.unpSize + DISK_SPACE_MARGIN)
+        {
+            g_diskFull = true;
+            g_diskNeeded = member.unpSize;
+            g_diskFree = freeSpace;
+        }
+        return -1;
+    }
+
+    case RAR_UNPACK_UNSUPPORTED:
+        DeleteFileA(packedPath.c_str());
+        return UNPACK_UNSUPPORTED;
+
+    default:
+        // Bad data or a name that isn't there: the download can't be trusted,
+        // so the next try fetches it again.
+        DeleteFileA(packedPath.c_str());
+        return -1;
+    }
 }
 
 bool DownloadDlcMember(const DlcRarMatch &pack, const DlcMember &member,
@@ -1570,10 +1734,11 @@ bool DownloadDlcMember(const DlcRarMatch &pack, const DlcMember &member,
     g_diskFull = false;
     g_tooLarge = false;
 
-    // Compressed and too big for the extraction to deliver whole - see
-    // EXTRACTED_SIZE_LIMIT. Said now, rather than after three attempts that
-    // each spend a quarter of an hour on the same 1 GiB.
-    if (!member.stored && member.unpSize > EXTRACTED_SIZE_LIMIT)
+    // Compressed in a way the console can't unpack, and too big for
+    // archive.org's extraction to deliver whole - see EXTRACTED_SIZE_LIMIT.
+    // Said now, rather than after three attempts that each spend a quarter of
+    // an hour on the same 1 GiB.
+    if (!member.stored && !member.canUnpack && member.unpSize > EXTRACTED_SIZE_LIMIT)
     {
         printFunction("ERROR: %s is %lu bytes and compressed - archive.org can't send a file that big to a console\n",
                       member.internalPath, member.unpSize);
@@ -1695,11 +1860,31 @@ bool DownloadDlcMember(const DlcRarMatch &pack, const DlcMember &member,
     if (damagedCopy)
         printFunction("  Replacing an incomplete earlier copy (%I64u of %lu bytes)\n", existing, member.unpSize);
 
-    // A stored member is read straight out of the RAR, which can pick up
-    // where it stopped; anything else goes through archive.org's extraction.
-    int httpStatus = member.stored
-                         ? DownloadStoredMember(PackUrl(pack), member, destPath, authHeader, printFunction, progressFn)
-                         : DownloadUrlToFile(url, destPath, authHeader, member.unpSize, printFunction, progressFn);
+    // A stored member is read straight out of the RAR, and a compressed one
+    // downloaded the same way and unpacked here - both pick up where they
+    // stopped. archive.org's extraction is the fallback, for what the console
+    // can't unpack: encrypted, split across volumes, or a method dmc_unrar
+    // doesn't do.
+    int httpStatus;
+    if (member.stored)
+        httpStatus = DownloadStoredMember(PackUrl(pack), member, destPath, authHeader, printFunction, progressFn);
+    else if (member.canUnpack)
+        httpStatus = DownloadPackedMember(PackUrl(pack), member, destPath, authHeader, printFunction, progressFn);
+    else
+        httpStatus = UNPACK_UNSUPPORTED;
+
+    if (httpStatus == UNPACK_UNSUPPORTED)
+    {
+        if (member.unpSize > EXTRACTED_SIZE_LIMIT)
+        {
+            printFunction("ERROR: %s can't be unpacked here, and at %lu bytes archive.org can't send it unpacked\n",
+                          member.internalPath, member.unpSize);
+            g_tooLarge = true;
+            return false;
+        }
+        printFunction("  Asking archive.org to unpack it instead\n");
+        httpStatus = DownloadUrlToFile(url, destPath, authHeader, member.unpSize, printFunction, progressFn);
+    }
 
     if (httpStatus != 200 && httpStatus != 206)
     {

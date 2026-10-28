@@ -67,6 +67,7 @@ RarFormat RarDetectFormat(const unsigned char *data, unsigned long len, unsigned
 #define RAR4_LHD_SPLIT_BEFORE 0x0001 // file header: continued from the previous volume
 #define RAR4_LHD_SPLIT_AFTER  0x0002 // ...and into the next
 #define RAR4_LHD_PASSWORD     0x0004 // its data is encrypted
+#define RAR4_LHD_SOLID        0x0010 // decoding it carries on from the file before
 #define RAR4_METHOD_STORE     0x30
 #define RAR4_LHD_LARGE    0x0100 // file header: 64-bit sizes, high halves before the name
 #define RAR4_LHD_DIRECTORY 0x00E0
@@ -147,6 +148,7 @@ static int ParseRar4(const unsigned char *data, unsigned long len, RarEntry *out
         out->stored = (data[7 + 18] == RAR4_METHOD_STORE);
         out->encrypted = (flags & RAR4_LHD_PASSWORD) != 0;
         out->split = (flags & (RAR4_LHD_SPLIT_BEFORE | RAR4_LHD_SPLIT_AFTER)) != 0;
+        out->solid = (flags & RAR4_LHD_SOLID) != 0;
         out->hasCrc = true;
         out->crc = ReadLE32(data + 7 + 9);
     }
@@ -303,6 +305,7 @@ static int ParseRar5(const unsigned char *data, unsigned long len, RarEntry *out
         // Bits 7-9 of the compression information are the method; 0 stores.
         out->dataOffset = headerEnd;
         out->stored = ((compression >> 7) & 7) == 0;
+        out->solid = (compression & 0x40) != 0; // bit 6: carries on from the file before
         out->split = (flags & (RAR5_HFL_SPLIT_BEFORE | RAR5_HFL_SPLIT_AFTER)) != 0;
 
         // The extra area, at the header's end: records of a size, a type and
@@ -344,6 +347,7 @@ int RarParseHeader(RarFormat format, const unsigned char *data, unsigned long le
     out->unpSize = 0;
     out->dataOffset = 0;
     out->stored = false;
+    out->solid = false;
     out->encrypted = false;
     out->split = false;
     out->hasCrc = false;

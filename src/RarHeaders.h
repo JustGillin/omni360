@@ -49,6 +49,7 @@ struct RarEntry
     bool stored;                   // not compressed: the data is the file, byte for byte
     bool encrypted;                // the file's data is
     bool split;                    // it continues from, or into, another volume
+    bool solid;                    // compressed carrying on from the file before it
     bool hasCrc;                   // crc is the file's CRC32 (RAR5 may leave it out)
     unsigned long crc;
 };
