@@ -293,12 +293,16 @@ void RenderSettingsFrame(SettingsPageView &view, const UiHint *hints, int hintCo
 #define STORE_FOCUS_FEATURED 0
 #define STORE_FOCUS_BUTTONS  (STORE_FOCUS_FEATURED + STORE_FEATURED_MAX) // some featured slots may be unused
 #define STORE_FOCUS_LETTERS  (STORE_FOCUS_BUTTONS + STORE_BUTTON_COUNT)
-// Under the A to Z, rows of games that scroll sideways - Popular, Top rated,
+// Under the A to Z, the Collections: a row of wide cards, a series each,
+// that scrolls sideways. Focus on one is STORE_FOCUS_COLLECTIONS + its place.
+#define STORE_COLLECTIONS_MAX   32
+#define STORE_FOCUS_COLLECTIONS (STORE_FOCUS_LETTERS + STORE_LETTER_COUNT)
+// Under them, rows of games that scroll sideways - Popular, Top rated,
 // a genre each. Focus on a row's game is STORE_FOCUS_ROWS + row *
 // STORE_ROW_TILES_MAX + its place in the row.
 #define STORE_ROWS_MAX       16
 #define STORE_ROW_TILES_MAX  24
-#define STORE_FOCUS_ROWS     (STORE_FOCUS_LETTERS + STORE_LETTER_COUNT)
+#define STORE_FOCUS_ROWS     (STORE_FOCUS_COLLECTIONS + STORE_COLLECTIONS_MAX)
 #define STORE_FOCUS_COUNT    (STORE_FOCUS_ROWS + STORE_ROWS_MAX * STORE_ROW_TILES_MAX)
 
 struct StoreTileView;
@@ -309,6 +313,13 @@ struct StoreRowView
     const StoreTileView *tiles;
     int count;
     int scroll; // the first game shown; the caller's to keep, the Render call moves it
+};
+
+struct StoreCollectionView
+{
+    const char *name;
+    unsigned long art; // the game whose wallpaper is its card
+    int count;         // its games
 };
 
 struct StoreFeaturedView
@@ -329,6 +340,9 @@ struct StorePageView
     const char *featuredLabel; // over the featured tiles - "Featured", or an event's name
     StoreFeaturedView featured[STORE_FEATURED_MAX];
     int featuredCount;         // 1 to STORE_FEATURED_MAX
+    StoreCollectionView collections[STORE_COLLECTIONS_MAX];
+    int collectionCount;
+    int collectionScroll; // the first card shown; the caller's to keep, the Render call moves it
     StoreRowView rows[STORE_ROWS_MAX];
     int rowCount;
     StoreButtonView buttons[STORE_BUTTON_COUNT];
@@ -343,6 +357,9 @@ int StoreLettersPerRow();
 
 // How many of a row's games show across at once.
 int StoreRowTilesAcross();
+
+// How many Collections cards show across at once.
+int StoreCollectionsAcross();
 
 // Where featured tile i of count sits, before the page scrolls - and a
 // button's - for the D-pad to go to whichever is next to it.
@@ -435,16 +452,22 @@ int StoreLetterVisibleRows();
 void RenderStoreLetterFrame(StoreLetterView &view, const UiHint *hints, int hintCount);
 
 // A game's page: its wallpaper across the top, the box, the catalog's
-// details, its buttons, the synopsis, its versions and screenshots.
+// details, its buttons, the synopsis and screenshots - and under them, More
+// like this, a row of games that scrolls sideways. Its versions are on a
+// panel down the right, open over the page while versionsOpen; Install
+// installs the chosen one, which is the best one unless someone chose.
 //
-// focus: STORE_GAME_FOCUS_BUTTONS + 0..3 is a button, STORE_GAME_FOCUS_VERSIONS
-// + i is version i. versionScroll is the first version row shown; the Render
-// call keeps the focused one on screen. The buttons are Install, Find DLC,
-// Title updates and Uninstall; a NULL one isn't shown, and only the last may
-// be - Uninstall, while there's nothing installed to remove.
+// focus: STORE_GAME_FOCUS_BUTTONS + 0..3 is a button, STORE_GAME_FOCUS_SIMILAR
+// + i a game in the row. similarScroll is the row's first game shown, and
+// scroll how far the page has moved up to show it; on the panel,
+// versionFocus is the focused version and versionScroll the first shown.
+// The Render call keeps what's focused on screen. The buttons are Install,
+// Find DLC, Title updates and Uninstall; a NULL one isn't shown, and only
+// the last may be - Uninstall, while there's nothing installed to remove.
 #define STORE_GAME_BUTTONS        4
 #define STORE_GAME_FOCUS_BUTTONS  0
-#define STORE_GAME_FOCUS_VERSIONS STORE_GAME_BUTTONS
+#define STORE_GAME_FOCUS_SIMILAR  STORE_GAME_BUTTONS
+#define STORE_SIMILAR_MAX         24
 
 struct StoreVersionView
 {
@@ -485,7 +508,15 @@ struct StoreGameView
     const StoreVersionView *versions;
     int versionCount;
     int versionChosen;      // the one Install installs
+    bool versionsOpen;      // the panel
+    int versionFocus;
     int versionScroll;
+
+    const StoreTileView *similar; // More like this; none hides the row
+    int similarCount;
+    int similarScroll;
+    float scroll;           // pixels the page has moved up; starts at 0
+
     int focus;
     bool focused;
 };

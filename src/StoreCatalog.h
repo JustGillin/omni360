@@ -50,6 +50,20 @@ const char *StoreRowName(int row);
 // many were written.
 int StoreRowGames(int row, StoreGame *out, int maxGames);
 
+// The front page's Collections - a series each, from StoreCollections.h
+// (tools/make_collections.py): its name, the game whose wallpaper is its
+// card, and its games oldest first, as StoreGameByTitleId finds them.
+int StoreCollectionCount();
+const char *StoreCollectionName(int collection);
+unsigned long StoreCollectionArt(int collection);
+int StoreCollectionGames(int collection, StoreGame *out, int maxGames);
+
+// A game page's "More like this": the rest of its series, oldest first, then
+// the most rated games of its genre - Kinect ones for a Kinect game and only
+// for one, family ones for a family game - with its publisher's few ahead.
+// Returns how many were written.
+int StoreSimilarGames(unsigned long titleId, StoreGame *out, int maxGames);
+
 // One of a game's versions, USA and World first; NULL out of range.
 const StoreRelease *StoreReleaseOf(const StoreGame *game, int version);
 

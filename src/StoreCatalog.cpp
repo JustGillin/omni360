@@ -3,8 +3,10 @@
 #define XBLA_TITLES_DATA
 #define XBLIG_TITLES_DATA
 #define STORE_ROWS_DATA
+#define STORE_COLLECTIONS_DATA
 #include "StoreCatalog.h"
 #include "StoreRows.h"
+#include "StoreCollections.h"
 
 #include <stdlib.h>
 #include <string.h>
@@ -570,6 +572,132 @@ int StoreRowGames(int row, StoreGame *out, int maxGames)
     {
         if (StoreGameByTitleId(kStoreRowGames[kStoreRows[row].first + i], &out[n]))
             n++;
+    }
+    return n;
+}
+
+int StoreCollectionCount()
+{
+    return STORE_COLLECTION_COUNT;
+}
+
+const char *StoreCollectionName(int collection)
+{
+    return (collection >= 0 && collection < STORE_COLLECTION_COUNT) ? kStoreCollections[collection].name : "";
+}
+
+unsigned long StoreCollectionArt(int collection)
+{
+    return (collection >= 0 && collection < STORE_COLLECTION_COUNT) ? kStoreCollections[collection].art : 0;
+}
+
+int StoreCollectionGames(int collection, StoreGame *out, int maxGames)
+{
+    if (collection < 0 || collection >= STORE_COLLECTION_COUNT || out == NULL)
+        return 0;
+    const StoreCollection &c = kStoreCollections[collection];
+    int n = 0;
+    for (int i = 0; i < c.count && n < maxGames; ++i)
+    {
+        if (StoreGameByTitleId(kStoreCollectionGames[c.first + i], &out[n]))
+            n++;
+    }
+    return n;
+}
+
+// "More like this": of its publisher's games, this many go ahead of the
+// rest - and a game rated under three stars isn't much of a suggestion.
+#define SIMILAR_SAME_PUBLISHER 4
+#define SIMILAR_MIN_STARS      30 // tenths
+
+static bool HasTitle(const StoreGame *games, int count, unsigned long titleId)
+{
+    for (int i = 0; i < count; ++i)
+    {
+        if (games[i].titleId == titleId)
+            return true;
+    }
+    return false;
+}
+
+// Whether a game is named for Kinect - "Kinect Adventures!", "Kinect Star
+// Wars": made for it, where one only tagged Kinect may just support it, as
+// Skyrim's voice commands do.
+static bool NamedForKinect(unsigned long titleId)
+{
+    StoreGame game;
+    return StoreGameByTitleId(titleId, &game) && game.name != NULL && strstr(game.name, "Kinect") != NULL;
+}
+
+// The most rated game like `me` that isn't in out yet - of its publisher's
+// alone, with samePublisher - as an index into kStoreGameInfo; -1 for none.
+// Like it: the same genre; a Kinect game only for a Kinect game, and one
+// made for Kinect only for another; and for a family game, one for the
+// family too.
+static int MostRatedLike(const StoreGameInfo &me, bool meForKinect, bool samePublisher, const StoreGame *out,
+                         int count)
+{
+    int best = -1;
+    for (int i = 0; i < STORE_INFO_COUNT; ++i)
+    {
+        const StoreGameInfo &g = kStoreGameInfo[i];
+        if (g.titleId == me.titleId || g.genre != me.genre || g.stars < SIMILAR_MIN_STARS)
+            continue;
+        if ((g.tags & STORE_TAG_KINECT) && !(me.tags & STORE_TAG_KINECT))
+            continue;
+        if ((me.tags & STORE_TAG_FAMILY) && !(g.tags & STORE_TAG_FAMILY))
+            continue;
+        // A title ID's first half is its publisher's.
+        if (samePublisher && (g.titleId >> 16) != (me.titleId >> 16))
+            continue;
+        if (best >= 0 && g.ratings <= kStoreGameInfo[best].ratings)
+            continue;
+        if (HasTitle(out, count, g.titleId))
+            continue;
+        // Last, as it's a lookup: only for one that would do otherwise.
+        if ((g.tags & STORE_TAG_KINECT) && !meForKinect && NamedForKinect(g.titleId))
+            continue;
+        best = i;
+    }
+    return best;
+}
+
+int StoreSimilarGames(unsigned long titleId, StoreGame *out, int maxGames)
+{
+    if (out == NULL || titleId == 0)
+        return 0;
+
+    // The rest of its series - of each collection it's in.
+    int n = 0;
+    for (int c = 0; c < STORE_COLLECTION_COUNT; ++c)
+    {
+        const StoreCollection &col = kStoreCollections[c];
+        bool in = false;
+        for (int i = 0; i < col.count && !in; ++i)
+            in = (kStoreCollectionGames[col.first + i] == titleId);
+        for (int i = 0; in && i < col.count && n < maxGames; ++i)
+        {
+            const unsigned long id = kStoreCollectionGames[col.first + i];
+            if (id != titleId && !HasTitle(out, n, id) && StoreGameByTitleId(id, &out[n]))
+                n++;
+        }
+    }
+
+    // Then its genre's, its publisher's few first.
+    StoreGameInfo me;
+    if (!StoreGameInfoOf(titleId, &me) || me.genre == 0)
+        return n;
+    const bool meForKinect = NamedForKinect(titleId);
+    for (int pass = 0; pass < 2; ++pass)
+    {
+        const int limit = (pass == 0) ? n + SIMILAR_SAME_PUBLISHER : maxGames;
+        while (n < limit && n < maxGames)
+        {
+            const int best = MostRatedLike(me, meForKinect, pass == 0, out, n);
+            if (best < 0 || !StoreGameByTitleId(kStoreGameInfo[best].titleId, &out[n]))
+                break;
+            n++;
+        }
     }
     return n;
 }

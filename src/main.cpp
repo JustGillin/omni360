@@ -2038,6 +2038,7 @@ struct Shell
     int storeFocus;
     float storeScroll;
     int storeRowScroll[STORE_ROWS_MAX]; // each row of games' first shown
+    int storeCollectionScroll;          // the Collections' first card shown
     bool storeArtRequested;
 
     // A section's A-Z page - Xbox Live Arcade's, the Indie Games' or the
@@ -2055,6 +2056,10 @@ struct Shell
     int storeLetterSection; // SECTION_*, or -1 for the front page's
     char storeLetter;
     int storeGameCount; // in g_storeGames
+
+    // Or a collection's games, in g_storeGames, oldest first.
+    bool storeInCollection;
+    int storeCollection;
 
     // Or a search's results, in g_searchHits - any list's games - with what
     // was typed.
@@ -2077,7 +2082,11 @@ struct Shell
     int storeGameFocus;     // STORE_GAME_FOCUS_*
     int storeVersionChosen;
     int storeVersionScroll;
+    bool storeVersionsOpen; // the Versions panel, over the page - Y
+    int storeVersionFocus;
     bool storeShotsAsked;   // its screenshots, once its details came
+    int storeSimilarScroll; // More like this's first game shown
+    float storeGameScroll;  // how far the page has moved up, to show it
 };
 
 // One letter's games and their tiles - or the All tile's, every game of a
@@ -2101,6 +2110,11 @@ static bool g_sectionCounted[SECTION_COUNT] = { false, false, false };
 static StoreGame g_storeGame;
 static StoreVersionView g_storeVersions[STORE_MAX_VERSIONS];
 static char g_storeVersionSize[STORE_MAX_VERSIONS][24];
+
+// Its More like this row, and the row's tiles.
+static StoreGame g_similarGames[STORE_SIMILAR_MAX];
+static StoreTileView g_similarTiles[STORE_SIMILAR_MAX];
+static int g_similarCount = 0;
 static StoreDetails g_storeDetails;
 static char g_storeMeta[256];
 
@@ -2202,8 +2216,28 @@ static StoreTileView g_rowTiles[STORE_ROWS_MAX][STORE_ROW_TILES_MAX];
 static int g_rowCounts[STORE_ROWS_MAX];
 static int g_rowCount = 0;
 
+// The Collections, a card each, as StoreCollections.h has them.
+static StoreCollectionView g_collections[STORE_COLLECTIONS_MAX];
+static int g_collectionIds[STORE_COLLECTIONS_MAX]; // each card's, for StoreCollectionGames
+static int g_collectionCount = 0;
+
 static void BuildStoreRows()
 {
+    g_collectionCount = 0;
+    const int collections = StoreCollectionCount() < STORE_COLLECTIONS_MAX ? StoreCollectionCount()
+                                                                          : STORE_COLLECTIONS_MAX;
+    for (int c = 0; c < collections; ++c)
+    {
+        StoreGame games[STORE_ROW_TILES_MAX];
+        StoreCollectionView &card = g_collections[g_collectionCount];
+        card.count = StoreCollectionGames(c, games, STORE_ROW_TILES_MAX);
+        if (card.count == 0)
+            continue;
+        card.name = StoreCollectionName(c);
+        card.art = StoreCollectionArt(c);
+        g_collectionIds[g_collectionCount++] = c;
+    }
+
     g_rowCount = 0;
     const int rows = StoreRowCount() < STORE_ROWS_MAX ? StoreRowCount() : STORE_ROWS_MAX;
     for (int r = 0; r < rows; ++r)
@@ -2239,6 +2273,10 @@ static StorePageView MakeStoreView(const Shell &shell)
     memset(&view, 0, sizeof(view));
     view.featuredLabel = g_featured.label;
     view.featuredCount = g_featuredCount;
+    view.collectionCount = g_collectionCount;
+    for (int c = 0; c < g_collectionCount; ++c)
+        view.collections[c] = g_collections[c];
+    view.collectionScroll = shell.storeCollectionScroll;
     view.rowCount = g_rowCount;
     for (int r = 0; r < g_rowCount; ++r)
     {
@@ -2306,10 +2344,32 @@ static int NextFeaturedTile(int f, WORD nav)
     return best;
 }
 
+// Where focus is on the Collections: card `place`, kept to the row.
+static int StoreCollectionFocus(int place)
+{
+    if (place >= g_collectionCount)
+        place = g_collectionCount - 1;
+    if (place < 0)
+        place = 0;
+    return STORE_FOCUS_COLLECTIONS + place;
+}
+
+// The letter in the A to Z's last row under about the same place as one of
+// `across` things on screen.
+static int LastLetterRowFocus(int onScreen, int across)
+{
+    const int perRow = StoreLettersPerRow();
+    int l = ((STORE_LETTER_COUNT - 1) / perRow) * perRow + onScreen * perRow / across;
+    if (l > STORE_LETTER_COUNT - 1)
+        l = STORE_LETTER_COUNT - 1;
+    return STORE_FOCUS_LETTERS + l;
+}
+
 // The D-pad on the front page. The featured tiles are a large one and up to
 // four beside it, gone between by where they are; the buttons are one row
-// under them; the letters wrap, perRow to a row. Left from the first column
-// goes to the sidebar.
+// under them; the letters wrap, perRow to a row; the Collections and the
+// rows of games under them go sideways. Left from the first column goes to
+// the sidebar.
 static void StepStoreFocus(WORD nav, Shell &shell)
 {
     const int perRow = StoreLettersPerRow();
@@ -2376,7 +2436,7 @@ static void StepStoreFocus(WORD nav, Shell &shell)
         else if (nav == XINPUT_GAMEPAD_DPAD_DOWN)
             i = STORE_FOCUS_LETTERS + (b * perRow * 2 + STORE_BUTTON_COUNT) / (STORE_BUTTON_COUNT * 2);
     }
-    else if (i < STORE_FOCUS_ROWS)
+    else if (i < STORE_FOCUS_COLLECTIONS)
     {
         const int l = i - STORE_FOCUS_LETTERS;
         const int col = l % perRow;
@@ -2401,11 +2461,35 @@ static void StepStoreFocus(WORD nav, Shell &shell)
             // Down onto a shorter last row lands on its last letter.
             i = (l + perRow < STORE_LETTER_COUNT) ? i + perRow : STORE_FOCUS_LETTERS + STORE_LETTER_COUNT - 1;
         }
+        else if (nav == XINPUT_GAMEPAD_DPAD_DOWN && g_collectionCount > 0)
+        {
+            // Onto the Collections, under about the same place.
+            i = StoreCollectionFocus(shell.storeCollectionScroll + col * StoreCollectionsAcross() / perRow);
+        }
         else if (nav == XINPUT_GAMEPAD_DPAD_DOWN && g_rowCount > 0)
         {
             // Into the first row of games, under about the same place.
             i = StoreRowFocus(0, shell.storeRowScroll[0] + col * StoreRowTilesAcross() / perRow);
         }
+    }
+    else if (i < STORE_FOCUS_ROWS)
+    {
+        // The Collections: along them, up to the letters, down to the games.
+        const int place = i - STORE_FOCUS_COLLECTIONS;
+        const int onScreen = place - shell.storeCollectionScroll;
+        if (nav == XINPUT_GAMEPAD_DPAD_RIGHT && place + 1 < g_collectionCount)
+            i++;
+        else if (nav == XINPUT_GAMEPAD_DPAD_LEFT)
+        {
+            if (place == 0)
+                shell.sidebarFocused = true;
+            else
+                i--;
+        }
+        else if (nav == XINPUT_GAMEPAD_DPAD_UP)
+            i = LastLetterRowFocus(onScreen, StoreCollectionsAcross());
+        else if (nav == XINPUT_GAMEPAD_DPAD_DOWN && g_rowCount > 0)
+            i = StoreRowFocus(0, shell.storeRowScroll[0] + onScreen * StoreRowTilesAcross() / StoreCollectionsAcross());
     }
     else
     {
@@ -2427,14 +2511,16 @@ static void StepStoreFocus(WORD nav, Shell &shell)
             i = StoreRowFocus(r + 1, shell.storeRowScroll[r + 1] + onScreen);
         else if (nav == XINPUT_GAMEPAD_DPAD_UP && r > 0)
             i = StoreRowFocus(r - 1, shell.storeRowScroll[r - 1] + onScreen);
+        else if (nav == XINPUT_GAMEPAD_DPAD_UP && g_collectionCount > 0)
+        {
+            // Back up to the Collections, under about the same place.
+            i = StoreCollectionFocus(shell.storeCollectionScroll +
+                                     onScreen * StoreCollectionsAcross() / StoreRowTilesAcross());
+        }
         else if (nav == XINPUT_GAMEPAD_DPAD_UP)
         {
             // Back up to the letters' last row, under about the same place.
-            const int lastRowStart = ((STORE_LETTER_COUNT - 1) / perRow) * perRow;
-            int l = lastRowStart + onScreen * perRow / StoreRowTilesAcross();
-            if (l > STORE_LETTER_COUNT - 1)
-                l = STORE_LETTER_COUNT - 1;
-            i = STORE_FOCUS_LETTERS + l;
+            i = LastLetterRowFocus(onScreen, StoreRowTilesAcross());
         }
     }
 
@@ -2881,11 +2967,43 @@ static void OpenStoreLetter(Shell &shell, char letter, int section)
     shell.storeLetterArcade = arcade;
     shell.storeLetterSection = section;
     shell.storeSearch = false;
+    shell.storeInCollection = false;
     shell.storeLetter = letter;
     shell.storeSelected = 0;
     shell.storeLetterScroll = 0;
     shell.storeInLetter = true;
     shell.storeFilterOpen = false;
+}
+
+// A collection's games, oldest first, in a letter's grid - unfiltered, as
+// it's a series to see whole.
+static void OpenStoreCollection(Shell &shell, int collection)
+{
+    shell.storeGameCount = StoreCollectionGames(collection, g_storeGames, MAX_STORE_GAMES);
+    for (int i = 0; i < shell.storeGameCount; ++i)
+    {
+        g_storeTiles[i].titleId = g_storeGames[i].titleId;
+        g_storeTiles[i].name = g_storeGames[i].name;
+        g_storeTiles[i].letter = g_storeGames[i].letter;
+        g_storeTiles[i].indie = false;
+    }
+    shell.storeLetterArcade = false;
+    shell.storeLetterSection = -1;
+    shell.storeSearch = false;
+    shell.storeInCollection = true;
+    shell.storeCollection = collection;
+    shell.storeLetter = '\0';
+    shell.storeSelected = 0;
+    shell.storeLetterScroll = 0;
+    shell.storeInLetter = true;
+    shell.storeFilterOpen = false;
+}
+
+// Whether the open grid is a letter's that the Filter and sort panel
+// applies to: not a search's, an arcade or indie letter's, or a collection's.
+static bool LetterFilterable(const Shell &shell)
+{
+    return !shell.storeSearch && !shell.storeLetterArcade && !shell.storeInCollection;
 }
 
 // The open letter's games again, after the filters changed - on the same
@@ -2909,8 +3027,7 @@ static void RefilterLetter(Shell &shell)
 // Whether the filters left the open letter with nothing - X resets them.
 static bool LetterFiltersEmptied(const Shell &shell)
 {
-    return shell.storeGameCount == 0 && !shell.storeSearch && !shell.storeLetterArcade &&
-           FilterNarrows(FilterFor(shell.storeLetterSection));
+    return shell.storeGameCount == 0 && LetterFilterable(shell) && FilterNarrows(FilterFor(shell.storeLetterSection));
 }
 
 // The Filter and sort panel's rows.
@@ -3116,6 +3233,7 @@ static bool OpenStoreSearch(Shell &shell)
     shell.storeLetterArcade = false;
     shell.storeLetterSection = -1;
     shell.storeSearch = true;
+    shell.storeInCollection = false;
     shell.storeSelected = 0;
     shell.storeLetterScroll = 0;
     shell.storeInLetter = true;
@@ -3149,7 +3267,12 @@ static StoreLetterView MakeStoreLetterView(const Shell &shell)
         view.title = title;
         view.section = section;
     }
-    const bool filtered = !shell.storeSearch && !shell.storeLetterArcade;
+    else if (shell.storeInCollection)
+    {
+        view.title = StoreCollectionName(shell.storeCollection);
+        view.section = "Collection";
+    }
+    const bool filtered = LetterFilterable(shell);
     view.filter = filtered ? FilterSummary(shell.storeLetterSection, false) : NULL;
     view.filterAll = filtered ? FilterSummary(shell.storeLetterSection, true) : NULL;
     view.panel = shell.storeFilterOpen ? MakeFilterPanel(shell) : NULL;
@@ -3373,7 +3496,20 @@ static void OpenStoreGame(Shell &shell, const StoreGame &game)
     shell.storeGameFocus = STORE_GAME_FOCUS_BUTTONS;
     shell.storeVersionChosen = BestVersionForFilter(g_storeGame);
     shell.storeVersionScroll = 0;
+    shell.storeVersionsOpen = false;
     shell.storeShotsAsked = false;
+    shell.storeSimilarScroll = 0;
+    shell.storeGameScroll = 0.0f;
+
+    // More like this. Its covers are asked for as they come into view.
+    g_similarCount = StoreSimilarGames(g_storeGame.titleId, g_similarGames, STORE_SIMILAR_MAX);
+    for (int i = 0; i < g_similarCount; ++i)
+    {
+        g_similarTiles[i].titleId = g_similarGames[i].titleId;
+        g_similarTiles[i].name = g_similarGames[i].name;
+        g_similarTiles[i].letter = g_similarGames[i].letter;
+        g_similarTiles[i].indie = false;
+    }
 
     // The details first - the screenshots wait on them - then the art.
     const unsigned long titleId = g_storeGame.titleId;
@@ -4051,7 +4187,13 @@ static StoreGameView MakeStoreGameView(Shell &shell, const Library &lib)
     view.versions = g_storeVersions;
     view.versionCount = StoreVersionCount();
     view.versionChosen = shell.storeVersionChosen;
+    view.versionsOpen = shell.storeVersionsOpen;
+    view.versionFocus = shell.storeVersionFocus;
     view.versionScroll = shell.storeVersionScroll;
+    view.similar = g_similarTiles;
+    view.similarCount = g_similarCount;
+    view.similarScroll = shell.storeSimilarScroll;
+    view.scroll = shell.storeGameScroll;
     view.focus = shell.storeGameFocus;
     view.focused = !shell.sidebarFocused;
     return view;
@@ -4067,15 +4209,15 @@ static bool GamePagePlays(const Shell &shell, const Library &lib)
            LibraryGameByTitleId(lib, g_storeGame.titleId) != NULL;
 }
 
-// The D-pad on a game page: along the buttons, and down the versions beside
-// the synopsis. Left from Install, as from any first column, is the sidebar.
+// The D-pad on a game page: along the buttons, and down to More like this,
+// along it. Left from Install or the row's first game, as from any first
+// column, is the sidebar. The Versions panel has its own.
 static void StepStoreGame(WORD nav, Shell &shell, const Library &lib)
 {
     int &f = shell.storeGameFocus;
-    const int versions = StoreVersionCount();
     const int buttons = CanUninstallStoreVersion(lib, shell) ? STORE_GAME_BUTTONS : STORE_GAME_BUTTONS - 1;
 
-    if (f < STORE_GAME_FOCUS_VERSIONS)
+    if (f < STORE_GAME_FOCUS_SIMILAR)
     {
         const int b = f - STORE_GAME_FOCUS_BUTTONS;
         if (nav == XINPUT_GAMEPAD_DPAD_LEFT)
@@ -4087,17 +4229,22 @@ static void StepStoreGame(WORD nav, Shell &shell, const Library &lib)
         }
         else if (nav == XINPUT_GAMEPAD_DPAD_RIGHT && b + 1 < buttons)
             f++;
-        else if (nav == XINPUT_GAMEPAD_DPAD_DOWN && versions > 0)
-            f = STORE_GAME_FOCUS_VERSIONS + shell.storeVersionChosen;
+        else if (nav == XINPUT_GAMEPAD_DPAD_DOWN && g_similarCount > 0)
+            f = STORE_GAME_FOCUS_SIMILAR + shell.storeSimilarScroll;
     }
     else
     {
-        const int v = f - STORE_GAME_FOCUS_VERSIONS;
-        if (nav == XINPUT_GAMEPAD_DPAD_UP)
-            f = (v == 0) ? STORE_GAME_FOCUS_BUTTONS : f - 1;
-        else if (nav == XINPUT_GAMEPAD_DPAD_DOWN && v + 1 < versions)
+        const int g = f - STORE_GAME_FOCUS_SIMILAR;
+        if (nav == XINPUT_GAMEPAD_DPAD_LEFT)
+        {
+            if (g == 0)
+                shell.sidebarFocused = true;
+            else
+                f--;
+        }
+        else if (nav == XINPUT_GAMEPAD_DPAD_RIGHT && g + 1 < g_similarCount)
             f++;
-        else if (nav == XINPUT_GAMEPAD_DPAD_LEFT)
+        else if (nav == XINPUT_GAMEPAD_DPAD_UP)
             f = STORE_GAME_FOCUS_BUTTONS;
     }
 }
@@ -4260,9 +4407,15 @@ static bool ActOnStoreFocus(Shell &shell)
         else
             ShowShellToast("Coming soon", kStoreButtonsSoon[i - STORE_FOCUS_BUTTONS], UI_TOAST_INFO);
     }
-    else if (i < STORE_FOCUS_ROWS)
+    else if (i < STORE_FOCUS_COLLECTIONS)
     {
         OpenStoreLetter(shell, kStoreLetters[i - STORE_FOCUS_LETTERS], -1);
+    }
+    else if (i < STORE_FOCUS_ROWS)
+    {
+        const int place = i - STORE_FOCUS_COLLECTIONS;
+        if (place < g_collectionCount)
+            OpenStoreCollection(shell, g_collectionIds[place]);
     }
     else
     {
@@ -4284,6 +4437,7 @@ static unsigned long FocusSignature(const Shell &shell)
         shell.picker.kind, shell.picker.selected, shell.queueSelected,
         shell.storeFocus, shell.storeInSection, shell.storeSection, shell.sectionFocus[shell.storeSection],
         shell.storeInLetter, shell.storeSelected, shell.storeInGame, shell.storeGameFocus, shell.storeVersionChosen,
+        shell.storeVersionsOpen, shell.storeVersionFocus,
         shell.storeFilterOpen, shell.storeFilterFocus, FilterSignature(),
     };
     unsigned long hash = 2166136261UL; // FNV-1a
@@ -4881,8 +5035,13 @@ static void RenderGamePageFrame(Shell &shell, const Library &lib, UiHint *hints,
     if (!shell.sidebarFocused)
     {
         const int f = shell.storeGameFocus;
-        if (f >= STORE_GAME_FOCUS_VERSIONS)
-            hintCount = AddHint(hints, hintCount, UI_BUTTON_A, L"Choose this version", L"Choose");
+        if (shell.storeVersionsOpen)
+        {
+            hintCount = AddHint(hints, hintCount, UI_BUTTON_A, L"Choose");
+            hintCount = AddHint(hints, hintCount, UI_BUTTON_B, L"Done");
+        }
+        else if (f >= STORE_GAME_FOCUS_SIMILAR)
+            hintCount = AddHint(hints, hintCount, UI_BUTTON_A, L"View game", L"View");
         else if (f == STORE_GAME_FOCUS_BUTTONS && StoreVersionCount() > 0)
             hintCount = AddHint(hints, hintCount, UI_BUTTON_A, GamePagePlays(shell, lib) ? L"Play" : L"Install");
         else if (f == STORE_GAME_FOCUS_BUTTONS + 1 && !StoreGameIsIndie() && !StoreGameIsXbox())
@@ -4891,13 +5050,21 @@ static void RenderGamePageFrame(Shell &shell, const Library &lib, UiHint *hints,
             hintCount = AddHint(hints, hintCount, UI_BUTTON_A, L"Find title updates", L"Updates");
         else if (f == STORE_GAME_FOCUS_BUTTONS + 3)
             hintCount = AddHint(hints, hintCount, UI_BUTTON_A, L"Uninstall");
-        hintCount = AddHint(hints, hintCount, UI_BUTTON_B, L"Back");
+        if (!shell.storeVersionsOpen)
+        {
+            hintCount = AddHint(hints, hintCount, UI_BUTTON_B, L"Back");
+            if (StoreVersionCount() > 1)
+                hintCount = AddHint(hints, hintCount, UI_BUTTON_Y, L"Versions");
+        }
     }
 
     StoreGameView view = MakeStoreGameView(shell, lib);
     RenderStoreGameFrame(view, hints, hintCount);
     shell.storeGameFocus = view.focus;
     shell.storeVersionScroll = view.versionScroll;
+    shell.storeVersionFocus = view.versionFocus;
+    shell.storeSimilarScroll = view.similarScroll;
+    shell.storeGameScroll = view.scroll;
 }
 
 static void RenderPickerFrame(Shell &shell, UiHint *hints, int hintCount)
@@ -5609,10 +5776,37 @@ int main()
                 shell.page = SHELL_PAGE_SETTINGS;
             }
         }
+        else if (GamePageOpen(shell) && shell.storeVersionsOpen)
+        {
+            // The Versions panel: A chooses one, for Install; B or Y closes it.
+            if (pressed & (XINPUT_GAMEPAD_B | XINPUT_GAMEPAD_Y))
+            {
+                shell.storeVersionsOpen = false;
+            }
+            else if (pressed & XINPUT_GAMEPAD_A)
+            {
+                shell.storeVersionChosen = shell.storeVersionFocus;
+                shell.storeVersionsOpen = false;
+            }
+            else if (input.nav == XINPUT_GAMEPAD_DPAD_UP && shell.storeVersionFocus > 0)
+            {
+                shell.storeVersionFocus--;
+            }
+            else if (input.nav == XINPUT_GAMEPAD_DPAD_DOWN && shell.storeVersionFocus + 1 < StoreVersionCount())
+            {
+                shell.storeVersionFocus++;
+            }
+        }
         else if (GamePageOpen(shell))
         {
             const int f = shell.storeGameFocus;
-            if ((pressed & XINPUT_GAMEPAD_B) && shell.page == SHELL_PAGE_LIBRARY)
+            if ((pressed & XINPUT_GAMEPAD_Y) && StoreVersionCount() > 1)
+            {
+                // The Versions panel, on the one Install installs.
+                shell.storeVersionsOpen = true;
+                shell.storeVersionFocus = shell.storeVersionChosen;
+            }
+            else if ((pressed & XINPUT_GAMEPAD_B) && shell.page == SHELL_PAGE_LIBRARY)
             {
                 shell.libraryInGame = false; // back to the library's grid
             }
@@ -5629,9 +5823,14 @@ int main()
                 bool partial = false;
                 const StoreInstallState installState =
                     StoreVersionState(lib, shell.storeVersionChosen, &installFraction, &partial);
-                if (f >= STORE_GAME_FOCUS_VERSIONS)
+                if (f >= STORE_GAME_FOCUS_SIMILAR)
                 {
-                    shell.storeVersionChosen = f - STORE_GAME_FOCUS_VERSIONS;
+                    // Copied out first: opening it fills the row afresh.
+                    if (f - STORE_GAME_FOCUS_SIMILAR < g_similarCount)
+                    {
+                        const StoreGame next = g_similarGames[f - STORE_GAME_FOCUS_SIMILAR];
+                        OpenStoreGame(shell, next);
+                    }
                 }
                 else if (f == STORE_GAME_FOCUS_BUTTONS && StoreVersionCount() > 0 && GamePagePlays(shell, lib))
                 {
@@ -5706,7 +5905,7 @@ int main()
             {
                 acted = OpenStoreSearch(shell);
             }
-            else if ((pressed & XINPUT_GAMEPAD_Y) && !shell.storeLetterArcade)
+            else if ((pressed & XINPUT_GAMEPAD_Y) && LetterFilterable(shell))
             {
                 shell.storeFilterOpen = true;
                 if (FilterRowDisabled(shell, shell.storeFilterFocus))
@@ -5766,13 +5965,15 @@ int main()
             const int focusBefore = shell.storeFocus;
             if (pressed & XINPUT_GAMEPAD_B)
                 shell.sidebarFocused = true;
+            else if (pressed & XINPUT_GAMEPAD_Y)
+                acted = OpenStoreSearch(shell); // as the Search button, from anywhere on the page
             else if (pressed & XINPUT_GAMEPAD_A)
                 acted = ActOnStoreFocus(shell);
             else if (input.nav != 0)
                 StepStoreFocus(input.nav, shell);
 
             if (!shell.storeInLetter && shell.storeFocus != focusBefore && shell.storeFocus >= STORE_FOCUS_LETTERS &&
-                shell.storeFocus < STORE_FOCUS_ROWS)
+                shell.storeFocus < STORE_FOCUS_COLLECTIONS)
                 PrefetchLetterCovers(kStoreLetters[shell.storeFocus - STORE_FOCUS_LETTERS], -1);
         }
         else if (shell.page == SHELL_PAGE_QUEUE)
@@ -5913,7 +6114,7 @@ int main()
                     SaveFilter();
                 shell.storeFilterChanged = false;
             }
-            if (ClearSessionFilters() && shell.storeInLetter && !shell.storeSearch && !shell.storeLetterArcade)
+            if (ClearSessionFilters() && shell.storeInLetter && LetterFilterable(shell))
                 RefilterLetter(shell);
         }
 
@@ -6033,7 +6234,7 @@ int main()
                     hintCount = AddHint(hints, hintCount, UI_BUTTON_B, L"Store");
                     if (shell.storeSearch)
                         hintCount = AddHint(hints, hintCount, UI_BUTTON_Y, L"Search again", L"Search");
-                    else if (!shell.storeLetterArcade)
+                    else if (LetterFilterable(shell))
                         hintCount = AddHint(hints, hintCount, UI_BUTTON_Y, L"Filter and sort", L"Filter");
                     if (LetterFiltersEmptied(shell))
                         hintCount = AddHint(hints, hintCount, UI_BUTTON_X, L"Reset filters", L"Reset");
@@ -6083,16 +6284,21 @@ int main()
                         if (!kStoreButtons[i - STORE_FOCUS_BUTTONS].disabled)
                             hintCount = AddHint(hints, hintCount, UI_BUTTON_A, L"Browse", L"Browse");
                     }
-                    else if (i < STORE_FOCUS_ROWS)
+                    else if (i < STORE_FOCUS_COLLECTIONS)
                     {
                         BrowseHint(browse, 32, kStoreLetters[i - STORE_FOCUS_LETTERS]);
                         hintCount = AddHint(hints, hintCount, UI_BUTTON_A, browse, L"Browse");
+                    }
+                    else if (i < STORE_FOCUS_ROWS)
+                    {
+                        hintCount = AddHint(hints, hintCount, UI_BUTTON_A, L"View collection", L"View");
                     }
                     else
                     {
                         hintCount = AddHint(hints, hintCount, UI_BUTTON_A, L"View game", L"View");
                     }
                     hintCount = AddHint(hints, hintCount, UI_BUTTON_B, L"Back");
+                    hintCount = AddHint(hints, hintCount, UI_BUTTON_Y, L"Search");
                 }
 
                 StorePageView view = MakeStoreView(shell);
@@ -6101,6 +6307,7 @@ int main()
                 shell.storeScroll = view.scroll;
                 for (int r = 0; r < view.rowCount; ++r)
                     shell.storeRowScroll[r] = view.rows[r].scroll;
+                shell.storeCollectionScroll = view.collectionScroll;
             }
             break;
 
