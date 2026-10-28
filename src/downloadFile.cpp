@@ -389,7 +389,8 @@ int DumpResponse(XboxTLSContext *ctx,
                  unsigned long long cookieOutBufferSize,
                  void printFunction(const char *_format, ...),
                  unsigned long long knownTotalSize = 0,
-                 DownloadProgressFn progressFn = NULL)
+                 DownloadProgressFn progressFn = NULL,
+                 bool appendToFile = false)
 {
     unsigned long long outputBufferSizeConst = 0;
     int responseCode = 0; // HTTP status code
@@ -442,7 +443,7 @@ int DumpResponse(XboxTLSContext *ctx,
             splitFile = true;
             std::cout << "Split file detected\n";
         }
-        file = fopen(filename.c_str(), "wb");
+        file = fopen(filename.c_str(), appendToFile ? "ab" : "wb");
 
         if (file == NULL)
         {
@@ -556,6 +557,15 @@ int DumpResponse(XboxTLSContext *ctx,
                 ExtractSetCookies(headerBuffer, headerEnd, cookieOutBuffer, cookieOutBufferSize);
             }
 
+            // Appending is picking up where a file left off, so it needs the
+            // range it asked for. A 200 is the whole file from byte 0.
+            if (appendToFile && status == 200)
+            {
+                printFunction("ERROR: the server ignored the Range request - not appending the whole file\n");
+                responseCode = -1;
+                goto failure;
+            }
+
             // 206 (Partial Content) is a success status for Range requests;
             // everything else that isn't a plain 200 goes through the same
             // error/redirect handling below.
@@ -610,7 +620,7 @@ int DumpResponse(XboxTLSContext *ctx,
                             goto failure;
                         }
                     }
-                    else if (filename.length() > 0 && file != NULL)
+                    else if (filename.length() > 0 && file != NULL && !appendToFile)
                     {
                         fprintf(file, "%s\n", newURL);
                     }
@@ -1004,7 +1014,8 @@ int httpRequestHTTPS(const std::string URL, HttpMethod method, const char *reque
                      char *cookieOutBuffer, unsigned long long cookieOutBufferSize,
                      void printFunction(const char *_format, ...),
                      unsigned long long knownTotalSize,
-                     DownloadProgressFn progressFn)
+                     DownloadProgressFn progressFn,
+                     bool appendToFile)
 {
     char *domain;
     char *path;
@@ -1182,7 +1193,7 @@ int httpRequestHTTPS(const std::string URL, HttpMethod method, const char *reque
     // Step 7: Read and print response
     if (downloadIntoFile)
     {
-        if ((httpStatus = DumpResponse(&ctx, fileName, NULL, NULL, dataBuffer, outputBufferSize, cookieOutBuffer, cookieOutBufferSize, printFunction, knownTotalSize, progressFn)) != 200 && httpStatus != 206)
+        if ((httpStatus = DumpResponse(&ctx, fileName, NULL, NULL, dataBuffer, outputBufferSize, cookieOutBuffer, cookieOutBufferSize, printFunction, knownTotalSize, progressFn, appendToFile)) != 200 && httpStatus != 206)
         {
             if (httpStatus != 302)
             {

@@ -76,6 +76,12 @@ bool DriveFreeSpace(const std::string &path, unsigned long long *outFree);
 // (SearchWorker.cpp).
 bool ArchiveOrgDiskFull(unsigned long long *outNeeded, unsigned long long *outFree);
 
+// Whether the most recent DownloadDlcMember refused its file as too big:
+// compressed in its RAR and over 1 GiB, which archive.org's extraction never
+// delivers whole to a console (see EXTRACTED_SIZE_LIMIT in ArchiveOrgDLC.cpp).
+// Cleared on entry; same one-thread rule as ArchiveOrgDiskFull.
+bool ArchiveOrgDlcTooLarge();
+
 enum KeyCheckResult
 {
     KEYS_ACCEPTED,  // archive.org says these keys are valid
@@ -117,6 +123,13 @@ struct DlcMember
     char contentPath[96];   // where it installs, under the content folder: "415607FF\00000002\66632C72..."
     unsigned long packSize;  // RAR-compressed size (informational only - we never decompress it ourselves)
     unsigned long unpSize;   // real, uncompressed size - this is what we actually download via the virtual-path URL
+
+    // Kept without compression ("store", -m0), whole in this one volume and
+    // not encrypted: its bytes are the file, starting dataStart bytes into
+    // the RAR. Those are read straight from the RAR with Range requests, so a
+    // dropped download picks up where it stopped. See DownloadDlcMember.
+    bool stored;
+    unsigned long long dataStart;
 };
 
 #define MAX_DLC_RAR_MATCHES 16

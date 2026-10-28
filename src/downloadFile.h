@@ -56,13 +56,17 @@ int downloadFileHTTPS(const std::string URL, const std::string fileName, char *d
 /// doesn't send a Content-Length (e.g. a chunked response) - pass 0 if unknown.
 /// progressFn, if non-NULL, is called periodically during the body read with
 /// live byte counts - see DownloadProgressFn above.
+/// appendToFile adds the body to the end of fileName instead of replacing it,
+/// for picking a download back up with a Range request. Only a 206 is taken
+/// then: a 200 is the whole file again, and would land after what's there.
 int httpRequestHTTPS(const std::string URL, HttpMethod method, const char *requestBody,
                      const char *extraHeaderLines, const std::string fileName,
                      char *dataBuffer, unsigned long long *outputBufferSize, bool downloadIntoFile,
                      char *cookieOutBuffer, unsigned long long cookieOutBufferSize,
                      void printFunction(const char *_format, ...),
                      unsigned long long knownTotalSize = 0,
-                     DownloadProgressFn progressFn = NULL);
+                     DownloadProgressFn progressFn = NULL,
+                     bool appendToFile = false);
 
 /// @brief A connection kept open across a run of small GET requests.
 ///

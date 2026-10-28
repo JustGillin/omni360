@@ -319,6 +319,7 @@ static void RunDlcPack(const QueueJob &job, JobResult &result)
     }
 
     int failures = 0;
+    int tooLarge = 0;
     int alreadyThere = 0;
     int installedNow = 0;
 
@@ -374,6 +375,11 @@ static void RunDlcPack(const QueueJob &job, JobResult &result)
             return;
         }
 
+        // Too big for archive.org to send - the rest of the pack may not be,
+        // so carry on with it.
+        if (ArchiveOrgDlcTooLarge())
+            tooLarge++;
+
         failures++;
     }
 
@@ -397,6 +403,20 @@ static void RunDlcPack(const QueueJob &job, JobResult &result)
         else if (pack.item[0] != '\0')
             detail = "It's in your library now.";
         SetResult(result, QUEUE_OUTCOME_INSTALLED, "Installed", detail);
+    }
+    else if (tooLarge == failures)
+    {
+        // Every failure was a file over 1 GiB that archive.org only serves
+        // unpacked, and its unpacking gives out at 1 GiB for a console.
+        char detail[160];
+        if (failures == memberCount)
+            _snprintf(detail, sizeof(detail), "This DLC is over 1 GB, too big for archive.org to send to a console.");
+        else
+            _snprintf(detail, sizeof(detail), "%d of %d files are over 1 GB, too big for archive.org to send to a console.",
+                      failures, memberCount);
+        detail[sizeof(detail) - 1] = '\0';
+        SetResult(result, failures == memberCount ? QUEUE_OUTCOME_FAILED : QUEUE_OUTCOME_PARTIAL,
+                  failures == memberCount ? "Too big to download" : "Finished with errors", detail);
     }
     else
     {
