@@ -55,7 +55,7 @@ Two optional `settings.txt` keys change where things go, and the games folder ca
 
 Omni360 is a store and a library in one app on the console. **Your Library** shows every installed game, read straight from the hard drive, and plays them - or the disc in the drive - with **A**, and the **Store** lists about 1,500 Xbox 360 disc games, 740 Xbox Live Arcade games, 3,450 indie games and 500 Original Xbox games from archive.org, along with DLC and title updates for any of them - filtered by region, language, genre or rating, browsed by series, or found with a search. Everything downloads and installs in the background while you keep browsing, with disc games installed as Games on Demand, and a game disc in the drive can be copied to the hard drive the same way. Omni360 also keeps itself up to date, installing only releases signed with the project's key. Nothing downloads without you choosing it, and a popup says when each job finishes or fails.
 
-**Status: beta (0.11.0-beta), working on real hardware.** Every kind of install has been run end to end on a modded console with a real library.
+**Status: beta (0.12.0-beta), working on real hardware.** Every kind of install has been run end to end on a modded console with a real library.
 
 <br>
 
@@ -91,7 +91,7 @@ Omni360 is a store and a library in one app on the console. **Your Library** sho
 ## Known limitations
 
 - **Downloads are slow-ish** — about 3.5MB/s on average, so a game takes half an hour or more. archive.org's servers are the limit, not the console.
-- **Some games aren't in the Store.** Games archived only as compressed RARs (in the `XBOX_360_*` items, such as the DiRT series and Deadpool) aren't listed, as the installer would have to unpack them first; uncompressed RARs, like BioShock Infinite's, install like any other game. A few dozen more aren't on archive.org at all.
+- **Games kept as compressed RARs install slowly.** About 20 games archive.org only has as compressed RARs (in the `XBOX_360_*` items, such as the DiRT series and Deadpool) are unpacked on the console as they download, with `dmc_unrar` - it keeps pace with the download, but Deadpool still took 64 minutes before its install. The Store marks them, and asks before starting one. Uncompressed RARs, like BioShock Infinite's, install like any other game. A few dozen games aren't on archive.org at all.
 - **An interrupted game install starts over.** Pieces resume within a session, but quitting the app mid-download removes what was downloaded.
 - **A multi-disc game installed some other way** — from real discs, or another tool — can't be uninstalled by version from its Store page, since Omni360 can't tell which disc is which. Its own library entry still can be, if the Store hasn't got it.
 - **A scratched disc can fail partway through a disc install.** Lower the disc read speed in Settings and try again.
