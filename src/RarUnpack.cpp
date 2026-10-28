@@ -17,10 +17,20 @@ its own - it reads through the two-part stream below.
 // default cap of 256MB is half the console's memory.
 #define DMC_UNRAR_MAX_DICT_SIZE (64u * 1024u * 1024u)
 
+// How much compressed data dmc_unrar asks for at a time; 4KB by default. Not
+// much bigger: its RAR4 filter parser keeps one of these on the stack. The
+// 1MB read buffer in RarUnpackMember is what keeps the drive's reads large.
+#define DMC_UNRAR_BS_BUFFER_SIZE (16 * 1024)
+
 #include "../dmc_unrar/dmc_unrar.c"
 
 #include "RarUnpack.h"
 
+#ifdef _XBOX
+#include <xtl.h>
+#else
+#include <windows.h> // the PC test harness
+#endif
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -34,9 +44,65 @@ struct SplicedStream
     const unsigned char *head;
     unsigned long long headLen;
     FILE *packed;
-    unsigned long long size; // headLen + packedPath's size
+    unsigned long long size; // headLen + packedPath's size (its final size, when fed)
     unsigned long long at;
+    unsigned long long filePos; // where `packed` is, so it's only moved when it has to be
+    void *readBuffer;           // packed's stdio buffer, freed with it
+
+    // Unpacking while packedPath downloads (see RarUnpackFeed): how much of it
+    // is known to be on disk so far.
+    RarUnpackFeed *feed;
+    const char *packedPath;
+    unsigned long long available;
 };
+
+// The size packedPath has reached, from a handle of its own - the download is
+// appending to it through another.
+static bool PolledSize(const char *path, unsigned long long *outSize)
+{
+    FILE *f = fopen(path, "rb");
+    if (f == NULL)
+        return false;
+    bool ok = (_fseeki64(f, 0, SEEK_END) == 0);
+    __int64 size = ok ? _ftelli64(f) : -1;
+    fclose(f);
+    if (size < 0)
+        return false;
+    *outSize = (unsigned long long)size;
+    return true;
+}
+
+// Waits until packedPath holds `need` bytes, or the download has stopped.
+// Returns how many it holds.
+static unsigned long long WaitForBytes(SplicedStream *s, unsigned long long need)
+{
+    while (s->available < need)
+    {
+        // Read the flag before the size: a download that has just finished
+        // has every byte on disk by the time it says so.
+        const long state = InterlockedCompareExchange(&s->feed->state, 0, 0);
+
+        unsigned long long size = 0;
+        if (PolledSize(s->packedPath, &size) && size > s->available)
+        {
+            s->available = size;
+            s->filePos = (unsigned long long)-1; // reseek: clears the end-of-file the last read hit
+            continue;
+        }
+
+        if (state != RAR_FEED_DOWNLOADING)
+            break; // no more is coming
+
+        Sleep(100);
+    }
+    return s->available;
+}
+
+static void CloseSpliced(SplicedStream *s)
+{
+    fclose(s->packed);
+    free(s->readBuffer);
+}
 
 static dmc_unrar_size_t SplicedRead(void *opaque, void *buffer, dmc_unrar_size_t n)
 {
@@ -56,10 +122,35 @@ static dmc_unrar_size_t SplicedRead(void *opaque, void *buffer, dmc_unrar_size_t
 
     if (done < n && s->at < s->size)
     {
-        if (_fseeki64(s->packed, (__int64)(s->at - s->headLen), SEEK_SET) != 0)
-            return done;
-        size_t got = fread(out + done, 1, (size_t)(n - done), s->packed);
+        // Only when dmc_unrar has jumped. The CRT's seek drops the read
+        // buffer even when it lands where the file already is, so seeking
+        // before every read sent each of dmc_unrar's small reads to the drive
+        // on its own - the console unpacked Lego Rock Band's DLC at 2.5 MB/s.
+        const unsigned long long want = s->at - s->headLen;
+        unsigned long long take = n - done;
+        if (s->at + take > s->size)
+            take = s->size - s->at;
+
+        // Still downloading: wait for the bytes, and read only what's there.
+        // A short read once the download has given up ends the unpacking.
+        if (s->feed != NULL)
+        {
+            const unsigned long long have = WaitForBytes(s, want + take);
+            if (have <= want)
+                return done;
+            if (want + take > have)
+                take = have - want;
+        }
+
+        if (want != s->filePos)
+        {
+            if (_fseeki64(s->packed, (__int64)want, SEEK_SET) != 0)
+                return done;
+            s->filePos = want;
+        }
+        size_t got = fread(out + done, 1, (size_t)take, s->packed);
         s->at += got;
+        s->filePos += got;
         done += got;
     }
 
@@ -153,26 +244,39 @@ static bool SamePath(const char *a, const char *b)
 
 RarUnpackResult RarUnpackMember(const unsigned char *head, unsigned long headLen, const char *packedPath,
                                 const char *memberName, const char *outPath, RarUnpackProgressFn progressFn,
-                                void printFunction(const char *_format, ...))
+                                void printFunction(const char *_format, ...), RarUnpackFeed *feed)
 {
     SplicedStream stream;
     stream.head = head;
     stream.headLen = headLen;
     stream.at = 0;
+    stream.feed = feed;
+    stream.packedPath = packedPath;
     stream.packed = fopen(packedPath, "rb");
     if (stream.packed == NULL)
     {
         printFunction("ERROR: couldn't open %s to unpack it\n", packedPath);
         return RAR_UNPACK_READ_FAILED;
     }
+
+    // Read ahead in big pieces, as the writes are - see SplicedRead. Set
+    // before anything else touches the file, as setvbuf requires.
+    const size_t READ_BUFFER = 1024 * 1024;
+    stream.readBuffer = malloc(READ_BUFFER);
+    if (stream.readBuffer != NULL)
+        setvbuf(stream.packed, (char *)stream.readBuffer, _IOFBF, READ_BUFFER);
+
     _fseeki64(stream.packed, 0, SEEK_END);
-    stream.size = headLen + (unsigned long long)_ftelli64(stream.packed);
+    stream.available = (unsigned long long)_ftelli64(stream.packed);
+    stream.size = headLen + (feed != NULL ? feed->finalSize : stream.available);
+    _fseeki64(stream.packed, 0, SEEK_SET);
+    stream.filePos = 0;
 
     dmc_unrar_archive archive;
     dmc_unrar_return r = dmc_unrar_archive_init(&archive);
     if (r != DMC_UNRAR_OK)
     {
-        fclose(stream.packed);
+        CloseSpliced(&stream);
         printFunction("ERROR: couldn't set up the unpacker: %s\n", dmc_unrar_strerror(r));
         return RAR_UNPACK_BAD_DATA;
     }
@@ -183,7 +287,7 @@ RarUnpackResult RarUnpackMember(const unsigned char *head, unsigned long headLen
     r = dmc_unrar_archive_open(&archive);
     if (r != DMC_UNRAR_OK)
     {
-        fclose(stream.packed);
+        CloseSpliced(&stream);
         printFunction("ERROR: couldn't read the RAR's headers: %s\n", dmc_unrar_strerror(r));
         return RAR_UNPACK_BAD_DATA;
     }
@@ -209,7 +313,7 @@ RarUnpackResult RarUnpackMember(const unsigned char *head, unsigned long headLen
     if (!found)
     {
         dmc_unrar_archive_close(&archive);
-        fclose(stream.packed);
+        CloseSpliced(&stream);
         printFunction("ERROR: %s isn't in the downloaded part of the RAR (%u files there)\n", memberName, (unsigned)count);
         return RAR_UNPACK_NOT_FOUND;
     }
@@ -218,7 +322,7 @@ RarUnpackResult RarUnpackMember(const unsigned char *head, unsigned long headLen
     if (r != DMC_UNRAR_OK)
     {
         dmc_unrar_archive_close(&archive);
-        fclose(stream.packed);
+        CloseSpliced(&stream);
         printFunction("ERROR: can't unpack %s: %s\n", memberName, dmc_unrar_strerror(r));
         return RAR_UNPACK_UNSUPPORTED;
     }
@@ -233,7 +337,7 @@ RarUnpackResult RarUnpackMember(const unsigned char *head, unsigned long headLen
     if (out.file == NULL)
     {
         dmc_unrar_archive_close(&archive);
-        fclose(stream.packed);
+        CloseSpliced(&stream);
         printFunction("ERROR: couldn't create %s\n", outPath);
         return RAR_UNPACK_WRITE_FAILED;
     }
@@ -249,7 +353,7 @@ RarUnpackResult RarUnpackMember(const unsigned char *head, unsigned long headLen
         fclose(out.file);
         remove(outPath);
         dmc_unrar_archive_close(&archive);
-        fclose(stream.packed);
+        CloseSpliced(&stream);
         printFunction("ERROR: out of memory for unpacking\n");
         return RAR_UNPACK_WRITE_FAILED;
     }
@@ -262,7 +366,7 @@ RarUnpackResult RarUnpackMember(const unsigned char *head, unsigned long headLen
     free(chunk);
     free(fileBuffer);
     dmc_unrar_archive_close(&archive);
-    fclose(stream.packed);
+    CloseSpliced(&stream);
 
     RarUnpackResult result = RAR_UNPACK_OK;
     if (out.cancelled)

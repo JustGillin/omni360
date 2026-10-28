@@ -300,13 +300,20 @@ static void RunDlcPack(const QueueJob &job, JobResult &result)
 
     // Checked once for the whole pack, before any of it downloads: running out
     // partway would leave a pack half installed, after a long wait. Files
-    // already on the console don't count - they won't be fetched again.
+    // already on the console don't count - they won't be fetched again. A
+    // file unpacked here has its download on the drive beside it until it's
+    // done, one file at a time, so the biggest of those counts too.
     unsigned long long needed = 0;
+    unsigned long long biggestDownload = 0;
     for (int f = 0; f < memberCount; ++f)
     {
-        if (!DlcMemberIsInstalled(g_members[f], g_contentBasePath))
-            needed += g_members[f].unpSize;
+        if (DlcMemberIsInstalled(g_members[f], g_contentBasePath))
+            continue;
+        needed += g_members[f].unpSize;
+        if (DlcMemberUnpackedHere(g_members[f]) && DlcMemberDownloadSize(g_members[f]) > biggestDownload)
+            biggestDownload = DlcMemberDownloadSize(g_members[f]);
     }
+    needed += biggestDownload;
 
     unsigned long long freeSpace = 0;
     if (needed > 0 && DriveFreeSpace(g_contentBasePath, &freeSpace) && freeSpace < needed + PACK_SPACE_MARGIN)

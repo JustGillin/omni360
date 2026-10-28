@@ -37,10 +37,24 @@ enum RarUnpackResult
     RAR_UNPACK_WRITE_FAILED  // couldn't create or write outPath - a full drive, usually
 };
 
+// For unpacking while packedPath is still downloading. The unpacker reads the
+// file as it grows, waiting whenever it catches up, until the downloading
+// thread sets state to say there's no more coming.
+#define RAR_FEED_DOWNLOADING 0
+#define RAR_FEED_COMPLETE    1 // packedPath is all there
+#define RAR_FEED_STOPPED     2 // the download gave up; the unpacking stops where the data does
+
+struct RarUnpackFeed
+{
+    unsigned long long finalSize; // what packedPath will hold once downloaded
+    volatile long state;          // RAR_FEED_*, set with InterlockedExchange
+};
+
 // Unpacks memberName (its path inside the RAR, '\' or '/' separated) to
 // outPath, replacing it. On anything but RAR_UNPACK_OK, outPath is deleted.
+// feed is NULL for a packedPath that's already complete.
 RarUnpackResult RarUnpackMember(const unsigned char *head, unsigned long headLen, const char *packedPath,
                                 const char *memberName, const char *outPath, RarUnpackProgressFn progressFn,
-                                void printFunction(const char *_format, ...));
+                                void printFunction(const char *_format, ...), RarUnpackFeed *feed = NULL);
 
 #endif

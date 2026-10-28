@@ -202,9 +202,11 @@ int ListDlcMembers(const DlcRarMatch &pack,
 // Content\0000000000000000\{TitleID}\{ContentType}\{ContentID} layout).
 //
 // Its bytes come straight out of the RAR with Range requests, so a dropped
-// download picks up where it stopped: a stored member's bytes are the file,
-// and a compressed one is unpacked on the console (RarUnpack.h). Only what the
-// console can't unpack goes through archive.org's own extraction - the
+// download picks up where it stopped. A stored member's bytes are the file. A
+// compressed one is unpacked on the console (RarUnpack.h) as it downloads, on
+// a thread of its own. If the unpacking is still going when the download
+// ends, progressFn carries on with the unpacked bytes. Only what
+// the console can't unpack goes through archive.org's own extraction - the
 // /download/{item}/{rarfile}/{urlencoded internal path} virtual-path URL -
 // which can't resume and gives out at 1 GiB (see ArchiveOrgDlcTooLarge).
 //
@@ -215,6 +217,15 @@ bool DownloadDlcMember(const DlcRarMatch &pack, const DlcMember &member,
                        const std::string &contentBasePath, const char *authHeader,
                        void printFunction(const char *_format, ...),
                        DownloadProgressFn progressFn = NULL);
+
+// Whether DownloadDlcMember unpacks this member on the console - compressed,
+// not encrypted, in one volume. Its download then sits on the drive beside the
+// unpacked copy until it's done.
+bool DlcMemberUnpackedHere(const DlcMember &member);
+
+// What DownloadDlcMember fetches for it: the compressed range when it's
+// unpacked here (everything before it too, in a solid archive), else the file.
+unsigned long long DlcMemberDownloadSize(const DlcMember &member);
 
 // True if this member is already sitting at its destination at the expected
 // size. Purely local - no network - so it is cheap enough to call for every

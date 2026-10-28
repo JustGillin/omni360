@@ -1606,34 +1606,134 @@ static std::string PackedPathFor(const std::string &destPath)
     return folder + staged.substr(lastSep);
 }
 
-// Unpacking reports to the same bar as the download before it: the download
-// is the first part of g_unpackTotal, the unpacked bytes the rest.
-static DownloadProgressFn g_unpackProgressFn = NULL;
-static unsigned long long g_unpackBase = 0;
-static unsigned long long g_unpackTotal = 0;
-static DWORD g_unpackStart = 0;
-
-static bool UnpackProgress(unsigned long long written, unsigned long long total)
-{
-    DWORD elapsed = GetTickCount() - g_unpackStart;
-    unsigned long long speed = elapsed > 0 ? written * 1000 / elapsed : 0;
-    unsigned long long remaining = (speed > 0 && total > written) ? (total - written) / speed : 0;
-    return g_unpackProgressFn(g_unpackBase + written, g_unpackTotal, speed, remaining);
-}
-
-// Unpacked on the console - see RarUnpack.h. The member's compressed bytes are
-// downloaded as a range of the RAR (resumable, like a stored member), and the
-// start of the RAR is fetched to go in front of them. A solid member needs
+// ---------------------------------------------------------------------------
+// Unpacking on the console, while it downloads
+// ---------------------------------------------------------------------------
+//
+// A compressed member is unpacked here - see RarUnpack.h. Its compressed bytes
+// are downloaded as a range of the RAR (resumable, like a stored member), and
+// the start of the RAR is fetched to go in front of them. A solid member needs
 // every member before it as well, so its range starts after that head.
 //
-// Returns 206 when the file is in place, or UNPACK_UNSUPPORTED for one
-// dmc_unrar can't do, for the caller to try archive.org's extraction instead.
+// The unpacking runs on a thread of its own from the start, reading the
+// download as it lands (RarUnpackFeed), while the download carries on on the
+// calling thread as it always has. On a console the two go at about the same
+// speed - Lego Rock Band's 1.37 GB package took 7:47 to download and 8:57 to
+// unpack one after the other, and 7:26 for both together.
+
+// For one dmc_unrar can't do, for the caller to try archive.org's extraction.
 #define UNPACK_UNSUPPORTED (-4)
 #define MAX_HEAD_LEN (64 * 1024)
 
-static int DownloadPackedMember(const std::string &rarUrl, const DlcMember &member, const std::string &destPath,
-                                const char *authHeader, void printFunction(const char *_format, ...),
-                                DownloadProgressFn progressFn)
+bool DlcMemberUnpackedHere(const DlcMember &member)
+{
+    return !member.stored && member.canUnpack;
+}
+
+static unsigned long long PackedRangeStart(const DlcMember &member)
+{
+    return member.solid ? member.headLen : member.headerStart;
+}
+
+unsigned long long DlcMemberDownloadSize(const DlcMember &member)
+{
+    return DlcMemberUnpackedHere(member) ? member.dataEnd - PackedRangeStart(member) : member.unpSize;
+}
+
+static DWORD g_unpackStart = 0;
+
+struct OverlapUnpack
+{
+    const unsigned char *head;
+    unsigned long headLen;
+    std::string packedPath;
+    std::string tempPath;
+    const char *memberName;
+    RarUnpackFeed feed;
+    RarUnpackResult result;
+    volatile long finished; // the unpacking thread is done, `result` says how
+    void (*printFunction)(const char *_format, ...);
+};
+
+// One overlapped unpack at a time - the download worker's - so module state,
+// like g_resumeProgressFn.
+static OverlapUnpack *g_overlap = NULL;
+static DownloadProgressFn g_overlapProgressFn = NULL;
+static unsigned long long g_overlapLogged = 0;
+
+// The unpacking thread's progress. While the download runs, the Queue shows
+// the download, so this only logs now and then. Once it's done, this takes
+// over the bar for whatever unpacking is left.
+static bool OverlapUnpackProgress(unsigned long long written, unsigned long long total)
+{
+    const long state = InterlockedCompareExchange(&g_overlap->feed.state, 0, 0);
+    if (state == RAR_FEED_STOPPED)
+        return false;
+
+    if (written >= g_overlapLogged + 64ULL * 1024 * 1024 || written == total)
+    {
+        DWORD elapsed = GetTickCount() - g_unpackStart;
+        g_overlap->printFunction("  [unpack] %I64u of %I64u MB, %I64u KB/s\n", written / (1024 * 1024),
+                                 total / (1024 * 1024), elapsed > 0 ? written / elapsed : 0);
+        g_overlapLogged = written;
+    }
+
+    if (state == RAR_FEED_COMPLETE && g_overlapProgressFn != NULL)
+    {
+        DWORD elapsed = GetTickCount() - g_unpackStart;
+        unsigned long long speed = elapsed > 0 ? written * 1000 / elapsed : 0;
+        unsigned long long remaining = (speed > 0 && total > written) ? (total - written) / speed : 0;
+        return g_overlapProgressFn(written, total, speed, remaining);
+    }
+    return true;
+}
+
+// The download's progress: passed on, unless the unpacking has already
+// failed - then the rest of the download is no use, so it stops.
+static bool OverlapDownloadProgress(unsigned long long bytesDone, unsigned long long bytesTotal,
+                                    unsigned long long bytesPerSec, unsigned long long secondsRemaining)
+{
+    if (InterlockedCompareExchange(&g_overlap->finished, 0, 0) != 0 && g_overlap->result != RAR_UNPACK_OK)
+        return false;
+    return g_overlapProgressFn != NULL ? g_overlapProgressFn(bytesDone, bytesTotal, bytesPerSec, secondsRemaining)
+                                       : true;
+}
+
+static DWORD WINAPI OverlapUnpackEntry(LPVOID param)
+{
+    OverlapUnpack *o = (OverlapUnpack *)param;
+    o->result = RarUnpackMember(o->head, o->headLen, o->packedPath.c_str(), o->memberName, o->tempPath.c_str(),
+                                OverlapUnpackProgress, o->printFunction, &o->feed);
+    InterlockedExchange(&o->finished, 1);
+    return 0;
+}
+
+// The signature and main header, fetched again rather than kept from the
+// file list - a few dozen bytes, one request. *outHead is the caller's to free.
+static int FetchArchiveHead(const std::string &rarUrl, const DlcMember &member, const char *authHeader,
+                            void printFunction(const char *_format, ...), unsigned char **outHead)
+{
+    unsigned char *head = (unsigned char *)malloc(MAX_HEAD_LEN + 1);
+    if (head == NULL)
+        return -1;
+    unsigned long long headLen = MAX_HEAD_LEN;
+    char range[64];
+    _snprintf(range, sizeof(range), "Range: bytes=0-%lu\r\n", member.headLen - 1);
+    range[sizeof(range) - 1] = '\0';
+    int status = HttpGetFollowRedirect(rarUrl, (char *)head, &headLen, range, authHeader, printFunction);
+    if ((status != 206 && status != 200) || headLen != member.headLen)
+    {
+        printFunction("ERROR: couldn't read the start of the RAR (status %d, %I64u bytes)\n", status, headLen);
+        free(head);
+        return (status == 206 || status == 200) ? -1 : status;
+    }
+    *outHead = head;
+    return 206;
+}
+
+static int DownloadAndUnpackTogether(const std::string &rarUrl, const DlcMember &member, const std::string &destPath,
+                                     const char *authHeader, void printFunction(const char *_format, ...),
+                                     DownloadProgressFn progressFn)
 {
     const std::string tempPath = StagingPathFor(destPath);
     const std::string packedPath = PackedPathFor(destPath);
@@ -1648,57 +1748,86 @@ static int DownloadPackedMember(const std::string &rarUrl, const DlcMember &memb
         return UNPACK_UNSUPPORTED;
     }
 
-    const unsigned long long from = member.solid ? member.headLen : member.headerStart;
+    const unsigned long long from = PackedRangeStart(member);
     const unsigned long long length = member.dataEnd - from;
-    if (member.solid)
-        printFunction("  Solid archive: downloading everything before it too (%I64u bytes)\n", length);
 
-    int status = DownloadRarRange(rarUrl, from, length, packedPath, destPath, member.unpSize,
-                                  authHeader, printFunction, progressFn, length + member.unpSize);
+    unsigned char *head = NULL;
+    int status = FetchArchiveHead(rarUrl, member, authHeader, printFunction, &head);
     if (status != 206)
         return status;
 
-    // The signature and main header, fetched again rather than kept from the
-    // file list - a few dozen bytes, one request.
-    unsigned char *head = (unsigned char *)malloc(MAX_HEAD_LEN + 1);
-    if (head == NULL)
-        return -1;
-    unsigned long long headLen = MAX_HEAD_LEN;
-    char range[64];
-    _snprintf(range, sizeof(range), "Range: bytes=0-%lu\r\n", member.headLen - 1);
-    range[sizeof(range) - 1] = '\0';
-    status = HttpGetFollowRedirect(rarUrl, (char *)head, &headLen, range, authHeader, printFunction);
-    if ((status != 206 && status != 200) || headLen != member.headLen)
-    {
-        printFunction("ERROR: couldn't read the start of the RAR (status %d, %I64u bytes)\n", status, headLen);
-        free(head);
-        return (status == 206 || status == 200) ? -1 : status;
-    }
+    // The unpacker opens it before the first byte may have landed.
+    FILE *touch = fopen(packedPath.c_str(), "ab");
+    if (touch != NULL)
+        fclose(touch);
 
-    printFunction("  Unpacking %s (%I64u bytes downloaded, %lu unpacked)\n", member.internalPath, length, member.unpSize);
-    g_unpackProgressFn = progressFn;
-    g_unpackBase = length;
-    g_unpackTotal = length + member.unpSize;
+    OverlapUnpack o;
+    o.head = head;
+    o.headLen = member.headLen;
+    o.packedPath = packedPath;
+    o.tempPath = tempPath;
+    o.memberName = member.internalPath;
+    o.feed.finalSize = length;
+    o.feed.state = RAR_FEED_DOWNLOADING;
+    o.result = RAR_UNPACK_BAD_DATA;
+    o.finished = 0;
+    o.printFunction = printFunction;
+
+    g_overlap = &o;
+    g_overlapProgressFn = progressFn;
+    g_overlapLogged = 0;
     g_unpackStart = GetTickCount();
 
-    RarUnpackResult unpacked = RarUnpackMember(head, member.headLen, packedPath.c_str(), member.internalPath,
-                                               tempPath.c_str(), progressFn != NULL ? UnpackProgress : NULL,
-                                               printFunction);
-    g_unpackProgressFn = NULL;
+    printFunction("  Unpacking %s while it downloads (%I64u bytes to download, %lu unpacked)\n",
+                  member.internalPath, length, member.unpSize);
+
+    // On a core of its own: the download worker is on hardware thread 4.
+    HANDLE thread = CreateThread(NULL, 256 * 1024, OverlapUnpackEntry, &o, CREATE_SUSPENDED, NULL);
+    if (thread == NULL)
+    {
+        g_overlap = NULL;
+        free(head);
+        printFunction("ERROR: couldn't start the unpacking thread\n");
+        return -1;
+    }
+    XSetThreadProcessor(thread, 2);
+    ResumeThread(thread);
+
+    const DWORD downloadStart = GetTickCount();
+    status = DownloadRarRange(rarUrl, from, length, packedPath, destPath, member.unpSize,
+                              authHeader, printFunction, OverlapDownloadProgress, length);
+    const DWORD downloadSeconds = (GetTickCount() - downloadStart) / 1000;
+
+    // Whether the unpacking had already failed, and stopped the download -
+    // asked before the unpacking is told the download is over, which ends it
+    // with a failure of its own once the data runs out.
+    const bool unpackFailedFirst = InterlockedCompareExchange(&o.finished, 0, 0) != 0 && o.result != RAR_UNPACK_OK;
+
+    InterlockedExchange(&o.feed.state, status == 206 ? RAR_FEED_COMPLETE : RAR_FEED_STOPPED);
+    WaitForSingleObject(thread, INFINITE);
+    CloseHandle(thread);
+    g_overlap = NULL;
+    g_overlapProgressFn = NULL;
     free(head);
 
     DWORD seconds = (GetTickCount() - g_unpackStart) / 1000;
-    printFunction("  Unpacking took %lu:%02lu (result %d)\n", (unsigned long)(seconds / 60),
-                  (unsigned long)(seconds % 60), (int)unpacked);
+    printFunction("  Download took %lu:%02lu, download and unpacking together %lu:%02lu (unpack result %d)\n",
+                  (unsigned long)(downloadSeconds / 60), (unsigned long)(downloadSeconds % 60),
+                  (unsigned long)(seconds / 60), (unsigned long)(seconds % 60), (int)o.result);
 
-    switch (unpacked)
+    // The download stopped on its own account - the network, a cancel, a full
+    // drive. What it got is kept for next time; the unpacking just ran out of
+    // data, and starts again then.
+    if (status != 206 && !unpackFailedFirst)
+        return status;
+
+    switch (o.result)
     {
     case RAR_UNPACK_OK:
         DeleteFileA(packedPath.c_str());
         return MoveIntoPlace(tempPath, destPath, printFunction) ? 206 : -1;
 
     case RAR_UNPACK_CANCELLED:
-        // The download is kept; only the unpacking starts again.
         return HTTP_STATUS_CANCELLED;
 
     case RAR_UNPACK_WRITE_FAILED:
@@ -1725,27 +1854,11 @@ static int DownloadPackedMember(const std::string &rarUrl, const DlcMember &memb
     }
 }
 
-bool DownloadDlcMember(const DlcRarMatch &pack, const DlcMember &member,
-                       const std::string &contentBasePath, const char *authHeader,
-                       void printFunction(const char *_format, ...),
-                       DownloadProgressFn progressFn)
+// What DownloadDlcMember starts with: the member's archive.org extraction
+// URL, and where it installs, with its folders made.
+static bool PrepareMember(const DlcRarMatch &pack, const DlcMember &member, const std::string &contentBasePath,
+                          std::string *outUrl, std::string *outDestPath, void printFunction(const char *_format, ...))
 {
-    g_keysRejected = false;
-    g_diskFull = false;
-    g_tooLarge = false;
-
-    // Compressed in a way the console can't unpack, and too big for
-    // archive.org's extraction to deliver whole - see EXTRACTED_SIZE_LIMIT.
-    // Said now, rather than after three attempts that each spend a quarter of
-    // an hour on the same 1 GiB.
-    if (!member.stored && !member.canUnpack && member.unpSize > EXTRACTED_SIZE_LIMIT)
-    {
-        printFunction("ERROR: %s is %lu bytes and compressed - archive.org can't send a file that big to a console\n",
-                      member.internalPath, member.unpSize);
-        g_tooLarge = true;
-        return false;
-    }
-
     // Build the virtual-path URL: /download/{item}/{rarfile}/{urlencoded/internal/path}
     // Each path SEGMENT is percent-encoded separately so the separators
     // themselves become the literal "%2F" archive.org's own virtual-path
@@ -1809,7 +1922,7 @@ bool DownloadDlcMember(const DlcRarMatch &pack, const DlcMember &member,
     // printing something much shorter and garbled, and the downloads built
     // from it succeeded. It is a logging artifact, not a construction bug;
     // see LogEscapePercent in parsing.h for the cause and the fix.
-    std::string url = PackUrl(pack) + "/" + encodedPath;
+    *outUrl = PackUrl(pack) + "/" + encodedPath;
 
     // Destination mirrors the RAR's own internal path, e.g.
     // {contentBasePath}\415607FF\00000002\66632C72...  - this already matches
@@ -1844,6 +1957,52 @@ bool DownloadDlcMember(const DlcRarMatch &pack, const DlcMember &member,
         }
     }
 
+    *outDestPath = destPath;
+    return true;
+}
+
+// Not unpackable here: archive.org's extraction, if the file is small enough
+// for it to deliver whole.
+static int ExtractOnServer(const std::string &url, const DlcMember &member, const std::string &destPath,
+                           const char *authHeader, void printFunction(const char *_format, ...),
+                           DownloadProgressFn progressFn)
+{
+    if (member.unpSize > EXTRACTED_SIZE_LIMIT)
+    {
+        printFunction("ERROR: %s can't be unpacked here, and at %lu bytes archive.org can't send it unpacked\n",
+                      member.internalPath, member.unpSize);
+        g_tooLarge = true;
+        return -1;
+    }
+    printFunction("  Asking archive.org to unpack it\n");
+    return DownloadUrlToFile(url, destPath, authHeader, member.unpSize, printFunction, progressFn);
+}
+
+bool DownloadDlcMember(const DlcRarMatch &pack, const DlcMember &member,
+                       const std::string &contentBasePath, const char *authHeader,
+                       void printFunction(const char *_format, ...),
+                       DownloadProgressFn progressFn)
+{
+    g_keysRejected = false;
+    g_diskFull = false;
+    g_tooLarge = false;
+
+    // Compressed in a way the console can't unpack, and too big for
+    // archive.org's extraction to deliver whole - see EXTRACTED_SIZE_LIMIT.
+    // Said now, rather than after three attempts that each spend a quarter of
+    // an hour on the same 1 GiB.
+    if (!member.stored && !member.canUnpack && member.unpSize > EXTRACTED_SIZE_LIMIT)
+    {
+        printFunction("ERROR: %s is %lu bytes and compressed - archive.org can't send a file that big to a console\n",
+                      member.internalPath, member.unpSize);
+        g_tooLarge = true;
+        return false;
+    }
+
+    std::string url, destPath;
+    if (!PrepareMember(pack, member, contentBasePath, &url, &destPath, printFunction))
+        return false;
+
     printFunction("Downloading DLC member: %s -> %s\n", member.internalPath, destPath.c_str());
 
     // A file already at destPath with the wrong size is a broken copy - the
@@ -1861,30 +2020,20 @@ bool DownloadDlcMember(const DlcRarMatch &pack, const DlcMember &member,
         printFunction("  Replacing an incomplete earlier copy (%I64u of %lu bytes)\n", existing, member.unpSize);
 
     // A stored member is read straight out of the RAR, and a compressed one
-    // downloaded the same way and unpacked here - both pick up where they
-    // stopped. archive.org's extraction is the fallback, for what the console
-    // can't unpack: encrypted, split across volumes, or a method dmc_unrar
-    // doesn't do.
+    // downloaded the same way and unpacked as it lands - both pick up where
+    // they stopped. archive.org's extraction is the fallback, for what
+    // the console can't unpack: encrypted, split across volumes, or a method
+    // dmc_unrar doesn't do.
     int httpStatus;
     if (member.stored)
         httpStatus = DownloadStoredMember(PackUrl(pack), member, destPath, authHeader, printFunction, progressFn);
     else if (member.canUnpack)
-        httpStatus = DownloadPackedMember(PackUrl(pack), member, destPath, authHeader, printFunction, progressFn);
+        httpStatus = DownloadAndUnpackTogether(PackUrl(pack), member, destPath, authHeader, printFunction, progressFn);
     else
         httpStatus = UNPACK_UNSUPPORTED;
 
     if (httpStatus == UNPACK_UNSUPPORTED)
-    {
-        if (member.unpSize > EXTRACTED_SIZE_LIMIT)
-        {
-            printFunction("ERROR: %s can't be unpacked here, and at %lu bytes archive.org can't send it unpacked\n",
-                          member.internalPath, member.unpSize);
-            g_tooLarge = true;
-            return false;
-        }
-        printFunction("  Asking archive.org to unpack it instead\n");
-        httpStatus = DownloadUrlToFile(url, destPath, authHeader, member.unpSize, printFunction, progressFn);
-    }
+        httpStatus = ExtractOnServer(url, member, destPath, authHeader, printFunction, progressFn);
 
     if (httpStatus != 200 && httpStatus != 206)
     {
