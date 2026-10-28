@@ -377,6 +377,7 @@
     <ClInclude Include="zlib\gzguts.h" />
     <ClInclude Include="src\GameInstaller.h" />
     <ClInclude Include="src\HttpPlain.h" />
+    <ClInclude Include="src\SpeedTest.h" />
     <ClInclude Include="src\StoreCatalog.h" />
     <ClInclude Include="src\StoreArt.h" />
     <ClInclude Include="src\UpdateCheck.h" />
@@ -448,6 +449,7 @@
     <ClCompile Include="src\DiscWorker.cpp" />
     <ClCompile Include="src\GameInstaller.cpp" />
     <ClCompile Include="src\HttpPlain.cpp" />
+    <ClCompile Include="src\SpeedTest.cpp" />
     <ClCompile Include="src\StoreCatalog.cpp" />
     <ClCompile Include="src\StoreArt.cpp" />
     <ClCompile Include="src\UpdateCheck.cpp" />

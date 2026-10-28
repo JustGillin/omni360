@@ -130,6 +130,8 @@ struct XboxTLSInternal {
     br_x509_trust_anchor anchors[MAX_ANCHORS];   // Trust anchor certificates
     int anchor_count;                            // Count of loaded anchors
     unsigned char iobuf[BR_SSL_BUFSIZE_BIDI];    // TLS I/O buffer
+    bool chachaOnly;                             // offered ChaCha20 alone - see XboxTLS_SetThreadSuites
+    char host[64];                               // for remembering a host that refused that
 };
 
 
@@ -238,7 +240,106 @@ static void XboxTLS_SetSocketOptions(SOCKET sock) {
     setsockopt(sock, SOL_SOCKET, SO_SNDTIMEO, (PCSTR)&timeoutMs, sizeof(timeoutMs));
 }
 
-static void XboxTLS_UseFastDownloadSuites(br_ssl_client_context* sc) {
+// ---------------------------------------------------------------------------
+// Which cipher suites a connection offers
+// ---------------------------------------------------------------------------
+//
+// The console decrypts ChaCha20-Poly1305 at about 25 MB/s on one core, and
+// AES-128-GCM at about 5 (Settings' speed test, BearSSL's own code for both).
+// archive.org's storage servers (ia8....us.archive.org) take AES-GCM over
+// ChaCha20 even when ChaCha20 is offered first - the server's preference
+// wins - which held every download connection under about 4 MB/s. Offered
+// ChaCha20 alone, they take it. So an archive.org connection offers only
+// ChaCha20, unless that host has refused it before; everything else keeps
+// the full list, as no other server here has been measured.
+
+// Per-thread settings: a thread-local slot each, allocated the first time
+// any thread uses one.
+static volatile LONG g_suitesSlot = (LONG)TLS_OUT_OF_INDEXES;
+static volatile LONG g_lastSuiteSlot = (LONG)TLS_OUT_OF_INDEXES;
+
+static DWORD XboxTLS_Slot(volatile LONG *slot) {
+    if (*slot == (LONG)TLS_OUT_OF_INDEXES) {
+        DWORD fresh = TlsAlloc();
+        if (fresh == TLS_OUT_OF_INDEXES)
+            return TLS_OUT_OF_INDEXES;
+        // Another thread may have got there first; keep whichever won.
+        if (InterlockedCompareExchange(slot, (LONG)fresh, (LONG)TLS_OUT_OF_INDEXES) != (LONG)TLS_OUT_OF_INDEXES)
+            TlsFree(fresh);
+    }
+    return (DWORD)*slot;
+}
+
+void XboxTLS_SetThreadSuites(int mode) {
+    DWORD slot = XboxTLS_Slot(&g_suitesSlot);
+    if (slot != TLS_OUT_OF_INDEXES)
+        TlsSetValue(slot, (LPVOID)(ULONG_PTR)mode);
+}
+
+unsigned short XboxTLS_LastSuiteForThisThread(void) {
+    if (g_lastSuiteSlot == (LONG)TLS_OUT_OF_INDEXES)
+        return 0;
+    return (unsigned short)(ULONG_PTR)TlsGetValue((DWORD)g_lastSuiteSlot);
+}
+
+static void XboxTLS_NoteSuite(unsigned short suite) {
+    DWORD slot = XboxTLS_Slot(&g_lastSuiteSlot);
+    if (slot != TLS_OUT_OF_INDEXES)
+        TlsSetValue(slot, (LPVOID)(ULONG_PTR)suite);
+}
+
+// Hosts that refused ChaCha20 alone. Few, so a short list; a spin lock, as
+// connections are made from several threads.
+#define NO_CHACHA_MAX 16
+static char g_noChacha[NO_CHACHA_MAX][64];
+static int g_noChachaCount = 0;
+static volatile LONG g_noChachaLock = 0;
+
+static void NoChachaLock() {
+    while (InterlockedCompareExchange(&g_noChachaLock, 1, 0) != 0)
+        Sleep(0);
+}
+
+static void NoChachaUnlock() {
+    InterlockedExchange(&g_noChachaLock, 0);
+}
+
+static bool XboxTLS_RefusedChacha(const char *host) {
+    bool found = false;
+    NoChachaLock();
+    for (int i = 0; i < g_noChachaCount && !found; ++i)
+        found = (_stricmp(g_noChacha[i], host) == 0);
+    NoChachaUnlock();
+    return found;
+}
+
+static void XboxTLS_NoteRefusedChacha(const char *host) {
+    NoChachaLock();
+    if (g_noChachaCount < NO_CHACHA_MAX) {
+        strncpy(g_noChacha[g_noChachaCount], host, sizeof(g_noChacha[0]) - 1);
+        g_noChacha[g_noChachaCount][sizeof(g_noChacha[0]) - 1] = '\0';
+        g_noChachaCount++;
+    }
+    NoChachaUnlock();
+}
+
+static bool XboxTLS_EndsWith(const char *s, const char *suffix) {
+    size_t n = strlen(s), m = strlen(suffix);
+    return n >= m && _stricmp(s + n - m, suffix) == 0;
+}
+
+static bool XboxTLS_OfferChachaOnly(const char *host) {
+    int mode = XBOXTLS_SUITES_DEFAULT;
+    if (g_suitesSlot != (LONG)TLS_OUT_OF_INDEXES)
+        mode = (int)(ULONG_PTR)TlsGetValue((DWORD)g_suitesSlot);
+    if (mode == XBOXTLS_SUITES_CHACHA)
+        return true;
+    if (mode == XBOXTLS_SUITES_SERVER_CHOICE)
+        return false;
+    return XboxTLS_EndsWith(host, "archive.org") && !XboxTLS_RefusedChacha(host);
+}
+
+static void XboxTLS_UseFastDownloadSuites(br_ssl_client_context* sc, bool chachaOnly) {
     static const uint16_t suites[] = {
         BR_TLS_ECDHE_RSA_WITH_CHACHA20_POLY1305_SHA256,
         BR_TLS_ECDHE_ECDSA_WITH_CHACHA20_POLY1305_SHA256,
@@ -249,7 +350,8 @@ static void XboxTLS_UseFastDownloadSuites(br_ssl_client_context* sc) {
     };
 
     br_ssl_engine_set_versions(&sc->eng, BR_TLS12, BR_TLS12);
-    br_ssl_engine_set_suites(&sc->eng, suites, sizeof(suites) / sizeof(suites[0]));
+    // The first two are the ChaCha20 ones.
+    br_ssl_engine_set_suites(&sc->eng, suites, chachaOnly ? 2 : sizeof(suites) / sizeof(suites[0]));
 }
 
 
@@ -520,7 +622,10 @@ bool XboxTLS_Connect(XboxTLSContext* ctx, const char* ip, const char* hostname, 
         br_x509_minimal_set_ecdsa(&ic->xc, br_ec_get_default(), br_ecdsa_vrfy_asn1_get_default());
 
         br_ssl_client_init_full(&ic->sc, &ic->xc, ic->anchors, ic->anchor_count);
-        XboxTLS_UseFastDownloadSuites(&ic->sc);
+        ic->chachaOnly = XboxTLS_OfferChachaOnly(hostname);
+        strncpy(ic->host, hostname, sizeof(ic->host) - 1);
+        ic->host[sizeof(ic->host) - 1] = '\0';
+        XboxTLS_UseFastDownloadSuites(&ic->sc, ic->chachaOnly);
         br_ssl_engine_set_buffer(&ic->sc.eng, ic->iobuf, sizeof(ic->iobuf), 1);
         br_ssl_client_reset(&ic->sc, hostname, 0);
         br_sslio_init(&ic->ioc, &ic->sc.eng, tls_socket_read, &ic->sock, tls_socket_write, &ic->sock);
@@ -610,6 +715,15 @@ int XboxTLS_Write(XboxTLSContext* ctx, const void* buf, int len) {
         char msg[160];
         sprintf(msg, "TLS write error code: %d%s", err, TlsErrorMeaning(err));
         debug_tls(msg);
+
+        // The server turned the handshake down outright - a fatal alert -
+        // when offered ChaCha20 alone: offer it everything from now on. The
+        // caller's retry, if it has one, connects again with the full list.
+        if (ic->chachaOnly && err >= BR_ERR_RECV_FATAL_ALERT && err < BR_ERR_RECV_FATAL_ALERT + 256) {
+            XboxTLS_NoteRefusedChacha(ic->host);
+            sprintf(msg, "%.64s refused ChaCha20 - offering every cipher suite from now on", ic->host);
+            debug_tls(msg);
+        }
         return -1;
     }
 
@@ -630,6 +744,9 @@ int XboxTLS_Write(XboxTLSContext* ctx, const void* buf, int len) {
         debug_tls(msg);
         return -1;
     }
+
+    // The handshake is done by now: which suite it settled on.
+    XboxTLS_NoteSuite(ic->sc.eng.session.cipher_suite);
     return len;
 }
 

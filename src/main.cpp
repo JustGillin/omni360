@@ -29,6 +29,7 @@ end-to-end on real hardware against a real 27-game library.
 #include "LibraryCache.h"
 #include "UiSound.h"
 #include "Featured.h"
+#include "SpeedTest.h"
 #include "GameListUI.h"
 #include "DownloadQueue.h"
 #include "SearchWorker.h"
@@ -1236,7 +1237,8 @@ enum SettingsRow
     SETTINGS_ROW_UPDATE_CHECKS, // checking at start, on or off
     SETTINGS_ROW_LIBRARY_FOLDER, // one of g_folderRows: A adds or removes it
     SETTINGS_ROW_ADD_FOLDER,   // another library folder, typed
-    SETTINGS_ROW_SOUNDS        // the interface's sounds, on or off
+    SETTINGS_ROW_SOUNDS,       // the interface's sounds, on or off
+    SETTINGS_ROW_SPEED_TEST    // where a download's speed goes - SpeedTest.h
 };
 
 // Rescans with the library folders now in settings.txt.
@@ -1718,6 +1720,11 @@ static void BuildSettingsPage(SettingsPage &page, const Library &lib, const char
         c.valueCount = DISC_SPEED_FULL;
     }
 
+    AddSettingsRow(page, SETTINGS_VIEW_LINE, "Download speed");
+    AddSettingsControl(page, SETTINGS_CONTROL_BUTTON, "Run test", SETTINGS_ROW_SPEED_TEST,
+                       "Checks how fast your internet, your console and archive.org are, to see what slows "
+                       "downloads down. About a minute.");
+
     // The version, and whether there's a newer one.
     UpdateInfo update;
     const UpdateState state = GetUpdateState(&update, NULL);
@@ -1784,6 +1791,17 @@ static void StepSettingsRow(SettingsPage &page, int direction)
     }
 }
 
+// Settings' speed test, with the saved keys if there are any - without them
+// it leaves archive.org out rather than asking for them.
+static void RunSpeedTest(const char *gamesPath)
+{
+    std::string accessKey, secretKey;
+    char header[IAS3_AUTH_HEADER_MAX];
+    const bool keys = LoadSavedKeys(accessKey, secretKey) &&
+                      BuildIas3AuthHeader(accessKey, secretKey, header, sizeof(header));
+    RunSpeedTestUI(keys ? header : NULL, gamesPath);
+}
+
 static SettingsOutcome RunSettingsRow(SettingsRow row, int arg, Library &lib, char *gamesPath, size_t gamesPathSize)
 {
     SettingsOutcome outcome = {false, false};
@@ -1798,6 +1816,7 @@ static SettingsOutcome RunSettingsRow(SettingsRow row, int arg, Library &lib, ch
     case SETTINGS_ROW_LIBRARY_FOLDER: ToggleLibraryFolder(arg, lib, gamesPath, outcome); break;
     case SETTINGS_ROW_ADD_FOLDER:   AddLibraryFolder(lib, gamesPath, outcome); break;
     case SETTINGS_ROW_SOUNDS:       ToggleUiSounds(); break;
+    case SETTINGS_ROW_SPEED_TEST:   RunSpeedTest(gamesPath); break;
     default:                        break;
     }
 

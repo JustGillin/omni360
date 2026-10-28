@@ -224,6 +224,26 @@ void XboxTLS_Free(XboxTLSContext* ctx);
  */
 void XboxTLS_SetThreadIoTimeout(unsigned long timeoutMs);
 
+/**
+ * @brief Which cipher suites connections made on the calling thread offer.
+ *
+ * DEFAULT offers an archive.org server ChaCha20-Poly1305 alone - it decrypts
+ * about five times faster on the console than AES-GCM, which archive.org's
+ * servers otherwise pick - and every other server the full list. A host that
+ * refuses ChaCha20 alone is offered the full list from then on. The others
+ * are for Settings' speed test, to compare the two.
+ */
+#define XBOXTLS_SUITES_DEFAULT       0
+#define XBOXTLS_SUITES_SERVER_CHOICE 1 // the full list, ChaCha20 first: the server picks
+#define XBOXTLS_SUITES_CHACHA        2 // ChaCha20-Poly1305 alone, whatever the host
+void XboxTLS_SetThreadSuites(int mode);
+
+/**
+ * @brief The cipher suite (a BR_TLS_* value) the calling thread's last
+ * completed handshake settled on, or 0 if it hasn't made one.
+ */
+unsigned short XboxTLS_LastSuiteForThisThread(void);
+
 
 #ifdef __cplusplus
 }
