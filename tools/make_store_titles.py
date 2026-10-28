@@ -30,9 +30,11 @@ It's given a Redump-style name - "Naruto - The Broken Bond (World)" - for
 the Store to show, and its title ID from the datfile.
 
 XBOX_360_1 and XBOX_360_1_OTHER hold the same kind of games as RARs -
-BioShock Infinite's only copy is one. A RAR is added only if its disc image is
-stored - no compression - and not encrypted or split, as the installer
-reads the disc image straight out of it. Finding that out means reading its
+BioShock Infinite's only copy is one. A RAR is added if its disc image isn't
+encrypted or split. One kept without compression is read straight out of the
+download; a compressed one is unpacked on the console as it downloads, which
+is slow - about 3 MB/s - so it's flagged STORE_FLAG_UNPACKS for the Store to
+say so before it starts. Finding that out means reading its
 headers, which are private, so it takes the archive.org keys (--keys, the
 two-line ArchiveOrgKeys.txt the app uses); what each RAR held is kept in
 tools/cache/store_rars.json, so a rerun asks only about new ones. Without
@@ -754,7 +756,6 @@ def main():
                 why = ("unreadable: %s" % entry["error"] if "error" in entry
                        else "encrypted" if entry.get("encrypted")
                        else "split" if entry.get("split")
-                       else "compressed" if not entry.get("stored")
                        else None)
                 if why:
                     rar_skipped.append((zn, why))
@@ -777,8 +778,9 @@ def main():
                 region_bits |= 1 << REGIONS.index(r)
             cat = CATEGORIES.index(category) + 1 if category in CATEGORIES else 0
             display = display_title(redump_title)
+            unpacks = 0x08 if is_rar and not entry.get("stored") else 0  # STORE_FLAG_UNPACKS
             rows.append((sort_key(display), 0 if regions & {"USA", "World"} else 1, name,
-                         index, disc_no, region_bits, 0, cat, tid, int(f.get("size", 0)), zn, name, display))
+                         index, disc_no, region_bits, unpacks, cat, tid, int(f.get("size", 0)), zn, name, display))
             added.append((name, ident, zn))
             taken.add((key, disc_no))
     print("%d added from the other set (%d RARs)" % (len(added), sum(1 for a in added if a[2].lower().endswith(".rar"))))
@@ -828,6 +830,7 @@ def main():
     L.append("#define STORE_FLAG_DEMO     0x01 // a demo or kiosk disc")
     L.append("#define STORE_FLAG_PREVIEW  0x02 // a beta or prototype")
     L.append("#define STORE_FLAG_REVISION 0x04 // a later pressing (\"Rev 1\")")
+    L.append("#define STORE_FLAG_UNPACKS  0x08 // a compressed RAR, unpacked on the console as it downloads - slow")
     L.append("")
     L.append("enum StoreCategory // Redump's")
     L.append("{")

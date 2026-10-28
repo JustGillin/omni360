@@ -16,7 +16,8 @@ DESCRIPTION : Downloads a Redump game's zip from archive.org and installs it as
 #include "StoreArt.h"      // FetchTitleIcon
 #include "parsing.h"       // UrlEncodeFormValue
 #include "OutputConsole.h"
-#include "RarHeaders.h"     // a game kept in a RAR, uncompressed
+#include "RarHeaders.h"     // a game kept in a RAR
+#include "RarUnpack.h"      // ...and unpacked here, if compressed
 #include "zlib/zlib.h"      // crc32, for checking one
 
 #include <xtl.h>
@@ -423,14 +424,14 @@ static bool ReadZipDirectory(const std::string &url, const char *auth, unsigned 
 // Some games are on archive.org only as RARs (XBOX_360_1). The Store lists
 // one only once make_store_titles.py has seen it's stored - no compression,
 // "-m0" - so the disc image is in the RAR byte for byte, and is read straight
-// out of the download, with no unpacking. Compressed, encrypted or split ones
-// are refused here too, in case one gets through.
+// out of the download, with no unpacking. A compressed one is unpacked on the
+// console as it downloads (DownloadingRar, below). Encrypted or split ones are
+// refused.
 
 enum RarMemberResult
 {
     RAR_MEMBER_OK,
     RAR_MEMBER_UNREADABLE,  // the headers couldn't be fetched or made sense of
-    RAR_MEMBER_COMPRESSED,
     RAR_MEMBER_ENCRYPTED,
     RAR_MEMBER_SPLIT
 };
@@ -446,7 +447,7 @@ static bool IsDiscImage(const RarEntry &entry)
 // The archive's disc image: its size, CRC, and where its data starts.
 static RarMemberResult ReadRarMember(const std::string &url, const char *auth, RarFormat format,
                                      unsigned long signatureLen, ZipMember *out, unsigned long long *outDataStart,
-                                     bool *outHasCrc)
+                                     bool *outHasCrc, bool *outCompressed)
 {
     const unsigned long HEAD = 65536;
     unsigned char *head = (unsigned char *)malloc(HEAD + 1);
@@ -486,10 +487,9 @@ static RarMemberResult ReadRarMember(const std::string &url, const char *auth, R
                 result = RAR_MEMBER_ENCRYPTED;
             else if (entry.split)
                 result = RAR_MEMBER_SPLIT;
-            else if (!entry.stored || entry.packSize != entry.unpSize)
-                result = RAR_MEMBER_COMPRESSED;
             else
             {
+                *outCompressed = !entry.stored || entry.packSize != entry.unpSize;
                 _snprintf(out->name, sizeof(out->name), "%s", entry.name);
                 out->name[sizeof(out->name) - 1] = '\0';
                 out->method = 0;
@@ -1085,6 +1085,222 @@ static int RankServers(GameJob *job, const std::string &redirected, const char *
     return n;
 }
 
+// ---------------------------------------------------------------------------
+// A compressed RAR: unpacked as it downloads
+// ---------------------------------------------------------------------------
+//
+// dmc_unrar (RarUnpack.h) reads the RAR straight out of the pieces, waiting
+// for each to land, on this thread - in place of the zip indexer, so the two
+// connections keep their cores. It writes the disc image to pieces of its own,
+// which the GoD install then reads like a stored RAR's. Unpacking runs at
+// about 3 MB/s on a console - slower than the download - so the bar follows
+// the unpacking, and a piece is deleted once the unpacking is past it: the
+// drive holds the image and whatever download is still waiting, never both
+// whole.
+
+class DownloadingRar : public RarUnpackInput
+{
+public:
+    DownloadingRar(Download *d_, ZipPieces *pieces_, GameJob *job_)
+        : d(d_), pieces(pieces_), job(job_), failed(false), consumed(0), dropped(0), lastReport(0),
+          started(GetTickCount()), cache(NULL), cacheStart(0), cacheLen(0)
+    {
+        cache = (unsigned char *)malloc(CACHE_SIZE);
+    }
+
+    ~DownloadingRar() { free(cache); }
+
+    bool Failed() const { return failed; }
+    unsigned long long Size() { return d->total; }
+
+    unsigned long Read(unsigned long long offset, void *buffer, unsigned long len)
+    {
+        if (failed || cache == NULL || offset >= d->total)
+            return 0;
+        if (len > d->total - offset)
+            len = (unsigned long)(d->total - offset);
+
+        unsigned char *out = (unsigned char *)buffer;
+        unsigned long done = 0;
+        while (done < len)
+        {
+            const unsigned long long at = offset + done;
+            if (at < cacheStart || at >= cacheStart + cacheLen)
+            {
+                if (!Fill(at))
+                {
+                    failed = true;
+                    return done;
+                }
+            }
+            unsigned long take = (unsigned long)(cacheStart + cacheLen - at);
+            if (take > len - done)
+                take = len - done;
+            memcpy(out + done, cache + (at - cacheStart), take);
+            done += take;
+        }
+
+        if (offset + len > consumed)
+            consumed = offset + len;
+        Report(false);
+        return done;
+    }
+
+    // Once more at the end, so the bar isn't left short.
+    void Report(bool force)
+    {
+        const DWORD now = GetTickCount();
+        if (!force && now - lastReport < 500)
+            return;
+        lastReport = now;
+
+        EnterCriticalSection(&g_lock);
+        bool downloaded = (d->doneBytes >= d->total);
+        LeaveCriticalSection(&g_lock);
+
+        const DWORD ms = now - started;
+        SetPhase(job, GAME_STEP_DOWNLOADING, downloaded ? "Unpacking" : "Downloading and unpacking", consumed,
+                 d->total, ms > 3000 ? consumed * 1000 / ms : 0);
+    }
+
+private:
+    enum { CACHE_SIZE = 1024 * 1024 };
+
+    // Loads the cache from `at`, waiting for its piece. dmc_unrar reads the
+    // headers, then the data from start to end - so a read never needs a
+    // piece behind the one before, and those can go.
+    bool Fill(unsigned long long at)
+    {
+        const unsigned long index = (unsigned long)(at / PIECE_SIZE);
+        if (!WaitFor(index))
+            return false;
+
+        // One piece at most - the next may not be here yet.
+        unsigned long long end = (unsigned long long)(index + 1) * PIECE_SIZE;
+        if (end > d->total)
+            end = d->total;
+        unsigned long len = (end - at > CACHE_SIZE) ? CACHE_SIZE : (unsigned long)(end - at);
+        if (!pieces->Read(at, cache, len))
+        {
+            dprintf("[game] reading piece %lu to unpack failed\n", index);
+            return false;
+        }
+        cacheStart = at;
+        cacheLen = len;
+
+        // Keep the one before, in case a header sits across the boundary.
+        for (; dropped + 1 < index; ++dropped)
+        {
+            char path[300];
+            pieces->PiecePath(dropped, path, sizeof(path));
+            DeleteFileA(path);
+        }
+        return true;
+    }
+
+    bool WaitFor(unsigned long index)
+    {
+        for (;;)
+        {
+            EnterCriticalSection(&g_lock);
+            bool ready = d->done[index];
+            bool stop = Stopping(d);
+            LeaveCriticalSection(&g_lock);
+
+            if (ready)
+                return true;
+            if (stop)
+                return false;
+            Report(false);
+            WaitForSingleObject(d->pieceReady, 500);
+        }
+    }
+
+    Download *d;
+    ZipPieces *pieces;
+    GameJob *job;
+    bool failed;
+    unsigned long long consumed; // how far through the RAR the unpacking has read
+    unsigned long dropped;       // pieces before this one are deleted
+    DWORD lastReport;
+    DWORD started;
+    unsigned char *cache;
+    unsigned long long cacheStart;
+    unsigned long cacheLen;
+};
+
+// The unpacked image, written as pieces the size of the download's, for a
+// StoredSource to read back - FATX can't hold a file of 4GB or more.
+class ImagePieceWriter : public RarUnpackOutput
+{
+public:
+    ImagePieceWriter(ZipPieces *image_) : image(image_), file(NULL), index(0), inPiece(0), buffer(NULL)
+    {
+        buffer = malloc(BUFFER_SIZE);
+    }
+
+    ~ImagePieceWriter()
+    {
+        Close();
+        free(buffer);
+    }
+
+    bool Write(const void *data, unsigned long len)
+    {
+        const unsigned char *p = (const unsigned char *)data;
+        while (len > 0)
+        {
+            if (file == NULL || inPiece == PIECE_SIZE)
+            {
+                if (file != NULL)
+                {
+                    bool ok = (fclose(file) == 0);
+                    file = NULL;
+                    index++;
+                    if (!ok)
+                        return false;
+                }
+                char path[300];
+                image->PiecePath(index, path, sizeof(path));
+                file = fopen(path, "wb");
+                if (file == NULL)
+                    return false;
+                if (buffer != NULL)
+                    setvbuf(file, (char *)buffer, _IOFBF, BUFFER_SIZE);
+                inPiece = 0;
+            }
+
+            unsigned long take = (unsigned long)(PIECE_SIZE - inPiece);
+            if (take > len)
+                take = len;
+            if (fwrite(p, 1, take, file) != take)
+                return false;
+            p += take;
+            len -= take;
+            inPiece += take;
+        }
+        return true;
+    }
+
+    bool Close()
+    {
+        if (file == NULL)
+            return true;
+        bool ok = (fclose(file) == 0);
+        file = NULL;
+        return ok;
+    }
+
+private:
+    enum { BUFFER_SIZE = 4 * 1024 * 1024 };
+
+    ZipPieces *image;
+    FILE *file;
+    unsigned long index;
+    unsigned long long inPiece;
+    void *buffer;
+};
+
 static void RunJob(GameJob *job, const char *gamesPath)
 {
     const GameRequest &req = job->request;
@@ -1135,16 +1351,17 @@ static void RunJob(GameJob *job, const char *gamesPath)
     unsigned long long dataStart = 0;
     unsigned long signatureLen = 0;
     const RarFormat rarFormat = RarDetectFormat((const unsigned char *)small, (unsigned long)len, &signatureLen);
-    const bool stored = (rarFormat != RAR_FORMAT_UNKNOWN);
+    const bool isRar = (rarFormat != RAR_FORMAT_UNKNOWN);
     bool hasCrc = true;
-    if (stored)
+    bool compressedRar = false;
+    if (isRar)
     {
-        const RarMemberResult rar = ReadRarMember(url, auth, rarFormat, signatureLen, &member, &dataStart, &hasCrc);
+        const RarMemberResult rar = ReadRarMember(url, auth, rarFormat, signatureLen, &member, &dataStart, &hasCrc,
+                                                  &compressedRar);
         if (rar != RAR_MEMBER_OK)
         {
             FinishLocked(job, QUEUE_OUTCOME_FAILED, "Couldn't install",
-                         rar == RAR_MEMBER_COMPRESSED ? "This RAR is compressed - only uncompressed ones can be installed."
-                         : rar == RAR_MEMBER_ENCRYPTED ? "This RAR has a password."
+                         rar == RAR_MEMBER_ENCRYPTED ? "This RAR has a password."
                          : rar == RAR_MEMBER_SPLIT     ? "This RAR is split into parts."
                                                        : "The RAR's headers couldn't be read.",
                          true);
@@ -1188,17 +1405,24 @@ static void RunJob(GameJob *job, const char *gamesPath)
         dataStart = member.localHeader + 30 + LE16(local + 26) + LE16(local + 28);
     }
     const unsigned long long needed = dataStart + member.packed;
+    const bool stored = isRar && !compressedRar;
 
     dprintf("[game] %s: \"%s\", %I64u packed from %I64u, %I64u unpacked, crc %08lX\n", req.zipName, member.name,
             member.packed, dataStart, member.unpacked, member.crc);
 
     // Room for the zip and the game. The game is at most the image's size;
-    // checked again, exactly, once the image says how big the game is.
+    // checked again, exactly, once the image says how big the game is. A
+    // compressed RAR is unpacked to an image first, and its download is
+    // deleted as the unpacking passes it: at worst the whole download and the
+    // image, or the image and the game.
+    const unsigned long long spaceNeeded = compressedRar
+        ? (needed > member.unpacked ? needed : member.unpacked) + member.unpacked
+        : needed + member.unpacked;
     unsigned long long freeSpace = 0;
-    if (DriveFreeSpace(gamesPath, &freeSpace) && freeSpace < needed + member.unpacked + SPACE_MARGIN)
+    if (DriveFreeSpace(gamesPath, &freeSpace) && freeSpace < spaceNeeded + SPACE_MARGIN)
     {
         char needText[64] = "", freeText[64] = "", detail[160];
-        FormatBytes(needed + member.unpacked, needText, sizeof(needText));
+        FormatBytes(spaceNeeded, needText, sizeof(needText));
         FormatBytes(freeSpace, freeText, sizeof(freeText));
         _snprintf(detail, sizeof(detail), "It needs up to %s while it installs, and %s is free.", needText, freeText);
         detail[sizeof(detail) - 1] = '\0';
@@ -1220,6 +1444,18 @@ static void RunJob(GameJob *job, const char *gamesPath)
 
     // --- Download, and index as the pieces land -----------------------------
     ZipPieces pieces(dir, PIECE_SIZE);
+
+    // A compressed RAR's image, unpacked.
+    char imageDir[340];
+    _snprintf(imageDir, sizeof(imageDir), "%s\\image", dir);
+    imageDir[sizeof(imageDir) - 1] = '\0';
+    ZipPieces imagePieces(imageDir, PIECE_SIZE);
+    if (compressedRar && !CreateDirectoryA(imageDir, NULL))
+    {
+        RemoveFolder(dir);
+        FinishLocked(job, QUEUE_OUTCOME_FAILED, "Couldn't install", "The staging folder couldn't be made.", true);
+        return;
+    }
     Download d;
     for (int i = 0; i < serverCount; ++i)
         d.servers[i] = servers[i];
@@ -1250,8 +1486,9 @@ static void RunJob(GameJob *job, const char *gamesPath)
     }
 
     // A zip's image is indexed for reading back out of its deflate stream;
-    // a RAR's needs only its CRC.
-    InflateIndexer *indexer = stored ? NULL : new InflateIndexer(member.unpacked);
+    // a stored RAR's needs only its CRC, and a compressed one's is checked as
+    // it's unpacked.
+    InflateIndexer *indexer = isRar ? NULL : new InflateIndexer(member.unpacked);
     unsigned long crc = crc32(0L, Z_NULL, 0);
     unsigned char *chunk = (unsigned char *)malloc(1024 * 1024);
 
@@ -1294,8 +1531,23 @@ static void RunJob(GameJob *job, const char *gamesPath)
 
     const DWORD downloadStart = GetTickCount();
     bool indexOk = (started > 0);
+    RarUnpackResult unpacked = RAR_UNPACK_OK;
 
-    for (unsigned long index = 0; indexOk && index < d.pieceCount; ++index)
+    if (compressedRar && indexOk)
+    {
+        DownloadingRar rar(&d, &pieces, job);
+        ImagePieceWriter writer(&imagePieces);
+        unpacked = RarUnpackFrom(&rar, member.name, &writer, NULL, dprintf);
+        if (!writer.Close() && unpacked == RAR_UNPACK_OK)
+            unpacked = RAR_UNPACK_WRITE_FAILED;
+        rar.Report(true);
+        indexOk = !rar.Failed();
+        DWORD unpackSeconds = (GetTickCount() - downloadStart) / 1000;
+        dprintf("[game] unpacking %s after %lu:%02lu (result %d)\n", unpacked == RAR_UNPACK_OK ? "finished" : "stopped",
+                (unsigned long)(unpackSeconds / 60), (unsigned long)(unpackSeconds % 60), (int)unpacked);
+    }
+
+    for (unsigned long index = 0; !compressedRar && indexOk && index < d.pieceCount; ++index)
     {
         // Wait for this piece, reporting progress meanwhile.
         for (;;)
@@ -1345,7 +1597,7 @@ static void RunJob(GameJob *job, const char *gamesPath)
     }
 
     // Stop the connections if anything went wrong, and wait for them.
-    if (!indexOk)
+    if (!indexOk || unpacked != RAR_UNPACK_OK)
     {
         EnterCriticalSection(&g_lock);
         if (!d.failed)
@@ -1365,16 +1617,17 @@ static void RunJob(GameJob *job, const char *gamesPath)
     dprintf("[game] downloaded %I64u MB in %lu:%02lu\n", d.doneBytes / (1024 * 1024),
             (unsigned long)(downloadSeconds / 60), (unsigned long)(downloadSeconds % 60));
 
-    const bool imageOk = indexOk && (stored ? (!hasCrc || crc == member.crc)
-                                            : (indexer->Finished() && indexer->Out() == member.unpacked &&
-                                               indexer->Crc() == member.crc));
+    const bool imageOk = indexOk && (compressedRar ? unpacked == RAR_UNPACK_OK
+                                     : stored      ? (!hasCrc || crc == member.crc)
+                                                   : (indexer->Finished() && indexer->Out() == member.unpacked &&
+                                                      indexer->Crc() == member.crc));
     if (!imageOk)
     {
         bool cancelled = Cancelled(job);
         int failStatus = d.failStatus;
         if (indexOk && !cancelled && stored)
             dprintf("[game] the image didn't check out: crc %08lX (want %08lX)\n", crc, member.crc);
-        else if (indexOk && !cancelled)
+        else if (indexOk && !cancelled && !compressedRar)
             dprintf("[game] the image didn't check out: finished %d, %I64u of %I64u bytes, crc %08lX (want %08lX)\n",
                     indexer->Finished() ? 1 : 0, indexer->Out(), member.unpacked, indexer->Crc(), member.crc);
         delete indexer;
@@ -1385,6 +1638,12 @@ static void RunJob(GameJob *job, const char *gamesPath)
         else if (failStatus == 401 || failStatus == 403)
             FinishLocked(job, QUEUE_OUTCOME_KEYS_REJECTED, "Keys not accepted",
                          "archive.org refused the keys - check them in Settings.", true);
+        else if (indexOk && unpacked == RAR_UNPACK_UNSUPPORTED)
+            FinishLocked(job, QUEUE_OUTCOME_FAILED, "Couldn't install",
+                         "This RAR is packed in a way the console can't unpack.", true);
+        else if (indexOk && unpacked == RAR_UNPACK_WRITE_FAILED)
+            FinishLocked(job, QUEUE_OUTCOME_FAILED, "Couldn't install",
+                         "The unpacked game couldn't be written - is the drive full?", true);
         else if (indexOk)
             FinishLocked(job, QUEUE_OUTCOME_FAILED, "Download was damaged",
                          "The game's data didn't match its checksum. Try again.", true);
@@ -1398,12 +1657,15 @@ static void RunJob(GameJob *job, const char *gamesPath)
     InflatePoint *points = (indexer != NULL) ? indexer->TakePoints(&pointCount) : NULL;
     delete indexer;
     dprintf("[game] image checks out: %I64u bytes, crc %08lX%s, %d restart points\n", member.unpacked, member.crc,
-            stored && !hasCrc ? " (the RAR has none to check)" : "", pointCount);
+            isRar && !hasCrc ? " (the RAR has none to check)" : "", pointCount);
 
     // --- Install --------------------------------------------------------------
     InflateSource inflated(&pieces, dataStart, member.packed, member.unpacked, points, pointCount);
     StoredSource storedImage(&pieces, dataStart, member.unpacked);
-    GodSource *image = stored ? (GodSource *)&storedImage : (GodSource *)&inflated;
+    StoredSource unpackedImage(&imagePieces, 0, member.unpacked);
+    GodSource *image = compressedRar ? (GodSource *)&unpackedImage
+                       : stored      ? (GodSource *)&storedImage
+                                     : (GodSource *)&inflated;
 
     GodImageInfo info;
     GodResult result = GodInspect(image, &info);
