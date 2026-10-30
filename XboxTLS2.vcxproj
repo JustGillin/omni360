@@ -356,6 +356,7 @@
     <ClInclude Include="src\GameListUI.h" />
     <ClInclude Include="src\HttpResponse.h" />
     <ClInclude Include="src\ButtonAtlas.h" />
+    <ClInclude Include="src\NavIcons.h" />
     <ClInclude Include="src\BoxArtBanner.h" />
     <ClInclude Include="src\Wordmark.h" />
     <ClInclude Include="src\SelawikBold.h" />
@@ -405,6 +406,7 @@
     <ClInclude Include="src\FolderGames.h" />
     <ClInclude Include="src\Launch.h" />
     <ClInclude Include="src\LibraryCache.h" />
+    <ClInclude Include="src\Recents.h" />
     <ClInclude Include="src\UiSound.h" />
     <ClInclude Include="src\Featured.h" />
     <ClInclude Include="src\TrustAnchors.h" />
@@ -486,6 +488,7 @@
     <ClCompile Include="src\FolderGames.cpp" />
     <ClCompile Include="src\Launch.cpp" />
     <ClCompile Include="src\LibraryCache.cpp" />
+    <ClCompile Include="src\Recents.cpp" />
     <ClCompile Include="src\UiSound.cpp" />
     <ClCompile Include="src\Featured.cpp" />
     <ClCompile Include="src\UiText.cpp" />

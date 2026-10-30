@@ -48,14 +48,9 @@ games-path: Usb0:\Content\0000000000000000
 
 Each folder needs the `{TitleID}\{ContentType}\...` layout — Games on Demand, arcade games, installed packages. Extracted XEX games (a folder with a `default.xex`) aren't found yet. A drive the dashboard formatted as Xbox storage keeps its files in a container Omni360 can't reach.
 
-**Other apps to exit to.** **B** from the sidebar asks where to go: back to the dashboard the console starts with, or Microsoft's Xbox Dashboard. Add an `app:` line, a name and a path, for each other place you want listed there: an `.xex`, or a package such as XeXMenu's:
+**Leaving.** **B** goes back to Home from any page; **B** on Home asks whether to exit, and leaving takes the console wherever it normally starts — whatever DashLaunch is set to. To reach another dashboard or a file manager instead, put its folder on the **Apps** page below and start it from there.
 
-```
-app: Aurora = Hdd1:\Aurora\Aurora.xex
-app: XeXMenu = Hdd1:\Content\0000000000000000\C0DE9999\00080000\C0DE99990F586558
-```
-
-**Apps, Homebrew and Emulators.** These three pages show what's in your apps, homebrew and emulator folders as tiles, like the library does, and **A** starts one. Each page is in the sidebar only once it has a folder. Each folder in **Settings** has a value on its right, **Games**, **Homebrew**, **Apps** or **Emulators**, that says which page it feeds. Left and right change it, the same way they change Disc read speed. **Add folder** asks what's in a new folder once you've typed its path. `Homebrew`, `Apps` and `Emulators` folders on each drive are suggested too. Settings writes `homebrew-path:` (homebrew games), `apps-path:` (dashboards, file managers, tools) and `emulators-path:` lines for you, and you can also add them by hand, more than once each:
+**Apps, Homebrew and Emulators.** These three pages show what's in your apps, homebrew and emulator folders as tiles, like the library does, and **A** starts one. Each page is in the **Games + Apps** sidebar only once it has a folder. Each folder in **Settings** has a value on its right, **Games**, **Homebrew**, **Apps** or **Emulators**, that says which page it feeds. Left and right change it, the same way they change Disc read speed. **Add folder** asks what's in a new folder once you've typed its path. `Homebrew`, `Apps` and `Emulators` folders on each drive are suggested too. Settings writes `homebrew-path:` (homebrew games), `apps-path:` (dashboards, file managers, tools) and `emulators-path:` lines for you, and you can also add them by hand, more than once each:
 
 ```
 apps-path: Hdd1:\Apps
@@ -77,7 +72,7 @@ Remove the line to go back to downloading from consolemods.org.
 
 ## 4. Transfer files to the console
 
-Copy `Omni360.xex`, `ArchiveOrgKeys.txt`, and `settings.txt` if you made one, into a single folder on the console — something like `Hdd1:\Apps\Omni360\` or `Usb0:\Apps\Omni360\`. Keep them together, and do not put any other `.xex` in that folder. Omni360 keeps its caches beside them, in `Covers\` and `Store\`.
+Copy `Omni360.xex`, `ArchiveOrgKeys.txt`, and `settings.txt` if you made one, into a single folder on the console — something like `Hdd1:\Apps\Omni360\` or `Usb0:\Apps\Omni360\`. Keep them together, and do not put any other `.xex` in that folder. Omni360 keeps its caches beside them: `Covers\` and `Store\` for artwork, `Library.cache` for the game list it draws at startup, and `Recents.txt` for what Home shows. All four can be deleted safely; they rebuild.
 
 Three ways to get them across:
 
@@ -96,12 +91,13 @@ While you are there, make sure Aurora can see `Omni360.xex` so you can launch it
 Launch `Omni360.xex` from a file manager or your dashboard's home screen.
 
 1. The app mounts drive aliases, then scans your library and reads each title's name and icon out of its package header. This is offline and takes a moment on a large library; covers fill in over the next few seconds, and are cached after the first run.
-2. The sidebar on the left has the pages: **Your Library**, **Store**, **Queue** and **Settings**. Move with the **D-pad or left stick**; left reaches the sidebar from any page. **B** steps back a level, and **B** on the sidebar exits.
-3. **To install a game**, open the **Store**, pick a letter, then a game. Its page has its description, screenshots and versions — USA and World versions first, and a multi-disc game's discs together as one version. Choose one in the list if you want a different version, then press **Install**. It joins the **Queue**: a typical game takes 30-40 minutes to download and 5-10 to install, and you can keep browsing meanwhile. A popup says when it's done.
-4. **For DLC or title updates**, open a game's page — from the Store, or **A** on a game in your library — and press **Find DLC** or **Title updates**. It searches archive.org by name and shows what it found, ranked. **Nothing downloads automatically** — you pick the pack yourself, and anything already installed is marked as such.
-5. **To install a disc**, put it in the drive: it shows up as the first tile in your library. **A** installs it as Games on Demand; you confirm its name, it checks there's room, and it copies the disc to your games folder.
-6. **To remove a game**, press **Uninstall** on its page. Its DLC and title updates stay.
-7. **On the Queue**, **X** stops a download or install (nothing is left behind), or clears a finished one.
+2. **Home** is where it starts: the games you played most recently, and a row of icons across the top for **Games + Apps**, **Store**, **Queue** and **Settings**. Move with the **D-pad or left stick**, **up** from the games to reach the icons. **B** goes back to Home from anywhere, and **B** on Home asks whether to exit.
+3. **Games + Apps** has a sidebar of its own — **Games**, and **Apps**, **Homebrew** or **Emulators** once those have folders. Left from the first column reaches it. The Store, the Queue and Settings have no sidebar; they open full width.
+4. **To install a game**, open the **Store**, pick a letter, then a game. Its page has its description, screenshots and versions — USA and World versions first, and a multi-disc game's discs together as one version. Choose one in the list if you want a different version, then press **Install**. It joins the **Queue**: a typical game takes 30-40 minutes to download and 5-10 to install, and you can keep browsing meanwhile. A popup says when it's done.
+5. **For DLC or title updates**, open a game's page — from the Store, or **X** on a game in Games or on Home — and press **Find DLC** or **Title updates**. It searches archive.org by name and shows what it found, ranked. **Nothing downloads automatically** — you pick the pack yourself, and anything already installed is marked as such.
+6. **To install a disc**, put it in the drive: it shows up as the first tile on Home and in Games. **A** installs it as Games on Demand; you confirm its name, it checks there's room, and it copies the disc to your games folder.
+7. **To remove a game**, press **Uninstall** on its page. Its DLC and title updates stay.
+8. **On the Queue**, **X** stops a download or install (nothing is left behind), or clears a finished one.
 
 Because DLC matching is deliberately loose — it has to cope with release-group naming like `Halo.1.Combat.Evolved.Anniversary` — read the filename before confirming. That check is the reason auto-selection was removed.
 
@@ -113,7 +109,8 @@ Because DLC matching is deliberately loose — it has to cope with release-group
 - **"Keys not accepted"** — archive.org refused your keys. This usually means keys put in `ArchiveOrgKeys.txt` by hand are wrong or in the wrong order (access key line 1, secret key line 2), or were reset on archive.org. Re-enter them in Settings.
 - **"Not enough space"** — the drive needs room for the download and the installed game at once, as in Prerequisites. Free some space, or point the games folder at a bigger drive.
 - **A download slows down, or seems to pause** — archive.org's servers stall every minute or so; Omni360 drops a stalled connection after 10 seconds and carries on where it stopped, and moves to another server if one keeps failing. The speed on screen is the average, pauses included.
-- **A game isn't in the Store** — archive.org doesn't have every game as a zip; some are only there as RARs, which the installer can't read yet, and a few aren't there at all.
+- **A game isn't in the Store** — archive.org doesn't have every game. A few dozen aren't there at all; about 20 more are only there as compressed RARs, which install but take far longer, and the Store asks before starting one.
+- **Home's Recent row is empty** — it fills as you start games from Omni360. A game started from another dashboard isn't recorded, and a game that's since been uninstalled drops out.
 - **No DLC or updates for a game you know has them** — the collection may genuinely not have them, or the game's display name may be too abbreviated to match. Not every title has DLC or updates archived.
 - **Game pages with no description, wallpaper or screenshots** — they come from Xbox Live's servers, and DashLaunch's `livestrong` setting blocks those (the log shows `[dns] download.xbox.com: the DNS server says there's no such name`). Box art still comes from xboxunity, and downloads from archive.org are unaffected. Turn `livestrong` off in `launch.ini` if you want the details; `liveblock` on its own doesn't block them.
 - **Nothing will connect, but Aurora can** — look for `WSA error 10060` in the log: every connection is timing out, so something between the console and the internet is dropping the app's connections. Open an issue on GitHub with the log; it helps to say how the console is modded and which plugins it runs.

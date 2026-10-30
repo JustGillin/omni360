@@ -46,7 +46,7 @@ Optional `settings.txt` keys change where things go, and the games folder can al
 
 - `games-path:` — where games install, and where the library is scanned. Defaults to `Hdd1:\Content\0000000000000000`, where the dashboard keeps Games on Demand and arcade titles. Add more `games-path:` lines to scan more folders, such as `Usb0:\Content\0000000000000000` — the first is still where games install. See the Setup Guide.
 - `xbla-path:` — where DLC, title updates, arcade games and indie games are written. Same default. (The name is inherited from X-Store, which used the same key.)
-- `apps-path:`, `homebrew-path:` and `emulators-path:` — the folders the **Apps**, **Homebrew** and **Emulators** pages show, such as `Hdd1:\Apps` for dashboards and tools, `Hdd1:\Homebrew` for homebrew games and `Hdd1:\Emulators`. Each key can be listed more than once, and none is set by default. A page with no folders isn't in the sidebar. In Settings, every folder's row says whether it holds games, homebrew, apps or emulators, and left and right change it.
+- `apps-path:`, `homebrew-path:` and `emulators-path:` — the folders the **Apps**, **Homebrew** and **Emulators** pages show, such as `Hdd1:\Apps` for dashboards and tools, `Hdd1:\Homebrew` for homebrew games and `Hdd1:\Emulators`. Each key can be listed more than once, and none is set by default. A page with no folders isn't in the **Games + Apps** sidebar. In Settings, every folder's row says whether it holds games, homebrew, apps or emulators, and left and right change it.
 
 </details>
 
@@ -54,7 +54,15 @@ Optional `settings.txt` keys change where things go, and the games folder can al
 
 ## What it does
 
-Omni360 is a store and a library in one app on the console. **Your Library** shows every installed game, read straight from the hard drive, and plays them - or the disc in the drive - with **A**, and the **Store** lists about 1,500 Xbox 360 disc games, 740 Xbox Live Arcade games, 3,450 indie games and 500 Original Xbox games from archive.org, along with DLC and title updates for any of them - filtered by region, language, genre or rating, browsed by series, or found with a search. Everything downloads and installs in the background while you keep browsing, with disc games installed as Games on Demand, and a game disc in the drive can be copied to the hard drive the same way. Omni360 also keeps itself up to date, installing only releases signed with the project's key. Nothing downloads without you choosing it, and a popup says when each job finishes or fails.
+Omni360 is a store and a library in one app on the console.
+
+**Home** is where it opens: the games you played most recently as a row of covers, each one's own artwork filling the screen behind it, and a row of icons across the top for the four places to go. **B** comes back to it from anywhere.
+
+**Games + Apps** shows every installed game, read straight from the hard drive, and plays them - or the disc in the drive - with **A**. Its sidebar reaches your apps, homebrew and emulators too, if you've pointed it at folders for them.
+
+**The Store** lists about 1,500 Xbox 360 disc games, 740 Xbox Live Arcade games, 3,450 indie games and 500 Original Xbox games from archive.org, along with DLC and title updates for any of them - filtered by region, language, genre or rating, browsed by series, or found with a search.
+
+Everything downloads and installs in the background while you keep browsing, with disc games installed as Games on Demand, and a game disc in the drive can be copied to the hard drive the same way. Omni360 also keeps itself up to date, installing only releases signed with the project's key. Nothing downloads without you choosing it, and a popup says when each job finishes or fails.
 
 **Status: beta (0.12.0-beta), working on real hardware.** Every kind of install has been run end to end on a modded console with a real library.
 
@@ -63,8 +71,8 @@ Omni360 is a store and a library in one app on the console. **Your Library** sho
 ## Screenshots
 
 <p align="center">
-  <img src="docs/screenshots/library.png" alt="Your Library: installed games as a grid of covers" width="100%"><br>
-  <sub><b>Your Library</b>: every installed game, Xbox 360 and Original Xbox, with its DLC and title updates marked.</sub>
+  <img src="docs/screenshots/library.png" alt="Games: installed games as a grid of covers" width="100%"><br>
+  <sub><b>Games</b>: every installed game, Xbox 360 and Original Xbox, with its DLC and title updates marked.</sub>
 </p>
 
 <p align="center">
@@ -84,6 +92,9 @@ Omni360 is a store and a library in one app on the console. **Your Library** sho
   <tr>
     <td width="50%"><img src="docs/screenshots/queue.png" alt="The Queue: Grand Theft Auto V waiting while an arcade game downloads"><br><sub><b>Queue</b>: everything downloads and installs in the background.</sub></td>
     <td width="50%"><img src="docs/screenshots/settings.png" alt="Settings: library folders, archive.org keys, disc read speed, updates"><br><sub><b>Settings</b>: library folders, your archive.org keys and updates, all on one screen.</sub></td>
+  </tr>
+  <tr>
+    <td colspan="2"><sub>These shots predate the Home screen and the move to a single sidebar on Games + Apps; the pages themselves are unchanged.</sub></td>
   </tr>
 </table>
 
@@ -133,7 +144,9 @@ Omni360 is a store and a library in one app on the console. **Your Library** sho
 <summary><b>The library, the Store, installs, DLC and disc installs</b></summary>
 <br>
 
-**The library** walks `{games folder}\{TitleID}\{ContentType}\*` and reads each title's ID, name and icon out of its STFS package header (`StfsParser.cpp`) — entirely offline. Covers come from xboxunity.net, or Xbox Live's box art where xboxunity has none, and are cached in `game:\Covers` (`CoverArt.cpp`).
+**The library** walks `{games folder}\{TitleID}\{ContentType}\*` and reads each title's ID, name and icon out of its STFS package header (`StfsParser.cpp`) — entirely offline. Covers come from xboxunity.net, or Xbox Live's box art where xboxunity has none, and are cached in `game:\Covers` (`CoverArt.cpp`). The list as last read is kept in `game:\Library.cache`, so the next start draws it immediately and rescans the drive behind it.
+
+**Home** (`Recents.cpp`) keeps the games you've started in `game:\Recents.txt`, most recent first — written just before the loader takes over, since starting a game ends Omni360 and nothing tells it when the game ends. Only title IDs are stored; the name, the cover and whether the game is still installed come from the library each time, so an uninstalled game drops out on its own. The focused game's wallpaper is the Store's, by title ID, and is asked for only once the focus has rested for a moment — otherwise running across the row would queue a download per tile.
 
 **The Store's games are compiled in.** `tools/make_store_titles.py` builds `StoreTitles.h` from archive.org's Redump collection (the `microsoft_xbox360_*` items, one zip per disc), with title IDs from Redump's own datfile — a disc's serial *is* its title ID: "MW-2004" is publisher code `MW` (0x4D57) and title 2004 (0x07D4). It adds games the Redump collection lacks from the `XBOX_360_2` to `_6` set, gathers each game's discs into games and versions, and writes their labels, so the console only reads tables. Wallpapers, screenshots, descriptions and ratings come from Xbox Live's servers over plain HTTP (`HttpPlain.cpp`), and are cached in `game:\Store` (`StoreArt.cpp`).
 

@@ -27,6 +27,7 @@ end-to-end on real hardware against a real 27-game library.
 #include "FolderGames.h"
 #include "Launch.h"
 #include "LibraryCache.h"
+#include "Recents.h"
 #include "UiSound.h"
 #include "Featured.h"
 #include "SpeedTest.h"
@@ -582,7 +583,7 @@ enum FolderKind
 static const char *const kFolderKindNames[FOLDER_KIND_COUNT] = { "Games", "Homebrew", "Apps", "Emulators" };
 static const char *const kFolderKindKeys[FOLDER_KIND_COUNT] = { GAMES_PATH_KEY, HOMEBREW_PATH_KEY, APPS_PATH_KEY,
                                                                 EMULATORS_PATH_KEY };
-static const char *const kFolderKindPages[FOLDER_KIND_COUNT] = { "Your Library", "Homebrew", "Apps", "Emulators" };
+static const char *const kFolderKindPages[FOLDER_KIND_COUNT] = { "Games", "Homebrew", "Apps", "Emulators" };
 
 // Every kind but games has a shelf.
 static Shelf &ShelfFor(FolderKind kind)
@@ -2343,7 +2344,7 @@ static bool AskDiscName(const char *suggested, unsigned int discNumber, unsigned
     TrimInPlace(typed);
 
     // Unchanged, the original is kept: the keyboard hands text back one byte
-    // per character, which would turn a name like "Modern Warfare® 3" or a
+    // per character, which would turn a name like "Modern WarfareÂ® 3" or a
     // Japanese title into question marks.
     if (typed.empty() || typed == Utf8AsKeyboardText(suggested))
         name = suggested;
@@ -2387,7 +2388,18 @@ static void WaitForExit()
 struct Shell
 {
     ShellPage page;
+
+    // The sidebar has focus rather than the page. Home draws no sidebar and
+    // uses homeFocus instead, so this is held false while it's the page -
+    // see the Home branch in the input loop, and SidebarShown below.
     bool sidebarFocused;
+
+    // Home: which of its two rows has focus (HOME_FOCUS_*), and where it is
+    // in each.
+    int homeFocus;
+    int homeNavFocus;
+    int homeSelected;
+    int homeScroll;
 
     int librarySelected;
     int libraryScroll; // -1 until placed - see LibraryPageView
@@ -2540,15 +2552,37 @@ static bool PageTakesFocus(const Shell &shell, ShellPage page)
     if (page == SHELL_PAGE_QUEUE)
         return shell.queueCount > 0;
     ShelfKind shelf;
-    return page == SHELL_PAGE_LIBRARY || ShelfForPage(page, &shelf) || page == SHELL_PAGE_STORE ||
-           page == SHELL_PAGE_SETTINGS;
+    return page == SHELL_PAGE_HOME || page == SHELL_PAGE_LIBRARY || ShelfForPage(page, &shelf) ||
+           page == SHELL_PAGE_STORE || page == SHELL_PAGE_SETTINGS;
 }
 
-// Apps, Homebrew or Emulators with no folders set: left out of the sidebar.
+// The sidebar is this group's own navigation, not the app's: Games and the
+// three shelves share it, and it lists only them. Home, the Store, the Queue
+// and Settings draw full width and are reached from Home's nav row instead,
+// so shell.sidebarFocused means nothing on them and is held false.
+static bool SidebarShown(const Shell &shell)
+{
+    ShelfKind shelf;
+    return shell.page == SHELL_PAGE_LIBRARY || ShelfForPage(shell.page, &shelf);
+}
+
+// Left out of a page's first column goes to the sidebar - where the page has
+// one. On the pages that don't, the press does nothing.
+static void FocusSidebar(Shell &shell)
+{
+    if (SidebarShown(shell))
+        shell.sidebarFocused = true;
+}
+
+// Not in the sidebar. It lists its own group and nothing else: Games, and
+// Apps, Homebrew or Emulators while each has folders set. Home, the Store,
+// the Queue and Settings are reached from Home's nav row instead.
 static bool PageHidden(ShellPage page)
 {
     ShelfKind shelf;
-    return ShelfForPage(page, &shelf) && g_shelves[shelf].pathCount == 0;
+    if (ShelfForPage(page, &shelf))
+        return g_shelves[shelf].pathCount == 0;
+    return page != SHELL_PAGE_LIBRARY;
 }
 
 // Up or down the sidebar, past the pages it leaves out. Stays put at either end.
@@ -2560,6 +2594,22 @@ static ShellPage NextShownPage(ShellPage page, int step)
             return (ShellPage)p;
     }
     return page;
+}
+
+// Moves to a page and puts focus where that page expects it: Home on its
+// recents row, everything else on the sidebar it was reached from.
+static void EnterPage(Shell &shell, ShellPage page, bool fromSidebar)
+{
+    shell.page = page;
+    if (page == SHELL_PAGE_HOME)
+    {
+        shell.sidebarFocused = false;
+        shell.homeFocus = HOME_FOCUS_RECENTS;
+    }
+    else
+    {
+        shell.sidebarFocused = fromSidebar;
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -2813,7 +2863,7 @@ static void StepStoreFocus(WORD nav, Shell &shell)
         if (next >= 0)
             i = STORE_FOCUS_FEATURED + next;
         else if (nav == XINPUT_GAMEPAD_DPAD_LEFT)
-            shell.sidebarFocused = true;
+            FocusSidebar(shell);
         else if (nav == XINPUT_GAMEPAD_DPAD_DOWN)
         {
             // The button under it: the first for the large tile, else the
@@ -2840,7 +2890,7 @@ static void StepStoreFocus(WORD nav, Shell &shell)
         else if (nav == XINPUT_GAMEPAD_DPAD_LEFT)
         {
             if (b == 0)
-                shell.sidebarFocused = true;
+                FocusSidebar(shell);
             else
                 i--;
         }
@@ -2876,7 +2926,7 @@ static void StepStoreFocus(WORD nav, Shell &shell)
         else if (nav == XINPUT_GAMEPAD_DPAD_LEFT)
         {
             if (col == 0)
-                shell.sidebarFocused = true;
+                FocusSidebar(shell);
             else
                 i--;
         }
@@ -2913,7 +2963,7 @@ static void StepStoreFocus(WORD nav, Shell &shell)
         else if (nav == XINPUT_GAMEPAD_DPAD_LEFT)
         {
             if (place == 0)
-                shell.sidebarFocused = true;
+                FocusSidebar(shell);
             else
                 i--;
         }
@@ -2934,7 +2984,7 @@ static void StepStoreFocus(WORD nav, Shell &shell)
         else if (nav == XINPUT_GAMEPAD_DPAD_LEFT)
         {
             if (place == 0)
-                shell.sidebarFocused = true;
+                FocusSidebar(shell);
             else
                 i--;
         }
@@ -3763,7 +3813,7 @@ static void StepStoreLetter(const UiInput &input, Shell &shell)
     if (input.nav == XINPUT_GAMEPAD_DPAD_LEFT)
     {
         if (sel % cols == 0)
-            shell.sidebarFocused = true;
+            FocusSidebar(shell);
         else
             sel--;
     }
@@ -3871,7 +3921,7 @@ static void StepSectionFocus(WORD nav, Shell &shell)
     else if (nav == XINPUT_GAMEPAD_DPAD_LEFT)
     {
         if (col == 0)
-            shell.sidebarFocused = true;
+            FocusSidebar(shell);
         else
             l--;
     }
@@ -4468,93 +4518,36 @@ static void PlayLibraryGame(const InstalledGame &game)
     if (!ConfirmLeaving())
         return;
     dprintf("Playing: %s (Title ID %08lX)\n", game.displayName, game.titleId);
+    // Before the loader takes over: starting a game ends Omni360, so this is
+    // the only chance to record it for Home's recents.
+    NoteGamePlayed(game.titleId, game.contentType);
     RenderLaunchFrame("Starting", game.displayName, game.titleId);
     LaunchInstalledGame(game);
     ShowMessageUI("Couldn't start this game", game.displayName, "The console's loader refused it - see the log.");
 }
 
-// Settings.txt's "app:" lines - "app: Aurora = Hdd1:\Aurora\Aurora.xex" -
-// the Exit menu's other places to go.
-#define APP_KEY "app: "
-#define MAX_APPS 8
-static char g_appNames[MAX_APPS][64];
-static char g_appPaths[MAX_APPS][MAX_TEXT_LENGTH];
-
-static int ReadApps()
-{
-    int count = 0;
-    FILE *fd = fopen(SETTINGS_FILE, "r");
-    if (fd == NULL)
-        return 0;
-
-    char line[512];
-    const size_t keyLen = strlen(APP_KEY);
-    while (fgets(line, sizeof(line), fd) != NULL && count < MAX_APPS)
-    {
-        if (line[0] == '#' || strncmp(line, APP_KEY, keyLen) != 0)
-            continue;
-        char *value = line + keyLen;
-        value[strcspn(value, "\r\n")] = '\0';
-        char *equals = strchr(value, '=');
-        if (equals == NULL)
-            continue;
-
-        // Both sides, without the spaces around the "=".
-        char *nameEnd = equals;
-        while (nameEnd > value && nameEnd[-1] == ' ')
-            nameEnd--;
-        *nameEnd = '\0';
-        char *path = equals + 1;
-        while (*path == ' ')
-            path++;
-        if (value[0] == '\0' || strlen(path) < 3)
-            continue;
-
-        _snprintf(g_appNames[count], sizeof(g_appNames[count]), "%s", value);
-        g_appNames[count][sizeof(g_appNames[count]) - 1] = '\0';
-        _snprintf(g_appPaths[count], sizeof(g_appPaths[count]), "%s", path);
-        g_appPaths[count][sizeof(g_appPaths[count]) - 1] = '\0';
-        count++;
-    }
-    fclose(fd);
-    return count;
-}
-
-// B from the sidebar: where to go. True if Omni360 should just end - what
-// leaving always did, which takes the console wherever DashLaunch says.
+// B on Home: the one way out of the app. Ending Omni360 takes the console
+// wherever DashLaunch says, which is the only exit now that Home is the
+// root - the Xbox Dashboard and settings.txt's "app:" places were a menu
+// here until then. Launch.h still has what either of those would need.
 static bool ExitMenu()
 {
-    const int apps = ReadApps();
+    const int pending = PendingDownloadCount() + PendingDiscJobCount() + PendingGameJobCount();
 
-    const char *labels[MAX_APPS + 2];
-    const char *sublabels[MAX_APPS + 2];
-    int count = 0;
-    labels[count] = "Leave Omni360";
-    sublabels[count++] = "To the dashboard the console starts with";
-    labels[count] = "Xbox Dashboard";
-    sublabels[count++] = "Microsoft's own, whatever the console starts with";
-    for (int i = 0; i < apps; ++i)
-    {
-        labels[count] = g_appNames[i];
-        sublabels[count++] = g_appPaths[i];
-    }
-
-    const int chosen = ShowChoiceUI("Exit to", "Add more places with \"app:\" lines in settings.txt.",
-                                    labels, sublabels, count, L"Go");
-    if (chosen < 0 || !ConfirmLeaving())
-        return false;
-    if (chosen == 0)
-        return true;
-
-    RenderStatusFrame("Starting", labels[chosen], NULL);
-    if (chosen == 1)
-        LaunchXboxDashboard();
+    char message[96];
+    if (pending > 0)
+        _snprintf(message, sizeof(message), "%d job%s still in the queue.", pending,
+                  pending == 1 ? " is" : "s are");
     else
-        LaunchApp(g_appPaths[chosen - 2]);
-    ShowMessageUI("Couldn't start it", labels[chosen], "The console's loader refused it - see the log.");
-    return false;
-}
+        _snprintf(message, sizeof(message), "The console goes back to its dashboard.");
+    message[sizeof(message) - 1] = '\0';
 
+    return ShowConfirmUI("Exit Omni360?", message,
+                         pending > 0 ? "Leaving stops them. Files that already finished stay installed; "
+                                       "a disc install is removed."
+                                     : NULL,
+                         "Exit");
+}
 static StoreGameView MakeStoreGameView(Shell &shell, const Library &lib)
 {
     StoreGameView view;
@@ -4682,7 +4675,7 @@ static void StepStoreGame(WORD nav, Shell &shell, const Library &lib)
         if (nav == XINPUT_GAMEPAD_DPAD_LEFT)
         {
             if (b == 0)
-                shell.sidebarFocused = true;
+                FocusSidebar(shell);
             else
                 f--;
         }
@@ -4697,7 +4690,7 @@ static void StepStoreGame(WORD nav, Shell &shell, const Library &lib)
         if (nav == XINPUT_GAMEPAD_DPAD_LEFT)
         {
             if (g == 0)
-                shell.sidebarFocused = true;
+                FocusSidebar(shell);
             else
                 f--;
         }
@@ -5148,6 +5141,7 @@ static unsigned long FocusSignature(const Shell &shell)
 {
     const int parts[] = {
         shell.page, shell.sidebarFocused, shell.librarySelected, shell.libraryInGame,
+        shell.homeFocus, shell.homeNavFocus, shell.homeSelected,
         shell.settings.focusRow, shell.settings.focusCol, DiscSpeedSetting(),
         shell.picker.kind, shell.picker.selected, shell.queueSelected,
         shell.storeFocus, shell.storeInSection, shell.storeSection, shell.sectionFocus[shell.storeSection],
@@ -5203,8 +5197,11 @@ static void RefreshShell(Shell &shell, Library &lib, const char *contentBasePath
 static void PublishSidebar(const Shell &shell, const Library &lib)
 {
     ShellSidebar sidebar;
+    sidebar.shown = SidebarShown(shell);
     sidebar.page = shell.page;
-    sidebar.focused = shell.sidebarFocused;
+    // Home draws no sidebar; never let a focused one be published for it,
+    // whatever shell.sidebarFocused was left holding.
+    sidebar.focused = SidebarShown(shell) && shell.sidebarFocused;
     sidebar.libraryCount = lib.count;
     sidebar.appsCount = g_shelvesRead ? g_shelves[SHELF_APPS].count : 0;
     sidebar.homebrewCount = g_shelvesRead ? g_shelves[SHELF_HOMEBREW].count : 0;
@@ -5221,6 +5218,137 @@ static void PublishSidebar(const Shell &shell, const Library &lib)
     sidebar.storageTotal[sizeof(sidebar.storageTotal) - 1] = '\0';
 
     SetShellSidebar(sidebar);
+}
+
+// ---------------------------------------------------------------------------
+// Home
+// ---------------------------------------------------------------------------
+
+// Recents.txt as last read. Reading it is one small file read, so it's done
+// at startup and again whenever the library is rescanned - never per frame.
+static RecentGame g_recents[MAX_RECENTS];
+static int g_recentCount = 0;
+
+static void ReadRecents()
+{
+    g_recentCount = LoadRecents(g_recents, MAX_RECENTS);
+}
+
+// What a library game is, for the line under its name on Home.
+static const char *GameKindName(const InstalledGame &game)
+{
+    if (game.folder)
+        return "Extracted game";
+    switch (game.contentType)
+    {
+    case 0x00005000UL: return "Original Xbox";
+    case 0x000D0000UL: return "Xbox Live Arcade";
+    default:           return "Games on Demand";
+    }
+}
+
+// The games played most recently that are still installed, with the disc in
+// the drive in front of them. Names and covers come from the library, so a
+// game uninstalled since isn't found and drops out on its own.
+//
+// The strings the view points at are held in statics: it's built, drawn and
+// thrown away inside one frame, like the other Make*View calls.
+static HomePageView MakeHomeView(const Shell &shell, const Library &lib)
+{
+    static char clock[16];
+    static char storage[40];
+    static char details[HOME_RECENTS_MAX][72];
+
+    HomePageView view;
+    memset(&view, 0, sizeof(view));
+
+    view.gamertag = NULL; // until there's a profile to show
+    view.focus = shell.homeFocus;
+    view.navFocus = shell.homeNavFocus;
+    view.recentFocus = shell.homeSelected;
+    view.recentScroll = shell.homeScroll;
+
+    SYSTEMTIME now;
+    GetLocalTime(&now);
+    int hour = now.wHour % 12;
+    if (hour == 0)
+        hour = 12;
+    _snprintf(clock, sizeof(clock), "%d:%02d %s", hour, (int)now.wMinute, now.wHour < 12 ? "AM" : "PM");
+    clock[sizeof(clock) - 1] = '\0';
+    view.clock = clock;
+
+    if (shell.storage.detail[0] != '\0')
+    {
+        _snprintf(storage, sizeof(storage), "%s", shell.storage.detail);
+        storage[sizeof(storage) - 1] = '\0';
+        view.storage = storage;
+    }
+
+    // The four places Home goes. Apps, Homebrew and Emulators aren't here:
+    // they sit in the Games page's own sidebar, beside the games, which is
+    // why that one reads "Games + Apps".
+    static const ShellPage kHomeNavPages[] = { SHELL_PAGE_LIBRARY, SHELL_PAGE_STORE, SHELL_PAGE_QUEUE,
+                                               SHELL_PAGE_SETTINGS };
+    const int queued = PendingDownloadCount() + PendingDiscJobCount() + PendingGameJobCount();
+    for (int i = 0; i < (int)(sizeof(kHomeNavPages) / sizeof(kHomeNavPages[0])) && view.navCount < HOME_NAV_MAX;
+         ++i)
+    {
+        const ShellPage p = kHomeNavPages[i];
+        HomeNavView &item = view.nav[view.navCount++];
+        item.label = (p == SHELL_PAGE_LIBRARY) ? "Games + Apps" : ShellPageName(p);
+        item.page = p;
+        item.count = (p == SHELL_PAGE_QUEUE) ? queued : 0;
+    }
+
+    // The disc first: it's the thing you've just put in, so it's what you
+    // most likely came here to start.
+    if (shell.hasDisc && view.recentCount < HOME_RECENTS_MAX)
+    {
+        HomeRecentView &tile = view.recents[view.recentCount];
+        tile.titleId = shell.disc.titleId;
+        tile.name = shell.discName;
+        tile.detail = shell.discInstalled ? "Already installed" : "In the disc drive";
+        tile.disc = true;
+        view.recentCount++;
+    }
+
+    for (int i = 0; i < g_recentCount && view.recentCount < HOME_RECENTS_MAX; ++i)
+    {
+        const InstalledGame *game = NULL;
+        for (int g = 0; g < lib.count && game == NULL; ++g)
+        {
+            if (lib.games[g].titleId == g_recents[i].titleId)
+                game = &lib.games[g];
+        }
+        if (game == NULL)
+            continue; // played once, not installed now
+
+        const int slot = view.recentCount;
+        HomeRecentView &tile = view.recents[slot];
+        tile.titleId = game->titleId;
+        tile.name = game->displayName;
+        tile.disc = false;
+
+        char when[48];
+        const char *played = RecentWhen(g_recents[i], when, sizeof(when));
+        if (played != NULL)
+            _snprintf(details[slot], sizeof(details[slot]), "%s  \xC2\xB7  %s", GameKindName(*game), played);
+        else
+            _snprintf(details[slot], sizeof(details[slot]), "%s", GameKindName(*game));
+        details[slot][sizeof(details[slot]) - 1] = '\0';
+        tile.detail = details[slot];
+
+        view.recentCount++;
+    }
+
+    if (view.recentCount == 0)
+    {
+        view.emptyTitle = lib.count > 0 ? "Nothing played yet" : "No games installed yet";
+        view.emptyHint = lib.count > 0 ? "Games you start show up here."
+                                       : "Find something in the Store to get going.";
+    }
+
+    return view;
 }
 
 static LibraryPageView MakeLibraryView(const Shell &shell, const Library &lib, const char *gamesPath)
@@ -5468,6 +5596,9 @@ static bool DiscTileAction(Shell &shell, const Library &lib, const char *gamesPa
         if (ConfirmLeaving())
         {
             dprintf("Playing the disc: %s (Title ID %08lX)\n", shell.discName, disc.titleId);
+            // Recorded like any other game: it shows on Home if the same
+            // title is also installed, and drops out if it isn't.
+            NoteGamePlayed(disc.titleId, 0);
             RenderLaunchFrame("Starting", shell.discName, disc.titleId);
             // Nothing may be reading the drive as the game starts from it.
             StopDiscWorker(3000);
@@ -5556,6 +5687,38 @@ static int LibraryIndexForTitle(const Library &lib, unsigned long titleId)
             return i;
     }
     return -1;
+}
+
+// A or X on a Home tile. The disc's tile is the library's, so it goes
+// through the same place; a game plays, or opens its page in Your Library.
+// True if something took over the screen.
+static bool HomeTileAction(Shell &shell, const Library &lib, const char *gamesPath, WORD pressed,
+                           const HomeRecentView &tile)
+{
+    if (tile.disc)
+        return DiscTileAction(shell, lib, gamesPath, pressed);
+
+    const int index = LibraryIndexForTitle(lib, tile.titleId);
+    if (index < 0)
+        return false; // uninstalled since the page was built
+
+    if (pressed & XINPUT_GAMEPAD_A)
+    {
+        PlayLibraryGame(lib.games[index]);
+        return true; // it said why if it's still here
+    }
+
+    if (pressed & XINPUT_GAMEPAD_X)
+    {
+        // On the library's page, so B comes back to the grid rather than to
+        // the Store - OpenGameByTitleId goes by whichever page is showing.
+        shell.page = SHELL_PAGE_LIBRARY;
+        shell.sidebarFocused = false;
+        shell.librarySelected = index + (shell.hasDisc ? 1 : 0);
+        OpenGameByTitleId(shell, lib, tile.titleId, lib.games[index].displayName);
+    }
+
+    return false;
 }
 
 static QueueRowTone ToneForOutcome(QueueOutcome outcome)
@@ -6364,9 +6527,17 @@ int main()
     // The library is scanned once (and again only if Settings changes the
     // folder) and the auth header is built once; both are held across the
     // loop, so coming back from anything costs nothing.
+    // One small file read. The list is filtered against the library every
+    // frame, so an uninstall drops out without this being read again.
+    ReadRecents();
+
     Shell &shell = g_shell;
-    shell.page = SHELL_PAGE_LIBRARY;
+    shell.page = SHELL_PAGE_HOME;
     shell.sidebarFocused = false;
+    shell.homeFocus = HOME_FOCUS_RECENTS;
+    shell.homeNavFocus = 0;
+    shell.homeSelected = 0;
+    shell.homeScroll = 0;
     shell.librarySelected = 0;
     shell.libraryScroll = -1;
     shell.settings.focusRow = 0;
@@ -6468,15 +6639,16 @@ int main()
             shell.storeArtRequested = true;
         }
 
-        // Removing the last finished job leaves nothing on the Queue to have
-        // focus.
-        if (shell.page == SHELL_PAGE_QUEUE && !shell.sidebarFocused && shell.queueCount == 0)
-            shell.sidebarFocused = true;
+        // An empty Queue has nothing to focus, and no sidebar to hand focus
+        // to any more: it says so, and B goes Home like every other page.
 
         // Nor is there anything on a page whose last folder Settings took
         // away - it's gone from the sidebar.
-        if (PageHidden(shell.page))
-            shell.page = SHELL_PAGE_LIBRARY;
+        // A shelf whose folders have just been cleared in Settings: back to
+        // Games, which is the one page of the group that is always there.
+        ShelfKind clearedShelf;
+        if (ShelfForPage(shell.page, &clearedShelf) && g_shelves[clearedShelf].pathCount == 0)
+            EnterPage(shell, SHELL_PAGE_LIBRARY, false);
 
         PublishSidebar(shell, lib);
 
@@ -6487,7 +6659,78 @@ int main()
         bool exitRequested = false;
         const unsigned long focusBefore = (pressed != 0 || input.nav != 0) ? FocusSignature(shell) : 0;
 
-        if (shell.sidebarFocused)
+        if (shell.page == SHELL_PAGE_HOME)
+        {
+            // Home's chrome is the nav row across the top rather than the
+            // sidebar, so the same back-stack every other page has - content,
+            // then chrome, then the Exit menu - runs up and down here instead
+            // of left and right.
+            const HomePageView home = MakeHomeView(shell, lib);
+            if (home.recentCount == 0)
+                shell.homeFocus = HOME_FOCUS_NAV; // nothing below to go to
+
+            if (shell.homeNavFocus > home.navCount - 1)
+                shell.homeNavFocus = home.navCount - 1;
+            if (shell.homeNavFocus < 0)
+                shell.homeNavFocus = 0;
+            if (shell.homeSelected > home.recentCount - 1)
+                shell.homeSelected = home.recentCount - 1;
+            if (shell.homeSelected < 0)
+                shell.homeSelected = 0;
+
+            if (shell.homeFocus == HOME_FOCUS_NAV)
+            {
+                if (input.nav == XINPUT_GAMEPAD_DPAD_LEFT && shell.homeNavFocus > 0)
+                    shell.homeNavFocus--;
+                else if (input.nav == XINPUT_GAMEPAD_DPAD_RIGHT && shell.homeNavFocus + 1 < home.navCount)
+                    shell.homeNavFocus++;
+                else if (input.nav == XINPUT_GAMEPAD_DPAD_DOWN && home.recentCount > 0)
+                    shell.homeFocus = HOME_FOCUS_RECENTS;
+                else if ((pressed & XINPUT_GAMEPAD_A) && home.navCount > 0)
+                {
+                    // Straight into the page's content. Only Games has a
+                    // sidebar now, and landing in it rather than on the
+                    // games would be a stop on the way to nowhere.
+                    EnterPage(shell, (ShellPage)home.nav[shell.homeNavFocus].page, false);
+                }
+                else if (pressed & XINPUT_GAMEPAD_B)
+                {
+                    // Home is the root, so B here is what B on the sidebar is
+                    // everywhere else.
+                    exitRequested = ExitMenu();
+                    acted = !exitRequested;
+                }
+            }
+            else
+            {
+                const int across = HomeRecentsAcross();
+
+                if (input.nav == XINPUT_GAMEPAD_DPAD_LEFT && shell.homeSelected > 0)
+                    shell.homeSelected--;
+                else if (input.nav == XINPUT_GAMEPAD_DPAD_RIGHT && shell.homeSelected + 1 < home.recentCount)
+                    shell.homeSelected++;
+                else if (input.nav == XINPUT_GAMEPAD_DPAD_UP)
+                    shell.homeFocus = HOME_FOCUS_NAV;
+                else if (pressed & XINPUT_GAMEPAD_B)
+                {
+                    // Home is the root, so B here leaves the app wherever
+                    // focus is on it - the dialog is what catches a slip.
+                    exitRequested = ExitMenu();
+                    acted = !exitRequested;
+                }
+                else if (pressed & (XINPUT_GAMEPAD_LEFT_SHOULDER | XINPUT_GAMEPAD_RIGHT_SHOULDER))
+                {
+                    shell.homeSelected += (pressed & XINPUT_GAMEPAD_RIGHT_SHOULDER) ? across : -across;
+                    if (shell.homeSelected > home.recentCount - 1) shell.homeSelected = home.recentCount - 1;
+                    if (shell.homeSelected < 0) shell.homeSelected = 0;
+                }
+                else if (pressed & (XINPUT_GAMEPAD_A | XINPUT_GAMEPAD_X))
+                {
+                    acted = HomeTileAction(shell, lib, gamesPath, pressed, home.recents[shell.homeSelected]);
+                }
+            }
+        }
+        else if (shell.sidebarFocused)
         {
             if (input.nav == XINPUT_GAMEPAD_DPAD_UP)
                 shell.page = NextShownPage(shell.page, -1);
@@ -6497,10 +6740,7 @@ int main()
                      PageTakesFocus(shell, shell.page))
                 shell.sidebarFocused = false;
             else if (pressed & XINPUT_GAMEPAD_B)
-            {
-                exitRequested = ExitMenu();
-                acted = !exitRequested;
-            }
+                EnterPage(shell, SHELL_PAGE_HOME, false); // the root, as B is everywhere but Home
         }
         else if (shell.picker.kind != PICKER_NONE && shell.page == shell.picker.page)
         {
@@ -6550,7 +6790,10 @@ int main()
         else if (shell.page == SHELL_PAGE_LIBRARY && !shell.libraryInGame)
         {
             // Left from the first column goes to the sidebar, as B does.
-            bool toSidebar = (pressed & XINPUT_GAMEPAD_B) != 0;
+            // B leaves the page for Home, the root. Left from the first
+            // column goes to the sidebar, which is this page's own chrome.
+            const bool toHome = (pressed & XINPUT_GAMEPAD_B) != 0;
+            bool toSidebar = false;
 
             // The disc's tile, when there is one, is item 0 and the games
             // follow it.
@@ -6562,9 +6805,13 @@ int main()
                          shell.librarySelected))
                 toSidebar = true;
 
-            if (toSidebar)
+            if (toHome)
             {
-                shell.sidebarFocused = true;
+                EnterPage(shell, SHELL_PAGE_HOME, false);
+            }
+            else if (toSidebar)
+            {
+                FocusSidebar(shell);
             }
             else if (onDisc && (pressed & (XINPUT_GAMEPAD_A | XINPUT_GAMEPAD_X | XINPUT_GAMEPAD_START)))
             {
@@ -6600,10 +6847,13 @@ int main()
             Shelf &shelf = g_shelves[kind];
             const int count = g_shelvesRead ? shelf.count : 0;
 
-            if (StepGrid(input, count, LibraryPageVisibleRows(MakeShelfView(shell, kind)), shelf.selected) ||
-                (pressed & XINPUT_GAMEPAD_B))
+            if (pressed & XINPUT_GAMEPAD_B)
             {
-                shell.sidebarFocused = true;
+                EnterPage(shell, SHELL_PAGE_HOME, false);
+            }
+            else if (StepGrid(input, count, LibraryPageVisibleRows(MakeShelfView(shell, kind)), shelf.selected))
+            {
+                FocusSidebar(shell);
             }
             else if ((pressed & XINPUT_GAMEPAD_A) && count > 0)
             {
@@ -6726,7 +6976,7 @@ int main()
             }
             else if (input.nav == XINPUT_GAMEPAD_DPAD_LEFT && place == 0)
             {
-                shell.sidebarFocused = true;
+                FocusSidebar(shell);
             }
             else if ((pressed & XINPUT_GAMEPAD_A) && HomebrewRowCount(row) > 0)
             {
@@ -6856,7 +7106,7 @@ int main()
         {
             const int focusBefore = shell.storeFocus;
             if (pressed & XINPUT_GAMEPAD_B)
-                shell.sidebarFocused = true;
+                EnterPage(shell, SHELL_PAGE_HOME, false);
             else if (pressed & XINPUT_GAMEPAD_Y)
                 acted = OpenStoreSearch(shell); // from anywhere on the page
             else if (pressed & XINPUT_GAMEPAD_A)
@@ -6874,9 +7124,13 @@ int main()
             if (shell.queueCount > 0)
                 shell.queueSelectedId = shell.queueJobs[shell.queueSelected].id;
 
-            if (input.nav == XINPUT_GAMEPAD_DPAD_LEFT || (pressed & XINPUT_GAMEPAD_B))
+            if (pressed & XINPUT_GAMEPAD_B)
             {
-                shell.sidebarFocused = true;
+                EnterPage(shell, SHELL_PAGE_HOME, false);
+            }
+            else if (input.nav == XINPUT_GAMEPAD_DPAD_LEFT)
+            {
+                FocusSidebar(shell);
             }
             else if ((pressed & XINPUT_GAMEPAD_X) && shell.queueCount > 0)
             {
@@ -6929,9 +7183,13 @@ int main()
                 (row != NULL && settings.focusCol < row->controlCount) ? &row->controls[settings.focusCol] : NULL;
             const bool onValue = (control != NULL && control->kind == SETTINGS_CONTROL_VALUE);
 
-            if ((pressed & XINPUT_GAMEPAD_B) || row == NULL)
+            if (pressed & XINPUT_GAMEPAD_B)
             {
-                shell.sidebarFocused = true;
+                EnterPage(shell, SHELL_PAGE_HOME, false);
+            }
+            else if (row == NULL)
+            {
+                FocusSidebar(shell);
             }
             else if (input.nav == XINPUT_GAMEPAD_DPAD_UP || input.nav == XINPUT_GAMEPAD_DPAD_DOWN)
             {
@@ -6974,7 +7232,7 @@ int main()
                 else if (!right && settings.focusCol > 0 && row->kind != SETTINGS_VIEW_FOLDER)
                     settings.focusCol--;
                 else if (!right)
-                    shell.sidebarFocused = true;
+                    FocusSidebar(shell);
             }
             else if ((pressed & XINPUT_GAMEPAD_A) &&
                      settings.actions[settings.focusRow][row->kind == SETTINGS_VIEW_FOLDER ? 0 : settings.focusCol] !=
@@ -7006,9 +7264,10 @@ int main()
         }
         else
         {
-            // A page that never takes focus. Nothing should land here, but if
-            // it does, hand focus back rather than leave the pad doing nothing.
-            shell.sidebarFocused = true;
+            // Nothing should land here. Leave for Home rather than leave the
+            // pad doing nothing.
+            if (pressed & XINPUT_GAMEPAD_B)
+                EnterPage(shell, SHELL_PAGE_HOME, false);
         }
 
         if (exitRequested)
@@ -7059,11 +7318,35 @@ int main()
         {
             if (PageTakesFocus(shell, shell.page))
                 hintCount = AddHint(hints, hintCount, UI_BUTTON_A, L"Select");
-            hintCount = AddHint(hints, hintCount, UI_BUTTON_B, L"Exit");
+            hintCount = AddHint(hints, hintCount, UI_BUTTON_B, L"Home");
         }
 
         switch (shell.page)
         {
+        case SHELL_PAGE_HOME:
+        {
+            HomePageView view = MakeHomeView(shell, lib);
+
+            if (shell.homeFocus == HOME_FOCUS_NAV)
+            {
+                if (view.navCount > 0)
+                    hintCount = AddHint(hints, hintCount, UI_BUTTON_A, L"Open");
+                hintCount = AddHint(hints, hintCount, UI_BUTTON_B, L"Exit");
+            }
+            else
+            {
+                hintCount = AddHint(hints, hintCount, UI_BUTTON_A, L"Play");
+                hintCount = AddHint(hints, hintCount, UI_BUTTON_X, L"View game", L"View");
+                hintCount = AddHint(hints, hintCount, UI_BUTTON_B, L"Exit");
+                if (view.recentCount > HomeRecentsAcross())
+                    hintCount = AddHint(hints, hintCount, UI_BUTTON_LBRB, L"Page");
+            }
+
+            RenderHomeFrame(view, hints, hintCount);
+            shell.homeScroll = view.recentScroll;
+            break;
+        }
+
         case SHELL_PAGE_LIBRARY:
             if (shell.picker.kind != PICKER_NONE && shell.picker.page == SHELL_PAGE_LIBRARY)
             {
@@ -7113,7 +7396,7 @@ int main()
                         hintCount = AddHint(hints, hintCount, UI_BUTTON_A, L"Play");
                         hintCount = AddHint(hints, hintCount, UI_BUTTON_X, L"View game", L"View");
                     }
-                    hintCount = AddHint(hints, hintCount, UI_BUTTON_B, L"Back");
+                    hintCount = AddHint(hints, hintCount, UI_BUTTON_B, L"Home");
                     if (itemCount > LibraryPageVisibleRows(view) * LibraryGridColumns())
                         hintCount = AddHint(hints, hintCount, UI_BUTTON_LBRB, L"Page");
                 }
@@ -7138,7 +7421,7 @@ int main()
             {
                 if (view.count > 0)
                     hintCount = AddHint(hints, hintCount, UI_BUTTON_A, L"Start");
-                hintCount = AddHint(hints, hintCount, UI_BUTTON_B, L"Back");
+                hintCount = AddHint(hints, hintCount, UI_BUTTON_B, L"Home");
                 if (view.count > LibraryPageVisibleRows(view) * LibraryGridColumns())
                     hintCount = AddHint(hints, hintCount, UI_BUTTON_LBRB, L"Page");
             }
@@ -7254,7 +7537,7 @@ int main()
                     {
                         hintCount = AddHint(hints, hintCount, UI_BUTTON_A, L"View game", L"View");
                     }
-                    hintCount = AddHint(hints, hintCount, UI_BUTTON_B, L"Back");
+                    hintCount = AddHint(hints, hintCount, UI_BUTTON_B, L"Home");
                     hintCount = AddHint(hints, hintCount, UI_BUTTON_Y, L"Search");
                 }
 
@@ -7282,7 +7565,7 @@ int main()
                     bool finished = (shell.queueJobs[shell.queueSelected].state == QUEUE_FINISHED);
                     hintCount = finished ? AddHint(hints, hintCount, UI_BUTTON_X, L"Remove")
                                          : AddHint(hints, hintCount, UI_BUTTON_X, L"Stop download", L"Stop");
-                    hintCount = AddHint(hints, hintCount, UI_BUTTON_B, L"Back");
+                    hintCount = AddHint(hints, hintCount, UI_BUTTON_B, L"Home");
                 }
 
                 QueuePageView view;
@@ -7321,7 +7604,7 @@ int main()
                     hintCount = AddHint(hints, hintCount, UI_BUTTON_A, control->on ? L"Turn off" : L"Turn on");
                 else if (action != SETTINGS_ROW_NONE)
                     hintCount = AddHint(hints, hintCount, UI_BUTTON_A, L"Select");
-                hintCount = AddHint(hints, hintCount, UI_BUTTON_B, L"Back");
+                hintCount = AddHint(hints, hintCount, UI_BUTTON_B, L"Home");
             }
 
             SettingsPageView view;

@@ -21,10 +21,17 @@ void ShutdownGameListUI();
 // down (progress, messages, confirmations) are still their own loops for now;
 // they draw the sidebar too, so the app reads as one place throughout.
 
-// In the order the sidebar lists them. Library, Apps, Homebrew, Emulators and
-// Store are one group, Queue and Settings the other, with a divider between.
+// In the order the sidebar lists them. Home, Library, Apps, Homebrew,
+// Emulators and Store are one group, Queue and Settings the other, with a
+// divider between.
+//
+// Home is the app's root, and the one page the sidebar isn't drawn over: it
+// has a nav row of its own across the top so the wallpaper can run the full
+// width. Everything else in the shell is unchanged by it - see
+// HomePageView below, and main.cpp's Home branch.
 enum ShellPage
 {
+    SHELL_PAGE_HOME,
     SHELL_PAGE_LIBRARY,
     SHELL_PAGE_APPS,
     SHELL_PAGE_HOMEBREW,
@@ -35,8 +42,18 @@ enum ShellPage
     SHELL_PAGE_COUNT
 };
 
+// A page's name, as the sidebar writes it - so Home's nav row and the
+// sidebar can't drift apart.
+const char *ShellPageName(ShellPage page);
+
 struct ShellSidebar
 {
+    // Whether this page draws it at all. It is the Games/Apps/Homebrew/
+    // Emulators group's own navigation, not the app's: Home, the Store, the
+    // Queue and Settings run full width without it, and setting this also
+    // moves where their content starts.
+    bool shown;
+
     ShellPage page;       // the highlighted page
     bool focused;         // the sidebar has focus, rather than the page
     int libraryCount;     // shown beside Your Library
@@ -125,6 +142,72 @@ struct UiHint
 // ---------------------------------------------------------------------------
 // Pages
 // ---------------------------------------------------------------------------
+
+// Home: the focused game's wallpaper across the whole screen, a nav row
+// along the top in place of the sidebar, and a row of the games played most
+// recently under its name.
+//
+// Two things can have focus, and the page draws whichever has it: the nav
+// row, or the recents row. main.cpp owns which (HOME_FOCUS_* below) and does
+// the moving; this only draws.
+
+#define HOME_RECENTS_MAX 12
+#define HOME_NAV_MAX 8
+
+enum HomeFocus
+{
+    HOME_FOCUS_NAV,
+    HOME_FOCUS_RECENTS
+};
+
+// One tile in the recents row. The disc in the drive is one of these too,
+// drawn as the library's disc tile is, so Home needs no separate case.
+struct HomeRecentView
+{
+    unsigned long titleId; // its cover, and the page's wallpaper; 0 for none
+    const char *name;
+    const char *detail;    // under the name while it has focus; may be NULL
+    bool disc;             // the disc in the drive rather than a library game
+};
+
+// One button in the nav row. page is what main.cpp does with it when A is
+// pressed - it means nothing here. count, when above 0, is drawn as a pill
+// on the button, the way the sidebar draws the queue's.
+struct HomeNavView
+{
+    const char *label;
+    int page;   // a ShellPage, or -1 for something that isn't one
+    int count;
+};
+
+struct HomePageView
+{
+    // Along the top. clock and storage may be NULL; gamertag is NULL until
+    // there's a profile to show, and the row then starts with the app's name.
+    const char *gamertag;
+    const char *clock;
+    const char *storage;
+
+    HomeNavView nav[HOME_NAV_MAX];
+    int navCount;
+    int navFocus;
+
+    HomeRecentView recents[HOME_RECENTS_MAX];
+    int recentCount;
+    int recentFocus;
+    int recentScroll; // the first tile shown; the Render call moves it
+
+    int focus; // HOME_FOCUS_*
+
+    // Nothing played yet, so the row is a single card pointing at the Store.
+    const char *emptyTitle;
+    const char *emptyHint;
+};
+
+// How many recent tiles fit across, so main.cpp can page by a screenful.
+int HomeRecentsAcross();
+
+void RenderHomeFrame(HomePageView &view, const UiHint *hints, int hintCount);
 
 // What the disc's tile shows.
 enum LibraryDiscTile
