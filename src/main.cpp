@@ -45,6 +45,8 @@ end-to-end on real hardware against a real 27-game library.
 #include "DiscSource.h"
 #include "ReadAhead.h"
 #include "TitleNames.h"
+#define HOMEBREW_CATALOG_DATA
+#include "HomebrewCatalog.h"
 #include "dns.h"         // StartNetwork, LogNetworkStatus
 #include "ImageDecode.h" // ImageTimerMs, for the startup timing lines
 
@@ -66,6 +68,7 @@ extern "C" NTSTATUS XexGetModuleHandle(PSZ moduleName, PHANDLE outHandle);
 #define SOUNDS_KEY "nav-sounds: "         // "off" silences the interface
 #define DISC_SPEED_KEY "disc-speed: "       // 1 to 4, DiscWorker's spindle speed for installs
 #define STORE_FILTER_KEY "store-filter: "   // the Store letters' filters and order: "sort=a-z;regions=usa,eur;..."
+#define HOMEBREW_MIRROR_KEY "homebrew-mirror: " // for testing: homebrew from "http://PC:8000", a folder of the repo's .7z files
 #define CREDENTIALS_FILE "game:\\ArchiveOrgKeys.txt"
 #define CONTENT_BASE_PATH_DEFAULT "Hdd1:\\Content\\0000000000000000"
 #define GAMES_PATH_DEFAULT CONTENT_BASE_PATH_DEFAULT // where the dashboard itself keeps installed games
@@ -388,26 +391,26 @@ static bool FolderExists(const char *path)
     return attributes != (DWORD)-1 && (attributes & FILE_ATTRIBUTE_DIRECTORY) != 0;
 }
 
-// Rewrites settings.txt's library folders: the folder games install to,
-// first, then the others - in place of every "games-path:" line there was,
-// where the first of them was, or at the end. Every other line stays as it
-// was. Written to a temporary file and swapped in, as SetSettingsValue does.
-static bool WriteGamesPaths(const char *first, char more[][MAX_TEXT_LENGTH], int moreCount)
+// Rewrites every key line in settings.txt as values, one line each - in
+// place of every one there was, where the first of them was, or at the end;
+// none removes them all. Every other line stays as it was. Written to a
+// temporary file and swapped in, as SetSettingsValue does.
+static bool WriteSettingsLines(const char *key, const char *const *values, int count)
 {
-    std::string paths = std::string(GAMES_PATH_KEY) + first + "\n";
-    for (int i = 0; i < moreCount; ++i)
-        paths += std::string(GAMES_PATH_KEY) + more[i] + "\n";
+    std::string paths;
+    for (int i = 0; i < count; ++i)
+        paths += std::string(key) + values[i] + "\n";
 
     std::string contents;
     bool placed = false;
-    const size_t keyLen = strlen(GAMES_PATH_KEY);
+    const size_t keyLen = strlen(key);
     FILE *in = fopen(SETTINGS_FILE, "r");
     if (in != NULL)
     {
         char line[512];
         while (fgets(line, sizeof(line), in) != NULL)
         {
-            if (line[0] != '#' && strncmp(line, GAMES_PATH_KEY, keyLen) == 0)
+            if (line[0] != '#' && strncmp(line, key, keyLen) == 0)
             {
                 if (!placed)
                     contents += paths;
@@ -437,21 +440,230 @@ static bool WriteGamesPaths(const char *first, char more[][MAX_TEXT_LENGTH], int
     return rename(SETTINGS_TEMP_FILE, SETTINGS_FILE) == 0;
 }
 
-// The library folders Settings lists, after the one games install to: those
-// added, then the likely places on each drive that aren't - a Content folder
-// and a Games folder, on the hard drive and each USB port - that exist.
+// ---------------------------------------------------------------------------
+// Apps, Homebrew and Emulators
+// ---------------------------------------------------------------------------
+//
+// Three pages laid out as the library is, of what's in the folders named by
+// settings.txt's "apps-path:" lines - Aurora, file managers, tools - its
+// "homebrew-path:" lines - homebrew games - and its "emulators-path:" lines.
+// Each key can be given more than once, and Settings writes them; a page
+// with no folders isn't in the sidebar. Read by the startup thread, after
+// the library, and again when Settings changes them; A starts one as the
+// Exit menu's "app:" lines are started.
+
+#define APPS_PATH_KEY "apps-path: "
+#define HOMEBREW_PATH_KEY "homebrew-path: "
+#define EMULATORS_PATH_KEY "emulators-path: "
+#define MAX_SHELF_PATHS 8
+#define MAX_SHELF_ITEMS 64
+
+enum ShelfKind
+{
+    SHELF_APPS,
+    SHELF_HOMEBREW,
+    SHELF_EMULATORS,
+    SHELF_COUNT
+};
+
+struct Shelf
+{
+    InstalledGame items[MAX_SHELF_ITEMS]; // no images: an app's folder has none to keep
+    int count;
+    char paths[MAX_SHELF_PATHS][MAX_TEXT_LENGTH];
+    int found[MAX_SHELF_PATHS]; // each folder's, at the last scan
+    unsigned long coverKeys[MAX_SHELF_ITEMS]; // each item's cover, by its name - CoverArt.h's HomebrewCoverKey
+    int pathCount;
+    char pathList[MAX_TEXT_LENGTH]; // the folders, for an empty page: "Hdd1:\Apps, Usb0:\Apps"
+    int selected;
+    int scroll; // -1 until placed - see LibraryPageView
+};
+
+static Shelf g_shelves[SHELF_COUNT];
+static const char *const kShelfKeys[SHELF_COUNT] = { APPS_PATH_KEY, HOMEBREW_PATH_KEY, EMULATORS_PATH_KEY };
+
+// Each shelf's sidebar page, and the other way round.
+static const ShellPage kShelfPages[SHELF_COUNT] = { SHELL_PAGE_APPS, SHELL_PAGE_HOMEBREW, SHELL_PAGE_EMULATORS };
+
+static bool ShelfForPage(int page, ShelfKind *out)
+{
+    for (int s = 0; s < SHELF_COUNT; ++s)
+    {
+        if (kShelfPages[s] == page)
+        {
+            *out = (ShelfKind)s;
+            return true;
+        }
+    }
+    return false;
+}
+
+// Set by the startup thread once the shelves are scanned. Until then their
+// pages say they're still looking, and nothing else scans them.
+static volatile LONG g_shelvesRead = 0;
+
+// The shelf's folders from settings.txt. On the UI thread, before the startup
+// thread scans them, so nothing reads settings.txt while Settings rewrites it.
+static void ReadShelfPaths(Shelf &shelf, const char *key)
+{
+    shelf.pathCount = 0;
+    shelf.pathList[0] = '\0';
+    shelf.selected = 0;
+    shelf.scroll = -1;
+    FILE *fd = fopen(SETTINGS_FILE, "r");
+    if (fd == NULL)
+        return;
+
+    char line[512];
+    const size_t keyLen = strlen(key);
+    while (fgets(line, sizeof(line), fd) != NULL && shelf.pathCount < MAX_SHELF_PATHS)
+    {
+        if (line[0] == '#' || strncmp(line, key, keyLen) != 0)
+            continue;
+        char *value = line + keyLen;
+        value[strcspn(value, "\r\n")] = '\0';
+
+        // The scan adds its own separator.
+        size_t len = strlen(value);
+        while (len > 0 && (value[len - 1] == '\\' || value[len - 1] == ' '))
+            value[--len] = '\0';
+        if (len < 3)
+            continue;
+
+        _snprintf(shelf.paths[shelf.pathCount], MAX_TEXT_LENGTH, "%s", value);
+        shelf.paths[shelf.pathCount][MAX_TEXT_LENGTH - 1] = '\0';
+        shelf.found[shelf.pathCount] = 0;
+        const size_t used = strlen(shelf.pathList);
+        _snprintf(shelf.pathList + used, sizeof(shelf.pathList) - used, "%s%s", used > 0 ? ", " : "", value);
+        shelf.pathList[sizeof(shelf.pathList) - 1] = '\0';
+        shelf.pathCount++;
+    }
+    fclose(fd);
+}
+
+static int CompareGamesByName(const void *a, const void *b);
+
+static void ScanShelf(Shelf &shelf)
+{
+    shelf.count = 0;
+    for (int p = 0; p < shelf.pathCount; ++p)
+    {
+        shelf.found[p] = 0;
+        if (shelf.count < MAX_SHELF_ITEMS)
+            shelf.found[p] = EnumerateFolderApps(shelf.paths[p], shelf.items + shelf.count,
+                                                 MAX_SHELF_ITEMS - shelf.count, dprintf);
+        shelf.count += shelf.found[p];
+    }
+    if (shelf.count > 1)
+        qsort(shelf.items, shelf.count, sizeof(InstalledGame), CompareGamesByName);
+
+    // Homebrew rarely carries a title ID to find its cover by, so it's found
+    // by its name - its folder's, or an Original Xbox one's own.
+    for (int i = 0; i < shelf.count; ++i)
+        shelf.coverKeys[i] = HomebrewCoverKey(shelf.items[i].displayName);
+}
+
+// ---------------------------------------------------------------------------
+// The folders Settings lists
+// ---------------------------------------------------------------------------
+
+// What a folder holds, which is the page that shows it and the settings.txt
+// key that names it. In the order left and right step through them on its
+// row in Settings.
+enum FolderKind
+{
+    FOLDER_GAMES,
+    FOLDER_HOMEBREW,
+    FOLDER_APPS,
+    FOLDER_EMULATORS,
+    FOLDER_KIND_COUNT
+};
+
+static const char *const kFolderKindNames[FOLDER_KIND_COUNT] = { "Games", "Homebrew", "Apps", "Emulators" };
+static const char *const kFolderKindKeys[FOLDER_KIND_COUNT] = { GAMES_PATH_KEY, HOMEBREW_PATH_KEY, APPS_PATH_KEY,
+                                                                EMULATORS_PATH_KEY };
+static const char *const kFolderKindPages[FOLDER_KIND_COUNT] = { "Your Library", "Homebrew", "Apps", "Emulators" };
+
+// Every kind but games has a shelf.
+static Shelf &ShelfFor(FolderKind kind)
+{
+    switch (kind)
+    {
+    case FOLDER_HOMEBREW:  return g_shelves[SHELF_HOMEBREW];
+    case FOLDER_EMULATORS: return g_shelves[SHELF_EMULATORS];
+    default:               return g_shelves[SHELF_APPS];
+    }
+}
+
+// The folders Settings lists, after the one games install to: those added -
+// games, homebrew, apps and emulators - then the likely places on each drive
+// that aren't, that exist.
 struct LibraryFolderRow
 {
     char path[MAX_TEXT_LENGTH];
-    bool scanned;   // a "games-path:" line has it
+    FolderKind kind;
+    bool scanned;   // a line of its kind's key has it
     bool suggested; // one of the likely places, listed whether it's scanned or not
     bool exists;
-    int games;    // found there at the last scan, when scanned
+    int games;      // found there at the last scan, when scanned; -1 while the first scan is still going
 };
 
-#define MAX_FOLDER_ROWS (MAX_MORE_GAMES_PATHS + 8)
+// A Content folder and a Games folder on each drive hold games; a Homebrew
+// folder homebrew, an Apps folder apps and an Emulators folder emulators.
+struct LikelyFolder
+{
+    const char *place;
+    FolderKind kind;
+};
+
+static const char *const kFolderDrives[] = { "Hdd1:", "Usb0:", "Usb1:", "Usb2:" };
+static const LikelyFolder kFolderPlaces[] = {
+    { "\\Content\\0000000000000000", FOLDER_GAMES },
+    { "\\Games", FOLDER_GAMES },
+    { "\\Homebrew", FOLDER_HOMEBREW },
+    { "\\Apps", FOLDER_APPS },
+    { "\\Emulators", FOLDER_EMULATORS },
+};
+#define FOLDER_DRIVE_COUNT (sizeof(kFolderDrives) / sizeof(kFolderDrives[0]))
+#define FOLDER_PLACE_COUNT (sizeof(kFolderPlaces) / sizeof(kFolderPlaces[0]))
+
+#define MAX_FOLDER_ROWS (MAX_MORE_GAMES_PATHS + SHELF_COUNT * MAX_SHELF_PATHS + FOLDER_DRIVE_COUNT * FOLDER_PLACE_COUNT)
 static LibraryFolderRow g_folderRows[MAX_FOLDER_ROWS];
 static int g_folderRowCount = 0;
+
+// What a likely folder that isn't scanned yet was set to hold, on its row -
+// A then adds it as that. Kept by path, as the rows are built again.
+#define MAX_KIND_CHOICES 8
+static char g_kindChoicePaths[MAX_KIND_CHOICES][MAX_TEXT_LENGTH];
+static FolderKind g_kindChoices[MAX_KIND_CHOICES];
+static int g_kindChoiceCount = 0;
+
+static void ChooseUnscannedKind(const char *path, FolderKind kind)
+{
+    int i = 0;
+    while (i < g_kindChoiceCount && _stricmp(g_kindChoicePaths[i], path) != 0)
+        ++i;
+    if (i == g_kindChoiceCount)
+    {
+        if (g_kindChoiceCount == MAX_KIND_CHOICES)
+            i = 0; // the oldest goes
+        else
+            g_kindChoiceCount++;
+        _snprintf(g_kindChoicePaths[i], MAX_TEXT_LENGTH, "%s", path);
+        g_kindChoicePaths[i][MAX_TEXT_LENGTH - 1] = '\0';
+    }
+    g_kindChoices[i] = kind;
+}
+
+static FolderKind UnscannedKind(const char *path, FolderKind likely)
+{
+    for (int i = 0; i < g_kindChoiceCount; ++i)
+    {
+        if (_stricmp(g_kindChoicePaths[i], path) == 0)
+            return g_kindChoices[i];
+    }
+    return likely;
+}
 
 static bool FolderListed(const char *path, const char *gamesPath)
 {
@@ -465,17 +677,14 @@ static bool FolderListed(const char *path, const char *gamesPath)
     return false;
 }
 
-static const char *const kFolderDrives[] = { "Hdd1:", "Usb0:", "Usb1:", "Usb2:" };
-static const char *const kFolderPlaces[] = { "\\Content\\0000000000000000", "\\Games" };
-
 static bool IsSuggestedFolder(const char *path)
 {
-    for (int d = 0; d < 4; ++d)
+    for (size_t d = 0; d < FOLDER_DRIVE_COUNT; ++d)
     {
-        for (int f = 0; f < 2; ++f)
+        for (size_t f = 0; f < FOLDER_PLACE_COUNT; ++f)
         {
             char candidate[MAX_TEXT_LENGTH];
-            _snprintf(candidate, sizeof(candidate), "%s%s", kFolderDrives[d], kFolderPlaces[f]);
+            _snprintf(candidate, sizeof(candidate), "%s%s", kFolderDrives[d], kFolderPlaces[f].place);
             candidate[sizeof(candidate) - 1] = '\0';
             if (_stricmp(candidate, path) == 0)
                 return true;
@@ -484,40 +693,101 @@ static bool IsSuggestedFolder(const char *path)
     return false;
 }
 
+static void AddScannedFolderRow(const char *path, FolderKind kind, int found, const char *gamesPath)
+{
+    if (g_folderRowCount >= MAX_FOLDER_ROWS || FolderListed(path, gamesPath))
+        return;
+    LibraryFolderRow &row = g_folderRows[g_folderRowCount++];
+    _snprintf(row.path, sizeof(row.path), "%s", path);
+    row.path[sizeof(row.path) - 1] = '\0';
+    row.kind = kind;
+    row.scanned = true;
+    row.suggested = IsSuggestedFolder(row.path);
+    row.exists = FolderExists(row.path);
+    row.games = found;
+}
+
 // moreFound: how many games each of g_moreGamesPaths added at the last scan.
 static void FindLibraryFolders(const char *gamesPath, const int *moreFound)
 {
     g_folderRowCount = 0;
-    for (int p = 0; p < g_moreGamesPathCount && g_folderRowCount < MAX_FOLDER_ROWS; ++p)
+    for (int p = 0; p < g_moreGamesPathCount; ++p)
+        AddScannedFolderRow(g_moreGamesPaths[p], FOLDER_GAMES, moreFound[p], gamesPath);
+    for (int k = FOLDER_HOMEBREW; k < FOLDER_KIND_COUNT; ++k)
     {
-        if (FolderListed(g_moreGamesPaths[p], gamesPath))
-            continue;
-        LibraryFolderRow &row = g_folderRows[g_folderRowCount++];
-        _snprintf(row.path, sizeof(row.path), "%s", g_moreGamesPaths[p]);
-        row.path[sizeof(row.path) - 1] = '\0';
-        row.scanned = true;
-        row.suggested = IsSuggestedFolder(row.path);
-        row.exists = FolderExists(row.path);
-        row.games = moreFound[p];
+        const Shelf &shelf = ShelfFor((FolderKind)k);
+        for (int p = 0; p < shelf.pathCount; ++p)
+            AddScannedFolderRow(shelf.paths[p], (FolderKind)k, g_shelvesRead ? shelf.found[p] : -1, gamesPath);
     }
 
-    for (int d = 0; d < 4; ++d)
+    for (size_t d = 0; d < FOLDER_DRIVE_COUNT; ++d)
     {
-        for (int f = 0; f < 2 && g_folderRowCount < MAX_FOLDER_ROWS; ++f)
+        for (size_t f = 0; f < FOLDER_PLACE_COUNT && g_folderRowCount < MAX_FOLDER_ROWS; ++f)
         {
             char path[MAX_TEXT_LENGTH];
-            _snprintf(path, sizeof(path), "%s%s", kFolderDrives[d], kFolderPlaces[f]);
+            _snprintf(path, sizeof(path), "%s%s", kFolderDrives[d], kFolderPlaces[f].place);
             path[sizeof(path) - 1] = '\0';
             if (FolderListed(path, gamesPath) || !FolderExists(path))
                 continue;
             LibraryFolderRow &row = g_folderRows[g_folderRowCount++];
             memcpy(row.path, path, strlen(path) + 1);
+            row.kind = UnscannedKind(path, kFolderPlaces[f].kind);
             row.scanned = false;
             row.suggested = true;
             row.exists = true;
             row.games = 0;
         }
     }
+}
+
+// Whether path is under any kind's key already - where games install
+// included.
+static bool FolderScannedAsAnything(const char *path, const char *gamesPath)
+{
+    if (_stricmp(path, gamesPath) == 0)
+        return true;
+    for (int p = 0; p < g_moreGamesPathCount; ++p)
+        if (_stricmp(g_moreGamesPaths[p], path) == 0)
+            return true;
+    for (int s = 0; s < SHELF_COUNT; ++s)
+        for (int p = 0; p < g_shelves[s].pathCount; ++p)
+            if (_stricmp(g_shelves[s].paths[p], path) == 0)
+                return true;
+    return false;
+}
+
+// How many more folders kind's key can take.
+static int FolderKindRoom(FolderKind kind)
+{
+    if (kind == FOLDER_GAMES)
+        return MAX_MORE_GAMES_PATHS - g_moreGamesPathCount;
+    return MAX_SHELF_PATHS - ShelfFor(kind).pathCount;
+}
+
+// Writes kind's folders back to settings.txt as they are now, less remove and
+// plus add - either may be NULL. The games key's first line stays the folder
+// games install to.
+static bool WriteFolderKind(FolderKind kind, const char *gamesPath, const char *remove, const char *add)
+{
+    const char *values[1 + MAX_MORE_GAMES_PATHS + MAX_SHELF_PATHS + 1];
+    int n = 0;
+    if (kind == FOLDER_GAMES)
+    {
+        values[n++] = gamesPath;
+        for (int p = 0; p < g_moreGamesPathCount; ++p)
+            if (remove == NULL || _stricmp(g_moreGamesPaths[p], remove) != 0)
+                values[n++] = g_moreGamesPaths[p];
+    }
+    else
+    {
+        const Shelf &shelf = ShelfFor(kind);
+        for (int p = 0; p < shelf.pathCount; ++p)
+            if (remove == NULL || _stricmp(shelf.paths[p], remove) != 0)
+                values[n++] = shelf.paths[p];
+    }
+    if (add != NULL)
+        values[n++] = add;
+    return WriteSettingsLines(kFolderKindKeys[kind], values, n);
 }
 
 // ---------------------------------------------------------------------------
@@ -1069,14 +1339,25 @@ static int g_libraryGeneration = 0;
 // box art is asked for ahead of the library's, as it's the first tile.
 static unsigned long g_coverDiscTitleId = 0;
 
+static void NameHomebrewCovers(); // with the Store's Homebrew page
+
 static void RequestLibraryCovers(const Library &lib)
 {
-    static unsigned long titleIds[MAX_INSTALLED_GAMES + 1];
+    static unsigned long titleIds[MAX_INSTALLED_GAMES + 1 + SHELF_COUNT * MAX_SHELF_ITEMS];
     int n = 0;
     if (g_coverDiscTitleId != 0)
         titleIds[n++] = g_coverDiscTitleId;
     for (int i = 0; i < lib.count; ++i)
         titleIds[n++] = lib.games[i].titleId;
+
+    // Then the apps', once they're read - xboxunity has covers for some.
+    if (g_shelvesRead)
+    {
+        for (int s = 0; s < SHELF_COUNT; ++s)
+            for (int i = 0; i < g_shelves[s].count; ++i)
+                titleIds[n++] = g_shelves[s].coverKeys[i];
+    }
+    NameHomebrewCovers(); // by name, which the cover worker searches xboxunity for
     RequestCoverArt(titleIds, n);
 }
 
@@ -1248,16 +1529,51 @@ static void RescanFolders(Library &lib, const char *gamesPath, SettingsOutcome &
     outcome.libraryChanged = true;
 }
 
-// A on a library folder's row: scanned, it's removed - its games stay where
-// they are - and not, it's added.
+// The Apps and Homebrew pages read again from settings.txt - once the startup
+// thread's first read is done, which usually it long is.
+static void RescanShelves(const Library &lib)
+{
+    RenderStatusFrame("Scanning", "Looking for apps, homebrew and emulators", NULL);
+    while (!g_shelvesRead)
+        Sleep(20);
+    for (int s = 0; s < SHELF_COUNT; ++s)
+    {
+        ReadShelfPaths(g_shelves[s], kShelfKeys[s]);
+        ScanShelf(g_shelves[s]);
+    }
+    RequestLibraryCovers(lib); // theirs are asked for after the library's
+}
+
+// Reads again whatever kind's folders feed.
+static void RescanKind(FolderKind kind, Library &lib, const char *gamesPath, SettingsOutcome &outcome)
+{
+    if (kind == FOLDER_GAMES)
+        RescanFolders(lib, gamesPath, outcome);
+    else
+        RescanShelves(lib);
+}
+
+static void TooManyFolders(FolderKind kind)
+{
+    char detail[64];
+    _snprintf(detail, sizeof(detail), "Up to %d %s folders can be added.",
+              kind == FOLDER_GAMES ? MAX_MORE_GAMES_PATHS : MAX_SHELF_PATHS,
+              kind == FOLDER_GAMES       ? "more games"
+              : kind == FOLDER_HOMEBREW  ? "homebrew"
+              : kind == FOLDER_EMULATORS ? "emulators"
+                                         : "apps");
+    detail[sizeof(detail) - 1] = '\0';
+    ShowMessageUI("Too many folders", "Remove one of them first.", detail);
+}
+
+// A on a folder's row: scanned, it's removed - what's in it stays where it
+// is - and not, it's added as whatever its row says it holds.
 static void ToggleLibraryFolder(int index, Library &lib, const char *gamesPath, SettingsOutcome &outcome)
 {
     if (index < 0 || index >= g_folderRowCount)
         return;
     const LibraryFolderRow row = g_folderRows[index]; // a copy - the rescan rebuilds the list
 
-    static char more[MAX_MORE_GAMES_PATHS][MAX_TEXT_LENGTH];
-    int n = 0;
     if (row.scanned)
     {
         // One of the likely places stays listed, unticked, so it's only
@@ -1265,51 +1581,73 @@ static void ToggleLibraryFolder(int index, Library &lib, const char *gamesPath, 
         if (!row.suggested)
         {
             char message[MAX_TEXT_LENGTH + 64];
-            _snprintf(message, sizeof(message), "Remove %s from your library?", row.path);
+            _snprintf(message, sizeof(message), "Stop looking in %s?", row.path);
             message[sizeof(message) - 1] = '\0';
-            if (!ShowConfirmUI("Library folder", message, "Its games stay where they are.", "Remove"))
+            if (!ShowConfirmUI("Folder", message, "What's in it stays where it is.", "Remove"))
                 return;
         }
-        for (int p = 0; p < g_moreGamesPathCount; ++p)
-        {
-            if (_stricmp(g_moreGamesPaths[p], row.path) != 0)
-                memcpy(more[n++], g_moreGamesPaths[p], MAX_TEXT_LENGTH);
-        }
     }
-    else
+    else if (FolderKindRoom(row.kind) <= 0)
     {
-        if (g_moreGamesPathCount >= MAX_MORE_GAMES_PATHS)
-        {
-            ShowMessageUI("Too many folders", "Remove a library folder first.", "Up to 7 can be added.");
-            return;
-        }
-        for (int p = 0; p < g_moreGamesPathCount; ++p)
-            memcpy(more[n++], g_moreGamesPaths[p], MAX_TEXT_LENGTH);
-        memcpy(more[n++], row.path, MAX_TEXT_LENGTH);
+        TooManyFolders(row.kind);
+        return;
     }
 
-    if (!WriteGamesPaths(gamesPath, more, n))
+    if (!WriteFolderKind(row.kind, gamesPath, row.scanned ? row.path : NULL, row.scanned ? NULL : row.path))
     {
         ShowMessageUI("Not saved", "settings.txt could not be written.", row.path);
         return;
     }
-    dprintf("Library folder %s %s\n", row.path, row.scanned ? "removed" : "added");
-    RescanFolders(lib, gamesPath, outcome);
+    dprintf("%s folder %s %s\n", kFolderKindNames[row.kind], row.path, row.scanned ? "removed" : "added");
+    RescanKind(row.kind, lib, gamesPath, outcome);
 }
 
-// "Add another library folder": one typed, for a folder somewhere the list
-// doesn't look.
-static void AddLibraryFolder(Library &lib, const char *gamesPath, SettingsOutcome &outcome)
+// Left and right on a folder's row: what it holds. A scanned folder moves to
+// the other kind's key at once, and both kinds are read again; one that isn't
+// only remembers it, for when A adds it.
+static void StepFolderKind(int index, int step, Library &lib, const char *gamesPath, SettingsOutcome &outcome)
 {
-    if (g_moreGamesPathCount >= MAX_MORE_GAMES_PATHS)
+    if (index < 0 || index >= g_folderRowCount)
+        return;
+    const LibraryFolderRow row = g_folderRows[index];
+    const int next = (int)row.kind + step;
+    if (next < 0 || next >= FOLDER_KIND_COUNT)
+        return;
+    const FolderKind kind = (FolderKind)next;
+
+    if (!row.scanned)
     {
-        ShowMessageUI("Too many folders", "Remove a library folder first.", "Up to 7 can be added.");
+        ChooseUnscannedKind(row.path, kind);
+        return;
+    }
+    if (FolderKindRoom(kind) <= 0)
+    {
+        TooManyFolders(kind);
         return;
     }
 
+    // Added under the new key first, so a write that fails leaves it under
+    // one of them rather than neither.
+    if (!WriteFolderKind(kind, gamesPath, NULL, row.path) || !WriteFolderKind(row.kind, gamesPath, row.path, NULL))
+    {
+        ShowMessageUI("Not saved", "settings.txt could not be written.", row.path);
+        return;
+    }
+    dprintf("Folder %s now holds %s, was %s\n", row.path, kFolderKindNames[kind], kFolderKindNames[row.kind]);
+
+    if (row.kind == FOLDER_GAMES || kind == FOLDER_GAMES)
+        RescanFolders(lib, gamesPath, outcome);
+    if (row.kind != FOLDER_GAMES || kind != FOLDER_GAMES)
+        RescanShelves(lib);
+}
+
+// "Add folder": one typed, for a folder somewhere the list doesn't look -
+// then what's in it, as Aurora asks.
+static void AddLibraryFolder(Library &lib, const char *gamesPath, SettingsOutcome &outcome)
+{
     std::string typed;
-    if (OpenKeyboardToString(XUSER_INDEX_ANY, &typed, L"Library Folder",
-                             L"Another folder to look for games in, like Usb0:\\Games", L"Usb0:\\") != ERROR_SUCCESS)
+    if (OpenKeyboardToString(XUSER_INDEX_ANY, &typed, L"Add Folder",
+                             L"A folder of games, homebrew or apps, like Usb0:\\Games", L"Usb0:\\") != ERROR_SUCCESS)
         return; // cancelled
 
     char newPath[MAX_TEXT_LENGTH];
@@ -1323,27 +1661,37 @@ static void AddLibraryFolder(Library &lib, const char *gamesPath, SettingsOutcom
         ShowMessageUI("Folder not found", "There is no folder at that path.", newPath);
         return;
     }
-    bool listed = (_stricmp(newPath, gamesPath) == 0);
-    for (int p = 0; p < g_moreGamesPathCount && !listed; ++p)
-        listed = (_stricmp(g_moreGamesPaths[p], newPath) == 0);
-    if (listed)
+    if (FolderScannedAsAnything(newPath, gamesPath))
     {
-        ShowMessageUI("Already in your library", "That folder is looked in already.", newPath);
+        ShowMessageUI("Already added", "That folder is looked in already. Its row in Settings says what for.",
+                      newPath);
         return;
     }
 
-    static char more[MAX_MORE_GAMES_PATHS][MAX_TEXT_LENGTH];
-    int n = 0;
-    for (int p = 0; p < g_moreGamesPathCount; ++p)
-        memcpy(more[n++], g_moreGamesPaths[p], MAX_TEXT_LENGTH);
-    memcpy(more[n++], newPath, MAX_TEXT_LENGTH);
-    if (!WriteGamesPaths(gamesPath, more, n))
+    static const char *labels[FOLDER_KIND_COUNT] = { "Games", "Homebrew", "Apps", "Emulators" };
+    static const char *sublabels[FOLDER_KIND_COUNT] = {
+        "Games on Demand, arcade games and extracted games - Your Library",
+        "Homebrew games - the Homebrew page",
+        "Dashboards, file managers and tools - the Apps page",
+        "Emulators - the Emulators page",
+    };
+    const int chosen = ShowChoiceUI("What's in this folder?", newPath, labels, sublabels, FOLDER_KIND_COUNT, L"Choose");
+    if (chosen < 0)
+        return;
+    const FolderKind kind = (FolderKind)chosen;
+    if (FolderKindRoom(kind) <= 0)
+    {
+        TooManyFolders(kind);
+        return;
+    }
+
+    if (!WriteFolderKind(kind, gamesPath, NULL, newPath))
     {
         ShowMessageUI("Not saved", "settings.txt could not be written.", newPath);
         return;
     }
-    dprintf("Library folder %s added\n", newPath);
-    RescanFolders(lib, gamesPath, outcome);
+    dprintf("%s folder %s added\n", kFolderKindNames[kind], newPath);
+    RescanKind(kind, lib, gamesPath, outcome);
 }
 
 static void ChangeGamesFolder(Library &lib, char *gamesPath, size_t gamesPathSize, SettingsOutcome &outcome)
@@ -1579,6 +1927,7 @@ struct SettingsPage
     char installHelp[MAX_TEXT_LENGTH + 64];
     char installStatus[64];
     char folderStatus[MAX_FOLDER_ROWS][48];
+    char folderHelp[MAX_FOLDER_ROWS][128];
     char keysStatus[64];
     char updatesStatus[96];
     char updatesHelp[96];
@@ -1631,9 +1980,9 @@ static void BuildSettingsPage(SettingsPage &page, const Library &lib, const char
     // --- The library's folders ---
     _snprintf(page.installHelp, sizeof(page.installHelp), "Where Store and disc installs go - now %s", gamesPath);
     page.installHelp[sizeof(page.installHelp) - 1] = '\0';
-    AddSettingsRow(page, SETTINGS_VIEW_HEADING, "Library folders");
+    AddSettingsRow(page, SETTINGS_VIEW_HEADING, "Folders");
     AddSettingsControl(page, SETTINGS_CONTROL_BUTTON, "Add folder", SETTINGS_ROW_ADD_FOLDER,
-                       "Type the path of another folder to look for games in, like Usb0:\\Games");
+                       "Type the path of another folder of games, homebrew or apps, like Usb0:\\Games");
     AddSettingsControl(page, SETTINGS_CONTROL_BUTTON, "Change install folder", SETTINGS_ROW_GAMES_FOLDER,
                        page.installHelp);
 
@@ -1650,13 +1999,18 @@ static void BuildSettingsPage(SettingsPage &page, const Library &lib, const char
         row.help = "Games install here, so it's always scanned. Change install folder, above, moves it.";
     }
 
-    // The other folders the library looks in, and the likely ones it could.
+    // The other folders looked in - games, homebrew and apps - and the likely
+    // ones that could be. Each says what it holds on its right, which left
+    // and right change.
     FindLibraryFolders(gamesPath, lib.folderFound + 1);
     for (int i = 0; i < g_folderRowCount; ++i)
     {
         const LibraryFolderRow &folder = g_folderRows[i];
         char *status = page.folderStatus[i];
         const size_t statusSize = sizeof(page.folderStatus[i]);
+        char *help = page.folderHelp[i];
+        const size_t helpSize = sizeof(page.folderHelp[i]);
+        const char *kindName = kFolderKindNames[folder.kind];
         SettingsRowView &row = AddSettingsRow(page, SETTINGS_VIEW_FOLDER, folder.path);
         page.args[page.count - 1] = i;
         page.actions[page.count - 1][0] = SETTINGS_ROW_LIBRARY_FOLDER;
@@ -1664,22 +2018,44 @@ static void BuildSettingsPage(SettingsPage &page, const Library &lib, const char
         if (!folder.scanned)
         {
             _snprintf(status, statusSize, "Not scanned");
-            row.help = "Not scanned. A adds it to your library.";
+            _snprintf(help, helpSize, "Not scanned. A adds it to %s - left and right change what it holds.",
+                      kFolderKindPages[folder.kind]);
         }
         else if (!folder.exists)
         {
             _snprintf(status, statusSize, "Not found");
             row.missing = true;
-            row.help = "This folder isn't there any more. A removes it from your library.";
+            _snprintf(help, helpSize, "This folder isn't there any more. A stops looking for it.");
         }
         else
         {
-            _snprintf(status, statusSize, "%d game%s", folder.games, folder.games == 1 ? "" : "s");
-            row.help = folder.suggested ? "Scanned for games. A stops scanning it."
-                                        : "Scanned for games. A removes it from your library.";
+            if (folder.games < 0)
+                _snprintf(status, statusSize, "Scanning\xE2\x80\xA6");
+            else if (folder.kind == FOLDER_GAMES)
+                _snprintf(status, statusSize, "%d game%s", folder.games, folder.games == 1 ? "" : "s");
+            else if (folder.kind == FOLDER_APPS)
+                _snprintf(status, statusSize, "%d app%s", folder.games, folder.games == 1 ? "" : "s");
+            else if (folder.kind == FOLDER_EMULATORS)
+                _snprintf(status, statusSize, "%d emulator%s", folder.games, folder.games == 1 ? "" : "s");
+            else
+                _snprintf(status, statusSize, "%d found", folder.games);
+            _snprintf(help, helpSize, "Shown in %s. A %s - left and right change what it holds.",
+                      kFolderKindPages[folder.kind], folder.suggested ? "stops scanning it" : "removes it");
         }
         status[statusSize - 1] = '\0';
+        help[helpSize - 1] = '\0';
         row.status = status;
+        row.help = help;
+
+        // What it holds, beside it, as Disc read speed's value is.
+        SettingsControlView &c = row.controls[0];
+        memset(&c, 0, sizeof(c));
+        c.kind = SETTINGS_CONTROL_VALUE;
+        c.label = kindName;
+        c.valueIndex = folder.kind;
+        c.valueCount = FOLDER_KIND_COUNT;
+        c.compact = true;
+        row.controlCount = 1;
     }
 
     // --- One line a setting ---
@@ -2043,6 +2419,15 @@ struct Shell
     // A disc install finished: read the library again at the top of the
     // next pass, so the game is in it.
     bool rescanLibrary;
+    bool rescanShelves; // likewise the Apps, Homebrew and Emulators pages, for a homebrew install
+
+    // The Store's Homebrew page, open over the front page: the ConsoleMods
+    // repo's apps, homebrew and emulators, a row of tiles each.
+    bool storeInHomebrew;
+    int homebrewRow;
+    int homebrewPlace;
+    int homebrewRowScroll[HOMEBREW_KIND_COUNT]; // each row's first tile shown
+    float homebrewScroll;                       // pixels the page has moved up
 
     // What takes a file read or a drive query to find out, so it's refreshed
     // only when something may have changed it - on the way back from any
@@ -2154,7 +2539,27 @@ static bool PageTakesFocus(const Shell &shell, ShellPage page)
 {
     if (page == SHELL_PAGE_QUEUE)
         return shell.queueCount > 0;
-    return page == SHELL_PAGE_LIBRARY || page == SHELL_PAGE_STORE || page == SHELL_PAGE_SETTINGS;
+    ShelfKind shelf;
+    return page == SHELL_PAGE_LIBRARY || ShelfForPage(page, &shelf) || page == SHELL_PAGE_STORE ||
+           page == SHELL_PAGE_SETTINGS;
+}
+
+// Apps, Homebrew or Emulators with no folders set: left out of the sidebar.
+static bool PageHidden(ShellPage page)
+{
+    ShelfKind shelf;
+    return ShelfForPage(page, &shelf) && g_shelves[shelf].pathCount == 0;
+}
+
+// Up or down the sidebar, past the pages it leaves out. Stays put at either end.
+static ShellPage NextShownPage(ShellPage page, int step)
+{
+    for (int p = (int)page + step; p >= 0 && p < SHELL_PAGE_COUNT; p += step)
+    {
+        if (!PageHidden((ShellPage)p))
+            return (ShellPage)p;
+    }
+    return page;
 }
 
 // ---------------------------------------------------------------------------
@@ -2198,20 +2603,26 @@ static bool RefreshFeatured()
 
 // The other ways in - those still to come marked SOON. DLC and title updates
 // are on each game's page instead.
+// The Store's Homebrew page: off until ConsoleMods lets Omni360 download from
+// its repo - consolemods.org refuses anything but Aurora's script for now (see
+// the Setup Guide). Its button is drawn faded, marked SOON. true to open it.
+#define HOMEBREW_STORE_OPEN false
+
+// Search is Y, anywhere on the front page.
 static const StoreButtonView kStoreButtons[STORE_BUTTON_COUNT] = {
-    { "Search", false },
+    { "Homebrew", !HOMEBREW_STORE_OPEN },
     { "XBLA", false },
     { "XBLIG", false },
     { "Original Xbox", false },
 };
 
 // What each will be, for the toast when one's pressed before then.
-#define STORE_BUTTON_SEARCH 0
+#define STORE_BUTTON_HOMEBREW 0
 #define STORE_BUTTON_XBLA  1
 #define STORE_BUTTON_XBLIG 2
 #define STORE_BUTTON_XBOX  3
 static const char *const kStoreButtonsSoon[STORE_BUTTON_COUNT] = {
-    "Search every game by name",
+    "Homebrew apps, games and emulators",
     "Xbox Live Arcade games, A to Z",
     "Xbox Live Indie Games, A to Z",
     "Original Xbox games, A to Z",
@@ -4446,6 +4857,244 @@ static bool InstallStoreVersion(const Shell &shell, const Library &lib, const ch
     return unpacks;
 }
 
+// ---------------------------------------------------------------------------
+// The Store's Homebrew page
+// ---------------------------------------------------------------------------
+//
+// The ConsoleMods repo's apps, homebrew games and emulators - the list
+// Aurora's Xbox 360 Homebrew Store script shows, bundled from its .ini files
+// (HomebrewCatalog.h) until the repo can be read live. A row of tiles for
+// each kind, its covers xboxunity's, found by the folder it installs as - the
+// name the Apps, Homebrew and Emulators pages look its cover up by once it's
+// in, so the two share it. A shows an item's details, and Install queues it
+// into the first folder of its kind in Settings - or Hdd1:\Apps, \Homebrew or
+// \Emulators, which then becomes that folder.
+
+static const FolderKind kHomebrewFolderKinds[HOMEBREW_KIND_COUNT] = { FOLDER_APPS, FOLDER_HOMEBREW, FOLDER_EMULATORS };
+static const char *const kHomebrewHeadings[HOMEBREW_KIND_COUNT] = { "Apps", "Homebrew", "Emulators" };
+static const char *const kHomebrewDefaultFolders[HOMEBREW_KIND_COUNT] = { "Hdd1:\\Apps", "Hdd1:\\Homebrew",
+                                                                          "Hdd1:\\Emulators" };
+
+// The tiles, in kHomebrewItems' order - by kind, then title - so each row is
+// a run of them, starting at its kind's first.
+static StoreTileView g_homebrewTiles[HOMEBREW_ITEM_COUNT];
+static bool g_homebrewInstalled[HOMEBREW_ITEM_COUNT];
+static int g_homebrewRowStart[HOMEBREW_KIND_COUNT + 1];
+
+// Where an item of kind installs. *isSet: it's a folder from Settings, not
+// the usual one.
+static const char *HomebrewKindFolder(int kind, bool *isSet)
+{
+    const Shelf &shelf = ShelfFor(kHomebrewFolderKinds[kind]);
+    *isSet = shelf.pathCount > 0;
+    return *isSet ? shelf.paths[0] : kHomebrewDefaultFolders[kind];
+}
+
+// The test mirror from settings.txt, without a trailing '/'; empty for none.
+static void HomebrewMirror(char *out, size_t outSize)
+{
+    GetSettingsPath(HOMEBREW_MIRROR_KEY, "", out, outSize);
+    size_t len = strlen(out);
+    while (len > 0 && (out[len - 1] == '/' || out[len - 1] == ' '))
+        out[--len] = '\0';
+}
+
+// The catalog's tiles and rows. Once: they're its own.
+static void MakeHomebrewTiles()
+{
+    static bool made = false;
+    if (made)
+        return;
+    made = true;
+    for (int k = 0; k <= HOMEBREW_KIND_COUNT; ++k)
+        g_homebrewRowStart[k] = HOMEBREW_ITEM_COUNT;
+    for (int i = HOMEBREW_ITEM_COUNT - 1; i >= 0; --i)
+        g_homebrewRowStart[kHomebrewItems[i].kind] = i;
+    for (int k = HOMEBREW_KIND_COUNT - 1; k >= 0; --k)
+    {
+        if (g_homebrewRowStart[k] > g_homebrewRowStart[k + 1])
+            g_homebrewRowStart[k] = g_homebrewRowStart[k + 1]; // a kind with none
+    }
+    for (int i = 0; i < HOMEBREW_ITEM_COUNT; ++i)
+    {
+        StoreTileView &tile = g_homebrewTiles[i];
+        tile.titleId = HomebrewCoverKey(kHomebrewItems[i].folder);
+        tile.name = kHomebrewItems[i].title;
+        tile.letter = 0;
+        tile.indie = false;
+    }
+}
+
+// The item a row's tile is.
+static int HomebrewItemAt(int row, int place)
+{
+    return g_homebrewRowStart[row] + place;
+}
+
+static int HomebrewRowCount(int row)
+{
+    return g_homebrewRowStart[row + 1] - g_homebrewRowStart[row];
+}
+
+// The names behind every homebrew cover key: the Apps, Homebrew and Emulators
+// pages' items, by their names, and the catalog's, by their folders - for
+// the cover worker to search xboxunity for.
+static void NameHomebrewCovers()
+{
+    static const char *names[SHELF_COUNT * MAX_SHELF_ITEMS + HOMEBREW_ITEM_COUNT];
+    int named = 0;
+    if (g_shelvesRead)
+    {
+        for (int s = 0; s < SHELF_COUNT; ++s)
+            for (int i = 0; i < g_shelves[s].count; ++i)
+                names[named++] = g_shelves[s].items[i].displayName;
+    }
+    for (int i = 0; i < HOMEBREW_ITEM_COUNT; ++i)
+        names[named++] = kHomebrewItems[i].folder;
+    SetHomebrewCoverNames(names, named);
+}
+
+// Which items are installed - their folder is in their kind's. One listing
+// of each kind's folder, not a look-up an item.
+static void RefreshHomebrewPage()
+{
+    std::string present[HOMEBREW_KIND_COUNT];
+    for (int k = 0; k < HOMEBREW_KIND_COUNT; ++k)
+    {
+        bool set;
+        char pattern[MAX_TEXT_LENGTH + 4];
+        _snprintf(pattern, sizeof(pattern), "%s\\*", HomebrewKindFolder(k, &set));
+        pattern[sizeof(pattern) - 1] = '\0';
+        WIN32_FIND_DATAA found;
+        HANDLE h = FindFirstFileA(pattern, &found);
+        if (h == INVALID_HANDLE_VALUE)
+            continue;
+        do
+        {
+            if (found.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY)
+                present[k] += std::string("|") + found.cFileName + "|";
+        } while (FindNextFileA(h, &found));
+        FindClose(h);
+        for (size_t c = 0; c < present[k].size(); ++c)
+            present[k][c] = (char)tolower((unsigned char)present[k][c]);
+    }
+
+    for (int i = 0; i < HOMEBREW_ITEM_COUNT; ++i)
+    {
+        const HomebrewItem &item = kHomebrewItems[i];
+        std::string key = std::string("|") + item.folder + "|";
+        for (size_t c = 0; c < key.size(); ++c)
+            key[c] = (char)tolower((unsigned char)key[c]);
+        g_homebrewInstalled[i] = present[item.kind].find(key) != std::string::npos;
+    }
+}
+
+static void OpenHomebrew(Shell &shell)
+{
+    MakeHomebrewTiles();
+    NameHomebrewCovers();
+    RefreshHomebrewPage();
+    shell.storeInHomebrew = true;
+}
+
+static StoreRowsView MakeHomebrewView(const Shell &shell)
+{
+    StoreRowsView view;
+    memset(&view, 0, sizeof(view));
+    view.title = "Homebrew";
+
+    char mirror[MAX_TEXT_LENGTH];
+    HomebrewMirror(mirror, sizeof(mirror));
+    static char subtitle[MAX_TEXT_LENGTH + 64];
+    if (mirror[0] != '\0')
+        _snprintf(subtitle, sizeof(subtitle), "From the ConsoleMods repo" STORE_MIDDOT "downloads from %s", mirror);
+    else
+        _snprintf(subtitle, sizeof(subtitle), "From the ConsoleMods repo, as Aurora's Homebrew Store lists it");
+    subtitle[sizeof(subtitle) - 1] = '\0';
+    view.subtitle = subtitle;
+
+    for (int k = 0; k < HOMEBREW_KIND_COUNT; ++k)
+    {
+        StoreRowView &row = view.rows[k];
+        row.name = kHomebrewHeadings[k];
+        row.tiles = &g_homebrewTiles[g_homebrewRowStart[k]];
+        row.count = HomebrewRowCount(k);
+        row.scroll = shell.homebrewRowScroll[k];
+        view.installed[k] = &g_homebrewInstalled[g_homebrewRowStart[k]];
+    }
+    view.rowCount = HOMEBREW_KIND_COUNT;
+    view.focusRow = shell.homebrewRow;
+    view.focusPlace = shell.homebrewPlace;
+    view.scroll = shell.homebrewScroll;
+    view.focused = !shell.sidebarFocused;
+    return view;
+}
+
+// A on an item: its details, and Install. Takes over the screen.
+static void ShowHomebrewItem(Shell &shell, int index)
+{
+    const HomebrewItem &item = kHomebrewItems[index];
+    bool set;
+    const char *kindFolder = HomebrewKindFolder(item.kind, &set);
+    char mirror[MAX_TEXT_LENGTH];
+    HomebrewMirror(mirror, sizeof(mirror));
+
+    std::string body = item.description;
+    char facts[160] = "";
+    if (item.version[0] != '\0')
+        _snprintf(facts, sizeof(facts), "Version %s", item.version);
+    facts[sizeof(facts) - 1] = '\0';
+    if (item.author[0] != '\0')
+    {
+        char by[96];
+        _snprintf(by, sizeof(by), "by %s", item.author);
+        by[sizeof(by) - 1] = '\0';
+        AppendText(facts, sizeof(facts), STORE_MIDDOT, by);
+    }
+    if (item.size[0] != '\0')
+        AppendText(facts, sizeof(facts), STORE_MIDDOT, item.size);
+    if (facts[0] != '\0')
+        body = std::string(facts) + "\n\n" + body;
+
+    char foot[MAX_TEXT_LENGTH + 160];
+    _snprintf(foot, sizeof(foot), "%s %s\\%s%s", g_homebrewInstalled[index] ? "Installed in" : "Installs to",
+              kindFolder, item.folder, mirror[0] != '\0' ? "  -  from your test mirror" : "");
+    foot[sizeof(foot) - 1] = '\0';
+
+    if (!ShowNotesUI(kHomebrewHeadings[item.kind], item.title, body.c_str(), foot,
+                     g_homebrewInstalled[index] ? L"Install again" : L"Install"))
+        return;
+    if (g_homebrewInstalled[index] &&
+        !ShowConfirmUI("Install again?", item.title,
+                       "Files it brings are replaced; anything else in its folder, like settings, stays.", "Install"))
+        return;
+
+    // The first of its kind: the usual folder becomes its kind's, so its
+    // page turns up in the sidebar once it's in.
+    if (!set)
+    {
+        if (!WriteFolderKind(kHomebrewFolderKinds[item.kind], "", NULL, kindFolder))
+        {
+            ShowMessageUI("Not saved", "settings.txt could not be written.", kindFolder);
+            return;
+        }
+        shell.rescanShelves = true;
+    }
+
+    HomebrewJobSpec spec;
+    memset(&spec, 0, sizeof(spec));
+    _snprintf(spec.title, sizeof(spec.title), "%s", item.title);
+    for (int u = 0; u < item.urlCount && u < HOMEBREW_MAX_URLS; ++u)
+        _snprintf(spec.urls[u], sizeof(spec.urls[u]), "%s", kHomebrewUrls[item.firstUrl + u]);
+    spec.urlCount = item.urlCount < HOMEBREW_MAX_URLS ? item.urlCount : HOMEBREW_MAX_URLS;
+    _snprintf(spec.kindFolder, sizeof(spec.kindFolder), "%s", kindFolder);
+    _snprintf(spec.folder, sizeof(spec.folder), "%s", item.folder);
+    _snprintf(spec.mirror, sizeof(spec.mirror), "%s", mirror);
+    spec.title[sizeof(spec.title) - 1] = spec.kindFolder[sizeof(spec.kindFolder) - 1] = '\0';
+    spec.folder[sizeof(spec.folder) - 1] = spec.mirror[sizeof(spec.mirror) - 1] = '\0';
+    ReportEnqueue(EnqueueHomebrew(spec), item.title);
+}
+
 // A on the front page. True if something took over the screen.
 static bool ActOnStoreFocus(Shell &shell)
 {
@@ -4460,14 +5109,16 @@ static bool ActOnStoreFocus(Shell &shell)
     }
     else if (i < STORE_FOCUS_LETTERS)
     {
-        if (i - STORE_FOCUS_BUTTONS == STORE_BUTTON_XBLA)
+        if (kStoreButtons[i - STORE_FOCUS_BUTTONS].disabled)
+            ShowShellToast("Coming soon", kStoreButtonsSoon[i - STORE_FOCUS_BUTTONS], UI_TOAST_INFO);
+        else if (i - STORE_FOCUS_BUTTONS == STORE_BUTTON_XBLA)
             OpenSection(shell, SECTION_XBLA);
         else if (i - STORE_FOCUS_BUTTONS == STORE_BUTTON_XBLIG)
             OpenSection(shell, SECTION_XBLIG);
         else if (i - STORE_FOCUS_BUTTONS == STORE_BUTTON_XBOX)
             OpenSection(shell, SECTION_XBOX);
-        else if (i - STORE_FOCUS_BUTTONS == STORE_BUTTON_SEARCH)
-            return OpenStoreSearch(shell);
+        else if (i - STORE_FOCUS_BUTTONS == STORE_BUTTON_HOMEBREW)
+            OpenHomebrew(shell);
         else
             ShowShellToast("Coming soon", kStoreButtonsSoon[i - STORE_FOCUS_BUTTONS], UI_TOAST_INFO);
     }
@@ -4503,6 +5154,8 @@ static unsigned long FocusSignature(const Shell &shell)
         shell.storeInLetter, shell.storeSelected, shell.storeInGame, shell.storeGameFocus, shell.storeVersionChosen,
         shell.storeVersionsOpen, shell.storeVersionFocus,
         shell.storeFilterOpen, shell.storeFilterFocus, FilterSignature(),
+        shell.storeInHomebrew, shell.homebrewRow, shell.homebrewPlace,
+        g_shelves[SHELF_APPS].selected, g_shelves[SHELF_HOMEBREW].selected, g_shelves[SHELF_EMULATORS].selected,
     };
     unsigned long hash = 2166136261UL; // FNV-1a
     for (size_t i = 0; i < sizeof(parts) / sizeof(parts[0]); ++i)
@@ -4553,6 +5206,11 @@ static void PublishSidebar(const Shell &shell, const Library &lib)
     sidebar.page = shell.page;
     sidebar.focused = shell.sidebarFocused;
     sidebar.libraryCount = lib.count;
+    sidebar.appsCount = g_shelvesRead ? g_shelves[SHELF_APPS].count : 0;
+    sidebar.homebrewCount = g_shelvesRead ? g_shelves[SHELF_HOMEBREW].count : 0;
+    sidebar.emulatorsCount = g_shelvesRead ? g_shelves[SHELF_EMULATORS].count : 0;
+    for (int p = 0; p < SHELL_PAGE_COUNT; ++p)
+        sidebar.hidden[p] = PageHidden((ShellPage)p);
     sidebar.queueCount = PendingDownloadCount() + PendingDiscJobCount() + PendingGameJobCount();
     sidebar.storageUsed = shell.storage.used;
     strncpy(sidebar.storageLabel, shell.storage.label, sizeof(sidebar.storageLabel) - 1);
@@ -4575,6 +5233,11 @@ static LibraryPageView MakeLibraryView(const Shell &shell, const Library &lib, c
     view.gamesPath = gamesPath;
     view.bannerText = shell.keysSaved ? NULL : "Add your archive.org keys in Settings to start downloading.";
     view.focused = !shell.sidebarFocused;
+    view.heading = NULL;
+    view.emptyTitle = NULL;
+    view.emptyHint = NULL;
+    view.isApps = false;
+    view.coverKeys = NULL;
 
     view.hasDisc = shell.hasDisc;
     view.discTitleId = (shell.disc.state == DISC_READY) ? shell.disc.titleId : 0;
@@ -4599,6 +5262,103 @@ static LibraryPageView MakeLibraryView(const Shell &shell, const Library &lib, c
             view.discProgress = job.fraction;
     }
     return view;
+}
+
+// The Apps or Homebrew page, drawn as the library's grid is.
+static LibraryPageView MakeShelfView(const Shell &shell, ShelfKind kind)
+{
+    static const char *const headings[SHELF_COUNT] = { "Apps", "Homebrew", "Emulators" };
+    static const char *const looking[SHELF_COUNT] = { "Looking for apps", "Looking for homebrew",
+                                                      "Looking for emulators" };
+    static const char *const none[SHELF_COUNT] = { "No apps found", "No homebrew found", "No emulators found" };
+    const Shelf &shelf = g_shelves[kind];
+
+    LibraryPageView view;
+    memset(&view, 0, sizeof(view));
+    view.games = shelf.items;
+    view.count = g_shelvesRead ? shelf.count : 0;
+    view.selected = shelf.selected;
+    view.scroll = shelf.scroll;
+    view.focused = !shell.sidebarFocused;
+    view.heading = headings[kind];
+    view.isApps = true;
+    view.coverKeys = shelf.coverKeys;
+    view.gamesPath = shelf.pathCount > 0 ? shelf.pathList : NULL;
+
+    // Without folders the page isn't in the sidebar, so it's never empty for
+    // want of them.
+    if (!g_shelvesRead)
+    {
+        view.emptyTitle = looking[kind];
+        view.emptyHint = "";
+    }
+    else
+    {
+        view.emptyTitle = none[kind];
+        view.emptyHint = "Each one is a folder with default.xex, default.xbe or one other .xex in it.";
+    }
+    return view;
+}
+
+// A on an app. Returns only if it didn't start, having said so.
+static void PlayApp(const InstalledGame &app)
+{
+    if (!ConfirmLeaving())
+        return;
+    dprintf("Starting app: %s (%s)\n", app.displayName, app.packagePath);
+    RenderLaunchFrame("Starting", app.displayName, app.titleId);
+    LaunchApp(app.packagePath);
+    ShowMessageUI("Couldn't start it", app.displayName, "The console's loader refused it - see the log.");
+}
+
+// The D-pad and shoulder buttons on a grid of tiles - the library's, or an
+// app page's. True when left from the first column means the sidebar.
+static bool StepGrid(const UiInput &input, int itemCount, int pageRows, int &sel)
+{
+    if (itemCount == 0)
+        return input.nav == XINPUT_GAMEPAD_DPAD_LEFT;
+
+    const int cols = LibraryGridColumns();
+
+    if (input.nav == XINPUT_GAMEPAD_DPAD_LEFT)
+    {
+        if (sel % cols == 0)
+            return true;
+        sel--;
+    }
+    else if (input.nav == XINPUT_GAMEPAD_DPAD_RIGHT)
+    {
+        if (sel % cols < cols - 1 && sel + 1 < itemCount)
+            sel++;
+    }
+    else if (input.nav == XINPUT_GAMEPAD_DPAD_UP)
+    {
+        if (sel >= cols)
+            sel -= cols;
+    }
+    else if (input.nav == XINPUT_GAMEPAD_DPAD_DOWN)
+    {
+        // Down from a row with nothing under it lands on the last
+        // game, rather than doing nothing.
+        if (sel + cols < itemCount)
+            sel += cols;
+        else if (sel / cols < (itemCount - 1) / cols)
+            sel = itemCount - 1;
+    }
+
+    // Shoulder buttons jump a screenful of rows - the fast way
+    // through a large library even with auto-repeat.
+    if (input.pressed & (XINPUT_GAMEPAD_LEFT_SHOULDER | XINPUT_GAMEPAD_RIGHT_SHOULDER))
+    {
+        int jump = pageRows * cols;
+        if (input.pressed & XINPUT_GAMEPAD_LEFT_SHOULDER)
+            sel -= jump;
+        if (input.pressed & XINPUT_GAMEPAD_RIGHT_SHOULDER)
+            sel += jump;
+        if (sel > itemCount - 1) sel = itemCount - 1;
+        if (sel < 0) sel = 0;
+    }
+    return false;
 }
 
 // The disc in the drive, as of this frame. When it changes - in, out, or a
@@ -5036,6 +5796,10 @@ static void HandleFinishedDownloads(Shell &shell, bool &haveAuth)
         if (arcadeGame && ArcadeSetOf(arcade) == ARCADE_XBLA && job.outcome == QUEUE_OUTCOME_INSTALLED)
             shell.rescanLibrary = true;
 
+        // Homebrew: new on its Apps, Homebrew or Emulators page.
+        if (job.kind == QUEUE_JOB_HOMEBREW && job.outcome == QUEUE_OUTCOME_INSTALLED)
+            shell.rescanShelves = true;
+
         if (!job.notify)
             continue;
 
@@ -5268,6 +6032,15 @@ static DWORD WINAPI StartupLoadEntry(LPVOID param)
     dprintf("[timing] startup thread%s: library %.1f, Store rows %.1f ms\n",
             load.fresh != NULL ? " (behind the cached library)" : "", read - rows,
             load.fresh != NULL ? rows - start : ImageTimerMs() - read);
+
+    // The Apps and Homebrew pages last, with the app already up.
+    const double shelvesStart = ImageTimerMs();
+    for (int s = 0; s < SHELF_COUNT; ++s)
+        ScanShelf(g_shelves[s]);
+    InterlockedExchange(&g_shelvesRead, 1);
+    dprintf("[timing] startup thread: apps, homebrew and emulators %.1f ms (%d + %d + %d)\n",
+            ImageTimerMs() - shelvesStart, g_shelves[SHELF_APPS].count, g_shelves[SHELF_HOMEBREW].count,
+            g_shelves[SHELF_EMULATORS].count);
     return 0;
 }
 
@@ -5454,6 +6227,8 @@ int main()
     // With the library kept from last time, the bouncing waits only for the
     // Store's rows, and the drive is read behind the library instead.
     ReadMoreGamesPaths();
+    for (int s = 0; s < SHELF_COUNT; ++s)
+        ReadShelfPaths(g_shelves[s], kShelfKeys[s]);
     Library fresh;
     fresh.count = 0;
     fresh.games = NULL;
@@ -5602,6 +6377,7 @@ int main()
     shell.queueSelected = 0;
     shell.queueSelectedId = 0;
     shell.queueScroll = -1;
+    shell.homebrewScroll = 0.0f;
     shell.stale = true;
 
     char authHeader[IAS3_AUTH_HEADER_MAX];
@@ -5635,12 +6411,30 @@ int main()
             ScanLibrary(lib, gamesPath);
             shell.stale = true;
         }
+        if (shell.rescanShelves)
+        {
+            shell.rescanShelves = false;
+            RescanShelves(lib);
+            if (shell.storeInHomebrew)
+                RefreshHomebrewPage(); // what's installed now
+            shell.stale = true;
+        }
 
         // The drive, read behind the library kept from last time.
         if (load.fresh != NULL && load.freshRead)
         {
             TakeFreshLibrary(shell, lib, fresh, gamesPath);
             load.fresh = NULL;
+        }
+
+        // The apps, read after it: their covers too.
+        static bool shelfCoversAsked = false;
+        if (g_shelvesRead && !shelfCoversAsked)
+        {
+            shelfCoversAsked = true;
+            RequestLibraryCovers(lib);
+            shell.settingsStale = true; // their folders' counts
+
         }
 
         const double partDisc = ImageTimerMs();
@@ -5679,6 +6473,11 @@ int main()
         if (shell.page == SHELL_PAGE_QUEUE && !shell.sidebarFocused && shell.queueCount == 0)
             shell.sidebarFocused = true;
 
+        // Nor is there anything on a page whose last folder Settings took
+        // away - it's gone from the sidebar.
+        if (PageHidden(shell.page))
+            shell.page = SHELL_PAGE_LIBRARY;
+
         PublishSidebar(shell, lib);
 
         UiInput input = PollUiInput();
@@ -5690,10 +6489,10 @@ int main()
 
         if (shell.sidebarFocused)
         {
-            if (input.nav == XINPUT_GAMEPAD_DPAD_UP && shell.page > 0)
-                shell.page = (ShellPage)(shell.page - 1);
-            else if (input.nav == XINPUT_GAMEPAD_DPAD_DOWN && shell.page < SHELL_PAGE_COUNT - 1)
-                shell.page = (ShellPage)(shell.page + 1);
+            if (input.nav == XINPUT_GAMEPAD_DPAD_UP)
+                shell.page = NextShownPage(shell.page, -1);
+            else if (input.nav == XINPUT_GAMEPAD_DPAD_DOWN)
+                shell.page = NextShownPage(shell.page, 1);
             else if ((input.nav == XINPUT_GAMEPAD_DPAD_RIGHT || (pressed & XINPUT_GAMEPAD_A)) &&
                      PageTakesFocus(shell, shell.page))
                 shell.sidebarFocused = false;
@@ -5759,56 +6558,9 @@ int main()
             const int itemCount = lib.count + discItems;
             const bool onDisc = shell.hasDisc && shell.librarySelected == 0;
 
-            if (itemCount == 0)
-            {
-                if (input.nav == XINPUT_GAMEPAD_DPAD_LEFT)
-                    toSidebar = true;
-            }
-            else
-            {
-                const int cols = LibraryGridColumns();
-                int &sel = shell.librarySelected;
-
-                if (input.nav == XINPUT_GAMEPAD_DPAD_LEFT)
-                {
-                    if (sel % cols == 0)
-                        toSidebar = true;
-                    else
-                        sel--;
-                }
-                else if (input.nav == XINPUT_GAMEPAD_DPAD_RIGHT)
-                {
-                    if (sel % cols < cols - 1 && sel + 1 < itemCount)
-                        sel++;
-                }
-                else if (input.nav == XINPUT_GAMEPAD_DPAD_UP)
-                {
-                    if (sel >= cols)
-                        sel -= cols;
-                }
-                else if (input.nav == XINPUT_GAMEPAD_DPAD_DOWN)
-                {
-                    // Down from a row with nothing under it lands on the last
-                    // game, rather than doing nothing.
-                    if (sel + cols < itemCount)
-                        sel += cols;
-                    else if (sel / cols < (itemCount - 1) / cols)
-                        sel = itemCount - 1;
-                }
-
-                // Shoulder buttons jump a screenful of rows - the fast way
-                // through a large library even with auto-repeat.
-                if (pressed & (XINPUT_GAMEPAD_LEFT_SHOULDER | XINPUT_GAMEPAD_RIGHT_SHOULDER))
-                {
-                    int jump = LibraryPageVisibleRows(MakeLibraryView(shell, lib, gamesPath)) * cols;
-                    if (pressed & XINPUT_GAMEPAD_LEFT_SHOULDER)
-                        sel -= jump;
-                    if (pressed & XINPUT_GAMEPAD_RIGHT_SHOULDER)
-                        sel += jump;
-                    if (sel > itemCount - 1) sel = itemCount - 1;
-                    if (sel < 0) sel = 0;
-                }
-            }
+            if (StepGrid(input, itemCount, LibraryPageVisibleRows(MakeLibraryView(shell, lib, gamesPath)),
+                         shell.librarySelected))
+                toSidebar = true;
 
             if (toSidebar)
             {
@@ -5838,6 +6590,25 @@ int main()
                 // A shortcut, for the keys banner and the empty library, which
                 // both send you to Settings with a Y badge.
                 shell.page = SHELL_PAGE_SETTINGS;
+            }
+        }
+        else if (shell.page == SHELL_PAGE_APPS || shell.page == SHELL_PAGE_HOMEBREW ||
+                 shell.page == SHELL_PAGE_EMULATORS)
+        {
+            ShelfKind kind = SHELF_APPS;
+            ShelfForPage(shell.page, &kind);
+            Shelf &shelf = g_shelves[kind];
+            const int count = g_shelvesRead ? shelf.count : 0;
+
+            if (StepGrid(input, count, LibraryPageVisibleRows(MakeShelfView(shell, kind)), shelf.selected) ||
+                (pressed & XINPUT_GAMEPAD_B))
+            {
+                shell.sidebarFocused = true;
+            }
+            else if ((pressed & XINPUT_GAMEPAD_A) && count > 0)
+            {
+                PlayApp(shelf.items[shelf.selected]);
+                acted = true;
             }
         }
         else if (GamePageOpen(shell) && shell.storeVersionsOpen)
@@ -5944,6 +6715,60 @@ int main()
                 StepStoreGame(input.nav, shell, lib);
             }
         }
+        else if (shell.page == SHELL_PAGE_STORE && shell.storeInHomebrew)
+        {
+            int &row = shell.homebrewRow;
+            int &place = shell.homebrewPlace;
+            const int across = StoreRowTilesAcross();
+            if (pressed & XINPUT_GAMEPAD_B)
+            {
+                shell.storeInHomebrew = false; // back to the front page, on its button
+            }
+            else if (input.nav == XINPUT_GAMEPAD_DPAD_LEFT && place == 0)
+            {
+                shell.sidebarFocused = true;
+            }
+            else if ((pressed & XINPUT_GAMEPAD_A) && HomebrewRowCount(row) > 0)
+            {
+                ShowHomebrewItem(shell, HomebrewItemAt(row, place));
+                RefreshHomebrewPage(); // its folder may be new
+                acted = true;
+            }
+            else if (input.nav == XINPUT_GAMEPAD_DPAD_LEFT)
+            {
+                place--;
+            }
+            else if (input.nav == XINPUT_GAMEPAD_DPAD_RIGHT && place + 1 < HomebrewRowCount(row))
+            {
+                place++;
+            }
+            else if (input.nav == XINPUT_GAMEPAD_DPAD_UP || input.nav == XINPUT_GAMEPAD_DPAD_DOWN)
+            {
+                // The next row with something in it, on the tile in the same
+                // place on screen - or its last, if it's shorter.
+                const int step = (input.nav == XINPUT_GAMEPAD_DPAD_UP) ? -1 : 1;
+                for (int next = row + step; next >= 0 && next < HOMEBREW_KIND_COUNT; next += step)
+                {
+                    if (HomebrewRowCount(next) == 0)
+                        continue;
+                    const int column = place - shell.homebrewRowScroll[row];
+                    place = shell.homebrewRowScroll[next] + column;
+                    if (place > HomebrewRowCount(next) - 1)
+                        place = HomebrewRowCount(next) - 1;
+                    row = next;
+                    break;
+                }
+            }
+            else if (pressed & (XINPUT_GAMEPAD_LEFT_SHOULDER | XINPUT_GAMEPAD_RIGHT_SHOULDER))
+            {
+                // A screenful along the row.
+                place += (pressed & XINPUT_GAMEPAD_RIGHT_SHOULDER) ? across : -across;
+                if (place > HomebrewRowCount(row) - 1)
+                    place = HomebrewRowCount(row) - 1;
+                if (place < 0)
+                    place = 0;
+            }
+        }
         else if (shell.page == SHELL_PAGE_STORE && shell.storeInLetter && shell.storeFilterOpen)
         {
             if (pressed & (XINPUT_GAMEPAD_B | XINPUT_GAMEPAD_Y))
@@ -6033,7 +6858,7 @@ int main()
             if (pressed & XINPUT_GAMEPAD_B)
                 shell.sidebarFocused = true;
             else if (pressed & XINPUT_GAMEPAD_Y)
-                acted = OpenStoreSearch(shell); // as the Search button, from anywhere on the page
+                acted = OpenStoreSearch(shell); // from anywhere on the page
             else if (pressed & XINPUT_GAMEPAD_A)
                 acted = ActOnStoreFocus(shell);
             else if (input.nav != 0)
@@ -6117,7 +6942,29 @@ int main()
                 // A value changes in place; otherwise along the row, and off
                 // its left end to the sidebar.
                 const bool right = (input.nav == XINPUT_GAMEPAD_DPAD_RIGHT);
-                if (onValue)
+                if (onValue && row->kind == SETTINGS_VIEW_FOLDER)
+                {
+                    // What the folder holds. Moving a scanned one rescans,
+                    // which takes over the screen.
+                    const LibraryFolderRow folder = g_folderRows[settings.args[settings.focusRow]];
+                    const int next = (int)folder.kind + (right ? 1 : -1);
+                    if (next >= 0 && next < FOLDER_KIND_COUNT)
+                    {
+                        PlayUiSound(UI_SOUND_MOVE);
+                        SettingsOutcome changed = {false, false};
+                        StepFolderKind(settings.args[settings.focusRow], right ? 1 : -1, lib, gamesPath, changed);
+                        if (changed.libraryChanged)
+                        {
+                            shell.librarySelected = 0;
+                            shell.libraryScroll = -1;
+                        }
+                        if (folder.scanned)
+                            acted = true;
+                        else
+                            shell.settingsStale = true;
+                    }
+                }
+                else if (onValue)
                 {
                     StepDiscSpeed(right ? 1 : -1);
                     shell.stale = true;
@@ -6278,6 +7125,31 @@ int main()
             }
             break;
 
+        case SHELL_PAGE_APPS:
+        case SHELL_PAGE_HOMEBREW:
+        case SHELL_PAGE_EMULATORS:
+        {
+            ShelfKind kind = SHELF_APPS;
+            ShelfForPage(shell.page, &kind);
+            Shelf &shelf = g_shelves[kind];
+            LibraryPageView view = MakeShelfView(shell, kind);
+
+            if (!shell.sidebarFocused)
+            {
+                if (view.count > 0)
+                    hintCount = AddHint(hints, hintCount, UI_BUTTON_A, L"Start");
+                hintCount = AddHint(hints, hintCount, UI_BUTTON_B, L"Back");
+                if (view.count > LibraryPageVisibleRows(view) * LibraryGridColumns())
+                    hintCount = AddHint(hints, hintCount, UI_BUTTON_LBRB, L"Page");
+            }
+
+            RenderLibraryFrame(view, hints, hintCount);
+
+            shelf.selected = view.selected;
+            shelf.scroll = view.scroll;
+            break;
+        }
+
         case SHELL_PAGE_STORE:
             if (shell.picker.kind != PICKER_NONE && shell.picker.page == SHELL_PAGE_STORE)
             {
@@ -6286,6 +7158,24 @@ int main()
             else if (shell.storeInGame)
             {
                 RenderGamePageFrame(shell, lib, hints, hintCount);
+            }
+            else if (shell.storeInHomebrew)
+            {
+                if (!shell.sidebarFocused)
+                {
+                    hintCount = AddHint(hints, hintCount, UI_BUTTON_A, L"View");
+                    hintCount = AddHint(hints, hintCount, UI_BUTTON_B, L"Store");
+                    if (HomebrewRowCount(shell.homebrewRow) > StoreRowTilesAcross())
+                        hintCount = AddHint(hints, hintCount, UI_BUTTON_LBRB, L"Page");
+                }
+
+                StoreRowsView view = MakeHomebrewView(shell);
+                RenderStoreRowsFrame(view, hints, hintCount);
+                shell.homebrewRow = view.focusRow;
+                shell.homebrewPlace = view.focusPlace;
+                shell.homebrewScroll = view.scroll;
+                for (int k = 0; k < HOMEBREW_KIND_COUNT; ++k)
+                    shell.homebrewRowScroll[k] = view.rows[k].scroll;
             }
             else if (shell.storeInLetter)
             {

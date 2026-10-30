@@ -31,6 +31,13 @@ And a fourth, for the update check (Oct 2026):
     release downloads (objects/release-assets.githubusercontent.com) chain to
     ISRG X1, already here.
 
+And a fifth, for the Store's Homebrew page (Oct 2026):
+  - GTS_Root_R4.pem: Google Trust Services' GTS Root R4, exported from the
+    Windows root store (SHA-256 71CCA539...C951A4BD, as Mozilla's store lists
+    it). consolemods.org, behind Cloudflare, sends a chain through GTS WE1 to
+    it; the leaf and WE1 verified against this root alone with `openssl
+    verify`.
+
 For each certificate this emits what BearSSL's br_x509_trust_anchor needs:
 the subject DN, exactly as DER-encoded in the certificate (BearSSL compares
 DNs byte for byte against each issuer), and the public key - an RSA modulus

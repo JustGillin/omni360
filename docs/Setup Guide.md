@@ -55,6 +55,26 @@ app: Aurora = Hdd1:\Aurora\Aurora.xex
 app: XeXMenu = Hdd1:\Content\0000000000000000\C0DE9999\00080000\C0DE99990F586558
 ```
 
+**Apps, Homebrew and Emulators.** These three pages show what's in your apps, homebrew and emulator folders as tiles, like the library does, and **A** starts one. Each page is in the sidebar only once it has a folder. Each folder in **Settings** has a value on its right, **Games**, **Homebrew**, **Apps** or **Emulators**, that says which page it feeds. Left and right change it, the same way they change Disc read speed. **Add folder** asks what's in a new folder once you've typed its path. `Homebrew`, `Apps` and `Emulators` folders on each drive are suggested too. Settings writes `homebrew-path:` (homebrew games), `apps-path:` (dashboards, file managers, tools) and `emulators-path:` lines for you, and you can also add them by hand, more than once each:
+
+```
+apps-path: Hdd1:\Apps
+homebrew-path: Hdd1:\Homebrew
+emulators-path: Hdd1:\Emulators
+```
+
+Each app is a folder holding `default.xex` or `default.xbe`, or just one other `.xex`, such as Aurora's `Aurora.xex`. Omni360 looks up to three folders deep, so `Hdd1:\Emulators\Nintendo\FCEUX\default.xex` is found too. The folders are read when Omni360 starts and again whenever Settings changes them.
+
+**Homebrew in the Store.** *Not switched on in releases yet: the button shows as SOON until ConsoleMods allows Omni360 to download from its repo. Set `HOMEBREW_STORE_OPEN` to `true` in `src/main.cpp` to build it with the page on.* The Store's **Homebrew** button lists the ConsoleMods repo's apps, homebrew games and emulators, the same list Aurora's Xbox 360 Homebrew Store shows. **A** shows an item's details, and **Install** adds it to the Queue. Each install goes into the first folder of its kind in Settings. If you have none yet, it uses `Hdd1:\Apps`, `Hdd1:\Homebrew` or `Hdd1:\Emulators`, which then becomes that kind's folder. The list is built into Omni360 for now; `tools/make_homebrew.py` explains how to update it.
+
+**Downloads from consolemods.org don't work yet.** Its Cloudflare protection only lets Aurora's script through, so Omni360's requests are refused with "Refused by ConsoleMods" until ConsoleMods allows it. To test the whole install on the console in the meantime, serve the archives from your PC:
+
+1. Download the items' `.7z` files from consolemods.org in your browser into one folder, keeping their names. The item's details page shows where it installs, and the names are in `tools/data/homebrew/*.ini`.
+2. In that folder, start a web server: `python -m http.server 8000`. Allow it through Windows Firewall on your private network if Windows asks.
+3. Add `homebrew-mirror: http://192.168.1.10:8000` to `settings.txt`, with your PC's address, and restart Omni360. The Homebrew page then says it downloads from there.
+
+Remove the line to go back to downloading from consolemods.org.
+
 ## 4. Transfer files to the console
 
 Copy `Omni360.xex`, `ArchiveOrgKeys.txt`, and `settings.txt` if you made one, into a single folder on the console — something like `Hdd1:\Apps\Omni360\` or `Usb0:\Apps\Omni360\`. Keep them together, and do not put any other `.xex` in that folder. Omni360 keeps its caches beside them, in `Covers\` and `Store\`.

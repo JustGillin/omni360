@@ -121,12 +121,41 @@ void LaunchInstalledGame(const InstalledGame &game)
     LaunchPackage(game.packagePath, game.contentType == 0x00005000 ? "default.xbe" : "default.xex");
 }
 
+// An app's executable by its drive's name - "Hdd1:\Emulators\RetroArch\
+// default.xex" - as a disc only starts by "dvd:\default.xex". The drive names
+// main.cpp mounts are the kernel's, not this title's, so they're still there
+// for the loader once Omni360 has ended; mounted again first all the same.
+// Returns only if the loader refused it.
+static void LaunchByDriveName(const char *path)
+{
+    for (int i = 0; i < sizeof(kDrives) / sizeof(kDrives[0]); ++i)
+    {
+        const size_t len = strlen(kDrives[i][0]);
+        if (_strnicmp(path, kDrives[i][0], len) == 0)
+        {
+            mount(kDrives[i][0], (char *)kDrives[i][1]);
+            dprintf("[launch] %s\n", path);
+            XLaunchNewImage(path, 0);
+            dprintf("[launch] the loader refused %s\n", path);
+            return;
+        }
+    }
+}
+
 void LaunchApp(const char *path)
 {
     if (EndsWith(path, ".xex") || EndsWith(path, ".xbe"))
+    {
+        // An app like RetroArch is a launcher that starts its cores through
+        // game:\ - which went back to the stock dashboard when it was started
+        // by its device's path. By its drive's name first, then that.
+        LaunchByDriveName(path);
         LaunchExecutable(path);
+    }
     else
+    {
         LaunchPackage(path, "default.xex");
+    }
 }
 
 void LaunchDisc(bool original)

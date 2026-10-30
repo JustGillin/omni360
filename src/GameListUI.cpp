@@ -1527,6 +1527,9 @@ void SetShellSidebar(const ShellSidebar &sidebar)
 static const char *const kShellPageNames[SHELL_PAGE_COUNT] =
 {
     "Your Library",
+    "Apps",
+    "Homebrew",
+    "Emulators",
     "Store",
     "Queue",
     "Settings"
@@ -1537,11 +1540,27 @@ static float NavItemHeight()
     return S(56.0f);
 }
 
-// Where each page's button starts. The divider sits in the gap before Queue,
-// splitting the things you browse from the things you manage.
+static bool NavShown(int page)
+{
+    return !g_sidebar.hidden[page];
+}
+
+// Where each shown page's button starts, the hidden ones taking no room. The
+// divider sits in the gap before Queue, splitting the things you browse from
+// the things you manage. With every page shown they sit a little closer, so
+// the last stays clear of the storage ring on a 480p screen.
 static float NavItemY(int page)
 {
-    float y = g_M.listY + page * S(62.0f);
+    int shown = 0, before = 0;
+    for (int p = 0; p < SHELL_PAGE_COUNT; ++p)
+    {
+        if (!NavShown(p))
+            continue;
+        if (p < page)
+            before++;
+        shown++;
+    }
+    float y = g_M.listY + before * S(shown > 6 ? 58.0f : 62.0f);
     if (page >= SHELL_PAGE_QUEUE)
         y += S(26.0f);
     return y;
@@ -1564,6 +1583,9 @@ static bool NavCountFor(int page, NavCount *out)
 {
     int count = 0;
     if (page == SHELL_PAGE_LIBRARY) count = g_sidebar.libraryCount;
+    if (page == SHELL_PAGE_APPS) count = g_sidebar.appsCount;
+    if (page == SHELL_PAGE_HOMEBREW) count = g_sidebar.homebrewCount;
+    if (page == SHELL_PAGE_EMULATORS) count = g_sidebar.emulatorsCount;
     if (page == SHELL_PAGE_QUEUE) count = g_sidebar.queueCount;
     if (count <= 0)
         return false;
@@ -1675,6 +1697,8 @@ static void DrawSidebarQuads(bool focused)
 
     for (int page = 0; page < SHELL_PAGE_COUNT; ++page)
     {
+        if (!NavShown(page))
+            continue;
         const float y = NavItemY(page);
 
         if (page == g_sidebar.page)
@@ -1718,6 +1742,8 @@ static void DrawSidebarText(bool focused)
 
     for (int page = 0; page < SHELL_PAGE_COUNT; ++page)
     {
+        if (!NavShown(page))
+            continue;
         const bool current = (page == g_sidebar.page);
         const float centerY = NavItemY(page) + itemH * 0.5f;
         const float textX = g_M.navX + S(26.0f);
@@ -3167,6 +3193,8 @@ static D3DTexture *ItemBoxArt(const LibraryItems &it, int item)
 {
     if (ItemIsDisc(it, item))
         return it.view->discTitleId != 0 ? BoxArtFor(it.view->discTitleId) : NULL;
+    if (it.view->coverKeys != NULL)
+        return BoxArtFor(it.view->coverKeys[ItemGameIndex(it, item)]);
     return BoxArtFor(it.view->games[ItemGameIndex(it, item)].titleId);
 }
 
@@ -3285,11 +3313,12 @@ static void DrawDiscProgress(const LibraryItems &it, int item, float x, float y,
     }
 }
 
-// Whether an unfocused tile carries its name: only the disc's, while it has
-// no box art to go by - the art is the name everywhere else.
+// Whether an unfocused tile carries its name: the disc's, while it has no box
+// art to go by, and an app's without any - the art is the name everywhere
+// else.
 static bool ItemNamedUnfocused(const LibraryItems &it, int item)
 {
-    return ItemIsDisc(it, item) && ItemBoxArt(it, item) == NULL;
+    return (ItemIsDisc(it, item) || it.view->isApps) && ItemBoxArt(it, item) == NULL;
 }
 
 void RenderLibraryFrame(LibraryPageView &view, const UiHint *hints, int hintCount)
@@ -3301,7 +3330,7 @@ void RenderLibraryFrame(LibraryPageView &view, const UiHint *hints, int hintCoun
     const int gameCount = (games != NULL && view.count > 0) ? view.count : 0;
 
     Icon *icons = NULL;
-    if (gameCount > 0)
+    if (gameCount > 0 && !view.isApps)
     {
         EnsureIconsLoaded(games, gameCount);
         icons = (g_iconCount == gameCount) ? g_icons : NULL;
@@ -3449,7 +3478,7 @@ void RenderLibraryFrame(LibraryPageView &view, const UiHint *hints, int hintCoun
 
     DrawSidebarText(g_sidebar.focused);
 
-    DrawHeaderText("Your Library", NULL, showToast); // the sidebar has the count
+    DrawHeaderText(view.heading != NULL ? view.heading : "Your Library", NULL, showToast); // the sidebar has the count
 
     DrawButtonHintText(footer, footerCount, g_M.footerY);
 
@@ -3485,10 +3514,13 @@ void RenderLibraryFrame(LibraryPageView &view, const UiHint *hints, int hintCoun
 
         const float x = g_M.contentX + S(32.0f);
         const float w = g_M.contentW - S(64.0f);
-        TextFit(x, L.top + S(26.0f), 1.1f, COL_TEXT, "No games found", w, true);
+        const bool library = (view.heading == NULL);
+        TextFit(x, L.top + S(26.0f), 1.1f, COL_TEXT, library ? "No games found" : view.emptyTitle, w, true);
         TextFit(x, L.top + S(26.0f) + LineHeight(1.1f) * 1.25f + S(6.0f), 0.85f, COL_TEXT2, where, w);
         TextFit(x, L.top + S(26.0f) + LineHeight(1.1f) * 1.25f + LineHeight(0.85f) * 1.25f + S(12.0f), 0.8f, COL_DIM,
-                "Press Y to choose your games folder in Settings, or put a game disc in the drive.", w);
+                library ? "Press Y to choose your games folder in Settings, or put a game disc in the drive."
+                        : view.emptyHint,
+                w);
     }
 
     g_UiFont.SetBold(false);
@@ -4335,7 +4367,7 @@ void RenderListFrame(ListPageView &view, const UiHint *hints, int hintCount)
 // Settings
 // ---------------------------------------------------------------------------
 
-#define SETTINGS_ROWS_MAX   40
+#define SETTINGS_ROWS_MAX   64
 #define COL_BUTTON          0xFF383838 // a button on a row
 #define COL_BUTTON_HI       0xFF4A4A4A // one with focus
 #define COL_CHECK_EDGE      0xFF9A9A9A
@@ -4359,7 +4391,7 @@ static float SettingsControlWidth(const SettingsControlView &c)
         return SettingsCheck() + (c.label != NULL && c.label[0] != '\0' ? S(10.0f) + TextWidth(c.label, 0.85f) : 0.0f) +
                S(20.0f);
     default:
-        return S(230.0f);
+        return c.compact ? S(150.0f) : S(230.0f);
     }
 }
 
@@ -4541,7 +4573,10 @@ void RenderSettingsFrame(SettingsPageView &view, const UiHint *hints, int hintCo
 
         const float cy = L.y[i] + rowH * 0.5f;
         if (row.kind == SETTINGS_VIEW_FOLDER)
+        {
             DrawCheckQuads(x0 + S(16.0f), cy, row.checked, row.locked || row.missing);
+            DrawSettingsControlsQuads(row, cy, 0, rowFocused);
+        }
         else
             DrawSettingsControlsQuads(row, cy, view.focusCol, rowFocused);
     }
@@ -4578,13 +4613,16 @@ void RenderSettingsFrame(SettingsPageView &view, const UiHint *hints, int hintCo
         }
         if (row.kind == SETTINGS_VIEW_FOLDER)
         {
+            // The path, then its status, then what it holds at the right.
             const float pathX = x0 + S(16.0f) + SettingsCheck() + S(14.0f);
+            const float statusRight = row.controlCount > 0 ? SettingsControlsX(row) - S(14.0f) : x0 + w - S(18.0f);
             const float statusW = row.status != NULL ? TextWidth(row.status, 0.76f) : 0.0f;
             TextMid(pathX, cy, 0.88f, row.missing ? COL_DIM : (rowFocused ? COL_TEXT : COL_TEXT2), row.label,
-                    ATGFONT_TRUNCATED, x0 + w - S(36.0f) - statusW - pathX);
+                    ATGFONT_TRUNCATED, statusRight - S(18.0f) - statusW - pathX);
             if (row.status != NULL)
-                TextMid(x0 + w - S(18.0f), cy, 0.76f, row.statusGreen ? COL_GREEN_TEXT : COL_DIM, row.status,
+                TextMid(statusRight, cy, 0.76f, row.statusGreen ? COL_GREEN_TEXT : COL_DIM, row.status,
                         ATGFONT_RIGHT);
+            DrawSettingsControlsText(row, cy, 0, rowFocused);
             continue;
         }
         TextMid(x0 + S(18.0f), cy, 0.88f, rowFocused ? COL_TEXT : COL_TEXT2, row.label);
@@ -5563,6 +5601,213 @@ void RenderStoreFrame(StorePageView &view, const UiHint *hints, int hintCount)
         }
     }
 
+    ClearClip();
+
+    g_UiFont.SetBold(false);
+    g_UiFont.SetScaleFactors(1.0f, 1.0f);
+    g_UiFont.End();
+
+    EndFrame();
+}
+
+// The rows page's sideways glide, as g_rowShown is the front page's.
+static float g_rowsPageShown[STORE_ROWS_MAX];
+static bool g_rowsPageShownPlaced = false;
+
+void RenderStoreRowsFrame(StoreRowsView &view, const UiHint *hints, int hintCount)
+{
+    if (!g_Initialized)
+        return;
+
+    g_storeFrame++;
+
+    // The front page's rows: the same tiles, gaps and labels, from under the
+    // header.
+    StoreLayout L = LayOutStore();
+    L.rowsY = g_M.listY;
+    const float clipTop = g_M.listY - S(6.0f);
+    const float clipBottom = g_M.footerY - S(30.0f);
+
+    const int rowCount = view.rowCount < STORE_ROWS_MAX ? view.rowCount : STORE_ROWS_MAX;
+    if (view.focusRow > rowCount - 1) view.focusRow = rowCount - 1;
+    if (view.focusRow < 0) view.focusRow = 0;
+    const int focusRow = view.focusRow;
+    const int focusCount = rowCount > 0 ? view.rows[focusRow].count : 0;
+    if (view.focusPlace > focusCount - 1) view.focusPlace = focusCount - 1;
+    if (view.focusPlace < 0) view.focusPlace = 0;
+    const int focusPlace = view.focusPlace;
+
+    // Down the page as far as it takes to show the focused row; across, a
+    // tile at a time - both eased.
+    float target = view.scroll;
+    if (rowCount > 0)
+    {
+        const float rowTop = L.rowsY + focusRow * L.rowPitch;
+        const float rowBottom = rowTop + L.rowLabelH + L.rowTile;
+        if (rowBottom - target > clipBottom - S(16.0f))
+            target = rowBottom - (clipBottom - S(16.0f));
+        if (rowTop - target < clipTop + S(10.0f))
+            target = rowTop - (clipTop + S(10.0f));
+        if (target < 0.0f)
+            target = 0.0f;
+
+        StoreRowView &row = view.rows[focusRow];
+        if (focusPlace < row.scroll)
+            row.scroll = focusPlace;
+        if (focusPlace >= row.scroll + L.across)
+            row.scroll = focusPlace - L.across + 1;
+    }
+    for (int r = 0; r < rowCount; ++r)
+    {
+        StoreRowView &row = view.rows[r];
+        if (row.scroll > row.count - L.across)
+            row.scroll = row.count - L.across;
+        if (row.scroll < 0)
+            row.scroll = 0;
+    }
+    view.scroll += (target - view.scroll) * 0.3f;
+    if (fabsf(target - view.scroll) < 0.5f)
+        view.scroll = target;
+    const float sy = -view.scroll;
+
+    if (!g_rowsPageShownPlaced)
+    {
+        for (int r = 0; r < rowCount; ++r)
+            g_rowsPageShown[r] = (float)view.rows[r].scroll;
+        g_rowsPageShownPlaced = true;
+    }
+    float rowShown[STORE_ROWS_MAX];
+    for (int r = 0; r < rowCount; ++r)
+        rowShown[r] = Glide(g_rowsPageShown[r], view.rows[r].scroll);
+
+    // The focused tile, grown and drawn last.
+    const bool hasFocus = view.focused && focusCount > 0;
+    const float growT = (FocusGrowFor(focusRow * 1000 + focusPlace, hasFocus) - 1.0f) / (FOCUS_GROW - 1.0f);
+    float gx = 0.0f, gy = 0.0f, gw = L.rowTile, gh = L.rowTile;
+    if (hasFocus)
+    {
+        StoreRowTileRect(L, focusRow, focusPlace, rowShown[focusRow], &gx, &gy);
+        gy += sy;
+        GrowFocused(growT, &gx, &gy, &gw, &gh);
+    }
+    const float r = g_M.radius;
+
+    BeginFrame();
+    const bool showToast = ToastVisibleThisFrame();
+
+    ButtonHint footer[MAX_FOOTER_HINTS];
+    const int footerCount = LayoutFooter(hints, hintCount, footer);
+
+    // --- Pass 1: quads ---
+    DrawFrameBase(g_sidebar.focused);
+    SetClip(g_M.contentX - S(12.0f), clipTop, g_M.contentW + S(24.0f), clipBottom - clipTop);
+
+    // Each row's tiles across, and the next cut off at the edge to show
+    // there's more - two more while they glide. Covers are asked for as they
+    // come into view.
+    unsigned long wantCovers[MAX_STORE_COVERS];
+    int wantCount = 0;
+    for (int row = 0; row < rowCount; ++row)
+    {
+        const StoreRowView &rv = view.rows[row];
+        const float top = L.rowsY + row * L.rowPitch + sy;
+        if (top + L.rowPitch < clipTop || top > clipBottom)
+            continue;
+        const int first = (int)floorf(rowShown[row]);
+        for (int i = first; i < rv.count && i <= first + L.across + 1; ++i)
+        {
+            const unsigned long key = rv.tiles[i].titleId;
+            D3DTexture *cover = StoreCoverFor(key);
+            if (cover == NULL && key != 0 && wantCount < MAX_STORE_COVERS)
+                wantCovers[wantCount++] = key;
+            if (hasFocus && row == focusRow && i == focusPlace)
+                continue;
+            float x, y;
+            StoreRowTileRect(L, row, i, rowShown[row], &x, &y);
+            DrawTileArt(cover, NULL, x, y + sy, L.rowTile, L.rowTile);
+            if (view.installed[row] != NULL && view.installed[row][i])
+            {
+                const TilePill p = PillFor("INSTALLED", x, y + sy, L.rowTile);
+                FillRound(p.x, p.y, p.w, p.h, p.h * 0.5f, COL_PILL);
+            }
+        }
+    }
+    RequestMissingStoreCovers(wantCovers, wantCount);
+
+    if (hasFocus)
+    {
+        D3DTexture *cover = StoreCoverFor(view.rows[focusRow].tiles[focusPlace].titleId);
+        ShadowRound(gx, gy + S(10.0f), gw, gh, r, S(26.0f), COL_SHADOW);
+        DrawTileArt(cover, NULL, gx, gy, gw, gh);
+        if (cover != NULL)
+            FillRoundGradient(gx, gy + gh * 0.55f, gw, gh * 0.45f, r, 0x00000000, 0xD9000000, true);
+        if (view.installed[focusRow] != NULL && view.installed[focusRow][focusPlace])
+        {
+            const TilePill p = PillFor("INSTALLED", gx, gy, gw);
+            FillRound(p.x, p.y, p.w, p.h, p.h * 0.5f, COL_PILL);
+        }
+        FocusRing(gx, gy, gw, gh, r);
+    }
+
+    ClearClip();
+    DrawButtonHintShapes(footer, footerCount, g_M.footerY);
+    DrawHeaderQuads(showToast);
+    g_pd3dDevice->SetRenderState(D3DRS_SCISSORTESTENABLE, FALSE);
+
+    // --- Pass 2: all text, one Begin/End ---
+    g_UiFont.Begin();
+
+    DrawSidebarText(g_sidebar.focused);
+    DrawHeaderText(view.title, view.subtitle, showToast);
+    DrawButtonHintText(footer, footerCount, g_M.footerY);
+
+    // Each row's name, and a tile's under its focus - or on its tile, where
+    // there's no cover to show.
+    SetClip(0.0f, clipTop, g_M.screenW, clipBottom - clipTop);
+    const float textLeft = g_M.contentX - S(1.0f), textRight = g_M.contentX + g_M.contentW + S(1.0f);
+    const float pad = S(12.0f);
+    for (int row = 0; row < rowCount; ++row)
+    {
+        const StoreRowView &rv = view.rows[row];
+        const float top = L.rowsY + row * L.rowPitch + sy;
+        if (TextInClip(top, LineHeight(0.95f) * 1.2f))
+            Text(g_M.contentX, top, 0.95f, COL_TEXT, rv.name, 0, 0.0f, true);
+        const int first = (int)floorf(rowShown[row]);
+        for (int i = first; i < rv.count && i <= first + L.across; ++i)
+        {
+            const bool focused = hasFocus && row == focusRow && i == focusPlace;
+            float x, y, s = L.rowTile;
+            StoreRowTileRect(L, row, i, rowShown[row], &x, &y);
+            y += sy;
+            if (x < textLeft || x + s > textRight)
+                continue;
+            if (focused)
+                x = gx, y = gy, s = gw;
+
+            if (view.installed[row] != NULL && view.installed[row][i] && TextInClip(y, s))
+            {
+                const TilePill p = PillFor("INSTALLED", x, y, s);
+                TextMid(p.x + p.w * 0.5f, p.y + p.h * 0.5f, 0.56f, COL_TEXT, "INSTALLED", ATGFONT_CENTER_X, 0.0f,
+                        true);
+            }
+
+            const bool hasArt = StoreCoverFor(rv.tiles[i].titleId) != NULL;
+            if (hasArt && focused)
+            {
+                const float nameY = y + s - pad - LineHeight(0.78f) * 1.2f;
+                if (TextInClip(nameY, LineHeight(0.78f) * 1.2f))
+                    MarqueeTextMid(x + pad, nameY + LineHeight(0.78f) * 0.6f, 0.78f, COL_TEXT, rv.tiles[i].name,
+                                   s - pad * 2.0f, true);
+            }
+            else if (!hasArt && TextInClip(y + pad, s - pad * 2.0f))
+            {
+                // Under the pill, when there's one.
+                const float nameTop = (view.installed[row] != NULL && view.installed[row][i]) ? y + S(44.0f) : y + pad;
+                TextWrapped(x + pad, nameTop, 0.74f, focused ? COL_TEXT : COL_TEXT2, rv.tiles[i].name,
+                            s - pad * 2.0f, LineHeight(0.74f) * 1.2f, 4, true);
+            }
+        }
+    }
     ClearClip();
 
     g_UiFont.SetBold(false);

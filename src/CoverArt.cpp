@@ -16,6 +16,7 @@ DESCRIPTION : Box art from Xbox Live, else xboxunity.net, looked up, cut to a ti
 #include "StoreCatalog.h" // XblaGameByTitleId
 
 #include <xtl.h>
+#include <ctype.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -24,6 +25,13 @@ DESCRIPTION : Box art from Xbox Live, else xboxunity.net, looked up, cut to a ti
 #define COVER_DIR          "game:\\Covers"
 #define COVER_INFO_URL     "https://xboxunity.net/Resources/Lib/CoverInfo.php?titleid=%08lX"
 #define COVER_IMAGE_URL    "https://xboxunity.net/Resources/Lib/Cover.php?size=large&cid=%s"
+#define TITLE_SEARCH_URL   "https://xboxunity.net/Resources/Lib/TitleList.php?page=0&count=20&search=%s&sort=3&direction=1&category=0&filter=0"
+
+// Homebrew covers' keys: 0xEB, then 24 bits of the name's hash. A title ID's
+// top byte is a publisher's letter, or FF for homebrew - never EB.
+#define HOMEBREW_KEY_TAG   0xEB000000UL
+#define MAX_HOMEBREW_NAMES 384 // the Apps, Homebrew and Emulators pages' and the Store's Homebrew page's
+#define HOMEBREW_NAME_MAX  64
 #define BOXART_URL         "http://download.xbox.com/content/images/66acd000-77fe-1000-9115-d802%08lx/1033/boxartlg.jpg"
 
 // The marker for a game neither source has a cover for. Renamed from "none",
@@ -48,7 +56,7 @@ DESCRIPTION : Box art from Xbox Live, else xboxunity.net, looked up, cut to a ti
 #define IMAGE_BUFFER_BYTES (2 * 1024 * 1024)
 #define BOXART_BUFFER_BYTES (512 * 1024) // Xbox Live's box art is about 60KB
 
-#define MAX_REQUESTED      256
+#define MAX_REQUESTED      512 // the library, and the Apps, Homebrew and Emulators pages
 #define MAX_READY          4  // a library tile is 1MB - don't run far ahead of the UI
 
 // Workers fetching covers side by side. A cover is a few hundred
@@ -112,6 +120,11 @@ static int g_reserved = 0;
 
 static CoverData g_ready[MAX_READY + COVER_WORKERS];
 static int g_readyCount = 0;
+
+// The names behind the homebrew keys asked for, under g_lock.
+static unsigned long g_homebrewKeys[MAX_HOMEBREW_NAMES];
+static char g_homebrewNames[MAX_HOMEBREW_NAMES][HOMEBREW_NAME_MAX];
+static int g_homebrewNameCount = 0;
 
 // ---------------------------------------------------------------------------
 // The cache on disk
@@ -384,6 +397,186 @@ static FetchResult FetchXboxUnityCover(unsigned long titleId, Download *out)
 }
 
 // ---------------------------------------------------------------------------
+// Homebrew, found on xboxunity by name
+// ---------------------------------------------------------------------------
+
+unsigned long HomebrewCoverKey(const char *name)
+{
+    unsigned long hash = 2166136261UL; // FNV-1a
+    for (const char *c = name; *c != '\0'; ++c)
+    {
+        hash ^= (unsigned char)tolower((unsigned char)*c);
+        hash *= 16777619UL;
+    }
+    return HOMEBREW_KEY_TAG | (hash & 0x00FFFFFFUL);
+}
+
+bool IsHomebrewCoverKey(unsigned long key)
+{
+    return (key & 0xFF000000UL) == HOMEBREW_KEY_TAG;
+}
+
+void SetHomebrewCoverNames(const char *const *names, int count)
+{
+    if (!g_running)
+        return;
+    if (count > MAX_HOMEBREW_NAMES)
+        count = MAX_HOMEBREW_NAMES;
+    EnterCriticalSection(&g_lock);
+    for (int i = 0; i < count; ++i)
+    {
+        g_homebrewKeys[i] = HomebrewCoverKey(names[i]);
+        strncpy(g_homebrewNames[i], names[i], HOMEBREW_NAME_MAX - 1);
+        g_homebrewNames[i][HOMEBREW_NAME_MAX - 1] = '\0';
+    }
+    g_homebrewNameCount = count;
+    LeaveCriticalSection(&g_lock);
+}
+
+static bool HomebrewNameFor(unsigned long key, char *out, size_t outSize)
+{
+    bool found = false;
+    EnterCriticalSection(&g_lock);
+    for (int i = 0; i < g_homebrewNameCount && !found; ++i)
+    {
+        if (g_homebrewKeys[i] == key)
+        {
+            strncpy(out, g_homebrewNames[i], outSize - 1);
+            out[outSize - 1] = '\0';
+            found = true;
+        }
+    }
+    LeaveCriticalSection(&g_lock);
+    return found;
+}
+
+// Letters and digits only, lower case: "Retroarch" and "RetroArch", or
+// "Snes 360" and "Snes360", read the same.
+static void Normalise(const char *in, char *out, size_t outSize)
+{
+    size_t n = 0;
+    for (; *in != '\0' && n + 1 < outSize; ++in)
+    {
+        if (isalnum((unsigned char)*in))
+            out[n++] = (char)tolower((unsigned char)*in);
+    }
+    out[n] = '\0';
+}
+
+// The name less a version at its end - "RetroArchV3" to "RetroArch", "Exult
+// 360 v1.2" to "Exult 360" - for a second search when the first finds nothing.
+static void WithoutVersion(const char *in, char *out, size_t outSize)
+{
+    strncpy(out, in, outSize - 1);
+    out[outSize - 1] = '\0';
+    size_t len = strlen(out);
+    while (len > 0 && (isdigit((unsigned char)out[len - 1]) || out[len - 1] == '.'))
+        len--;
+    if (len > 0 && (out[len - 1] == 'v' || out[len - 1] == 'V'))
+        len--;
+    while (len > 0 && (out[len - 1] == ' ' || out[len - 1] == '-' || out[len - 1] == '_'))
+        len--;
+    out[len] = '\0';
+}
+
+// One search of xboxunity's titles for term, and the homebrew among them
+// that is name: the same name, letters and digits alone - or, when loose,
+// the only one of them whose name starts with it or it with theirs. A loose
+// match is only taken on the name searched in full: "Quake" from "Quake3"
+// would find Quake II.
+static FetchResult SearchHomebrew(const char *term, const char *name, bool loose, unsigned long *outId)
+{
+    // The search, percent-encoded but for letters and digits.
+    char encoded[3 * HOMEBREW_NAME_MAX + 1];
+    size_t n = 0;
+    for (const char *c = term; *c != '\0' && n + 4 < sizeof(encoded); ++c)
+    {
+        if (isalnum((unsigned char)*c))
+            encoded[n++] = *c;
+        else
+            n += _snprintf(encoded + n, sizeof(encoded) - n, "%%%02X", (unsigned char)*c);
+    }
+    encoded[n] = '\0';
+
+    char url[512];
+    _snprintf(url, sizeof(url), TITLE_SEARCH_URL, encoded);
+    url[sizeof(url) - 1] = '\0';
+
+    char *list = (char *)malloc(INFO_BUFFER_BYTES + 1);
+    if (list == NULL)
+        return FETCH_FAILED;
+    unsigned long long listLen = INFO_BUFFER_BYTES;
+    const int status = httpRequestHTTPS(url, HTTP_GET, NULL, NULL, "", list, &listLen, false, NULL, 0, QuietPrint);
+    if (status != 200)
+    {
+        dprintf("[covers] \"%s\": xboxunity's search -> HTTP %d\n", term, status);
+        free(list);
+        return FETCH_FAILED;
+    }
+    list[listLen] = '\0';
+
+    char want[HOMEBREW_NAME_MAX];
+    Normalise(name, want, sizeof(want));
+    const size_t wantLen = strlen(want);
+
+    FetchResult result = FETCH_NO_COVER;
+    int looseMatches = 0;
+    unsigned long looseId = 0;
+    cJSON *root = cJSON_ParseWithLength(list, (size_t)listLen);
+    const cJSON *item = NULL;
+    cJSON_ArrayForEach(item, cJSON_GetObjectItemCaseSensitive(root, "Items"))
+    {
+        const cJSON *type = cJSON_GetObjectItemCaseSensitive(item, "TitleType");
+        const cJSON *title = cJSON_GetObjectItemCaseSensitive(item, "Name");
+        const cJSON *id = cJSON_GetObjectItemCaseSensitive(item, "TitleID");
+        if (!cJSON_IsString(type) || strcmp(type->valuestring, "HomeBrew") != 0 || !cJSON_IsString(title) ||
+            !cJSON_IsString(id))
+            continue;
+
+        char theirs[HOMEBREW_NAME_MAX];
+        Normalise(title->valuestring, theirs, sizeof(theirs));
+        const size_t theirsLen = strlen(theirs);
+        const unsigned long unityId = strtoul(id->valuestring, NULL, 16);
+        if (wantLen > 0 && strcmp(theirs, want) == 0)
+        {
+            *outId = unityId;
+            result = FETCH_OK;
+            break;
+        }
+        if (loose && wantLen > 0 && theirsLen > 0 &&
+            (strncmp(theirs, want, wantLen) == 0 || strncmp(want, theirs, theirsLen) == 0))
+        {
+            looseMatches++;
+            looseId = unityId;
+        }
+    }
+    cJSON_Delete(root);
+    free(list);
+
+    if (result != FETCH_OK && looseMatches == 1)
+    {
+        *outId = looseId;
+        result = FETCH_OK;
+    }
+    return result;
+}
+
+// xboxunity's number for a homebrew's name - which is also its own title ID,
+// for the cover list - or FETCH_NO_COVER if it hasn't got it.
+static FetchResult FindHomebrewOnXboxUnity(const char *name, unsigned long *outId)
+{
+    FetchResult result = SearchHomebrew(name, name, true, outId);
+    if (result != FETCH_NO_COVER)
+        return result;
+
+    char shorter[HOMEBREW_NAME_MAX];
+    WithoutVersion(name, shorter, sizeof(shorter));
+    if (strlen(shorter) < 3 || strcmp(shorter, name) == 0)
+        return FETCH_NO_COVER;
+    return SearchHomebrew(shorter, shorter, false, outId);
+}
+
+// ---------------------------------------------------------------------------
 // The tile: the front of the case cut from the download, the banner beside it
 // ---------------------------------------------------------------------------
 
@@ -485,12 +678,13 @@ static bool IsArcadeTitle(unsigned long titleId)
 // tile then gets the disc banner, or failing that a plain green strip. Only
 // the workers use them, the first to want one decoding it under
 // g_bannerLock, and StopCoverArt lets them go once the workers have stopped.
-#define BANNER_DISC   0
-#define BANNER_ARCADE 1
-#define BANNER_XBOX   2
-#define BANNER_COUNT  3
-static unsigned long *g_bannerPixels[BANNER_COUNT] = { NULL, NULL, NULL };
-static bool g_bannerTried[BANNER_COUNT] = { false, false, false };
+#define BANNER_DISC     0
+#define BANNER_ARCADE   1
+#define BANNER_XBOX     2
+#define BANNER_HOMEBREW 3
+#define BANNER_COUNT    4
+static unsigned long *g_bannerPixels[BANNER_COUNT] = { NULL, NULL, NULL, NULL };
+static bool g_bannerTried[BANNER_COUNT] = { false, false, false, false };
 static CRITICAL_SECTION g_bannerLock;
 
 // Under g_bannerLock.
@@ -500,11 +694,14 @@ static const unsigned long *DecodeBanner(int which)
         return g_bannerPixels[which];
     g_bannerTried[which] = true;
 
-    const unsigned char *png = (which == BANNER_XBOX) ? kBoxArtBannerXboPng
+    const unsigned char *png = (which == BANNER_HOMEBREW) ? kBoxArtBannerHomebrewPng
+                             : (which == BANNER_XBOX) ? kBoxArtBannerXboPng
                              : (which == BANNER_ARCADE) ? kBoxArtBannerXblaPng : kBoxArtBannerPng;
-    const unsigned long size = (which == BANNER_XBOX) ? kBoxArtBannerXboPngSize
+    const unsigned long size = (which == BANNER_HOMEBREW) ? kBoxArtBannerHomebrewPngSize
+                             : (which == BANNER_XBOX) ? kBoxArtBannerXboPngSize
                              : (which == BANNER_ARCADE) ? kBoxArtBannerXblaPngSize : kBoxArtBannerPngSize;
-    const char *name = (which == BANNER_XBOX) ? "Original Xbox banner"
+    const char *name = (which == BANNER_HOMEBREW) ? "homebrew banner"
+                     : (which == BANNER_XBOX) ? "Original Xbox banner"
                      : (which == BANNER_ARCADE) ? "arcade banner" : "banner";
     if (size == 0)
         return NULL;
@@ -543,6 +740,8 @@ static const unsigned long *Banner(int which)
 // Which banner a game's tile gets.
 static int BannerFor(unsigned long titleId)
 {
+    if (IsHomebrewCoverKey(titleId))
+        return BANNER_HOMEBREW;
     if (IsArcadeTitle(titleId))
         return BANNER_ARCADE;
     if (IsXboxTitleId(titleId))
@@ -619,6 +818,34 @@ static unsigned long *FetchFront(unsigned long titleId, unsigned long *downloade
 {
     *outFailed = false;
     Download download = {NULL, 0};
+
+    // Homebrew: its name searched for on xboxunity, then that one's cover.
+    // Xbox Live has none.
+    if (IsHomebrewCoverKey(titleId))
+    {
+        char name[HOMEBREW_NAME_MAX];
+        if (!HomebrewNameFor(titleId, name, sizeof(name)))
+        {
+            *outFailed = true; // asked for before its name came - not "none"
+            return NULL;
+        }
+        const double started = ImageTimerMs();
+        unsigned long unityId = 0;
+        FetchResult found = FindHomebrewOnXboxUnity(name, &unityId);
+        if (found == FETCH_OK)
+            found = FetchXboxUnityCover(unityId, &download);
+        *fetchMs = ImageTimerMs() - started;
+        if (found == FETCH_OK)
+        {
+            *downloaded = download.size;
+            dprintf("[covers] \"%s\": xboxunity's homebrew %08lX\n", name, unityId);
+            return DecodeFront(titleId, "xboxunity", download, imageW, imageH, decodeMs, cutMs);
+        }
+        *outFailed = (found == FETCH_FAILED);
+        if (!*outFailed)
+            dprintf("[covers] \"%s\": no homebrew of that name on xboxunity\n", name);
+        return NULL;
+    }
 
     double fetchStarted = ImageTimerMs();
     const FetchResult xboxLive = FetchBoxArt(titleId, &download);

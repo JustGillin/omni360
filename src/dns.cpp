@@ -103,6 +103,16 @@ bool ResolveDNS(const char *domain, char *resolvedIP, int ipBufferSize)
 
     resolvedIP[0] = '\0';
 
+    // Already an address - "192.168.1.10", a PC on the LAN like the homebrew
+    // test mirror. DNS has no name to look up for it, and says so.
+    if (strspn(domain, "0123456789.") == strlen(domain) && inet_addr(domain) != INADDR_NONE)
+    {
+        if ((int)strlen(domain) >= ipBufferSize)
+            return false;
+        strcpy(resolvedIP, domain);
+        return true;
+    }
+
     if (KnownMissing(domain))
         return false;
 

@@ -66,6 +66,19 @@ bool StopCoverArt(DWORD timeoutMs);
 // covers already handed over aren't asked for again.
 void RequestCoverArt(const unsigned long *titleIds, int count);
 
+// Homebrew - the Apps, Homebrew and Emulators pages' - has no title ID to
+// find a cover by: most homebrew executables carry none, and xboxunity files
+// homebrew under numbers of its own. So each is asked for by a key made from
+// its name, in a range no title ID uses, and the worker searches xboxunity
+// for the name. Its tile gets the homebrew banner. HomebrewCoverKey is the
+// same for the same name, whatever its case.
+unsigned long HomebrewCoverKey(const char *name);
+bool IsHomebrewCoverKey(unsigned long key);
+
+// The names behind the homebrew keys in the next RequestCoverArt list.
+// Replaces any earlier names.
+void SetHomebrewCoverNames(const char *const *names, int count);
+
 // The Store's covers, for the tiles on screen: fetched ahead of the
 // library's. Replaces any earlier Store list. Unlike the library's, a cover
 // asked for again is read again - the Store keeps only the covers it's

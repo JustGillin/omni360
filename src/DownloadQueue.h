@@ -30,7 +30,8 @@ enum QueueJobKind
     QUEUE_JOB_DLC_PACK,
     QUEUE_JOB_TITLE_UPDATE,
     QUEUE_JOB_DISC_INSTALL, // not this queue's: DiscWorker's, in the same terms so the Queue page lists both
-    QUEUE_JOB_GAME_INSTALL  // likewise GameInstaller's
+    QUEUE_JOB_GAME_INSTALL, // likewise GameInstaller's
+    QUEUE_JOB_HOMEBREW      // an app, homebrew game or emulator from the ConsoleMods repo
 };
 
 enum QueueJobState
@@ -133,6 +134,25 @@ EnqueueResult EnqueueDlcPack(const DlcRarMatch &pack, const char *gameName, unsi
                              const char *authHeader);
 EnqueueResult EnqueueTitleUpdate(const TitleUpdateMatch &update, const char *gameName, unsigned long titleId,
                                  const char *authHeader);
+
+// A homebrew install: each .7z downloaded in turn into kindFolder, unpacked
+// into kindFolder\folder - over what's there, as Aurora's Homebrew Store
+// does - and deleted. With a mirror ("http://192.168.1.10:8000"), each
+// archive is fetched from there by its file name instead of from its URL -
+// for testing against a folder of them served over the LAN.
+#define HOMEBREW_MAX_URLS 4
+
+struct HomebrewJobSpec
+{
+    char title[128];
+    char urls[HOMEBREW_MAX_URLS][256];
+    int urlCount;
+    char kindFolder[512];
+    char folder[64];
+    char mirror[256]; // empty for none
+};
+
+EnqueueResult EnqueueHomebrew(const HomebrewJobSpec &spec);
 
 // Copies the jobs out in the order the Queue page lists them: the active one,
 // then the waiting ones in the order they'll run, then finished ones, most

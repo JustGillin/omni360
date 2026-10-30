@@ -68,6 +68,9 @@
     <Filter Include="zlib">
       <UniqueIdentifier>{bdbeaf25-ac60-5c6a-8835-75c065f581f1}</UniqueIdentifier>
     </Filter>
+    <Filter Include="lzma">
+      <UniqueIdentifier>{6f0d3c1e-8a52-4b7e-9c3a-2d5e7f1a9b40}</UniqueIdentifier>
+    </Filter>
     <Filter Include="dmc_unrar">
       <UniqueIdentifier>{6f1c2b8e-3d4a-4e5f-9a7b-1c2d3e4f5a6b}</UniqueIdentifier>
     </Filter>
@@ -97,6 +100,21 @@
     <ClCompile Include="zlib\zutil.c">
       <Filter>zlib</Filter>
     </ClCompile>
+    <ClCompile Include="lzma\7zArcIn.c"><Filter>lzma</Filter></ClCompile>
+    <ClCompile Include="lzma\7zBuf.c"><Filter>lzma</Filter></ClCompile>
+    <ClCompile Include="lzma\7zCrc.c"><Filter>lzma</Filter></ClCompile>
+    <ClCompile Include="lzma\7zCrcOpt.c"><Filter>lzma</Filter></ClCompile>
+    <ClCompile Include="lzma\7zDec.c"><Filter>lzma</Filter></ClCompile>
+    <ClCompile Include="lzma\7zStream.c"><Filter>lzma</Filter></ClCompile>
+    <ClCompile Include="lzma\Bcj2.c"><Filter>lzma</Filter></ClCompile>
+    <ClCompile Include="lzma\Bra.c"><Filter>lzma</Filter></ClCompile>
+    <ClCompile Include="lzma\Bra86.c"><Filter>lzma</Filter></ClCompile>
+    <ClCompile Include="lzma\BraIA64.c"><Filter>lzma</Filter></ClCompile>
+    <ClCompile Include="lzma\Delta.c"><Filter>lzma</Filter></ClCompile>
+    <ClCompile Include="lzma\Lzma2Dec.c"><Filter>lzma</Filter></ClCompile>
+    <ClCompile Include="lzma\LzmaDec.c"><Filter>lzma</Filter></ClCompile>
+    <ClCompile Include="lzma\Ppmd7.c"><Filter>lzma</Filter></ClCompile>
+    <ClCompile Include="lzma\Ppmd7Dec.c"><Filter>lzma</Filter></ClCompile>
     <ClCompile Include="src\driveMount.c">
       <Filter>Source Files\Support</Filter>
     </ClCompile>
@@ -140,6 +158,9 @@
       <Filter>Source Files\Installs</Filter>
     </ClCompile>
     <ClCompile Include="src\GameInstaller.cpp">
+      <Filter>Source Files\Installs</Filter>
+    </ClCompile>
+    <ClCompile Include="src\SevenZip.cpp">
       <Filter>Source Files\Installs</Filter>
     </ClCompile>
     <ClCompile Include="src\HttpPlain.cpp">

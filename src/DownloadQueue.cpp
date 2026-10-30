@@ -8,6 +8,8 @@ DESCRIPTION : the download queue - DLC packs and title updates, installed one
 
 #include "DownloadQueue.h"
 #include "downloadFile.h" // FormatBytes, DownloadProgressFn
+#include "HttpPlain.h"    // HttpDownloadPlain, for a homebrew mirror
+#include "SevenZip.h"
 #include "OutputConsole.h"
 
 #include <xtl.h>
@@ -37,6 +39,7 @@ struct QueueJob
 
     DlcRarMatch pack;          // QUEUE_JOB_DLC_PACK
     TitleUpdateMatch update;   // QUEUE_JOB_TITLE_UPDATE
+    HomebrewJobSpec homebrew;  // QUEUE_JOB_HOMEBREW
     char authHeader[IAS3_AUTH_HEADER_MAX];
 
     // The worker's own counters, kept here so its progress callbacks - which
@@ -471,6 +474,110 @@ static void RunTitleUpdate(const QueueJob &job, JobResult &result)
     }
 }
 
+static bool WorkerUnpackProgress(unsigned long long, unsigned long long)
+{
+    return !ActiveJobCancelled();
+}
+
+// The last part of a URL: "RetroArch-360.7z".
+static const char *UrlFileName(const char *url)
+{
+    const char *slash = strrchr(url, '/');
+    return slash != NULL ? slash + 1 : url;
+}
+
+// Each archive downloaded beside where it's going, unpacked, and deleted.
+static void RunHomebrew(const QueueJob &job, JobResult &result)
+{
+    const HomebrewJobSpec &hb = job.homebrew;
+    char archive[600], dest[600];
+    _snprintf(archive, sizeof(archive), "%s\\Omni360-download.7z", hb.kindFolder);
+    archive[sizeof(archive) - 1] = '\0';
+    _snprintf(dest, sizeof(dest), "%s\\%s", hb.kindFolder, hb.folder);
+    dest[sizeof(dest) - 1] = '\0';
+    CreateDirectoryA(hb.kindFolder, NULL); // the first install of its kind; already there is fine
+    int skippedNames = 0;
+
+    for (int i = 0; i < hb.urlCount; ++i)
+    {
+        char url[600];
+        if (hb.mirror[0] != '\0')
+            _snprintf(url, sizeof(url), "%s/%s", hb.mirror, UrlFileName(hb.urls[i]));
+        else
+            _snprintf(url, sizeof(url), "%s", hb.urls[i]);
+        url[sizeof(url) - 1] = '\0';
+
+        char phase[64];
+        if (hb.urlCount > 1)
+            _snprintf(phase, sizeof(phase), "Downloading part %d of %d", i + 1, hb.urlCount);
+        else
+            _snprintf(phase, sizeof(phase), "Downloading");
+        phase[sizeof(phase) - 1] = '\0';
+        SetActivePhase(phase, 0, 1, i, hb.urlCount, (float)i / (float)hb.urlCount);
+
+        dprintf("[homebrew] %s: %s\n", hb.title, url);
+        const int status = (_strnicmp(url, "http://", 7) == 0)
+                               ? HttpDownloadPlain(url, archive, WorkerDownloadProgress)
+                               : httpRequestHTTPS(url, HTTP_GET, NULL, NULL, archive, NULL, NULL, true, NULL, 0,
+                                                  dprintf, 0, WorkerDownloadProgress);
+        if (status != 200)
+        {
+            remove(archive);
+            if (status == HTTP_STATUS_CANCELLED || ActiveJobCancelled())
+            {
+                SetResult(result, QUEUE_OUTCOME_CANCELLED, "Cancelled",
+                          i == 0 ? "Nothing was installed." : "Its first parts are installed.");
+            }
+            else if (status == 403 && hb.mirror[0] == '\0')
+            {
+                // Cloudflare in front of the repo lets only Aurora through, for now.
+                SetResult(result, QUEUE_OUTCOME_FAILED, "Refused by ConsoleMods",
+                          "consolemods.org doesn't let Omni360 download yet. The Setup Guide has a way to test it.");
+            }
+            else
+            {
+                char detail[160];
+                _snprintf(detail, sizeof(detail), "%s - %s %d. See the log.", UrlFileName(url),
+                          status > 0 ? "the server said" : "error", status);
+                detail[sizeof(detail) - 1] = '\0';
+                SetResult(result, QUEUE_OUTCOME_FAILED, "Download failed", detail);
+            }
+            return;
+        }
+
+        SetActivePhase("Unpacking", 0, 1, i + 1, hb.urlCount, (float)(i + 1) / (float)hb.urlCount);
+        int leftOut = 0;
+        const SevenZipResult unpacked = ExtractSevenZip(archive, dest, hb.folder, WorkerUnpackProgress, &leftOut);
+        skippedNames += leftOut;
+        remove(archive);
+        if (unpacked == SEVEN_ZIP_CANCELLED)
+        {
+            SetResult(result, QUEUE_OUTCOME_CANCELLED, "Cancelled", "Some of its files may already be there.");
+            return;
+        }
+        if (unpacked != SEVEN_ZIP_OK)
+        {
+            char detail[160];
+            _snprintf(detail, sizeof(detail), "%s: %s.", UrlFileName(url), SevenZipResultText(unpacked));
+            detail[sizeof(detail) - 1] = '\0';
+            SetResult(result, QUEUE_OUTCOME_FAILED, "Couldn't unpack it", detail);
+            return;
+        }
+    }
+
+    if (skippedNames > 0)
+    {
+        // Names longer than FATX's 42 characters, usually sample ROMs.
+        char detail[160];
+        _snprintf(detail, sizeof(detail), "%s - %d file%s left out, as the drive can't hold their names.", dest,
+                  skippedNames, skippedNames == 1 ? "" : "s");
+        detail[sizeof(detail) - 1] = '\0';
+        SetResult(result, QUEUE_OUTCOME_INSTALLED, "Installed", detail);
+        return;
+    }
+    SetResult(result, QUEUE_OUTCOME_INSTALLED, "Installed", dest);
+}
+
 // Under the lock. The job's slot stays put while it's active - RemoveQueueJob
 // refuses unfinished jobs - so the worker can write back to it afterwards.
 //
@@ -540,6 +647,8 @@ static DWORD WINAPI WorkerEntry(LPVOID)
 
         if (work.kind == QUEUE_JOB_DLC_PACK)
             RunDlcPack(work, result);
+        else if (work.kind == QUEUE_JOB_HOMEBREW)
+            RunHomebrew(work, result);
         else
             RunTitleUpdate(work, result);
 
@@ -685,16 +794,18 @@ static int FreeSlot()
 }
 
 static EnqueueResult Enqueue(QueueJobKind kind, const DlcRarMatch *pack, const TitleUpdateMatch *update,
-                             const char *gameName, unsigned long titleId, const char *authHeader)
+                             const char *gameName, unsigned long titleId, const char *authHeader,
+                             const HomebrewJobSpec *homebrew = NULL)
 {
     if (!g_running)
         return ENQUEUE_UNAVAILABLE;
 
     // What the row is called, and what's checked for being queued already:
     // the pack's file - or for one file of a pack, its own name (gameName),
-    // so it doesn't stand in for the whole pack.
-    const char *filename = (kind == QUEUE_JOB_DLC_PACK) ? (pack->only[0] != '\0' ? gameName : pack->filename)
-                                                        : update->filename;
+    // so it doesn't stand in for the whole pack - or the homebrew's title.
+    const char *filename = (kind == QUEUE_JOB_HOMEBREW) ? homebrew->title
+                           : (kind == QUEUE_JOB_DLC_PACK) ? (pack->only[0] != '\0' ? gameName : pack->filename)
+                                                          : update->filename;
 
     EnterCriticalSection(&g_lock);
 
@@ -725,6 +836,8 @@ static EnqueueResult Enqueue(QueueJobKind kind, const DlcRarMatch *pack, const T
         job.pack = *pack;
     if (update != NULL)
         job.update = *update;
+    if (homebrew != NULL)
+        job.homebrew = *homebrew;
     CopyText(job.authHeader, sizeof(job.authHeader), authHeader);
 
     job.view.titleId = titleId;
@@ -749,6 +862,15 @@ EnqueueResult EnqueueTitleUpdate(const TitleUpdateMatch &update, const char *gam
                                  const char *authHeader)
 {
     return Enqueue(QUEUE_JOB_TITLE_UPDATE, NULL, &update, gameName, titleId, authHeader);
+}
+
+EnqueueResult EnqueueHomebrew(const HomebrewJobSpec &spec)
+{
+    // The row's second line: where it's going.
+    char where[600];
+    _snprintf(where, sizeof(where), "%s\\%s", spec.kindFolder, spec.folder);
+    where[sizeof(where) - 1] = '\0';
+    return Enqueue(QUEUE_JOB_HOMEBREW, NULL, NULL, where, 0, "", &spec);
 }
 
 // Display order: active, then waiting by sequence, then finished newest first.

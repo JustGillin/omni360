@@ -1,0 +1,24 @@
+7-Zip's C code (the LZMA SDK's), 24.09 - the .7z decoder only, for installing
+homebrew from the ConsoleMods repo, whose downloads are .7z archives.
+
+Files copied from the C folder of the 7-Zip 24.09 tag:
+
+  https://github.com/ip7z/7zip/tree/24.09/C
+
+Only reading .7z archives and what it needs are here: 7zArcIn.c, 7zBuf.c,
+7zCrc.c, 7zCrcOpt.c, 7zDec.c, 7zStream.c, the BCJ, BCJ2 and Delta filters,
+the LZMA, LZMA2 and PPMd decoders, and their headers. 7zAlloc.c, 7zFile.c and
+CpuArch.c, which are Windows- and x86-specific, aren't used - SevenZip.cpp has
+its own allocator and file stream. lzma.txt is the SDK's own documentation.
+
+Two changes, each marked "Omni360:":
+  - CpuArch.h's big-endian test also takes _M_PPCBE, the Xbox 360 compiler's
+    own define - without it, the file stops the build, as it can't tell the
+    byte order.
+  - 7zDec.c defines Z7_PPMD_SUPPORT, which the SDK leaves off, so an archive
+    packed with PPMd unpacks too.
+
+tools/test_7z/run_test.py checks the decoder on a PC against archives 7-Zip
+makes.
+
+Licence: every file here says it is in the public domain.

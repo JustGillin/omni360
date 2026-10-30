@@ -21,11 +21,14 @@ void ShutdownGameListUI();
 // down (progress, messages, confirmations) are still their own loops for now;
 // they draw the sidebar too, so the app reads as one place throughout.
 
-// In the order the sidebar lists them. Library and Store are one group,
-// Queue and Settings the other, with a divider between.
+// In the order the sidebar lists them. Library, Apps, Homebrew, Emulators and
+// Store are one group, Queue and Settings the other, with a divider between.
 enum ShellPage
 {
     SHELL_PAGE_LIBRARY,
+    SHELL_PAGE_APPS,
+    SHELL_PAGE_HOMEBREW,
+    SHELL_PAGE_EMULATORS,
     SHELL_PAGE_STORE,
     SHELL_PAGE_QUEUE,
     SHELL_PAGE_SETTINGS,
@@ -37,7 +40,14 @@ struct ShellSidebar
     ShellPage page;       // the highlighted page
     bool focused;         // the sidebar has focus, rather than the page
     int libraryCount;     // shown beside Your Library
+    int appsCount;        // beside Apps
+    int homebrewCount;    // beside Homebrew
+    int emulatorsCount;   // beside Emulators
     int queueCount;       // shown beside Queue; 0 shows nothing
+
+    // Pages left out of the sidebar - Apps, Homebrew or Emulators with no
+    // folders. The ones under them move up into their place.
+    bool hidden[SHELL_PAGE_COUNT];
 
     // The drive content installs to, at the foot of the sidebar: a ring for
     // how full it is, its name, and the free space in words.
@@ -151,6 +161,17 @@ struct LibraryPageView
     const char *bannerText;
     bool focused; // false while the sidebar has focus
 
+    // The Apps and Homebrew pages are this grid too. heading NULL is the
+    // library's own, with its empty-page text; otherwise emptyTitle and
+    // emptyHint say what an empty page says. Their apps have no package
+    // images, so isApps leaves the library's icons alone and names every
+    // tile that has no box art.
+    const char *heading;
+    const char *emptyTitle;
+    const char *emptyHint;
+    bool isApps;
+    const unsigned long *coverKeys; // an app's cover, by CoverArt.h's HomebrewCoverKey - one a game; NULL for the library
+
     // The disc in the drive, as the first tile, when hasDisc. selected and
     // scroll count it: game i is then item i + 1.
     bool hasDisc;
@@ -239,13 +260,15 @@ struct SettingsControlView
     bool on;             // a checkbox's
     int valueIndex;
     int valueCount;
+    bool compact;        // a value's: narrower, beside a folder's path
     const char *help;    // for the help line, while it has focus
 };
 
 enum SettingsRowKind
 {
     SETTINGS_VIEW_HEADING, // label, and any controls on the right
-    SETTINGS_VIEW_FOLDER,  // a checkbox (checked, locked), label the path, status on the right
+    SETTINGS_VIEW_FOLDER,  // a checkbox (checked, locked), label the path, status on the right - then
+                           // its one value control, if it has one, which left and right change
     SETTINGS_VIEW_LINE     // label, status beside it, controls on the right
 };
 
@@ -372,6 +395,28 @@ void StoreFeaturedTileRect(int count, int i, float *x, float *y, float *w, float
 void StoreButtonRect(int i, float *x, float *y, float *w, float *h);
 
 void RenderStoreFrame(StorePageView &view, const UiHint *hints, int hintCount);
+
+// A page of the Store that is only rows of tiles scrolling sideways under its
+// header, laid out as the front page's rows of games are - the Homebrew
+// page's apps, homebrew and emulators. A row's tiles may be any number.
+// focusRow and focusPlace are the caller's; scroll, in pixels, and each row's
+// scroll, its first tile shown, are kept between frames and moved by the
+// Render call so the focused tile is on screen. A tile marked installed
+// carries an INSTALLED pill.
+struct StoreRowsView
+{
+    const char *title;
+    const char *subtitle;  // may be NULL
+    StoreRowView rows[STORE_ROWS_MAX];
+    const bool *installed[STORE_ROWS_MAX]; // each row's, a flag a tile; NULL for none
+    int rowCount;
+    int focusRow;
+    int focusPlace;
+    float scroll;
+    bool focused;
+};
+
+void RenderStoreRowsFrame(StoreRowsView &view, const UiHint *hints, int hintCount);
 
 // A section of the Store that is only its A-Z tiles - Xbox Live Arcade's -
 // laid out as the front page's are. focus is the letter, 0 to

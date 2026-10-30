@@ -68,6 +68,16 @@ static const char *LastPart(const char *path)
     return strchr(part, ':') != NULL ? "" : part;
 }
 
+// Not looked in: a Content folder's title folders, a Games on Demand
+// package's .data folder, and the system's $SystemUpdate and the like.
+static bool SkippedFolder(const char *name)
+{
+    if (strcmp(name, ".") == 0 || strcmp(name, "..") == 0)
+        return true;
+    const size_t len = strlen(name);
+    return IsHexFolderName(name) || name[0] == '$' || (len > 5 && _stricmp(name + len - 5, ".data") == 0);
+}
+
 struct FolderScan
 {
     InstalledGame *out;
@@ -165,12 +175,7 @@ static void Visit(FolderScan &scan, const char *dir, int depth)
         if (!(found.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY))
             continue;
         const char *name = found.cFileName;
-        if (strcmp(name, ".") == 0 || strcmp(name, "..") == 0)
-            continue;
-        // A Content folder's title folders, a Games on Demand package's
-        // .data folder, and the system's $SystemUpdate and the like.
-        const size_t len = strlen(name);
-        if (IsHexFolderName(name) || name[0] == '$' || (len > 5 && _stricmp(name + len - 5, ".data") == 0))
+        if (SkippedFolder(name))
             continue;
 
         char sub[600];
@@ -196,6 +201,126 @@ int EnumerateFolderGames(const char *root, InstalledGame *outGames, int maxGames
     if (scan.count > 0 || scan.unreadable > 0)
         printFunction("Folder scan of %s: %d folder(s), %d game(s), %d unreadable, %lu ms\n", root,
                       scan.foldersSeen, scan.count, scan.unreadable, (unsigned long)(GetTickCount() - startedAt));
+    return scan.count;
+}
+
+// The app at exe, in dir.
+static void AddApp(FolderScan &scan, const char *dir, const char *exe)
+{
+    if (scan.count >= scan.max)
+        return;
+
+    GodTitleInfo info;
+    const GodResult result = GodReadExecutableFile(exe, &info);
+    if (result != GOD_OK)
+    {
+        // Homebrew isn't always built as a retail executable is; it can
+        // still be started.
+        scan.print("  %s -> header not readable (%s), listed anyway\n", exe, GodResultText(result));
+        scan.unreadable++;
+        memset(&info, 0, sizeof(info));
+    }
+
+    InstalledGame &app = scan.out[scan.count++];
+    memset(&app, 0, sizeof(app));
+    app.titleId = info.titleId;
+    app.contentType = info.contentType;
+    app.folder = true;
+    _snprintf(app.packagePath, sizeof(app.packagePath), "%s", exe);
+    app.packagePath[sizeof(app.packagePath) - 1] = '\0';
+
+    const char *name = info.name[0] != '\0' ? info.name : LastPart(dir);
+    if (name[0] == '\0')
+        name = LastPart(exe); // an app at the top of a drive
+    _snprintf(app.displayName, sizeof(app.displayName), "%s", name);
+    app.displayName[sizeof(app.displayName) - 1] = '\0';
+}
+
+static void VisitApps(FolderScan &scan, const char *dir, int depth)
+{
+    if (scan.count >= scan.max)
+        return;
+    scan.foldersSeen++;
+
+    static const char *const defaults[] = { "default.xex", "default.xbe" };
+    char exe[600];
+    for (int i = 0; i < 2; ++i)
+    {
+        _snprintf(exe, sizeof(exe), "%s\\%s", dir, defaults[i]);
+        exe[sizeof(exe) - 1] = '\0';
+        if (IsFile(exe))
+        {
+            AddApp(scan, dir, exe);
+            return;
+        }
+    }
+
+    char pattern[600];
+    _snprintf(pattern, sizeof(pattern), "%s\\*", dir);
+    pattern[sizeof(pattern) - 1] = '\0';
+
+    // First its files: one .xex, and it's an app. Several - a folder of
+    // emulator cores, say - and it's left to its folders. Not the folder
+    // named in settings.txt, which a stray .xex would otherwise hide.
+    WIN32_FIND_DATAA found;
+    HANDLE h = FindFirstFileA(pattern, &found);
+    if (h == INVALID_HANDLE_VALUE)
+        return;
+    int xexCount = 0;
+    char lone[MAX_PATH];
+    lone[0] = '\0';
+    do
+    {
+        const size_t len = strlen(found.cFileName);
+        if (!(found.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY) && len > 4 &&
+            _stricmp(found.cFileName + len - 4, ".xex") == 0 && xexCount++ == 0)
+        {
+            _snprintf(lone, sizeof(lone), "%s", found.cFileName);
+            lone[sizeof(lone) - 1] = '\0';
+        }
+    } while (FindNextFileA(h, &found));
+    FindClose(h);
+
+    if (xexCount == 1 && depth > 0)
+    {
+        _snprintf(exe, sizeof(exe), "%s\\%s", dir, lone);
+        exe[sizeof(exe) - 1] = '\0';
+        AddApp(scan, dir, exe);
+        return;
+    }
+
+    if (depth >= FOLDER_GAME_DEPTH)
+        return;
+
+    h = FindFirstFileA(pattern, &found);
+    if (h == INVALID_HANDLE_VALUE)
+        return;
+    do
+    {
+        if (!(found.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY) || SkippedFolder(found.cFileName))
+            continue;
+        char sub[600];
+        _snprintf(sub, sizeof(sub), "%s\\%s", dir, found.cFileName);
+        sub[sizeof(sub) - 1] = '\0';
+        VisitApps(scan, sub, depth + 1);
+    } while (scan.count < scan.max && FindNextFileA(h, &found));
+    FindClose(h);
+}
+
+int EnumerateFolderApps(const char *root, InstalledGame *outApps, int maxApps,
+                        void printFunction(const char *_format, ...))
+{
+    const DWORD startedAt = GetTickCount();
+    FolderScan scan;
+    memset(&scan, 0, sizeof(scan));
+    scan.out = outApps;
+    scan.max = maxApps;
+    scan.print = printFunction;
+
+    VisitApps(scan, root, 0);
+
+    printFunction("App scan of %s: %d folder(s), %d app(s), %d without a readable header, %lu ms\n", root,
+                  scan.foldersSeen, scan.count, scan.unreadable, (unsigned long)(GetTickCount() - startedAt));
     return scan.count;
 }
 

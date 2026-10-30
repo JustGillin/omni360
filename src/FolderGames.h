@@ -30,6 +30,15 @@
 int EnumerateFolderGames(const char *root, InstalledGame *outGames, int maxGames,
                          void printFunction(const char *_format, ...));
 
+// Apps and homebrew, for the Apps and Homebrew pages: the same walk, but a
+// folder is one when it holds default.xex or default.xbe at its top - or,
+// without those, exactly one other .xex, as Aurora's Aurora.xex. Each is
+// marked folder, its packagePath the executable - LaunchApp starts it - and
+// its name the folder's, or an Original Xbox one's own. One whose header
+// can't be read is still listed, with title ID 0.
+int EnumerateFolderApps(const char *root, InstalledGame *outApps, int maxApps,
+                        void printFunction(const char *_format, ...));
+
 // Deletes a folder game's folder and everything in it - once it's checked the
 // folder still holds that game. The number of files removed; 0 if it wasn't
 // removed.
