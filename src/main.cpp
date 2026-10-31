@@ -5234,6 +5234,21 @@ static void ReadRecents()
     g_recentCount = LoadRecents(g_recents, MAX_RECENTS);
 }
 
+// What the disc's tile shows, wherever it is drawn: the library's grid and
+// Home's recents row both start with it, and its buttons depend on this.
+static LibraryDiscTile DiscTileState(const Shell &shell)
+{
+    if (shell.disc.state == DISC_READING)
+        return DISC_TILE_READING;
+    if (shell.disc.state == DISC_UNREADABLE)
+        return DISC_TILE_UNREADABLE;
+    if (shell.disc.installing)
+        return DISC_TILE_INSTALLING;
+    if (shell.discInstalled)
+        return DISC_TILE_INSTALLED;
+    return DISC_TILE_READY;
+}
+
 // What a library game is, for the line under its name on Home.
 static const char *GameKindName(const InstalledGame &game)
 {
@@ -5305,10 +5320,19 @@ static HomePageView MakeHomeView(const Shell &shell, const Library &lib)
     if (shell.hasDisc && view.recentCount < HOME_RECENTS_MAX)
     {
         HomeRecentView &tile = view.recents[view.recentCount];
-        tile.titleId = shell.disc.titleId;
+        // Only a disc that read has a title ID worth asking for art by, as
+        // the library's tile does.
+        tile.titleId = (shell.disc.state == DISC_READY) ? shell.disc.titleId : 0;
         tile.name = shell.discName;
-        tile.detail = shell.discInstalled ? "Already installed" : "In the disc drive";
         tile.disc = true;
+        switch (DiscTileState(shell))
+        {
+        case DISC_TILE_READING:     tile.detail = "Reading the disc"; break;
+        case DISC_TILE_UNREADABLE:  tile.detail = "Can't be installed"; break;
+        case DISC_TILE_INSTALLING:  tile.detail = "Installing now"; break;
+        case DISC_TILE_INSTALLED:   tile.detail = "Already installed"; break;
+        default:                    tile.detail = "In the disc drive"; break;
+        }
         view.recentCount++;
     }
 
@@ -5371,16 +5395,7 @@ static LibraryPageView MakeLibraryView(const Shell &shell, const Library &lib, c
     view.discTitleId = (shell.disc.state == DISC_READY) ? shell.disc.titleId : 0;
     view.discName = shell.discName;
     view.discProgress = -1.0f;
-    if (shell.disc.state == DISC_READING)
-        view.discTile = DISC_TILE_READING;
-    else if (shell.disc.state == DISC_UNREADABLE)
-        view.discTile = DISC_TILE_UNREADABLE;
-    else if (shell.disc.installing)
-        view.discTile = DISC_TILE_INSTALLING;
-    else if (shell.discInstalled)
-        view.discTile = DISC_TILE_INSTALLED;
-    else
-        view.discTile = DISC_TILE_READY;
+    view.discTile = DiscTileState(shell);
 
     // The bar across an installing disc's tile, from its job on the Queue.
     for (int i = 0; i < shell.queueCount; ++i)
@@ -5696,7 +5711,23 @@ static bool HomeTileAction(Shell &shell, const Library &lib, const char *gamesPa
                            const HomeRecentView &tile)
 {
     if (tile.disc)
+    {
+        // The game's page is drawn by Games and by the Store, not by Home -
+        // OpenGameByTitleId goes by whichever page is showing, so opened
+        // from here it set a flag nothing on Home reads, and X appeared to
+        // do nothing at all. Move to Games first, as X on a library game
+        // does, but only in the two states DiscTileAction opens a page from:
+        // in the others X does nothing, and moving for it would be a jump
+        // to nowhere.
+        const LibraryDiscTile state = DiscTileState(shell);
+        if ((pressed & XINPUT_GAMEPAD_X) && (state == DISC_TILE_READY || state == DISC_TILE_INSTALLED))
+        {
+            shell.page = SHELL_PAGE_LIBRARY;
+            shell.sidebarFocused = false;
+            shell.librarySelected = 0; // the disc is the library's first tile
+        }
         return DiscTileAction(shell, lib, gamesPath, pressed);
+    }
 
     const int index = LibraryIndexForTitle(lib, tile.titleId);
     if (index < 0)
@@ -6226,15 +6257,12 @@ static bool SameLibrary(const Library &a, const Library &b, int folderCount)
 // The library read behind the cached one, once it's done: swapped in if it
 // differs, keeping the selected game selected - unless the library was
 // scanned again meanwhile, which is newer.
-static void TakeFreshLibrary(Shell &shell, Library &lib, Library &fresh, const char *gamesPath)
+// A freshly read library becomes the live one: the selection stays on the
+// same game, the covers are asked for again, and `fresh` is left empty with
+// its buffer kept for the next read. Nothing happens if the drive turned out
+// to agree with what's already on screen.
+static void AdoptLibrary(Shell &shell, Library &lib, Library &fresh, const char *gamesPath)
 {
-    if (g_libraryGeneration != 0)
-    {
-        dprintf("[library cache] the library was read again meanwhile; the startup read is dropped\n");
-        FreeInstalledGames(fresh.games, fresh.count);
-        fresh.count = 0;
-        return;
-    }
     if (SameLibrary(lib, fresh, 1 + g_moreGamesPathCount))
     {
         dprintf("[library cache] the drive agrees with it\n");
@@ -6271,6 +6299,127 @@ static void TakeFreshLibrary(Shell &shell, Library &lib, Library &fresh, const c
     RequestLibraryCovers(lib);
     SaveLibrary(lib, gamesPath);
     shell.stale = true;
+}
+
+static void TakeFreshLibrary(Shell &shell, Library &lib, Library &fresh, const char *gamesPath)
+{
+    if (g_libraryGeneration != 0)
+    {
+        dprintf("[library cache] the library was read again meanwhile; the startup read is dropped\n");
+        FreeInstalledGames(fresh.games, fresh.count);
+        fresh.count = 0;
+        return;
+    }
+    AdoptLibrary(shell, lib, fresh, gamesPath);
+}
+
+// ---------------------------------------------------------------------------
+// Reading the library again without stopping the app
+// ---------------------------------------------------------------------------
+//
+// An install finishing leaves the drive out of step with what's on screen.
+// Reading it again takes a couple of seconds on a large library, and used to
+// take the whole screen while it did. It runs on a worker thread instead,
+// into a library of its own - the shape the startup read already uses - so
+// the page carries on, with "Refreshing library" in the footer until the new
+// one can be swapped in. Nothing is shared with the worker: it writes only
+// to its own library, and the swap happens here.
+
+struct LibraryRescan
+{
+    Library fresh;
+    char gamesPath[MAX_TEXT_LENGTH];
+    char morePaths[MAX_MORE_GAMES_PATHS][MAX_TEXT_LENGTH];
+    int moreCount;
+    volatile LONG done;
+    HANDLE thread;
+    bool running;
+    bool again;     // asked for again while one was going
+    int generation; // what g_libraryGeneration was when it started
+};
+
+static LibraryRescan g_rescan = { 0 };
+
+static DWORD WINAPI LibraryRescanEntry(LPVOID param)
+{
+    LibraryRescan &r = *(LibraryRescan *)param;
+    ReadLibrary(r.fresh, r.gamesPath, r.morePaths, r.moreCount);
+    InterlockedExchange(&r.done, 1);
+    return 0;
+}
+
+// False if it couldn't start one, and the caller should read the drive the
+// slow way instead.
+static bool StartLibraryRescan(const char *gamesPath)
+{
+    if (g_rescan.running)
+    {
+        g_rescan.again = true;
+        return true;
+    }
+
+    // settings.txt is read here, on the UI thread, and the paths handed over:
+    // the worker must not touch anything this thread may be reading.
+    ReadMoreGamesPaths();
+
+    if (g_rescan.fresh.games == NULL)
+        g_rescan.fresh.games = (InstalledGame *)malloc(sizeof(InstalledGame) * MAX_INSTALLED_GAMES);
+    if (g_rescan.fresh.games == NULL)
+        return false;
+    g_rescan.fresh.count = 0;
+
+    _snprintf(g_rescan.gamesPath, sizeof(g_rescan.gamesPath), "%s", gamesPath);
+    g_rescan.gamesPath[sizeof(g_rescan.gamesPath) - 1] = '\0';
+    memcpy(g_rescan.morePaths, g_moreGamesPaths, sizeof(g_rescan.morePaths));
+    g_rescan.moreCount = g_moreGamesPathCount;
+
+    g_rescan.generation = g_libraryGeneration;
+    InterlockedExchange(&g_rescan.done, 0);
+    g_rescan.thread = CreateThread(NULL, 0, LibraryRescanEntry, &g_rescan, 0, NULL);
+    if (g_rescan.thread == NULL)
+    {
+        dprintf("[library] no thread to read the drive on; reading it here instead\n");
+        return false;
+    }
+
+    g_rescan.running = true;
+    SetShellBusy("Refreshing library");
+    return true;
+}
+
+// Swaps a finished read in. Call once a frame.
+static void PollLibraryRescan(Shell &shell, Library &lib, const char *gamesPath)
+{
+    if (!g_rescan.running || InterlockedCompareExchange(&g_rescan.done, 0, 0) == 0)
+        return;
+
+    CloseHandle(g_rescan.thread);
+    g_rescan.thread = NULL;
+    g_rescan.running = false;
+
+    if (g_libraryGeneration != g_rescan.generation)
+    {
+        // Settings changed the folders and read the drive itself while this
+        // was going: what came back is for the folders as they were.
+        dprintf("[library] the folders changed while the drive was being read; that read is dropped\n");
+        FreeInstalledGames(g_rescan.fresh.games, g_rescan.fresh.count);
+        g_rescan.fresh.count = 0;
+    }
+    else
+    {
+        g_libraryGeneration++;
+        AdoptLibrary(shell, lib, g_rescan.fresh, gamesPath);
+        shell.stale = true;
+    }
+
+    // Another install finished while that one was going.
+    if (g_rescan.again)
+    {
+        g_rescan.again = false;
+        if (StartLibraryRescan(gamesPath))
+            return;
+    }
+    SetShellBusy(NULL);
 }
 
 int main()
@@ -6579,9 +6728,13 @@ int main()
         if (shell.rescanLibrary)
         {
             shell.rescanLibrary = false;
-            ScanLibrary(lib, gamesPath);
-            shell.stale = true;
+            if (!StartLibraryRescan(gamesPath))
+            {
+                ScanLibrary(lib, gamesPath); // no thread for it: the old way
+                shell.stale = true;
+            }
         }
+        PollLibraryRescan(shell, lib, gamesPath);
         if (shell.rescanShelves)
         {
             shell.rescanShelves = false;
@@ -6724,8 +6877,9 @@ int main()
                     if (shell.homeSelected > home.recentCount - 1) shell.homeSelected = home.recentCount - 1;
                     if (shell.homeSelected < 0) shell.homeSelected = 0;
                 }
-                else if (pressed & (XINPUT_GAMEPAD_A | XINPUT_GAMEPAD_X))
+                else if (pressed & (XINPUT_GAMEPAD_A | XINPUT_GAMEPAD_X | XINPUT_GAMEPAD_START))
                 {
+                    // START is the disc's install, as it is in the grid.
                     acted = HomeTileAction(shell, lib, gamesPath, pressed, home.recents[shell.homeSelected]);
                 }
             }
@@ -7335,8 +7489,38 @@ int main()
             }
             else
             {
-                hintCount = AddHint(hints, hintCount, UI_BUTTON_A, L"Play");
-                hintCount = AddHint(hints, hintCount, UI_BUTTON_X, L"View game", L"View");
+                // On the disc's tile the buttons say what its state allows,
+                // the same as they do on the grid.
+                const bool onDisc = view.recentCount > 0 && view.recents[view.recentFocus].disc;
+                if (onDisc)
+                {
+                    switch (DiscTileState(shell))
+                    {
+                    case DISC_TILE_READY:
+                        hintCount = AddHint(hints, hintCount, UI_BUTTON_A, L"Play");
+                        hintCount = AddHint(hints, hintCount, UI_BUTTON_X, L"View game", L"View");
+                        hintCount = AddHint(hints, hintCount, UI_BUTTON_START, L"Install to hard drive", L"Install");
+                        break;
+                    case DISC_TILE_INSTALLED:
+                        hintCount = AddHint(hints, hintCount, UI_BUTTON_A, L"Play");
+                        hintCount = AddHint(hints, hintCount, UI_BUTTON_X, L"View game", L"View");
+                        hintCount = AddHint(hints, hintCount, UI_BUTTON_START, L"Install again", L"Reinstall");
+                        break;
+                    case DISC_TILE_INSTALLING:
+                        hintCount = AddHint(hints, hintCount, UI_BUTTON_A, L"View in the Queue", L"Queue");
+                        break;
+                    case DISC_TILE_UNREADABLE:
+                        hintCount = AddHint(hints, hintCount, UI_BUTTON_A, L"Why?");
+                        break;
+                    default:
+                        break;
+                    }
+                }
+                else if (view.recentCount > 0)
+                {
+                    hintCount = AddHint(hints, hintCount, UI_BUTTON_A, L"Play");
+                    hintCount = AddHint(hints, hintCount, UI_BUTTON_X, L"View game", L"View");
+                }
                 hintCount = AddHint(hints, hintCount, UI_BUTTON_B, L"Exit");
                 if (view.recentCount > HomeRecentsAcross())
                     hintCount = AddHint(hints, hintCount, UI_BUTTON_LBRB, L"Page");

@@ -725,6 +725,12 @@ enum UiToastTone
 
 void ShowShellToast(const char *heading, const char *message, UiToastTone tone);
 
+// Something slow running behind the page, shown at the right of the footer
+// on whatever page is up - "Refreshing library" while the drive is read
+// again after an install. NULL clears it. It takes no input and blocks
+// nothing; it is only there so a page that is briefly out of date says so.
+void SetShellBusy(const char *label);
+
 // ---------------------------------------------------------------------------
 // Blocking screens
 // ---------------------------------------------------------------------------

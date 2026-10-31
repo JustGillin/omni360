@@ -748,6 +748,7 @@ struct UiMetrics
     float footerY;    // centre line of the button hints and the storage ring
     float radius;     // corners of tiles, cards and page buttons
     int gridCols;     // library columns
+    int storeCols;    // the Store's: it runs full width, so more fit across
 };
 
 static UiMetrics g_M;
@@ -800,6 +801,11 @@ static bool ComputeUiMetrics()
     // Five across on HD, as on the dashboard. A 4:3 page is too narrow for
     // five tiles to show anything.
     g_M.gridCols = isHD ? 5 : 3;
+
+    // The Store draws without a sidebar, so its pages are about a quarter
+    // wider than the library's grid: at the same five across its tiles came
+    // out far bigger than the library's, which is what six fixes.
+    g_M.storeCols = isHD ? 6 : 4;
 
     return true;
 }
@@ -1502,10 +1508,54 @@ static float DrawButtonSprite(int sprite, float boxX, float centerY)
     return (float)s.boxW * k;
 }
 
+// Something slow running behind the page - a library being read again after
+// an install. It sits at the right of the footer, opposite the button
+// hints, so it turns up on every page without any of them knowing about it.
+// Empty when there's nothing going on.
+static char g_busyLabel[48] = "";
+
+void SetShellBusy(const char *label)
+{
+    if (label == NULL)
+    {
+        g_busyLabel[0] = '\0';
+        return;
+    }
+    _snprintf(g_busyLabel, sizeof(g_busyLabel), "%s", label);
+    g_busyLabel[sizeof(g_busyLabel) - 1] = '\0';
+}
+
+// Three dots that fill and empty, so it reads as working rather than stuck.
+#define BUSY_DOT_MS 420.0
+
+static float BusyWidth()
+{
+    if (g_busyLabel[0] == '\0')
+        return 0.0f;
+    return TextWidth(g_busyLabel, 0.7f) + S(34.0f);
+}
+
+static void DrawBusyShapes(float centerY)
+{
+    if (g_busyLabel[0] == '\0')
+        return;
+
+    const float w = BusyWidth();
+    const float x = g_M.contentX + g_M.contentW - w;
+    const int lit = ((int)(TimerMs() / BUSY_DOT_MS)) % 4;
+
+    for (int i = 0; i < 3; ++i)
+    {
+        const float d = S(5.0f);
+        FillRound(x + i * S(9.0f), centerY - d * 0.5f, d, d, d * 0.5f, i < lit ? COL_GREEN_TEXT : COL_TRACK);
+    }
+}
+
 static void DrawButtonHintShapes(const ButtonHint *hints, int count, float centerY)
 {
     for (int i = 0; i < count; ++i)
         DrawButtonSprite(hints[i].sprite, hints[i].badgeX, centerY);
+    DrawBusyShapes(centerY);
 }
 
 // Must be called inside an open Font Begin/End.
@@ -1520,6 +1570,9 @@ static void DrawButtonHintText(const ButtonHint *hints, int count, float centerY
         g_UiFont.DrawText(hints[i].labelX, TextTopForCenter(centerY, labelScale),
                           COL_TEXT2, hints[i].label);
     }
+
+    if (g_busyLabel[0] != '\0')
+        TextMid(g_M.contentX + g_M.contentW - BusyWidth() + S(34.0f), centerY, 0.7f, COL_TEXT2, g_busyLabel);
 }
 
 // Full-screen wash, drawn first every frame: lightest at the top, settling to
@@ -2638,6 +2691,29 @@ static void DrawScrollbar(float trackY, float trackH, int count, int visibleRows
     FillRound(x, thumbY, w, thumbH, w * 0.5f, COL_TEXT2);
 }
 
+// The same bar for a page that scrolls by pixels rather than whole rows.
+// viewH is how much of the page is on screen, most its largest scroll - so
+// the content is viewH + most tall - and scroll where it has got to.
+static void DrawScrollbarRange(float trackY, float trackH, float viewH, float most, float scroll)
+{
+    if (most <= 0.5f || viewH <= 0.0f)
+        return;
+
+    const float w = S(4.0f);
+    const float x = g_M.contentX + g_M.contentW - w;
+
+    float thumbH = trackH * (viewH / (viewH + most));
+    if (thumbH < S(24.0f)) thumbH = S(24.0f);
+    if (thumbH > trackH) thumbH = trackH;
+
+    float t = scroll / most;
+    if (t < 0.0f) t = 0.0f;
+    if (t > 1.0f) t = 1.0f;
+
+    FillRound(x, trackY, w, trackH, w * 0.5f, COL_SURFACE);
+    FillRound(x, trackY + (trackH - thumbH) * t, w, thumbH, w * 0.5f, COL_TEXT2);
+}
+
 // Room the scrollbar takes from the right of a list.
 static float ScrollGutter()
 {
@@ -3173,7 +3249,10 @@ static LibraryLayout ComputeLibraryLayout(const LibraryPageView &view)
 
     L.cols = g_M.gridCols;
     L.gap = S(18.0f);
-    L.tile = (g_M.contentW - (L.cols - 1) * L.gap) / (float)L.cols;
+    // The scrollbar's room is always kept, whether or not the grid scrolls
+    // right now: taking it only when it does would resize every tile the
+    // moment a page grew past one screen.
+    L.tile = (g_M.contentW - ScrollGutter() - (L.cols - 1) * L.gap) / (float)L.cols;
     L.pitch = L.tile + L.gap;
 
     L.top = g_M.listYTitleOnly + (L.showBanner ? L.bannerH + S(18.0f) : 0.0f);
@@ -3515,6 +3594,9 @@ void RenderLibraryFrame(LibraryPageView &view, const UiHint *hints, int hintCoun
         DrawPillQuads(PillsFor(items, focusItem, focusOX, focusOY, focusS));
         DrawDiscProgress(items, focusItem, focusOX, focusOY, focusS, bandH);
     }
+
+    if (rowCount > L.fullRows)
+        DrawScrollbar(L.top, L.bottom - L.top, rowCount, L.fullRows, view.scroll);
 
     if (items.count == 0)
         FillRound(g_M.contentX, L.top, g_M.contentW, S(150.0f), r, COL_SURFACE);
@@ -4461,6 +4543,8 @@ struct SettingsLayout
     float y[SETTINGS_ROWS_MAX];    // each row's, on screen
     float h[SETTINGS_ROWS_MAX];
     bool shown[SETTINGS_ROWS_MAX]; // wholly inside the page
+    float viewH;                   // how much of the page is on screen
+    float most;                    // its largest scroll; 0 when it all fits
 };
 
 // Lays the rows out from the top, and scrolls so the focused row - and the
@@ -4496,6 +4580,8 @@ static SettingsLayout LayOutSettings(SettingsPageView &view)
     const float most = (total > height) ? total - height : 0.0f;
     if (view.scroll > most) view.scroll = most;
     if (view.scroll < 0.0f) view.scroll = 0.0f;
+    L.viewH = height;
+    L.most = most;
 
     for (int i = 0; i < count; ++i)
     {
@@ -4592,7 +4678,10 @@ void RenderSettingsFrame(SettingsPageView &view, const UiHint *hints, int hintCo
 
     const int count = view.count < SETTINGS_ROWS_MAX ? view.count : SETTINGS_ROWS_MAX;
     const SettingsLayout L = LayOutSettings(view);
-    const float x0 = g_M.contentX, w = g_M.contentW, rowH = SettingsRowH();
+    // The rows stop short of the scrollbar when there is one, as the list
+    // page's plates do.
+    const float x0 = g_M.contentX, rowH = SettingsRowH();
+    const float w = g_M.contentW - (L.most > 0.5f ? ScrollGutter() : 0.0f);
 
     BeginFrame();
     const bool showToast = ToastVisibleThisFrame();
@@ -4629,6 +4718,7 @@ void RenderSettingsFrame(SettingsPageView &view, const UiHint *hints, int hintCo
         else
             DrawSettingsControlsQuads(row, cy, view.focusCol, rowFocused);
     }
+    DrawScrollbarRange(L.top, L.viewH, L.viewH, L.most, view.scroll);
     DrawButtonHintShapes(footer, footerCount, g_M.footerY);
     DrawHeaderQuads(showToast);
 
@@ -4885,34 +4975,39 @@ static StoreLayout LayOutStore()
     L.labelY = g_M.listYTitleOnly;
     L.top = g_M.listYTitleOnly + LineHeight(1.05f) * 1.3f + S(10.0f);
 
+    // The A to Z letters are always below the fold, so this page always
+    // scrolls and the scrollbar's room is always kept: everything across it
+    // is laid out inside this rather than the full contentW.
+    const float width = g_M.contentW - ScrollGutter();
+
     // Room beside it for two landscape tiles across, wide enough for a name.
-    L.heroW = floorf(g_M.contentW * 0.58f);
+    L.heroW = floorf(width * 0.58f);
     L.heroH = floorf(L.heroW * 9.0f / 16.0f);
     L.sideX = g_M.contentX + L.heroW + L.gap;
-    L.sideW = g_M.contentW - L.heroW - L.gap;
+    L.sideW = width - L.heroW - L.gap;
     L.sideH = (L.heroH - L.gap) * 0.5f;
 
     L.btnY = L.top + L.heroH + S(24.0f);
     L.btnH = S(52.0f);
-    L.btnW = (g_M.contentW - 3.0f * L.gap) / STORE_BUTTON_COUNT;
+    L.btnW = (width - 3.0f * L.gap) / STORE_BUTTON_COUNT;
 
     L.azLabelY = L.btnY + L.btnH + S(30.0f);
     L.azY = L.azLabelY + LineHeight(0.95f) * 1.3f + S(8.0f);
     L.perRow = StoreLettersPerRow();
     L.cellGap = S(12.0f);
-    L.cell = (g_M.contentW - (L.perRow - 1) * L.cellGap) / L.perRow;
+    L.cell = (width - (L.perRow - 1) * L.cellGap) / L.perRow;
 
     const int rows = (STORE_LETTER_COUNT + L.perRow - 1) / L.perRow;
     L.bottom = L.azY + rows * L.cell + (rows - 1) * L.cellGap;
 
     L.across = StoreRowTilesAcross();
     L.rowGap = S(14.0f);
-    L.rowTile = floorf((g_M.contentW - (L.across - 1) * L.rowGap) / L.across);
+    L.rowTile = floorf((width - (L.across - 1) * L.rowGap) / L.across);
     L.rowLabelH = LineHeight(0.95f) * 1.3f + S(8.0f);
 
     L.collAcross = StoreCollectionsAcross();
     L.collGap = L.rowGap;
-    L.collW = floorf((g_M.contentW - (L.collAcross - 1) * L.collGap) / L.collAcross);
+    L.collW = floorf((width - (L.collAcross - 1) * L.collGap) / L.collAcross);
     L.collH = floorf(L.collW * 9.0f / 16.0f); // a wallpaper's shape
     L.collLabelY = L.bottom + S(34.0f);
     L.collY = L.collLabelY + L.rowLabelH;
@@ -4924,12 +5019,12 @@ static StoreLayout LayOutStore()
 
 int StoreRowTilesAcross()
 {
-    return g_M.gridCols + 2; // 7 on HD, 5 on a 4:3 screen
+    return g_M.storeCols + 2; // 8 on HD, 6 on a 4:3 screen
 }
 
 int StoreCollectionsAcross()
 {
-    return g_M.gridCols - 1; // 4 on HD, 2 on a 4:3 screen
+    return g_M.storeCols - 1; // 5 on HD, 3 on a 4:3 screen
 }
 
 // Where a Collections card sits, before the page scrolls.
@@ -5397,6 +5492,17 @@ static void DrawHomeWallpaper(const HomeWallpapers &art)
     DrawWallpaperLayer(art.to, art.t);
 }
 
+// One tile in the recents row: the disc's own face when there's no box art
+// for what's in the drive, a cover otherwise.
+static void DrawHomeTileArt(const HomeRecentView &tile, float x, float y, float s)
+{
+    D3DTexture *cover = BoxArtFor(tile.titleId);
+    if (tile.disc && cover == NULL)
+        DrawDiscArt(x, y, s, s);
+    else
+        DrawTileArt(cover, NULL, x, y, s, s);
+}
+
 void RenderHomeFrame(HomePageView &view, const UiHint *hints, int hintCount)
 {
     if (!g_Initialized)
@@ -5422,6 +5528,22 @@ void RenderHomeFrame(HomePageView &view, const UiHint *hints, int hintCount)
 
     const bool navFocused = (view.focus == HOME_FOCUS_NAV);
     const int focusTile = view.recentCount > 0 ? view.recentFocus : -1;
+
+    // The focused tile swells a little, eased over a few frames, and is drawn
+    // after its neighbours so it can grow over them - as the library's grid
+    // and the Store's do.
+    const float grow = FocusGrowFor(view.recentFocus, !navFocused && view.recentCount > 0);
+    const int focusCol = (focusTile >= view.recentScroll && focusTile < view.recentScroll + L.across)
+                             ? focusTile - view.recentScroll
+                             : -1;
+    const bool growTile = !navFocused && focusCol >= 0;
+    const float focusS = L.tile * grow;
+    const float focusOX = g_M.safeX + focusCol * (L.tile + L.gap) - (focusS - L.tile) * 0.5f;
+    const float focusOY = L.rowY - (focusS - L.tile) * 0.5f;
+
+    // No names on these tiles, and so no band to carry them: the focused
+    // game's name is already across the page above the row, in full size,
+    // and a second copy under the cover only crowded it.
 
     HomeNavRect nav[HOME_NAV_MAX];
     const int navCount = LayOutHomeNav(view, L.navH, nav);
@@ -5473,24 +5595,24 @@ void RenderHomeFrame(HomePageView &view, const UiHint *hints, int hintCount)
         const int item = view.recentScroll + i;
         if (item >= view.recentCount)
             break;
+        if (growTile && item == focusTile)
+            continue; // after the rest, so it can grow over its neighbours
 
         const float x = g_M.safeX + i * (L.tile + L.gap);
-        const bool isFocused = !navFocused && item == focusTile;
 
-        if (view.recents[item].disc && BoxArtFor(view.recents[item].titleId) == NULL)
-            DrawDiscArt(x, L.rowY, L.tile, L.tile);
-        else
-            DrawTileArt(BoxArtFor(view.recents[item].titleId), NULL, x, L.rowY, L.tile, L.tile);
+        DrawHomeTileArt(view.recents[item], x, L.rowY, L.tile);
 
-        if (isFocused)
-            FocusRing(x, L.rowY, L.tile, L.tile, g_M.radius);
-        else if (item == focusTile)
+        // Where focus lands when the nav row gives it back.
+        if (item == focusTile)
             StrokeRound(x - S(4.0f), L.rowY - S(4.0f), L.tile + S(8.0f), L.tile + S(8.0f),
                         g_M.radius > 0.0f ? g_M.radius + S(4.0f) : 0.0f, S(2.0f), 0x59FFFFFF);
+    }
 
-        // A band under the name, so it reads over any cover.
-        FillRoundGradient(x, L.rowY + L.tile - S(44.0f), L.tile, S(44.0f), g_M.radius, 0x00000000, 0xB3000000,
-                          true);
+    if (growTile)
+    {
+        ShadowRound(focusOX, focusOY + S(10.0f), focusS, focusS, g_M.radius, S(26.0f), COL_SHADOW);
+        DrawHomeTileArt(view.recents[focusTile], focusOX, focusOY, focusS);
+        FocusRing(focusOX, focusOY, focusS, focusS, g_M.radius);
     }
 
     if (view.recentCount == 0)
@@ -5566,16 +5688,6 @@ void RenderHomeFrame(HomePageView &view, const UiHint *hints, int hintCount)
     }
 
     Text(g_M.safeX, L.rowLabelY, 0.95f, COL_TEXT, view.recentCount > 0 ? "Recent" : "Your games", 0, 0.0f, true);
-
-    for (int i = 0; i < L.across; ++i)
-    {
-        const int item = view.recentScroll + i;
-        if (item >= view.recentCount)
-            break;
-        const float x = g_M.safeX + i * (L.tile + L.gap);
-        TextFit(x + S(10.0f), L.rowY + L.tile - S(32.0f), 0.72f, COL_TEXT, view.recents[item].name,
-                L.tile - S(20.0f), true);
-    }
 
     if (view.recentCount == 0)
     {
@@ -5887,7 +5999,7 @@ void RenderStoreFrame(StorePageView &view, const UiHint *hints, int hintCount)
             wantArt[wantArtCount++] = view.featured[i].titleId;
     }
     ClearClip();
-    SetClip(g_M.contentX - S(12.0f), clipTop, g_M.contentW + S(24.0f), clipBottom - clipTop);
+    SetClip(g_M.contentX - S(12.0f), clipTop, g_M.contentW - ScrollGutter() + S(12.0f), clipBottom - clipTop);
 
     if (L.collY + sy + L.collH >= clipTop && L.collY + sy <= clipBottom)
     {
@@ -5944,6 +6056,15 @@ void RenderStoreFrame(StorePageView &view, const UiHint *hints, int hintCount)
     }
 
     ClearClip();
+
+    // Outside the clip, so the bar itself is never cut off. The page can
+    // scroll until the last row of letters clears the foot.
+    {
+        const float viewH = clipBottom - clipTop;
+        float most = L.bottom - (clipBottom - S(16.0f));
+        if (most < 0.0f) most = 0.0f;
+        DrawScrollbarRange(clipTop, viewH, viewH, most, view.scroll);
+    }
 
     DrawButtonHintShapes(footer, footerCount, g_M.footerY);
     DrawHeaderQuads(showToast);
@@ -6195,7 +6316,7 @@ void RenderStoreRowsFrame(StoreRowsView &view, const UiHint *hints, int hintCoun
 
     // --- Pass 1: quads ---
     DrawFrameBase(g_sidebar.focused);
-    SetClip(g_M.contentX - S(12.0f), clipTop, g_M.contentW + S(24.0f), clipBottom - clipTop);
+    SetClip(g_M.contentX - S(12.0f), clipTop, g_M.contentW - ScrollGutter() + S(12.0f), clipBottom - clipTop);
 
     // Each row's tiles across, and the next cut off at the edge to show
     // there's more - two more while they glide. Covers are asked for as they
@@ -6245,6 +6366,18 @@ void RenderStoreRowsFrame(StoreRowsView &view, const UiHint *hints, int hintCoun
     }
 
     ClearClip();
+
+    // Outside the clip, so the bar itself is never cut off. The page can
+    // scroll until the last row clears the foot.
+    if (rowCount > 0)
+    {
+        const float viewH = clipBottom - clipTop;
+        const float contentBottom = L.rowsY + (rowCount - 1) * L.rowPitch + L.rowLabelH + L.rowTile;
+        float most = contentBottom - (clipBottom - S(16.0f));
+        if (most < 0.0f) most = 0.0f;
+        DrawScrollbarRange(clipTop, viewH, viewH, most, view.scroll);
+    }
+
     DrawButtonHintShapes(footer, footerCount, g_M.footerY);
     DrawHeaderQuads(showToast);
     g_pd3dDevice->SetRenderState(D3DRS_SCISSORTESTENABLE, FALSE);
@@ -6470,9 +6603,12 @@ struct StoreGridLayout
 static StoreGridLayout LayOutStoreGrid()
 {
     StoreGridLayout L;
-    L.cols = g_M.gridCols;
+    L.cols = g_M.storeCols;
     L.gap = S(18.0f);
-    L.tile = (g_M.contentW - (L.cols - 1) * L.gap) / (float)L.cols;
+    // The scrollbar's room is always kept, whether or not the grid scrolls
+    // right now: taking it only when it does would resize every tile the
+    // moment a page grew past one screen.
+    L.tile = (g_M.contentW - ScrollGutter() - (L.cols - 1) * L.gap) / (float)L.cols;
     L.pitch = L.tile + L.gap;
     L.top = g_M.listY;
     L.bottom = g_M.footerY - S(30.0f);
@@ -6738,6 +6874,9 @@ void RenderStoreLetterFrame(StoreLetterView &view, const UiHint *hints, int hint
             FillRoundGradient(focusOX, focusOY + focusS - bandH, focusS, bandH, r, 0x00000000, 0xD9000000, true);
     }
 
+    if (rowCount > L.fullRows)
+        DrawScrollbar(L.top, L.bottom - L.top, rowCount, L.fullRows, view.scroll);
+
     if (view.panel != NULL)
         DrawFilterPanelQuads(*view.panel);
 
@@ -6877,10 +7016,15 @@ static StoreGameLayout LayOutStoreGame(bool hasShots)
     L.artW = g_M.screenW - L.artX;
     L.artH = L.artW * 9.0f / 16.0f;
 
+    // The page scrolls to reach More like this, so the scrollbar's room is
+    // kept whether or not it is needed on this particular game: letting the
+    // width depend on that would move the synopsis about game by game.
+    const float width = g_M.contentW - ScrollGutter();
+
     L.boxS = S(172.0f);
     L.top = g_M.listY - S(34.0f);
     L.textX = g_M.contentX + L.boxS + S(28.0f);
-    L.textW = g_M.contentX + g_M.contentW - L.textX;
+    L.textW = g_M.contentX + width - L.textX;
 
     L.titleY = L.top;
     L.metaY = L.top + LineHeight(1.9f) * 1.25f + S(6.0f);
@@ -6897,9 +7041,9 @@ static StoreGameLayout LayOutStoreGame(bool hasShots)
     float end;
     if (hasShots)
     {
-        L.bodyW = floorf(g_M.contentW * 0.6f);
+        L.bodyW = floorf(width * 0.6f);
         L.shotsX = g_M.contentX + L.bodyW + S(32.0f);
-        L.shotW = (g_M.contentX + g_M.contentW - L.shotsX - L.shotGap) * 0.5f;
+        L.shotW = (g_M.contentX + width - L.shotsX - L.shotGap) * 0.5f;
         L.shotH = L.shotW * 9.0f / 16.0f;
         L.shotsY = L.bodyY;
         end = L.shotsY + L.shotH * 2.0f + L.shotGap;
@@ -6909,7 +7053,7 @@ static StoreGameLayout LayOutStoreGame(bool hasShots)
     }
     else
     {
-        L.bodyW = g_M.contentW;
+        L.bodyW = width;
         L.shotsX = L.shotsY = L.shotW = L.shotH = 0.0f;
         L.bodyLines = 3;
         end = L.bodyY + L.lineH * L.bodyLines;
@@ -6922,7 +7066,7 @@ static StoreGameLayout LayOutStoreGame(bool hasShots)
     L.similarY = L.similarLabelY + LineHeight(0.92f) * 1.3f + S(4.0f);
     L.similarAcross = StoreRowTilesAcross() + 1;
     L.similarGap = S(14.0f);
-    L.similarTile = floorf((g_M.contentW - (L.similarAcross - 1) * L.similarGap) / L.similarAcross);
+    L.similarTile = floorf((width - (L.similarAcross - 1) * L.similarGap) / L.similarAcross);
     return L;
 }
 
@@ -6953,6 +7097,10 @@ static VersionsPanelLayout LayOutVersionsPanel(int count)
         L.rows = count;
     if (L.rows < 1)
         L.rows = 1;
+    // The rows stop short of the scrollbar when there are more than fit;
+    // rowX stays, so they start in the same place either way.
+    if (count > L.rows)
+        L.rowW -= ScrollGutter();
     return L;
 }
 
@@ -6972,6 +7120,9 @@ static void DrawVersionsPanelQuads(const StoreGameView &view, const VersionsPane
             FocusRing(L.rowX, y, L.rowW, L.rowH, g_M.radius);
         DrawCheckQuads(L.rowX + L.rowW - S(16.0f) - SettingsCheck(), y + L.rowH * 0.5f, v == view.versionChosen, false);
     }
+
+    if (view.versionCount > L.rows)
+        DrawScrollbar(L.top, g_M.footerY - S(20.0f) - L.top, view.versionCount, L.rows, view.versionScroll);
 }
 
 static void DrawVersionsPanelText(const StoreGameView &view, const VersionsPanelLayout &L)
@@ -7114,6 +7265,10 @@ void RenderStoreGameFrame(StoreGameView &view, const UiHint *hints, int hintCoun
     // Room under it for the focused one's growth and ring.
     if (focusSimilar >= 0 && L.similarY + L.similarTile > clipBottom - S(9.0f))
         target = L.similarY + L.similarTile - (clipBottom - S(9.0f));
+    // How far the page could move at all, for the scrollbar - taken before
+    // ScrollStoreGameLayout moves the layout's own Y values.
+    float scrollMost = L.similarY + L.similarTile - (clipBottom - S(9.0f));
+    if (scrollMost < 0.0f) scrollMost = 0.0f;
     view.scroll += (target - view.scroll) * 0.3f;
     if (fabsf(target - view.scroll) < 0.5f)
         view.scroll = target;
@@ -7247,7 +7402,7 @@ void RenderStoreGameFrame(StoreGameView &view, const UiHint *hints, int hintCoun
 
     // More like this: those across and the next, cut off - two more while
     // it glides - and the focused one last, over them.
-    SetClip(g_M.contentX - S(12.0f), 0.0f, g_M.contentW + S(24.0f), clipBottom);
+    SetClip(g_M.contentX - S(12.0f), 0.0f, g_M.contentW - ScrollGutter() + S(12.0f), clipBottom);
     for (int i = similarFirst; i < similarCount && i <= similarFirst + L.similarAcross + 1; ++i)
     {
         if (i == focusSimilar)
@@ -7266,6 +7421,13 @@ void RenderStoreGameFrame(StoreGameView &view, const UiHint *hints, int hintCoun
             FocusRing(gx, gy, gs, gs, r);
     }
     ClearClip();
+
+    // Not while the versions panel is over the page: it has its own list.
+    if (!panelOpen)
+    {
+        const float trackY = g_M.listYTitleOnly;
+        DrawScrollbarRange(trackY, clipBottom - trackY, clipBottom - trackY, scrollMost, view.scroll);
+    }
 
     if (panelOpen)
         DrawVersionsPanelQuads(view, P);
@@ -7391,9 +7553,16 @@ void RenderStoreGameFrame(StoreGameView &view, const UiHint *hints, int hintCoun
 
 // Three lines - the file, the game and its numbers, then how it's going -
 // with the progress bar under them while it downloads.
+//
+// 126 rather than a rounder number because of what it buys: the page has
+// 516 of these units between the header and the footer on an HD screen, so
+// this is what fits a fourth row (516 / 126 = 4.09) where 132 fit three and
+// left most of a row's worth of space empty. The card keeps about 12 units
+// between its last line of text and the bar, which is where the slack came
+// from. A 4:3 screen has a deeper title-safe margin and still fits three.
 static float QueueRowHeight()
 {
-    return S(132.0f);
+    return S(126.0f);
 }
 
 static float QueueRowGap()
