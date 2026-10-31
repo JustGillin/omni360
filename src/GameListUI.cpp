@@ -7012,7 +7012,11 @@ struct StoreGameLayout
 static StoreGameLayout LayOutStoreGame(bool hasShots)
 {
     StoreGameLayout L;
-    L.artX = g_M.sidebarW;
+    // The wallpaper fills the page beside the sidebar - which means the
+    // whole screen on a page that has none. This read g_M.sidebarW outright,
+    // from when every page had one, and left a sidebar's width of gap down
+    // the left of the Store's game pages.
+    L.artX = g_sidebar.shown ? g_M.sidebarW : 0.0f;
     L.artW = g_M.screenW - L.artX;
     L.artH = L.artW * 9.0f / 16.0f;
 
