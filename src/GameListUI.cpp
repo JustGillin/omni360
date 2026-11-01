@@ -5865,15 +5865,27 @@ void RenderStoreFrame(StorePageView &view, const UiHint *hints, int hintCount)
         if (focusRow >= rowCount || focusPlace >= view.rows[focusRow].count)
             focusRow = focusPlace = -1;
     }
-    float target = 0.0f;
+    // The page's real foot. L.bottom is only the letters': the Collections
+    // and the rows of games are below them.
+    float contentBottom = L.bottom;
+    if (collCount > 0)
+        contentBottom = L.collY + L.collH;
+    if (rowCount > 0)
+        contentBottom = L.rowsY + (rowCount - 1) * L.rowPitch + L.rowLabelH + L.rowTile;
+    float most = contentBottom - (clipBottom - S(16.0f));
+    if (most < 0.0f)
+        most = 0.0f;
+
+    // Where the focused thing sits on the page, top to bottom. Moving to it
+    // centres it rather than scrolling the least that would bring it into
+    // view: there is then always something above and below, so the page
+    // says it goes on without having to be told. The clamps keep the top
+    // and the foot flush, so the ends don't drift into empty space.
+    float bandTop = L.labelY, bandBottom = L.top + L.heroH;
     if (focusColl >= 0)
     {
-        // As a row of games: on screen, and the focused card in view.
-        target = view.scroll;
-        if (L.collY + L.collH - target > clipBottom - S(16.0f))
-            target = L.collY + L.collH - (clipBottom - S(16.0f));
-        if (L.collLabelY - target < clipTop + S(10.0f))
-            target = L.collLabelY - (clipTop + S(10.0f));
+        bandTop = L.collLabelY;
+        bandBottom = L.collY + L.collH;
         if (focusColl < view.collectionScroll)
             view.collectionScroll = focusColl;
         if (focusColl >= view.collectionScroll + L.collAcross)
@@ -5881,15 +5893,8 @@ void RenderStoreFrame(StorePageView &view, const UiHint *hints, int hintCount)
     }
     else if (focusRow >= 0)
     {
-        // Only as far as it takes to bring the row on screen - one already
-        // in view, as Popular is from the letters, leaves the page where it is.
-        const float rowTop = L.rowsY + focusRow * L.rowPitch;
-        const float rowBottom = rowTop + L.rowLabelH + L.rowTile;
-        target = view.scroll;
-        if (rowBottom - target > clipBottom - S(16.0f))
-            target = rowBottom - (clipBottom - S(16.0f));
-        if (rowTop - target < clipTop + S(10.0f))
-            target = rowTop - (clipTop + S(10.0f));
+        bandTop = L.rowsY + focusRow * L.rowPitch;
+        bandBottom = bandTop + L.rowLabelH + L.rowTile;
 
         // Sideways: the focused game in view, a row at a time.
         StoreRowView &row = view.rows[focusRow];
@@ -5900,12 +5905,18 @@ void RenderStoreFrame(StorePageView &view, const UiHint *hints, int hintCount)
     }
     else if (view.focus >= STORE_FOCUS_LETTERS)
     {
-        // "Games, A to Z" to the top, so the rows of games start showing
-        // under the letters - Popular is there to be seen, not found.
-        target = L.azLabelY - (clipTop + S(10.0f));
-        if (target < 0.0f)
-            target = 0.0f;
+        bandTop = L.azLabelY;
+        bandBottom = L.bottom;
     }
+    else if (view.focus >= STORE_FOCUS_BUTTONS)
+    {
+        bandTop = L.btnY;
+        bandBottom = L.btnY + L.btnH;
+    }
+
+    float target = (bandTop + bandBottom) * 0.5f - clipTop - (clipBottom - clipTop) * 0.5f;
+    if (target > most) target = most;
+    if (target < 0.0f) target = 0.0f;
     if (view.collectionScroll > collCount - L.collAcross)
         view.collectionScroll = collCount - L.collAcross;
     if (view.collectionScroll < 0)
@@ -6069,12 +6080,11 @@ void RenderStoreFrame(StorePageView &view, const UiHint *hints, int hintCount)
 
     ClearClip();
 
-    // Outside the clip, so the bar itself is never cut off. The page can
-    // scroll until the last row of letters clears the foot.
+    // Outside the clip, so the bar itself is never cut off. `most` is the
+    // one the scroll above is clamped to, so the two can't disagree about
+    // where the page ends.
     {
         const float viewH = clipBottom - clipTop;
-        float most = L.bottom - (clipBottom - S(16.0f));
-        if (most < 0.0f) most = 0.0f;
         DrawScrollbarRange(clipTop, viewH, viewH, most, view.scroll);
     }
 
@@ -6265,19 +6275,22 @@ void RenderStoreRowsFrame(StoreRowsView &view, const UiHint *hints, int hintCoun
     if (view.focusPlace < 0) view.focusPlace = 0;
     const int focusPlace = view.focusPlace;
 
-    // Down the page as far as it takes to show the focused row; across, a
-    // tile at a time - both eased.
+    // The focused row centred, as the front page centres what has focus,
+    // and clamped so the first and last rows sit flush; across, a tile at a
+    // time - both eased.
     float target = view.scroll;
     if (rowCount > 0)
     {
         const float rowTop = L.rowsY + focusRow * L.rowPitch;
         const float rowBottom = rowTop + L.rowLabelH + L.rowTile;
-        if (rowBottom - target > clipBottom - S(16.0f))
-            target = rowBottom - (clipBottom - S(16.0f));
-        if (rowTop - target < clipTop + S(10.0f))
-            target = rowTop - (clipTop + S(10.0f));
-        if (target < 0.0f)
-            target = 0.0f;
+        const float lastBottom = L.rowsY + (rowCount - 1) * L.rowPitch + L.rowLabelH + L.rowTile;
+        float most = lastBottom - (clipBottom - S(16.0f));
+        if (most < 0.0f)
+            most = 0.0f;
+
+        target = (rowTop + rowBottom) * 0.5f - clipTop - (clipBottom - clipTop) * 0.5f;
+        if (target > most) target = most;
+        if (target < 0.0f) target = 0.0f;
 
         StoreRowView &row = view.rows[focusRow];
         if (focusPlace < row.scroll)
