@@ -1008,6 +1008,39 @@ int downloadFileHTTPS(const std::string URL, const std::string fileName, char *d
     return httpRequestHTTPS(URL, HTTP_GET, NULL, NULL, fileName, dataBuffer, outputBufferSize, downloadIntoFile, NULL, 0, printFunction);
 }
 
+// What every request says it is. A browser's, because several of the
+// services this talks to serve something else - or nothing - to anything
+// that looks like a script.
+#define DEFAULT_USER_AGENT \
+    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/147.0.0.0 Safari/537.36"
+
+// Except at ConsoleMods, whose bot protection refuses that one: Derf asked
+// that Omni360 identify itself with this instead, so their side can tell its
+// downloads apart and let them through. It is Omni360 saying who it is, not
+// a borrowed identity - spoofing Aurora's agent was declined, and this
+// replaces it.
+#define CONSOLEMODS_HOST  "consolemods.org"
+#define CONSOLEMODS_AGENT "Xbox Live Client"
+
+static bool HostIsConsoleMods(const char *domain)
+{
+    if (domain == NULL)
+        return false;
+    const size_t host = strlen(domain), want = strlen(CONSOLEMODS_HOST);
+    if (host < want)
+        return false;
+    // The host itself, or any subdomain of it - never a name that merely
+    // ends in those letters ("notconsolemods.org").
+    if (_stricmp(domain + host - want, CONSOLEMODS_HOST) != 0)
+        return false;
+    return host == want || domain[host - want - 1] == '.';
+}
+
+static const char *UserAgentFor(const char *domain)
+{
+    return HostIsConsoleMods(domain) ? CONSOLEMODS_AGENT : DEFAULT_USER_AGENT;
+}
+
 int httpRequestHTTPS(const std::string URL, HttpMethod method, const char *requestBody,
                      const char *extraHeaderLines, const std::string fileName,
                      char *dataBuffer, unsigned long long *outputBufferSize, bool downloadIntoFile,
@@ -1163,7 +1196,7 @@ int httpRequestHTTPS(const std::string URL, HttpMethod method, const char *reque
     requestLen = _snprintf(request, sizeof(request),
                            "%s %s HTTP/1.1\r\n"
                            "Host: %s\r\n"
-                           "User-Agent: Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/147.0.0.0 Safari/537.36\r\n"
+                           "User-Agent: %s\r\n"
                            "Accept: */*\r\n"
                            "Accept-Encoding: identity, *;q=0\r\n"
                            "Connection: close\r\n"
@@ -1172,7 +1205,7 @@ int httpRequestHTTPS(const std::string URL, HttpMethod method, const char *reque
                            "\r\n"
                            "%s", // request body, only present for POST
                            (method == HTTP_POST) ? "POST" : "GET",
-                           path, domain,
+                           path, domain, UserAgentFor(domain),
                            (extraHeaderLines != NULL) ? extraHeaderLines : "",
                            bodyHeaders,
                            (requestBody != NULL) ? requestBody : "");
@@ -1443,13 +1476,14 @@ int HttpsSessionGet(HttpsSession *session, const std::string &url, const char *e
         int requestLen = _snprintf(request, sizeof(request),
                                    "GET %s HTTP/1.1\r\n"
                                    "Host: %s\r\n"
-                                   "User-Agent: Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/147.0.0.0 Safari/537.36\r\n"
+                                   "User-Agent: %s\r\n"
                                    "Accept: */*\r\n"
                                    "Accept-Encoding: identity, *;q=0\r\n"
                                    "Connection: keep-alive\r\n"
                                    "%s"
                                    "\r\n",
-                                   path, domain, (extraHeaderLines != NULL) ? extraHeaderLines : "");
+                                   path, domain, UserAgentFor(domain),
+                                   (extraHeaderLines != NULL) ? extraHeaderLines : "");
 
         if (requestLen < 0 || requestLen >= (int)sizeof(request))
         {

@@ -530,9 +530,11 @@ static void RunHomebrew(const QueueJob &job, JobResult &result)
             }
             else if (status == 403 && hb.mirror[0] == '\0')
             {
-                // Cloudflare in front of the repo lets only Aurora through, for now.
+                // Omni360 is allowed through the bot protection by its user
+                // agent, so a 403 now means that arrangement has lapsed
+                // rather than that it was never there.
                 SetResult(result, QUEUE_OUTCOME_FAILED, "Refused by ConsoleMods",
-                          "consolemods.org doesn't let Omni360 download yet. The Setup Guide has a way to test it.");
+                          "consolemods.org turned this download away. Please report it.");
             }
             else
             {

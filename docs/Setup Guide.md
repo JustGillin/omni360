@@ -60,15 +60,23 @@ emulators-path: Hdd1:\Emulators
 
 Each app is a folder holding `default.xex` or `default.xbe`, or just one other `.xex`, such as Aurora's `Aurora.xex`. Omni360 looks up to three folders deep, so `Hdd1:\Emulators\Nintendo\FCEUX\default.xex` is found too. The folders are read when Omni360 starts and again whenever Settings changes them.
 
-**Homebrew in the Store.** *Not switched on in releases yet: the button shows as SOON until ConsoleMods allows Omni360 to download from its repo. Set `HOMEBREW_STORE_OPEN` to `true` in `src/main.cpp` to build it with the page on.* The Store's **Homebrew** button lists the ConsoleMods repo's apps, homebrew games and emulators, the same list Aurora's Xbox 360 Homebrew Store shows. **A** shows an item's details, and **Install** adds it to the Queue. Each install goes into the first folder of its kind in Settings. If you have none yet, it uses `Hdd1:\Apps`, `Hdd1:\Homebrew` or `Hdd1:\Emulators`, which then becomes that kind's folder. The list is built into Omni360 for now; `tools/make_homebrew.py` explains how to update it.
+**Homebrew in the Store.** The Store's **Homebrew** button lists the ConsoleMods repo's apps, homebrew games and emulators, the same list Aurora's Xbox 360 Homebrew Store shows. **A** shows an item's details, and **Install** adds it to the Queue. Each install goes into the first folder of its kind in Settings. If you have none yet, it uses `Hdd1:\Apps`, `Hdd1:\Homebrew` or `Hdd1:\Emulators`, which then becomes that kind's folder. The list is built into Omni360 for now; `tools/make_homebrew.py` explains how to update it.
 
-**Downloads from consolemods.org don't work yet.** Its Cloudflare protection only lets Aurora's script through, so Omni360's requests are refused with "Refused by ConsoleMods" until ConsoleMods allows it. To test the whole install on the console in the meantime, serve the archives from your PC:
+ConsoleMods' bot protection used to refuse Omni360 outright. They now let it through by the user agent it sends, agreed with them in November 2026, so downloads work as they are — please don't change that agent. A "Refused by ConsoleMods" message means something has changed at their end; it's worth reporting.
+
+<details>
+<summary><b>Serving the archives from your PC instead</b></summary>
+<br>
+
+Useful for testing an install without going out to consolemods.org:
 
 1. Download the items' `.7z` files from consolemods.org in your browser into one folder, keeping their names. The item's details page shows where it installs, and the names are in `tools/data/homebrew/*.ini`.
 2. In that folder, start a web server: `python -m http.server 8000`. Allow it through Windows Firewall on your private network if Windows asks.
 3. Add `homebrew-mirror: http://192.168.1.10:8000` to `settings.txt`, with your PC's address, and restart Omni360. The Homebrew page then says it downloads from there.
 
 Remove the line to go back to downloading from consolemods.org.
+
+</details>
 
 ## 4. Transfer files to the console
 

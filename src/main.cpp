@@ -2653,10 +2653,11 @@ static bool RefreshFeatured()
 
 // The other ways in - those still to come marked SOON. DLC and title updates
 // are on each game's page instead.
-// The Store's Homebrew page: off until ConsoleMods lets Omni360 download from
-// its repo - consolemods.org refuses anything but Aurora's script for now (see
-// the Setup Guide). Its button is drawn faded, marked SOON. true to open it.
-#define HOMEBREW_STORE_OPEN false
+// The Store's Homebrew page. ConsoleMods let Omni360 through their bot
+// protection on 2026-11-01, with the user agent Derf asked for - see
+// UserAgentFor in downloadFile.cpp. False draws the button faded, marked
+// SOON, as it was until then.
+#define HOMEBREW_STORE_OPEN true
 
 // Search is Y, anywhere on the front page.
 static const StoreButtonView kStoreButtons[STORE_BUTTON_COUNT] = {
