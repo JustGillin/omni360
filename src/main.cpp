@@ -5250,19 +5250,6 @@ static LibraryDiscTile DiscTileState(const Shell &shell)
     return DISC_TILE_READY;
 }
 
-// What a library game is, for the line under its name on Home.
-static const char *GameKindName(const InstalledGame &game)
-{
-    if (game.folder)
-        return "Extracted game";
-    switch (game.contentType)
-    {
-    case 0x00005000UL: return "Original Xbox";
-    case 0x000D0000UL: return "Xbox Live Arcade";
-    default:           return "Games on Demand";
-    }
-}
-
 // The games played most recently that are still installed, with the disc in
 // the drive in front of them. Names and covers come from the library, so a
 // game uninstalled since isn't found and drops out on its own.
@@ -5273,7 +5260,6 @@ static HomePageView MakeHomeView(const Shell &shell, const Library &lib)
 {
     static char clock[16];
     static char storage[40];
-    static char details[HOME_RECENTS_MAX][72];
 
     HomePageView view;
     memset(&view, 0, sizeof(view));
@@ -5326,14 +5312,6 @@ static HomePageView MakeHomeView(const Shell &shell, const Library &lib)
         tile.titleId = (shell.disc.state == DISC_READY) ? shell.disc.titleId : 0;
         tile.name = shell.discName;
         tile.disc = true;
-        switch (DiscTileState(shell))
-        {
-        case DISC_TILE_READING:     tile.detail = "Reading the disc"; break;
-        case DISC_TILE_UNREADABLE:  tile.detail = "Can't be installed"; break;
-        case DISC_TILE_INSTALLING:  tile.detail = "Installing now"; break;
-        case DISC_TILE_INSTALLED:   tile.detail = "Already installed"; break;
-        default:                    tile.detail = "In the disc drive"; break;
-        }
         view.recentCount++;
     }
 
@@ -5348,21 +5326,10 @@ static HomePageView MakeHomeView(const Shell &shell, const Library &lib)
         if (game == NULL)
             continue; // played once, not installed now
 
-        const int slot = view.recentCount;
-        HomeRecentView &tile = view.recents[slot];
+        HomeRecentView &tile = view.recents[view.recentCount];
         tile.titleId = game->titleId;
         tile.name = game->displayName;
         tile.disc = false;
-
-        char when[48];
-        const char *played = RecentWhen(g_recents[i], when, sizeof(when));
-        if (played != NULL)
-            _snprintf(details[slot], sizeof(details[slot]), "%s  \xC2\xB7  %s", GameKindName(*game), played);
-        else
-            _snprintf(details[slot], sizeof(details[slot]), "%s", GameKindName(*game));
-        details[slot][sizeof(details[slot]) - 1] = '\0';
-        tile.detail = details[slot];
-
         view.recentCount++;
     }
 

@@ -162,11 +162,13 @@ enum HomeFocus
 
 // One tile in the recents row. The disc in the drive is one of these too,
 // drawn as the library's disc tile is, so Home needs no separate case.
+// Nothing under the name: what kind of package a game is and when it was
+// last played are the app's business rather than anyone else's, and the
+// disc's line only ever repeated the caption above it.
 struct HomeRecentView
 {
     unsigned long titleId; // its cover, and the page's wallpaper; 0 for none
     const char *name;
-    const char *detail;    // under the name while it has focus; may be NULL
     bool disc;             // the disc in the drive rather than a library game
 };
 

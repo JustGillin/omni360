@@ -24,8 +24,12 @@ struct RecentGame
     unsigned long contentType;
 
     // When it was started, by the console's clock - which may be unset, so
-    // this is for wording only, never for ordering. Both halves zero when it
-    // wasn't recorded.
+    // it could never be trusted for ordering; the file's own order is that.
+    // Nothing reads it today: Home showed "Played yesterday" under the game's
+    // name for a while and no longer does. It is still written, because it
+    // can't be recovered later - a game played this week can only be known
+    // to have been if it was recorded at the time - and it costs two numbers
+    // in a line that is already there. Both halves zero when it wasn't.
     unsigned long playedLow, playedHigh;
 };
 
@@ -37,10 +41,5 @@ void NoteGamePlayed(unsigned long titleId, unsigned long contentType);
 // The list as last written, most recent first, into out (up to max). Returns
 // how many were read - 0 if there's no file yet.
 int LoadRecents(RecentGame *out, int max);
-
-// "Played today", "Played yesterday", "Played 8 days ago", or the date for
-// anything older, into out. NULL when the time wasn't recorded or the clock
-// has since gone backwards, so the caller can leave the line out.
-const char *RecentWhen(const RecentGame &game, char *out, size_t outSize);
 
 #endif

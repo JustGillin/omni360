@@ -5263,6 +5263,12 @@ void RenderLaunchFrame(const char *heading, const char *name, unsigned long titl
 #define HOME_ART_SETTLE_MS 260.0
 #define HOME_ART_FADE_MS   380.0
 
+// How far the focused tile grows - a quarter again, against the 5% a tile
+// in a grid gets. A grid is read as a block, so a tile that jumped out of it
+// would break the block up; this row is read one tile at a time, and the
+// focused one carries the page.
+#define HOME_FOCUS_GROW 1.25f
+
 // What's on screen, and what the focus is asking for, as title IDs rather
 // than textures: the art cache drops the least recently drawn when it's
 // full, so a texture pointer held across frames could outlive its texture.
@@ -5290,7 +5296,10 @@ static HomeLayout LayOutHome()
     L.navH = S(52.0f); // square buttons: the icons' box too
     L.navY = g_M.safeY;
 
-    L.tile = S(140.0f);
+    // Smaller than they look, because the focused one grows a long way
+    // further than the 5% a grid tile does: the difference between the one
+    // you are on and the rest is the point of the row.
+    L.tile = S(118.0f);
     L.gap = S(16.0f);
     const float width = g_M.screenW - g_M.safeX * 2.0f;
     L.across = (int)((width + L.gap) / (L.tile + L.gap));
@@ -5300,8 +5309,10 @@ static HomeLayout LayOutHome()
     // Up from the footer, so the row clears the button hints whatever the
     // screen is; the name block then takes what's left above it.
     L.rowY = g_M.footerY - S(46.0f) - L.tile;
-    L.rowLabelY = L.rowY - S(32.0f);
-    L.nameY = L.rowLabelY - S(148.0f);
+    // Far enough above the row for the focused tile's growth and its ring,
+    // which reach S(15) and S(6) past the top of an unfocused one.
+    L.rowLabelY = L.rowY - S(50.0f);
+    L.nameY = L.rowLabelY - S(120.0f);
     if (L.nameY < L.navY + L.navH + S(30.0f))
         L.nameY = L.navY + L.navH + S(30.0f);
 
@@ -5529,10 +5540,13 @@ void RenderHomeFrame(HomePageView &view, const UiHint *hints, int hintCount)
     const bool navFocused = (view.focus == HOME_FOCUS_NAV);
     const int focusTile = view.recentCount > 0 ? view.recentFocus : -1;
 
-    // The focused tile swells a little, eased over a few frames, and is drawn
-    // after its neighbours so it can grow over them - as the library's grid
-    // and the Store's do.
-    const float grow = FocusGrowFor(view.recentFocus, !navFocused && view.recentCount > 0);
+    // The focused tile swells, eased over a few frames, and is drawn after
+    // its neighbours so it can grow over them - as the library's grid does,
+    // but much further: FocusGrowFor only gives the timing, and the size it
+    // eases to is this page's own.
+    const float growT =
+        (FocusGrowFor(view.recentFocus, !navFocused && view.recentCount > 0) - 1.0f) / (FOCUS_GROW - 1.0f);
+    const float grow = 1.0f + growT * (HOME_FOCUS_GROW - 1.0f);
     const int focusCol = (focusTile >= view.recentScroll && focusTile < view.recentScroll + L.across)
                              ? focusTile - view.recentScroll
                              : -1;
@@ -5683,8 +5697,6 @@ void RenderHomeFrame(HomePageView &view, const UiHint *hints, int hintCount)
         Text(g_M.safeX, L.nameY, 0.62f, COL_GREEN_TEXT, game.disc ? "IN THE DRIVE" : "CONTINUE PLAYING", 0, 0.0f,
              true);
         TextFit(g_M.safeX, L.nameY + S(26.0f), 2.0f, COL_TEXT, game.name, nameW, true);
-        if (game.detail != NULL)
-            TextFit(g_M.safeX, L.nameY + S(26.0f) + LineHeight(2.0f) * 1.15f, 0.8f, COL_TEXT2, game.detail, nameW);
     }
 
     Text(g_M.safeX, L.rowLabelY, 0.95f, COL_TEXT, view.recentCount > 0 ? "Recent" : "Your games", 0, 0.0f, true);
