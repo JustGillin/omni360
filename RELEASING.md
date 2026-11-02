@@ -75,7 +75,7 @@ Don't move a tag that's been published, or replace a release's files with a diff
 
 1. **Releases → Draft a new release**, and choose the tag.
 2. Attach **both** files from `Release/dist/vX.Y.Z/`: `Omni360.xex` and `Omni360.xex.sig`.
-3. Upload the XEX to [VirusTotal](https://www.virustotal.com) and put the link to its results in the notes, with the SHA-256 the script printed. (r/360hacks requires a scan for every new file.)
+3. Put the SHA-256 the script printed in the notes, so anyone can check the file they downloaded is the one you built.
 4. Leave **Set as a pre-release** unticked, and tick **Set as the latest release**, so it shows on the repository's front page. A pre-release is only offered to people already running a pre-release (a version with a `-` suffix), and never shows as the latest.
 5. Publish.
 
@@ -86,7 +86,7 @@ The app shows a release's notes in **Settings → Updates**, with the Markdown t
 - a heading and a line or two of what's new;
 - short paragraphs and `-` bullet points — no tables, images or code blocks;
 - what someone on an older version needs to do, if anything;
-- the SHA-256 and the VirusTotal link.
+- the SHA-256.
 
 About sixteen lines fit on the console's screen; the rest is cut off there, though not on GitHub.
 
