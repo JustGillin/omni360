@@ -698,7 +698,7 @@ struct QueueRowView
     QueueRowTone tone;
 };
 
-// A game that finished installing, as a tile in the row along the foot of
+// A game that finished installing, as a tile in the row across the top of
 // the page. A card had three lines and a bar's worth of height to say
 // "Installed" in, and sat there saying it over whatever was still going;
 // the cover and the name are all that's left to tell. Only installs come
@@ -723,8 +723,8 @@ struct QueuePageView
     int scroll;
     bool focused;
 
-    // The row underneath. recentFocused says the focus is down there rather
-    // than on the cards, which keeps their selection where it was.
+    // The row above the cards. recentFocused says the focus is up there
+    // rather than on them, which keeps their selection where it was.
     const QueueRecentView *recents;
     int recentCount;
     int recentFocus;

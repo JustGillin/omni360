@@ -2430,7 +2430,7 @@ struct Shell
     char queueStatus[MAX_QUEUE_ROWS][256];
     char queueNumbers[MAX_QUEUE_ROWS][128];
 
-    // What installed, as the row along the foot of the Queue page. Kept
+    // What installed, as the row across the top of the Queue page. Kept
     // across frames rather than rebuilt from the snapshot, because nothing
     // records when a job finished: a job is put at the front the frame it
     // first reads as installed, so the row is in the order they finished.
@@ -2441,7 +2441,7 @@ struct Shell
     int queueRecentCount;
     int queueRecentFocus;
     int queueRecentScroll;
-    bool queueOnRecents; // the row has the focus, not the cards above it
+    bool queueOnRecents; // the row has the focus, not the cards below it
 
     // The disc in the drive, as the library's first tile - see UpdateDisc.
     // librarySelected counts it: with a disc, 0 is the disc and game i is
@@ -5797,7 +5797,7 @@ static void FormatTransferNumbers(const QueueJobSnapshot &job, char *out, size_t
 }
 
 // A job that finished by putting the game on the console. These go to the
-// row along the foot of the page; everything else that finished - a
+// row across the top of the page; everything else that finished - a
 // failure, a stopped install - keeps its card, because what it has to say
 // is the reason it's still listed at all.
 static bool JobInstalled(const QueueJobSnapshot &job)
@@ -5886,7 +5886,7 @@ static void UpdateQueueRecents(Shell &shell, const QueueJobSnapshot *disc, int d
 // Copies the queue out and turns it into rows for the Queue page: a disc
 // install and game installs still to do first, then the downloads as the
 // download queue orders them, then whatever finished without installing.
-// What installed goes to the row underneath instead - see queueRecents.
+// What installed goes to the row above them instead - see queueRecents.
 static void SnapshotQueue(Shell &shell, const Library &lib)
 {
     static QueueJobSnapshot discJobs[MAX_DISC_JOBS];
@@ -7382,15 +7382,15 @@ int main()
         }
         else if (shell.page == SHELL_PAGE_QUEUE)
         {
-            // Down off the last card steps into the row of installs; up out
-            // of the row comes back to it. Left there walks the row before
-            // it reaches the sidebar, the way a row of tiles should.
+            // Up off the first card steps into the row of installs above it;
+            // down out of the row comes back to it. Left there walks the row
+            // before it reaches the sidebar, the way a row of tiles should.
             if (shell.queueOnRecents)
             {
-                if (input.nav == XINPUT_GAMEPAD_DPAD_UP && shell.queueCount > 0)
+                if (input.nav == XINPUT_GAMEPAD_DPAD_DOWN && shell.queueCount > 0)
                 {
                     shell.queueOnRecents = false;
-                    shell.queueSelected = shell.queueCount - 1;
+                    shell.queueSelected = 0;
                     shell.queueSelectedId = shell.queueJobs[shell.queueSelected].id;
                 }
                 else if (input.nav == XINPUT_GAMEPAD_DPAD_LEFT)
@@ -7408,7 +7408,7 @@ int main()
             {
                 const int was = shell.queueSelected;
                 StepSelection(input.nav, shell.queueCount, shell.queueSelected);
-                if (input.nav == XINPUT_GAMEPAD_DPAD_DOWN && shell.queueSelected == was &&
+                if (input.nav == XINPUT_GAMEPAD_DPAD_UP && shell.queueSelected == was &&
                     shell.queueRecentCount > 0)
                     shell.queueOnRecents = true;
                 if (shell.queueCount > 0)

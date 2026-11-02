@@ -7614,8 +7614,8 @@ static float QueueRecentGap()
     return S(14.0f);
 }
 
-// The label, the tiles, their names and the air above the footer. Taken off
-// the cards' height, so a page with finished installs on it shows one card
+// The label, the tiles, their names and the air under them. Taken off the
+// cards' height, so a page with finished installs on it shows one card
 // fewer and the row instead - which is the trade: a row holds six of them
 // in the height a single card wanted.
 static float QueueRecentBandH()
@@ -7656,21 +7656,25 @@ void RenderQueueFrame(QueuePageView &view, const UiHint *hints, int hintCount)
     // The cover fills the card's left end, top to bottom.
     const float coverSize = plateH;
 
+    // The row sits above the cards, under the header: what just finished is
+    // the first thing the page says, and the cards keep the foot of the
+    // page they had before there was a row at all.
     const float bandH = (recentCount > 0) ? QueueRecentBandH() : 0.0f;
-    const float listBottom = g_M.footerY - S(30.0f) - bandH;
+    const float listTop = g_M.listY + bandH;
+    const float listBottom = g_M.footerY - S(30.0f);
 
-    int visibleRows = (int)((listBottom - g_M.listY + QueueRowGap()) / rowH);
+    int visibleRows = (int)((listBottom - listTop + QueueRowGap()) / rowH);
     if (visibleRows < 1) visibleRows = 1;
 
     KeepSelectionVisible(count, visibleRows, view.selected, view.scroll);
     const int selected = view.selected;
     const int scrollOffset = view.scroll;
 
-    // The row along the foot: the focused tile kept on screen, a tile at a
+    // The row across the top: the focused tile kept on screen, a tile at a
     // time, as the Home page's recents are.
     const float recTile = QueueRecentTile();
     const float recGap = QueueRecentGap();
-    const float bandTop = g_M.footerY - S(30.0f) - bandH;
+    const float bandTop = g_M.listY;
     const float recentY = bandTop + S(34.0f);
     const float recentNameY = recentY + recTile + S(8.0f);
 
@@ -7732,7 +7736,7 @@ void RenderQueueFrame(QueuePageView &view, const UiHint *hints, int hintCount)
             break;
 
         const QueueRowView &q = view.rows[index];
-        const float y = g_M.listY + row * rowH;
+        const float y = listTop + row * rowH;
         const bool isSelected = (index == selected);
 
         FillRound(g_M.contentX, y, plateW, plateH, g_M.radius, isSelected ? COL_SURFACE_HI : COL_SURFACE);
@@ -7783,7 +7787,7 @@ void RenderQueueFrame(QueuePageView &view, const UiHint *hints, int hintCount)
     }
 
     if (showScroll)
-        DrawScrollbar(g_M.listY, visibleRows * rowH - QueueRowGap(), count, visibleRows, scrollOffset);
+        DrawScrollbar(listTop, visibleRows * rowH - QueueRowGap(), count, visibleRows, scrollOffset);
 
     for (int i = 0; i < recentAcross; ++i)
     {
@@ -7842,7 +7846,7 @@ void RenderQueueFrame(QueuePageView &view, const UiHint *hints, int hintCount)
             break;
 
         const QueueRowView &q = view.rows[index];
-        const float y = g_M.listY + row * rowH;
+        const float y = listTop + row * rowH;
         const float titleY = y + S(16.0f);
         const float lineY = titleY + LineHeight(0.95f) * 1.2f + S(4.0f);
 
