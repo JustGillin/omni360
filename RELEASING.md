@@ -41,7 +41,7 @@ Build the Release configuration (see `COMPILING.md`), then:
 python tools/sign_release.py Release/Omni360.xex
 ```
 
-It checks the file is an XEX and that your key matches `UpdateKey.h`, writes `Release/Omni360.xex.sig`, verifies it with the public key alone, and prints the XEX's SHA-256.
+It checks the file is an XEX and that your key matches `UpdateKey.h`, writes `Release/Omni360.xex.sig`, verifies it with the public key alone, and prints the XEX's SHA-256 — handy for telling two builds apart, though nothing needs it in the release itself. The signature is what the app checks, and it covers the same ground: a hash printed beside the file on the release page proves nothing a tampered page couldn't also claim.
 
 Then **set the signed pair aside straight away**, before anything else rebuilds:
 
@@ -75,9 +75,8 @@ Don't move a tag that's been published, or replace a release's files with a diff
 
 1. **Releases → Draft a new release**, and choose the tag.
 2. Attach **both** files from `Release/dist/vX.Y.Z/`: `Omni360.xex` and `Omni360.xex.sig`.
-3. Put the SHA-256 the script printed in the notes, so anyone can check the file they downloaded is the one you built.
-4. Leave **Set as a pre-release** unticked, and tick **Set as the latest release**, so it shows on the repository's front page. A pre-release is only offered to people already running a pre-release (a version with a `-` suffix), and never shows as the latest.
-5. Publish.
+3. Leave **Set as a pre-release** unticked, and tick **Set as the latest release**, so it shows on the repository's front page. A pre-release is only offered to people already running a pre-release (a version with a `-` suffix), and never shows as the latest.
+4. Publish.
 
 ### Writing the notes
 
@@ -85,8 +84,7 @@ The app shows a release's notes in **Settings → Updates**, with the Markdown t
 
 - a heading and a line or two of what's new;
 - short paragraphs and `-` bullet points — no tables, images or code blocks;
-- what someone on an older version needs to do, if anything;
-- the SHA-256.
+- what someone on an older version needs to do, if anything.
 
 About sixteen lines fit on the console's screen; the rest is cut off there, though not on GitHub.
 
