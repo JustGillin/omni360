@@ -71,30 +71,35 @@ Everything downloads and installs in the background while you keep browsing, wit
 ## Screenshots
 
 <p align="center">
-  <img src="docs/screenshots/library.png" alt="Games: installed games as a grid of covers" width="100%"><br>
-  <sub><b>Games</b>: every installed game, Xbox 360 and Original Xbox, with its DLC and title updates marked.</sub>
+  <img src="docs/screenshots/home.png" alt="Home: the games played most recently as a row of covers, over Halo 3's wallpaper" width="100%"><br>
+  <sub><b>Home</b>: what you played last, the disc in the drive first, under its own wallpaper.</sub>
 </p>
 
 <p align="center">
-  <img src="docs/screenshots/store.png" alt="The Store: featured games and the A to Z lists" width="100%"><br>
-  <sub><b>Store</b>: this week's featured games up top, then every game A to Z.</sub>
+  <img src="docs/screenshots/library.png" alt="Games: installed games as a grid of covers" width="100%"><br>
+  <sub><b>Games</b>: every installed game, Xbox 360 and Original Xbox, with the disc in the drive marked.</sub>
+</p>
+
+<p align="center">
+  <img src="docs/screenshots/store.png" alt="The Store: this week's featured games and the Homebrew, XBLA, XBLIG and Original Xbox buttons" width="100%"><br>
+  <sub><b>Store</b>: this week's featured games, then Homebrew, XBLA, XBLIG and Original Xbox.</sub>
 </p>
 
 <table>
   <tr>
-    <td width="50%"><img src="docs/screenshots/360-game-details.png" alt="Grand Theft Auto V's page in the Store"><br><sub><b>A game's page</b>: description, ratings, screenshots and every regional version.</sub></td>
-    <td width="50%"><img src="docs/screenshots/xbla-game-details.png" alt="Alan Wake's American Nightmare installing"><br><sub><b>Xbox Live Arcade</b>: arcade games get the same pages, and show their progress as they install.</sub></td>
-  </tr>
-  <tr>
-    <td width="50%"><img src="docs/screenshots/store-popular.png" alt="The Store's A to Z, Popular and Top rated rows"><br><sub><b>Browse</b>: A to Z, or rows of Popular, Top rated and every genre.</sub></td>
+    <td width="50%"><img src="docs/screenshots/360-game-details.png" alt="Halo 3's page: description, ratings, screenshots and more like this"><br><sub><b>A game's page</b>: description, ratings, screenshots, its DLC and its title updates.</sub></td>
     <td width="50%"><img src="docs/screenshots/dlc.png" alt="Choosing a Rock Band DLC pack"><br><sub><b>DLC</b>: find the packs for any game and pick the ones you want.</sub></td>
   </tr>
   <tr>
+    <td width="50%"><img src="docs/screenshots/settings.png" alt="Settings: the folders games, apps, homebrew and emulators live in"><br><sub><b>Settings</b>: the folders your games, apps, homebrew and emulators live in, your archive.org keys and updates.</sub></td>
     <td width="50%"><img src="docs/screenshots/queue.png" alt="The Queue: Grand Theft Auto V waiting while an arcade game downloads"><br><sub><b>Queue</b>: everything downloads and installs in the background.</sub></td>
-    <td width="50%"><img src="docs/screenshots/settings.png" alt="Settings: library folders, archive.org keys, disc read speed, updates"><br><sub><b>Settings</b>: library folders, your archive.org keys and updates, all on one screen.</sub></td>
   </tr>
   <tr>
-    <td colspan="2"><sub>These shots predate the Home screen and the move to a single sidebar on Games + Apps; the pages themselves are unchanged.</sub></td>
+    <td width="50%"><img src="docs/screenshots/store-popular.png" alt="The Store's A to Z, Popular and Top rated rows"><br><sub><b>Browse</b>: A to Z, or rows of Popular, Top rated and every genre.</sub></td>
+    <td width="50%"><img src="docs/screenshots/xbla-game-details.png" alt="Alan Wake's American Nightmare installing"><br><sub><b>Xbox Live Arcade</b>: arcade games get the same pages, and show their progress as they install.</sub></td>
+  </tr>
+  <tr>
+    <td colspan="2"><sub>The last three shots are older than this release.</sub></td>
   </tr>
 </table>
 
