@@ -6647,6 +6647,11 @@ int StoreLetterVisibleRows()
     return LayOutStoreGrid().fullRows;
 }
 
+int StoreGridColumns()
+{
+    return g_M.storeCols;
+}
+
 // Asks for the Store covers of the games on screen that don't have one yet,
 // if that list has changed since last asked.
 static unsigned long g_storeCoversAsked[MAX_STORE_COVERS];

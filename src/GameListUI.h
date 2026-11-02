@@ -272,6 +272,12 @@ struct LibraryPageView
 int LibraryPageVisibleRows(const LibraryPageView &view);
 int LibraryGridColumns();
 
+// The Store's grid of covers - a letter's page, and a search's hits - is its
+// own width: it runs the full page where the library sits beside a sidebar,
+// so more tiles fit across. Anything moving about that grid has to count in
+// these, not the library's, or the focus walks it diagonally.
+int StoreGridColumns();
+
 void RenderLibraryFrame(LibraryPageView &view, const UiHint *hints, int hintCount);
 
 // Turns at most one cover that CoverArt.cpp has ready into a texture for the

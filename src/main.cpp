@@ -3794,7 +3794,7 @@ static void JumpLetter(Shell &shell, int step)
         }
     }
     sel = i;
-    shell.storeLetterScroll = sel / LibraryGridColumns();
+    shell.storeLetterScroll = sel / StoreGridColumns();
 }
 
 // The D-pad and shoulders on a letter's grid, as on the library's - and on
@@ -3807,7 +3807,11 @@ static void StepStoreLetter(const UiInput &input, Shell &shell)
         return;
     }
 
-    const int cols = LibraryGridColumns();
+    // The Store's grid, not the library's: a letter's page runs the full
+    // width with no sidebar beside it, so it fits six tiles across where
+    // the library fits five. Counting in fives here sent Up and Down
+    // diagonally and put the sidebar one tile into the row.
+    const int cols = StoreGridColumns();
     const int count = shell.storeGameCount;
     int &sel = shell.storeSelected;
 
@@ -7630,7 +7634,7 @@ int main()
                         hintCount = AddHint(hints, hintCount, UI_BUTTON_Y, L"Filter and sort", L"Filter");
                     if (LetterFiltersEmptied(shell))
                         hintCount = AddHint(hints, hintCount, UI_BUTTON_X, L"Reset filters", L"Reset");
-                    if (shell.storeGameCount > StoreLetterVisibleRows() * LibraryGridColumns())
+                    if (shell.storeGameCount > StoreLetterVisibleRows() * StoreGridColumns())
                         hintCount = AddHint(hints, hintCount, UI_BUTTON_LBRB, L"Page");
                     if (LetterJumps(shell))
                         hintCount = AddHint(hints, hintCount, UI_BUTTON_LTRT, L"Letter");
