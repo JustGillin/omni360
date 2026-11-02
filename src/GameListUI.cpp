@@ -4527,14 +4527,18 @@ static float SettingsControlWidth(const SettingsControlView &c)
 }
 
 // Where a row's controls start: right-aligned, inset on a row's plate.
-static float SettingsControlsX(const SettingsRowView &row)
+// plateW is the width the row is drawn at, which stops short of the content
+// when there's a scrollbar, so the controls stay on the plate.
+static float SettingsControlsX(const SettingsRowView &row, float plateW)
 {
     const float gap = S(10.0f);
     float total = 0.0f;
     for (int c = 0; c < row.controlCount; ++c)
         total += SettingsControlWidth(row.controls[c]) + (c > 0 ? gap : 0.0f);
-    const float inset = (row.kind == SETTINGS_VIEW_HEADING) ? 0.0f : S(8.0f);
-    return g_M.contentX + g_M.contentW - inset - total;
+    // Headings sit outside the plates, so their controls line up with the
+    // content's edge; a row's are inset as far in as its label is.
+    const float inset = (row.kind == SETTINGS_VIEW_HEADING) ? 0.0f : S(18.0f);
+    return g_M.contentX + plateW - inset - total;
 }
 
 struct SettingsLayout
@@ -4618,10 +4622,11 @@ static void DrawValueQuads(const SettingsControlView &c, float x, float cy)
         FillRound(left + d * step, cy + S(11.0f), w, S(4.0f), S(2.0f), d == c.valueIndex ? COL_GREEN : COL_TRACK);
 }
 
-static void DrawSettingsControlsQuads(const SettingsRowView &row, float cy, int focusCol, bool rowFocused)
+static void DrawSettingsControlsQuads(const SettingsRowView &row, float cy, float plateW, int focusCol,
+                                      bool rowFocused)
 {
     const bool single = (row.controlCount == 1 && row.kind != SETTINGS_VIEW_HEADING);
-    float x = SettingsControlsX(row);
+    float x = SettingsControlsX(row, plateW);
     for (int c = 0; c < row.controlCount; ++c)
     {
         const SettingsControlView &ctl = row.controls[c];
@@ -4643,9 +4648,10 @@ static void DrawSettingsControlsQuads(const SettingsRowView &row, float cy, int 
     }
 }
 
-static void DrawSettingsControlsText(const SettingsRowView &row, float cy, int focusCol, bool rowFocused)
+static void DrawSettingsControlsText(const SettingsRowView &row, float cy, float plateW, int focusCol,
+                                     bool rowFocused)
 {
-    float x = SettingsControlsX(row);
+    float x = SettingsControlsX(row, plateW);
     for (int c = 0; c < row.controlCount; ++c)
     {
         const SettingsControlView &ctl = row.controls[c];
@@ -4698,7 +4704,7 @@ void RenderSettingsFrame(SettingsPageView &view, const UiHint *hints, int hintCo
         const bool rowFocused = view.focused && i == view.focusRow;
         if (row.kind == SETTINGS_VIEW_HEADING)
         {
-            DrawSettingsControlsQuads(row, L.y[i] + L.h[i] * 0.5f, view.focusCol, rowFocused);
+            DrawSettingsControlsQuads(row, L.y[i] + L.h[i] * 0.5f, w, view.focusCol, rowFocused);
             continue;
         }
 
@@ -4713,10 +4719,10 @@ void RenderSettingsFrame(SettingsPageView &view, const UiHint *hints, int hintCo
         if (row.kind == SETTINGS_VIEW_FOLDER)
         {
             DrawCheckQuads(x0 + S(16.0f), cy, row.checked, row.locked || row.missing);
-            DrawSettingsControlsQuads(row, cy, 0, rowFocused);
+            DrawSettingsControlsQuads(row, cy, w, 0, rowFocused);
         }
         else
-            DrawSettingsControlsQuads(row, cy, view.focusCol, rowFocused);
+            DrawSettingsControlsQuads(row, cy, w, view.focusCol, rowFocused);
     }
     DrawScrollbarRange(L.top, L.viewH, L.viewH, L.most, view.scroll);
     DrawButtonHintShapes(footer, footerCount, g_M.footerY);
@@ -4747,21 +4753,22 @@ void RenderSettingsFrame(SettingsPageView &view, const UiHint *hints, int hintCo
         if (row.kind == SETTINGS_VIEW_HEADING)
         {
             TextMid(x0, cy, 1.0f, COL_TEXT, row.label, 0, 0.0f, true);
-            DrawSettingsControlsText(row, cy, view.focusCol, rowFocused);
+            DrawSettingsControlsText(row, cy, w, view.focusCol, rowFocused);
             continue;
         }
         if (row.kind == SETTINGS_VIEW_FOLDER)
         {
             // The path, then its status, then what it holds at the right.
             const float pathX = x0 + S(16.0f) + SettingsCheck() + S(14.0f);
-            const float statusRight = row.controlCount > 0 ? SettingsControlsX(row) - S(14.0f) : x0 + w - S(18.0f);
+            const float statusRight = row.controlCount > 0 ? SettingsControlsX(row, w) - S(14.0f)
+                                                           : x0 + w - S(18.0f);
             const float statusW = row.status != NULL ? TextWidth(row.status, 0.76f) : 0.0f;
             TextMid(pathX, cy, 0.88f, row.missing ? COL_DIM : (rowFocused ? COL_TEXT : COL_TEXT2), row.label,
                     ATGFONT_TRUNCATED, statusRight - S(18.0f) - statusW - pathX);
             if (row.status != NULL)
                 TextMid(statusRight, cy, 0.76f, row.statusGreen ? COL_GREEN_TEXT : COL_DIM, row.status,
                         ATGFONT_RIGHT);
-            DrawSettingsControlsText(row, cy, 0, rowFocused);
+            DrawSettingsControlsText(row, cy, w, 0, rowFocused);
             continue;
         }
         TextMid(x0 + S(18.0f), cy, 0.88f, rowFocused ? COL_TEXT : COL_TEXT2, row.label);
@@ -4769,9 +4776,9 @@ void RenderSettingsFrame(SettingsPageView &view, const UiHint *hints, int hintCo
         {
             const float statusX = x0 + S(18.0f) + S(250.0f);
             TextMid(statusX, cy, 0.76f, COL_DIM, row.status, ATGFONT_TRUNCATED,
-                    SettingsControlsX(row) - S(20.0f) - statusX);
+                    SettingsControlsX(row, w) - S(20.0f) - statusX);
         }
-        DrawSettingsControlsText(row, cy, view.focusCol, rowFocused);
+        DrawSettingsControlsText(row, cy, w, view.focusCol, rowFocused);
     }
 
     // The help line, beside the hints: what has focus does.
