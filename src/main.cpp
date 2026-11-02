@@ -2378,6 +2378,16 @@ static void WaitForExit()
 // Downloads and disc installs, on one Queue page.
 #define MAX_QUEUE_ROWS (MAX_QUEUE_JOBS + MAX_DISC_JOBS + MAX_GAME_JOBS)
 
+// One tile of the Queue page's "Recently installed" row. The name is kept
+// rather than pointed at, because the job it came from is removed the
+// moment the tile is - see Shell::queueRecents.
+struct QueueRecent
+{
+    int id;
+    unsigned long titleId;
+    char name[128];
+};
+
 // The Store's sections with A-Z pages of their own - the arcade's and the
 // indie games' lists (ArcadeSet), and the Original Xbox's discs.
 #define SECTION_XBLA  ARCADE_XBLA
@@ -2419,6 +2429,19 @@ struct Shell
     QueueRowView queueRows[MAX_QUEUE_ROWS];
     char queueStatus[MAX_QUEUE_ROWS][256];
     char queueNumbers[MAX_QUEUE_ROWS][128];
+
+    // What installed, as the row along the foot of the Queue page. Kept
+    // across frames rather than rebuilt from the snapshot, because nothing
+    // records when a job finished: a job is put at the front the frame it
+    // first reads as installed, so the row is in the order they finished.
+    // The id ties a tile back to its job - removing the tile removes the
+    // job, and a job removed any other way drops out of the row with it.
+    QueueRecent queueRecents[MAX_QUEUE_ROWS];
+    QueueRecentView queueRecentRows[MAX_QUEUE_ROWS];
+    int queueRecentCount;
+    int queueRecentFocus;
+    int queueRecentScroll;
+    bool queueOnRecents; // the row has the focus, not the cards above it
 
     // The disc in the drive, as the library's first tile - see UpdateDisc.
     // librarySelected counts it: with a disc, 0 is the disc and game i is
@@ -5773,15 +5796,105 @@ static void FormatTransferNumbers(const QueueJobSnapshot &job, char *out, size_t
     out[outSize - 1] = '\0';
 }
 
+// A job that finished by putting the game on the console. These go to the
+// row along the foot of the page; everything else that finished - a
+// failure, a stopped install - keeps its card, because what it has to say
+// is the reason it's still listed at all.
+static bool JobInstalled(const QueueJobSnapshot &job)
+{
+    return job.state == QUEUE_FINISHED &&
+           (job.outcome == QUEUE_OUTCOME_INSTALLED || job.outcome == QUEUE_OUTCOME_ALREADY_INSTALLED);
+}
+
+// Puts a job at the front of the row, if it isn't already in it. Already
+// there means it was noted on an earlier frame, and where it sits then is
+// where it belongs - the row is in the order jobs finished.
+static void NoteQueueRecent(Shell &shell, const QueueJobSnapshot &job)
+{
+    for (int i = 0; i < shell.queueRecentCount; ++i)
+    {
+        if (shell.queueRecents[i].id == job.id)
+            return;
+    }
+
+    if (shell.queueRecentCount >= MAX_QUEUE_ROWS)
+        shell.queueRecentCount = MAX_QUEUE_ROWS - 1; // the oldest falls off the end
+    for (int i = shell.queueRecentCount; i > 0; --i)
+        shell.queueRecents[i] = shell.queueRecents[i - 1];
+
+    QueueRecent &r = shell.queueRecents[0];
+    r.id = job.id;
+    r.titleId = job.titleId;
+    _snprintf(r.name, sizeof(r.name), "%s", job.gameName[0] != '\0' ? job.gameName : job.title);
+    r.name[sizeof(r.name) - 1] = '\0';
+    shell.queueRecentCount++;
+
+    // The row grew under the focus; keep it on the same tile.
+    if (shell.queueRecentCount > 1)
+        shell.queueRecentFocus++;
+}
+
+// Brings the row in line with the queue: anything newly installed joins it,
+// and anything no longer in the queue - removed by X, here or on a card -
+// leaves it.
+static void UpdateQueueRecents(Shell &shell, const QueueJobSnapshot *disc, int discCount,
+                               const QueueJobSnapshot *game, int gameCount, const QueueJobSnapshot *dl,
+                               int dlCount)
+{
+    const QueueJobSnapshot *lists[3] = { disc, game, dl };
+    const int counts[3] = { discCount, gameCount, dlCount };
+
+    int live[MAX_QUEUE_ROWS];
+    int liveCount = 0;
+    for (int l = 0; l < 3; ++l)
+    {
+        for (int i = 0; i < counts[l] && liveCount < MAX_QUEUE_ROWS; ++i)
+        {
+            if (JobInstalled(lists[l][i]))
+                live[liveCount++] = lists[l][i].id;
+        }
+    }
+
+    int kept = 0;
+    for (int i = 0; i < shell.queueRecentCount; ++i)
+    {
+        bool stillThere = false;
+        for (int j = 0; j < liveCount && !stillThere; ++j)
+            stillThere = (live[j] == shell.queueRecents[i].id);
+        if (stillThere)
+            shell.queueRecents[kept++] = shell.queueRecents[i];
+        else if (i < shell.queueRecentFocus)
+            shell.queueRecentFocus--; // a tile before the focus went; it didn't move
+    }
+    shell.queueRecentCount = kept;
+
+    for (int l = 0; l < 3; ++l)
+    {
+        for (int i = 0; i < counts[l]; ++i)
+        {
+            if (JobInstalled(lists[l][i]))
+                NoteQueueRecent(shell, lists[l][i]);
+        }
+    }
+
+    if (shell.queueRecentFocus > shell.queueRecentCount - 1)
+        shell.queueRecentFocus = shell.queueRecentCount - 1;
+    if (shell.queueRecentFocus < 0)
+        shell.queueRecentFocus = 0;
+}
+
 // Copies the queue out and turns it into rows for the Queue page: a disc
 // install and game installs still to do first, then the downloads as the
-// download queue orders them, then finished game and disc installs.
+// download queue orders them, then whatever finished without installing.
+// What installed goes to the row underneath instead - see queueRecents.
 static void SnapshotQueue(Shell &shell, const Library &lib)
 {
     static QueueJobSnapshot discJobs[MAX_DISC_JOBS];
     static QueueJobSnapshot gameJobs[MAX_GAME_JOBS];
+    static QueueJobSnapshot dlJobs[MAX_QUEUE_JOBS];
     const int discCount = SnapshotDiscJobs(discJobs, MAX_DISC_JOBS);
     const int gameCount = SnapshotGameJobs(gameJobs, MAX_GAME_JOBS);
+    const int dlCount = SnapshotDownloadQueue(dlJobs, MAX_QUEUE_JOBS);
 
     int n = 0;
     for (int i = 0; i < discCount; ++i)
@@ -5794,18 +5907,37 @@ static void SnapshotQueue(Shell &shell, const Library &lib)
         if (gameJobs[i].state != QUEUE_FINISHED)
             shell.queueJobs[n++] = gameJobs[i];
     }
-    n += SnapshotDownloadQueue(shell.queueJobs + n, MAX_QUEUE_JOBS);
+    for (int i = 0; i < dlCount && n < MAX_QUEUE_ROWS; ++i)
+    {
+        if (!JobInstalled(dlJobs[i]))
+            shell.queueJobs[n++] = dlJobs[i];
+    }
     for (int i = 0; i < gameCount && n < MAX_QUEUE_ROWS; ++i)
     {
-        if (gameJobs[i].state == QUEUE_FINISHED)
+        if (gameJobs[i].state == QUEUE_FINISHED && !JobInstalled(gameJobs[i]))
             shell.queueJobs[n++] = gameJobs[i];
     }
     for (int i = 0; i < discCount && n < MAX_QUEUE_ROWS; ++i)
     {
-        if (discJobs[i].state == QUEUE_FINISHED)
+        if (discJobs[i].state == QUEUE_FINISHED && !JobInstalled(discJobs[i]))
             shell.queueJobs[n++] = discJobs[i];
     }
     shell.queueCount = n;
+
+    UpdateQueueRecents(shell, discJobs, discCount, gameJobs, gameCount, dlJobs, dlCount);
+    for (int i = 0; i < shell.queueRecentCount; ++i)
+    {
+        shell.queueRecentRows[i].name = shell.queueRecents[i].name;
+        shell.queueRecentRows[i].titleId = shell.queueRecents[i].titleId;
+        shell.queueRecentRows[i].libraryIndex = LibraryIndexForTitle(lib, shell.queueRecents[i].titleId);
+    }
+
+    // Focus can't stay where there's nothing: on an empty row it goes back
+    // to the cards, and with no cards left it has nowhere else to be.
+    if (shell.queueRecentCount == 0)
+        shell.queueOnRecents = false;
+    else if (shell.queueCount == 0)
+        shell.queueOnRecents = true;
 
     // Follow the selected job to wherever it now sits.
     for (int i = 0; i < shell.queueCount; ++i)
@@ -6669,6 +6801,10 @@ int main()
     shell.queueSelected = 0;
     shell.queueSelectedId = 0;
     shell.queueScroll = -1;
+    shell.queueRecentCount = 0;
+    shell.queueRecentFocus = 0;
+    shell.queueRecentScroll = 0;
+    shell.queueOnRecents = false;
     shell.homebrewScroll = 0.0f;
     shell.stale = true;
 
@@ -7246,19 +7382,60 @@ int main()
         }
         else if (shell.page == SHELL_PAGE_QUEUE)
         {
-            StepSelection(input.nav, shell.queueCount, shell.queueSelected);
-            if (shell.queueCount > 0)
-                shell.queueSelectedId = shell.queueJobs[shell.queueSelected].id;
+            // Down off the last card steps into the row of installs; up out
+            // of the row comes back to it. Left there walks the row before
+            // it reaches the sidebar, the way a row of tiles should.
+            if (shell.queueOnRecents)
+            {
+                if (input.nav == XINPUT_GAMEPAD_DPAD_UP && shell.queueCount > 0)
+                {
+                    shell.queueOnRecents = false;
+                    shell.queueSelected = shell.queueCount - 1;
+                    shell.queueSelectedId = shell.queueJobs[shell.queueSelected].id;
+                }
+                else if (input.nav == XINPUT_GAMEPAD_DPAD_LEFT)
+                {
+                    if (shell.queueRecentFocus > 0)
+                        shell.queueRecentFocus--;
+                    else
+                        FocusSidebar(shell); // the row's start, so out to the chrome
+                }
+                else if (input.nav == XINPUT_GAMEPAD_DPAD_RIGHT &&
+                         shell.queueRecentFocus < shell.queueRecentCount - 1)
+                    shell.queueRecentFocus++;
+            }
+            else
+            {
+                const int was = shell.queueSelected;
+                StepSelection(input.nav, shell.queueCount, shell.queueSelected);
+                if (input.nav == XINPUT_GAMEPAD_DPAD_DOWN && shell.queueSelected == was &&
+                    shell.queueRecentCount > 0)
+                    shell.queueOnRecents = true;
+                if (shell.queueCount > 0)
+                    shell.queueSelectedId = shell.queueJobs[shell.queueSelected].id;
+            }
 
             if (pressed & XINPUT_GAMEPAD_B)
             {
                 EnterPage(shell, SHELL_PAGE_HOME, false);
             }
-            else if (input.nav == XINPUT_GAMEPAD_DPAD_LEFT)
+            else if (input.nav == XINPUT_GAMEPAD_DPAD_LEFT && !shell.queueOnRecents)
             {
                 FocusSidebar(shell);
             }
-            else if ((pressed & XINPUT_GAMEPAD_X) && shell.queueCount > 0)
+            else if ((pressed & XINPUT_GAMEPAD_X) && shell.queueOnRecents && shell.queueRecentCount > 0)
+            {
+                // The same removal a finished card's X did: the tile is the
+                // job, so clearing one clears the other.
+                const int id = shell.queueRecents[shell.queueRecentFocus].id;
+                if (IsGameJobId(id))
+                    RemoveGameJob(id);
+                else if (IsDiscJobId(id))
+                    RemoveDiscJob(id);
+                else
+                    RemoveQueueJob(id);
+            }
+            else if ((pressed & XINPUT_GAMEPAD_X) && !shell.queueOnRecents && shell.queueCount > 0)
             {
                 const QueueJobSnapshot &job = shell.queueJobs[shell.queueSelected];
 
@@ -7708,7 +7885,7 @@ int main()
             break;
 
         case SHELL_PAGE_QUEUE:
-            if (shell.queueCount == 0)
+            if (shell.queueCount == 0 && shell.queueRecentCount == 0)
             {
                 RenderPlaceholderFrame("Queue", "Nothing is downloading",
                                        "DLC and title updates you choose will wait here while they download.",
@@ -7718,9 +7895,16 @@ int main()
             {
                 if (!shell.sidebarFocused)
                 {
-                    bool finished = (shell.queueJobs[shell.queueSelected].state == QUEUE_FINISHED);
-                    hintCount = finished ? AddHint(hints, hintCount, UI_BUTTON_X, L"Remove")
-                                         : AddHint(hints, hintCount, UI_BUTTON_X, L"Stop download", L"Stop");
+                    if (shell.queueOnRecents)
+                    {
+                        hintCount = AddHint(hints, hintCount, UI_BUTTON_X, L"Remove");
+                    }
+                    else
+                    {
+                        bool finished = (shell.queueJobs[shell.queueSelected].state == QUEUE_FINISHED);
+                        hintCount = finished ? AddHint(hints, hintCount, UI_BUTTON_X, L"Remove")
+                                             : AddHint(hints, hintCount, UI_BUTTON_X, L"Stop download", L"Stop");
+                    }
                     hintCount = AddHint(hints, hintCount, UI_BUTTON_B, L"Home");
                 }
 
@@ -7732,11 +7916,18 @@ int main()
                 view.selected = shell.queueSelected;
                 view.scroll = shell.queueScroll;
                 view.focused = !shell.sidebarFocused;
+                view.recents = shell.queueRecentRows;
+                view.recentCount = shell.queueRecentCount;
+                view.recentFocus = shell.queueRecentFocus;
+                view.recentScroll = shell.queueRecentScroll;
+                view.recentFocused = shell.queueOnRecents && !shell.sidebarFocused;
 
                 RenderQueueFrame(view, hints, hintCount);
 
                 shell.queueSelected = view.selected;
                 shell.queueScroll = view.scroll;
+                shell.queueRecentFocus = view.recentFocus;
+                shell.queueRecentScroll = view.recentScroll;
             }
             break;
 

@@ -698,6 +698,19 @@ struct QueueRowView
     QueueRowTone tone;
 };
 
+// A game that finished installing, as a tile in the row along the foot of
+// the page. A card had three lines and a bar's worth of height to say
+// "Installed" in, and sat there saying it over whatever was still going;
+// the cover and the name are all that's left to tell. Only installs come
+// here - a job that failed or was stopped keeps its card, because the line
+// under it is the point of it.
+struct QueueRecentView
+{
+    const char *name;
+    int libraryIndex;      // whose icon, into the view's games; -1 for none
+    unsigned long titleId; // whose box art
+};
+
 // games/gameCount are the library, for the covers - the same array the
 // library page draws, so they share its cover cache.
 struct QueuePageView
@@ -709,6 +722,14 @@ struct QueuePageView
     int selected;
     int scroll;
     bool focused;
+
+    // The row underneath. recentFocused says the focus is down there rather
+    // than on the cards, which keeps their selection where it was.
+    const QueueRecentView *recents;
+    int recentCount;
+    int recentFocus;
+    int recentScroll;
+    bool recentFocused;
 };
 
 void RenderQueueFrame(QueuePageView &view, const UiHint *hints, int hintCount);

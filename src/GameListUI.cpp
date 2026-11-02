@@ -7604,6 +7604,25 @@ static float QueueRowGap()
     return S(12.0f);
 }
 
+static float QueueRecentTile()
+{
+    return S(92.0f);
+}
+
+static float QueueRecentGap()
+{
+    return S(14.0f);
+}
+
+// The label, the tiles, their names and the air above the footer. Taken off
+// the cards' height, so a page with finished installs on it shows one card
+// fewer and the row instead - which is the trade: a row holds six of them
+// in the height a single card wanted.
+static float QueueRecentBandH()
+{
+    return S(34.0f) + QueueRecentTile() + S(8.0f) + LineHeight(0.72f) * 1.2f + S(20.0f);
+}
+
 static D3DCOLOR QueueStatusColor(QueueRowTone tone)
 {
     switch (tone)
@@ -7630,17 +7649,41 @@ void RenderQueueFrame(QueuePageView &view, const UiHint *hints, int hintCount)
         icons = (g_iconCount == gameCount) ? g_icons : NULL;
     }
 
+    const int recentCount = (view.recents != NULL && view.recentCount > 0) ? view.recentCount : 0;
+
     const float rowH = QueueRowHeight();
     const float plateH = rowH - QueueRowGap();
     // The cover fills the card's left end, top to bottom.
     const float coverSize = plateH;
 
-    int visibleRows = (int)((g_M.footerY - S(30.0f) - g_M.listY + QueueRowGap()) / rowH);
+    const float bandH = (recentCount > 0) ? QueueRecentBandH() : 0.0f;
+    const float listBottom = g_M.footerY - S(30.0f) - bandH;
+
+    int visibleRows = (int)((listBottom - g_M.listY + QueueRowGap()) / rowH);
     if (visibleRows < 1) visibleRows = 1;
 
     KeepSelectionVisible(count, visibleRows, view.selected, view.scroll);
     const int selected = view.selected;
     const int scrollOffset = view.scroll;
+
+    // The row along the foot: the focused tile kept on screen, a tile at a
+    // time, as the Home page's recents are.
+    const float recTile = QueueRecentTile();
+    const float recGap = QueueRecentGap();
+    const float bandTop = g_M.footerY - S(30.0f) - bandH;
+    const float recentY = bandTop + S(34.0f);
+    const float recentNameY = recentY + recTile + S(8.0f);
+
+    int recentAcross = (int)((g_M.contentW + recGap) / (recTile + recGap));
+    if (recentAcross < 1) recentAcross = 1;
+
+    if (view.recentFocus > recentCount - 1) view.recentFocus = recentCount - 1;
+    if (view.recentFocus < 0) view.recentFocus = 0;
+    if (view.recentScroll > view.recentFocus) view.recentScroll = view.recentFocus;
+    if (view.recentFocus >= view.recentScroll + recentAcross)
+        view.recentScroll = view.recentFocus - recentAcross + 1;
+    if (view.recentScroll > recentCount - recentAcross) view.recentScroll = recentCount - recentAcross;
+    if (view.recentScroll < 0) view.recentScroll = 0;
 
     BeginFrame();
 
@@ -7670,6 +7713,12 @@ void RenderQueueFrame(QueuePageView &view, const UiHint *hints, int hintCount)
             if (tid != 0 && tid != INDIE_TITLE_ID && StoreCoverFor(tid) == NULL && wantCount < MAX_STORE_COVERS)
                 want[wantCount++] = tid;
         }
+        for (int i = 0; i < recentAcross && view.recentScroll + i < recentCount; ++i)
+        {
+            const unsigned long tid = view.recents[view.recentScroll + i].titleId;
+            if (tid != 0 && tid != INDIE_TITLE_ID && StoreCoverFor(tid) == NULL && wantCount < MAX_STORE_COVERS)
+                want[wantCount++] = tid;
+        }
         RequestMissingStoreCovers(want, wantCount);
     }
 
@@ -7687,7 +7736,7 @@ void RenderQueueFrame(QueuePageView &view, const UiHint *hints, int hintCount)
         const bool isSelected = (index == selected);
 
         FillRound(g_M.contentX, y, plateW, plateH, g_M.radius, isSelected ? COL_SURFACE_HI : COL_SURFACE);
-        if (isSelected && view.focused)
+        if (isSelected && view.focused && !view.recentFocused)
             FocusRing(g_M.contentX, y, plateW, plateH, g_M.radius);
 
         const bool inLibrary = (q.libraryIndex >= 0 && q.libraryIndex < gameCount);
@@ -7736,6 +7785,24 @@ void RenderQueueFrame(QueuePageView &view, const UiHint *hints, int hintCount)
     if (showScroll)
         DrawScrollbar(g_M.listY, visibleRows * rowH - QueueRowGap(), count, visibleRows, scrollOffset);
 
+    for (int i = 0; i < recentAcross; ++i)
+    {
+        const int item = view.recentScroll + i;
+        if (item >= recentCount)
+            break;
+
+        const QueueRecentView &r = view.recents[item];
+        const float x = g_M.contentX + i * (recTile + recGap);
+
+        const bool inLibrary = (r.libraryIndex >= 0 && r.libraryIndex < gameCount);
+        const Icon *icon = (icons != NULL && inLibrary) ? &icons[r.libraryIndex] : NULL;
+        D3DTexture *boxArt = (r.titleId == INDIE_TITLE_ID) ? IndieTile() : StoreCoverFor(r.titleId);
+        DrawCoverSquare(boxArt, icon, x, recentY, recTile);
+
+        if (view.recentFocused && item == view.recentFocus)
+            FocusRing(x, recentY, recTile, recTile, R(4.0f));
+    }
+
     DrawButtonHintShapes(footer, footerCount, g_M.footerY);
     DrawHeaderQuads(showToast);
 
@@ -7751,11 +7818,16 @@ void RenderQueueFrame(QueuePageView &view, const UiHint *hints, int hintCount)
             waiting++;
     }
 
+    // What installed is counted by the row, not by the cards - the only
+    // cards left once a job finishes are the ones that didn't install, and
+    // "finished" covers those.
     char subtitle[96];
-    if (waiting > 0 && waiting < count)
-        _snprintf(subtitle, sizeof(subtitle), "%d to do" MIDDOT "%d finished", waiting, count - waiting);
+    if (waiting > 0 && recentCount > 0)
+        _snprintf(subtitle, sizeof(subtitle), "%d to do" MIDDOT "%d installed", waiting, recentCount);
     else if (waiting > 0)
         _snprintf(subtitle, sizeof(subtitle), "%d to do", waiting);
+    else if (recentCount > 0)
+        _snprintf(subtitle, sizeof(subtitle), "%d installed", recentCount);
     else
         _snprintf(subtitle, sizeof(subtitle), "%d finished", count);
     subtitle[sizeof(subtitle) - 1] = '\0';
@@ -7803,6 +7875,38 @@ void RenderQueueFrame(QueuePageView &view, const UiHint *hints, int hintCount)
         TextFit(textX, lineY, 0.75f, COL_TEXT2, detail, textRight - textX);
         TextFit(textX, lineY + LineHeight(0.75f) * 1.2f + S(4.0f), 0.78f, QueueStatusColor(q.tone),
                 q.status, textRight - textX, true);
+    }
+
+    if (recentCount > 0)
+    {
+        // How many there are, beside the label, so the ones off the end of
+        // the row are accounted for - it scrolls sideways and a bar under
+        // it would crowd the footer.
+        Text(g_M.contentX, bandTop, 0.8f, COL_TEXT, "Recently installed", 0, 0.0f, true);
+        if (recentCount > recentAcross)
+        {
+            char of[32];
+            _snprintf(of, sizeof(of), "%d of %d", view.recentFocus + 1, recentCount);
+            of[sizeof(of) - 1] = '\0';
+            Text(g_M.contentX + g_M.contentW, bandTop, 0.72f, COL_DIM, of, ATGFONT_RIGHT);
+        }
+
+        for (int i = 0; i < recentAcross; ++i)
+        {
+            const int item = view.recentScroll + i;
+            if (item >= recentCount)
+                break;
+
+            const QueueRecentView &r = view.recents[item];
+            const float x = g_M.contentX + i * (recTile + recGap);
+
+            // Only the focused one scrolls its name: there is one marquee,
+            // and a row of them moving at once would be a mess anyway.
+            if (view.recentFocused && item == view.recentFocus)
+                MarqueeTextMid(x, recentNameY + LineHeight(0.72f) * 0.6f, 0.72f, COL_TEXT, r.name, recTile, true);
+            else
+                TextFit(x, recentNameY, 0.72f, COL_TEXT2, r.name, recTile);
+        }
     }
 
     g_UiFont.SetBold(false);
