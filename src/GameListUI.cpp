@@ -5291,7 +5291,7 @@ struct HomeLayout
 {
     float navY, navH;
     float nameY;
-    float rowLabelY, rowY;
+    float rowY;
     float tile, gap;
     int across;
 };
@@ -5316,10 +5316,9 @@ static HomeLayout LayOutHome()
     // Up from the footer, so the row clears the button hints whatever the
     // screen is; the name block then takes what's left above it.
     L.rowY = g_M.footerY - S(46.0f) - L.tile;
-    // Far enough above the row for the focused tile's growth and its ring,
-    // which reach S(15) and S(6) past the top of an unfocused one.
-    L.rowLabelY = L.rowY - S(50.0f);
-    L.nameY = L.rowLabelY - S(120.0f);
+    // The name block stops well clear of the row: the focused tile's growth
+    // and its ring reach S(15) and S(6) past the top of an unfocused one.
+    L.nameY = L.rowY - S(140.0f);
     if (L.nameY < L.navY + L.navH + S(30.0f))
         L.nameY = L.navY + L.navH + S(30.0f);
 
@@ -5705,8 +5704,6 @@ void RenderHomeFrame(HomePageView &view, const UiHint *hints, int hintCount)
              true);
         TextFit(g_M.safeX, L.nameY + S(26.0f), 2.0f, COL_TEXT, game.name, nameW, true);
     }
-
-    Text(g_M.safeX, L.rowLabelY, 0.95f, COL_TEXT, view.recentCount > 0 ? "Recent" : "Your games", 0, 0.0f, true);
 
     if (view.recentCount == 0)
     {
