@@ -53,6 +53,20 @@ void SetDiscReadSpeed(int speed)
 }
 #define SPINDLE_SETTLE_MS      3000
 
+// Back to the drive's quiet range. Only ever called with the drive open; see
+// where the install puts it back. when says what for, in the log. settle
+// waits for the drive to actually change speed, which the install does
+// before closing the drive out from under the command - a probe about to
+// read the disc has no need to wait, and three seconds on every disc going
+// in would be felt.
+static void ResetSpindleSpeed(const char *when, bool settle)
+{
+    const DWORD result = XamSetDvdSpindleSpeed(SPINDLE_SPEED_NORMAL);
+    dprintf("[disc] spindle back to %d %s -> 0x%08lX\n", SPINDLE_SPEED_NORMAL, when, (unsigned long)result);
+    if (settle)
+        Sleep(SPINDLE_SETTLE_MS);
+}
+
 #define TRAY_POLL_MS        500
 #define SETTLE_MS           2500   // after the tray moves, before reading the disc
 // How long after the tray moves a disc that won't read yet keeps being tried.
@@ -172,6 +186,12 @@ static bool ProbeDisc(bool lastChance)
             dprintf("[disc] nothing readable in the drive\n");
         return false;
     }
+
+    // Nothing is installing here - the worker runs one thing at a time - so
+    // whatever speed the drive is at isn't wanted. An install that ended
+    // without putting it back leaves it raised until something opens the
+    // drive again, which is here.
+    ResetSpindleSpeed("for a disc going in", false);
 
     EnterCriticalSection(&g_lock);
     SetDiscState(DISC_READING);
@@ -378,8 +398,15 @@ static void RunInstall(DiscJob *job, const char *gamesPath)
     }
 
     ClearInstallMarker();
+
+    // Back to the quiet speed BEFORE the drive is closed. The drive only
+    // takes a spindle speed while it is open - raising it above works
+    // because disc.Open() has already happened - and a speed set after the
+    // close is dropped, which left the drive howling at full speed until
+    // something else opened it. It needs the same moment to settle as
+    // raising it did, or the close can overtake it.
+    ResetSpindleSpeed("after the install", true);
     disc.Close();
-    XamSetDvdSpindleSpeed(SPINDLE_SPEED_NORMAL);
 
     DWORD seconds = (GetTickCount() - progress.startTick) / 1000;
     dprintf("[disc] install %s after %lu:%02lu: %s\n", GodResultText(result),
