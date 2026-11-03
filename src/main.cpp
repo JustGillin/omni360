@@ -4236,6 +4236,38 @@ static StoreDiscProgress ProgressOfDisc(const Library &lib, const StoreRelease *
     return STORE_DISC_NOT_INSTALLED;
 }
 
+// The disc in the drive is this page's game, ready and not already on its
+// way: the page offers to install from the drive, which beats downloading
+// the same game over again.
+static bool DiscInDriveFor(const Shell &shell, unsigned long titleId)
+{
+    return titleId != 0 && shell.disc.state == DISC_READY && !shell.disc.installing &&
+           shell.disc.titleId == titleId;
+}
+
+// A disc install of this title, waiting or running. The disc worker's jobs
+// are the download queue's in everything but where they come from, so a game
+// page can show one exactly as it shows an archive.org install - the install
+// may have been started from the disc's tile, or from the page itself.
+static StoreInstallState DiscJobState(unsigned long titleId, float *outFraction)
+{
+    if (titleId == 0)
+        return STORE_INSTALL_AVAILABLE;
+
+    static QueueJobSnapshot jobs[MAX_DISC_JOBS];
+    const int count = SnapshotDiscJobs(jobs, MAX_DISC_JOBS);
+    for (int i = 0; i < count; ++i)
+    {
+        if (jobs[i].titleId != titleId || jobs[i].state == QUEUE_FINISHED)
+            continue;
+        if (jobs[i].state == QUEUE_WAITING)
+            return STORE_INSTALL_QUEUED;
+        *outFraction = jobs[i].fraction;
+        return STORE_INSTALL_INSTALLING;
+    }
+    return STORE_INSTALL_AVAILABLE;
+}
+
 // The chosen version as a whole: installing while any disc is, queued while
 // any waits, installed once every disc is. outPartial: some discs are
 // installed and the rest aren't on their way.
@@ -4243,6 +4275,17 @@ static StoreInstallState StoreVersionState(const Library &lib, int version, floa
 {
     *outFraction = -1.0f;
     *outPartial = false;
+
+    // A disc install first, whatever the Store has: it is this game being
+    // installed, and it is the one the Queue page is showing.
+    float discFraction = -1.0f;
+    const StoreInstallState fromDisc = DiscJobState(g_storeGame.titleId, &discFraction);
+    if (fromDisc != STORE_INSTALL_AVAILABLE)
+    {
+        *outFraction = discFraction;
+        return fromDisc;
+    }
+
     if (g_storeArcade != NULL)
         return ArcadeInstallState(lib, outFraction);
     const StoreRelease *release = StoreReleaseOf(&g_storeGame, version);
@@ -4638,8 +4681,17 @@ static StoreGameView MakeStoreGameView(Shell &shell, const Library &lib)
         view.buttons[0] = LibraryGameByTitleId(lib, g_storeGame.titleId) != NULL ? "Play" : "Installed";
         break;
     default:
-        view.buttons[0] = partial ? "Install remaining" : "Install";
-        view.buttonDisabled[0] = (StoreVersionCount() == 0);
+        if (DiscInDriveFor(shell, g_storeGame.titleId))
+        {
+            // Even for a game archive.org hasn't got, which has no version
+            // to install and so would leave the button disabled.
+            view.buttons[0] = "Install from disc";
+        }
+        else
+        {
+            view.buttons[0] = partial ? "Install remaining" : "Install";
+            view.buttonDisabled[0] = (StoreVersionCount() == 0);
+        }
         break;
     }
     view.buttons[1] = "Find DLC";
@@ -5568,6 +5620,66 @@ static void UpdateDisc(Shell &shell, const Library &lib, const char *gamesPath)
     }
 }
 
+// Installs the disc that's in the drive now, asking first for what it needs:
+// whether to replace a copy that's already on the drive, whether there's
+// room for it, and the name the dashboard will show. Returns true if one of
+// those took over the screen, so input is resynced after.
+//
+// START on the disc's tile starts this, and so does Install from disc on the
+// game's own page - the two are the same install.
+static bool StartDiscInstall(Shell &shell, const char *gamesPath)
+{
+    const DiscInfo &disc = shell.disc;
+    if (disc.state != DISC_READY || disc.installing)
+        return false;
+
+    if (shell.discInstalled &&
+        !ShowConfirmUI("Install again?", shell.discName,
+                       "Installing it again replaces the copy on the drive.", "Reinstall"))
+        return true;
+
+    unsigned long long freeSpace = 0;
+    if (DriveFreeSpace(gamesPath, &freeSpace) && freeSpace < disc.outputSize + 4ULL * 1024 * 1024)
+    {
+        ShowNotEnoughSpace(gamesPath, disc.outputSize, freeSpace);
+        return true;
+    }
+
+    // A name from a list or the disc is used as it is; without one, the
+    // keyboard asks rather than installing it as "Title XXXXXXXX".
+    std::string name = shell.discName;
+    bool tookScreen = shell.discInstalled; // the confirm above
+    if (KnownDiscName(disc) == NULL)
+    {
+        tookScreen = true;
+        if (!AskDiscName(shell.discName, disc.discNumber, disc.discCount, name))
+            return true;
+    }
+
+    char sizeText[64] = "";
+    FormatBytes(disc.outputSize, sizeText, sizeof(sizeText));
+
+    char detail[160];
+    switch (QueueDiscInstall(disc.titleId, disc.mediaId, name.c_str()))
+    {
+    case DISC_INSTALL_QUEUED:
+        _snprintf(detail, sizeof(detail), "%s" "  \xC2\xB7  " "%s, on the Queue page", name.c_str(), sizeText);
+        detail[sizeof(detail) - 1] = '\0';
+        ShowShellToast("Installing", detail, UI_TOAST_INFO);
+        break;
+    case DISC_INSTALL_BUSY:
+        ShowShellToast("Already installing", "One disc installs at a time.", UI_TOAST_INFO);
+        break;
+    case DISC_INSTALL_NO_DISC:
+        ShowShellToast("Couldn't install", "The disc in the drive changed. Try again in a moment.", UI_TOAST_ERROR);
+        break;
+    default:
+        ShowShellToast("Couldn't install", "The disc worker didn't start - the log says why.", UI_TOAST_ERROR);
+        break;
+    }
+    return tookScreen;
+}
+
 // What A, X and START do on the disc's tile. Returns true if it took over
 // the screen (the keyboard, a message), so input is resynced after.
 static bool DiscTileAction(Shell &shell, const Library &lib, const char *gamesPath, WORD pressed)
@@ -5627,51 +5739,7 @@ static bool DiscTileAction(Shell &shell, const Library &lib, const char *gamesPa
     if (!(pressed & XINPUT_GAMEPAD_START))
         return false;
 
-    if (shell.discInstalled &&
-        !ShowConfirmUI("Install again?", shell.discName,
-                       "Installing it again replaces the copy on the drive.", "Reinstall"))
-        return true;
-
-    unsigned long long freeSpace = 0;
-    if (DriveFreeSpace(gamesPath, &freeSpace) && freeSpace < disc.outputSize + 4ULL * 1024 * 1024)
-    {
-        ShowNotEnoughSpace(gamesPath, disc.outputSize, freeSpace);
-        return true;
-    }
-
-    // A name from a list or the disc is used as it is; without one, the
-    // keyboard asks rather than installing it as "Title XXXXXXXX".
-    std::string name = shell.discName;
-    bool tookScreen = shell.discInstalled; // the confirm above
-    if (KnownDiscName(disc) == NULL)
-    {
-        tookScreen = true;
-        if (!AskDiscName(shell.discName, disc.discNumber, disc.discCount, name))
-            return true;
-    }
-
-    char sizeText[64] = "";
-    FormatBytes(disc.outputSize, sizeText, sizeof(sizeText));
-
-    char detail[160];
-    switch (QueueDiscInstall(disc.titleId, disc.mediaId, name.c_str()))
-    {
-    case DISC_INSTALL_QUEUED:
-        _snprintf(detail, sizeof(detail), "%s" "  \xC2\xB7  " "%s, on the Queue page", name.c_str(), sizeText);
-        detail[sizeof(detail) - 1] = '\0';
-        ShowShellToast("Installing", detail, UI_TOAST_INFO);
-        break;
-    case DISC_INSTALL_BUSY:
-        ShowShellToast("Already installing", "One disc installs at a time.", UI_TOAST_INFO);
-        break;
-    case DISC_INSTALL_NO_DISC:
-        ShowShellToast("Couldn't install", "The disc in the drive changed. Try again in a moment.", UI_TOAST_ERROR);
-        break;
-    default:
-        ShowShellToast("Couldn't install", "The disc worker didn't start - the log says why.", UI_TOAST_ERROR);
-        break;
-    }
-    return tookScreen;
+    return StartDiscInstall(shell, gamesPath);
 }
 
 // One row up or down for an up/down nav, clamped to the list.
@@ -7178,6 +7246,14 @@ int main()
                         const StoreGame next = g_similarGames[f - STORE_GAME_FOCUS_SIMILAR];
                         OpenStoreGame(shell, next);
                     }
+                }
+                else if (f == STORE_GAME_FOCUS_BUTTONS && installState == STORE_INSTALL_AVAILABLE &&
+                         DiscInDriveFor(shell, g_storeGame.titleId))
+                {
+                    // Install from disc: the same install the disc's tile
+                    // starts, without going back to it.
+                    if (StartDiscInstall(shell, gamesPath))
+                        acted = true;
                 }
                 else if (f == STORE_GAME_FOCUS_BUTTONS && StoreVersionCount() > 0 && GamePagePlays(shell, lib))
                 {
