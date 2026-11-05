@@ -56,13 +56,11 @@ Optional `settings.txt` keys change where things go, and the games folder can al
 
 Omni360 is a store and a library in one app on the console.
 
-**Home** is where it opens: the games you played most recently as a row of covers, each one's own artwork filling the screen behind it, and a row of icons across the top for the four places to go. **B** comes back to it from anywhere.
+Its store carries about 1,500 Xbox 360 disc games, 740 Xbox Live Arcade games, 3,450 indie games and 500 Original Xbox games from archive.org, along with DLC and title updates for any of them - filtered by region, language, genre or rating, browsed by series, or found with a search. Every game gets a proper page, with its description, ratings, screenshots and artwork pulled from Xbox Live.
 
-**Games + Apps** shows every installed game, read straight from the hard drive, and plays them - or the disc in the drive - with **A**. Its sidebar reaches your apps, homebrew and emulators too, if you've pointed it at folders for them.
+Everything downloads and installs in the background while you keep browsing, with disc games installed as Games on Demand, and a game disc in the drive can be copied to the hard drive the same way. Nothing downloads without you choosing it, and a popup says when each job finishes or fails.
 
-**The Store** lists about 1,500 Xbox 360 disc games, 740 Xbox Live Arcade games, 3,450 indie games and 500 Original Xbox games from archive.org, along with DLC and title updates for any of them - filtered by region, language, genre or rating, browsed by series, or found with a search.
-
-Everything downloads and installs in the background while you keep browsing, with disc games installed as Games on Demand, and a game disc in the drive can be copied to the hard drive the same way. Omni360 also keeps itself up to date, installing only releases signed with the project's key. Nothing downloads without you choosing it, and a popup says when each job finishes or fails.
+Your library is read straight off the hard drive, covers and all, and games start from Omni360 just as they would from the dashboard - alongside your apps, homebrew and emulators, if you point it at folders for them. It opens on the games you played last, each under its own wallpaper, and keeps itself up to date, installing only releases signed with the project's key.
 
 **Status: beta (0.13.1-beta), working on real hardware.** Every kind of install has been run end to end on a modded console with a real library.
 
