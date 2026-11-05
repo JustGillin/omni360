@@ -1,0 +1,166 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Omni360 - Home's ambient background</title>
+<style>
+  :root { color-scheme: dark; }
+  body {
+    margin: 0; background: #0b0b0b; color: #c4c4c4;
+    font: 14px/1.5 "Segoe UI", system-ui, sans-serif;
+    display: flex; flex-direction: column; align-items: center; gap: 14px; padding: 20px;
+  }
+  h1 { font-size: 15px; font-weight: 600; color: #fff; margin: 0; letter-spacing: .02em; }
+  p  { margin: 0; max-width: 1280px; }
+  .stage { position: relative; width: 1280px; max-width: 100%; aspect-ratio: 16/9; overflow: hidden; }
+  canvas, .layer { position: absolute; inset: 0; width: 100%; height: 100%; }
+  .layer { pointer-events: none; }
+  /* Home's two scrims, in the sizes RenderHomeFrame uses at 720p. */
+  .scrim-top    { bottom: auto; height: 20.83%; background: linear-gradient(to bottom, rgba(0,0,0,.749), rgba(0,0,0,0)); }
+  .scrim-bottom { top: auto;    height: 63.89%; background: linear-gradient(to bottom, rgba(0,0,0,0), rgba(0,0,0,.902)); }
+  .chrome { font: 500 17px/1 "Segoe UI", sans-serif; color: #fff; }
+  .chrome div { position: absolute; }
+  .nav { left: 50%; top: 3.6%; transform: translateX(-50%); display: flex; gap: 10px; }
+  .nav i { width: 46px; height: 46px; border-radius: 50%; background: rgba(0,0,0,.35); display: block; }
+  .nav i:first-child { background: #2f2f2f; box-shadow: 0 0 0 3px #000, 0 0 0 6px #fff; }
+  .tag  { left: 4.7%; top: 4.3%; }
+  .clock{ right: 4.7%; top: 4.3%; }
+  .plate{ left: 4.7%; right: 4.7%; top: 52%; height: 27%; border-radius: 10px; background: rgba(0,0,0,.549);
+          display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 8px; }
+  .plate b { font-weight: 600; }
+  .plate s { text-decoration: none; color: #8f8f8f; font-size: 15px; }
+  .hints { left: 4.7%; bottom: 5.5%; color: #c4c4c4; font-size: 15px; }
+  .controls { display: flex; gap: 18px; align-items: center; flex-wrap: wrap; }
+  label { display: flex; gap: 6px; align-items: center; cursor: pointer; }
+  code { color: #6cc96c; }
+</style>
+</head>
+<body>
+<h1>Home's ambient background</h1>
+<p>The same shader <code>src/GameListUI.cpp</code> runs on the console
+(<code>g_strAmbientShader</code>), ported line for line to WebGL, under the scrims and the
+empty-state plate Home draws over it. This is what an Omni360 with nothing recent looks like.</p>
+
+<div class="stage">
+  <canvas id="gl"></canvas>
+  <div class="layer scrim-top"></div>
+  <div class="layer scrim-bottom"></div>
+  <div class="layer chrome" id="chrome">
+    <div class="tag">Omni360</div>
+    <div class="nav"><i></i><i></i><i></i><i></i><i></i><i></i><i></i></div>
+    <div class="clock">9:41 PM&nbsp;&nbsp;&nbsp;312 GB free</div>
+    <div class="plate"><b>Nothing played yet</b><s>Your games show up here once you have played one</s></div>
+    <div class="hints">A&nbsp; Select&nbsp;&nbsp;&nbsp; Y&nbsp; Settings</div>
+  </div>
+</div>
+
+<div class="controls">
+  <label><input type="checkbox" id="scrims" checked> Home's scrims and chrome</label>
+  <label>Speed <input type="range" id="speed" min="0" max="20" step="0.5" value="1"></label>
+  <span id="clock"></span>
+</div>
+
+<script>
+// --- the colours, straight from the COL_AMBIENT_* defines -------------------
+const COL = {
+  top:    0xFF121613,
+  bottom: 0xFF060807,
+  glowA:  0x4D1E7C2E,
+  glowB:  0x3C184A62,
+};
+const f4 = c => [((c >> 16) & 255) / 255, ((c >> 8) & 255) / 255, (c & 255) / 255, ((c >>> 24) & 255) / 255];
+
+const VS = `
+attribute vec2 aPos;
+void main() { gl_Position = vec4(aPos, 0.0, 1.0); }
+`;
+
+// AmbientPixelShader, line for line.
+const FS = `
+precision highp float;
+uniform vec4 AmbFrame;   // x: seconds, y: 1/width, z: 1/height
+uniform vec4 AmbTop;
+uniform vec4 AmbBottom;
+uniform vec4 AmbGlowA;
+uniform vec4 AmbGlowB;
+
+float AmbWave(float x) {
+  float t = abs(fract(x) * 2.0 - 1.0);
+  return (t * t * (3.0 - 2.0 * t)) * 2.0 - 1.0;
+}
+float AmbBand(float dy, float width) {
+  float k = clamp(1.0 - abs(dy) / width, 0.0, 1.0);
+  return k * k;
+}
+void main() {
+  vec2 Pixel = vec2(gl_FragCoord.x, 1.0 / AmbFrame.z - gl_FragCoord.y); // D3D counts y downwards
+  vec2 uv = Pixel * AmbFrame.yz;
+  float t = AmbFrame.x;
+  vec3 col = mix(AmbTop.rgb, AmbBottom.rgb, uv.y);
+  float y1 = 0.42 + 0.11 * AmbWave(uv.x * 0.55 + t * 0.0345)
+                  + 0.05 * AmbWave(uv.x * 1.10 - t * 0.0219);
+  col += AmbGlowA.rgb * AmbGlowA.a * AmbBand(uv.y - y1, 0.30);
+  float y2 = 0.27 + 0.08 * AmbWave(uv.x * 0.42 - t * 0.0265);
+  col += AmbGlowB.rgb * AmbGlowB.a * AmbBand(uv.y - y2, 0.26);
+  float y3 = 0.60 + 0.07 * AmbWave(uv.x * 0.70 + t * 0.0173);
+  col += AmbGlowA.rgb * (AmbGlowA.a * 0.5) * AmbBand(uv.y - y3, 0.26);
+  col += (fract(dot(Pixel, vec2(0.0637, 0.1051))) - 0.5) * 0.005;
+  gl_FragColor = vec4(col, 1.0);
+}
+`;
+
+const canvas = document.getElementById("gl");
+const gl = canvas.getContext("webgl", { antialias: false, preserveDrawingBuffer: true });
+
+function shader(type, src) {
+  const s = gl.createShader(type);
+  gl.shaderSource(s, src);
+  gl.compileShader(s);
+  if (!gl.getShaderParameter(s, gl.COMPILE_STATUS)) throw new Error(gl.getShaderInfoLog(s));
+  return s;
+}
+const prog = gl.createProgram();
+gl.attachShader(prog, shader(gl.VERTEX_SHADER, VS));
+gl.attachShader(prog, shader(gl.FRAGMENT_SHADER, FS));
+gl.linkProgram(prog);
+gl.useProgram(prog);
+
+const buf = gl.createBuffer();
+gl.bindBuffer(gl.ARRAY_BUFFER, buf);
+gl.bufferData(gl.ARRAY_BUFFER, new Float32Array([-1, -1, 3, -1, -1, 3]), gl.STATIC_DRAW);
+const aPos = gl.getAttribLocation(prog, "aPos");
+gl.enableVertexAttribArray(aPos);
+gl.vertexAttribPointer(aPos, 2, gl.FLOAT, false, 0, 0);
+
+const u = n => gl.getUniformLocation(prog, n);
+gl.uniform4fv(u("AmbTop"), f4(COL.top));
+gl.uniform4fv(u("AmbBottom"), f4(COL.bottom));
+gl.uniform4fv(u("AmbGlowA"), f4(COL.glowA));
+gl.uniform4fv(u("AmbGlowB"), f4(COL.glowB));
+
+const speed = document.getElementById("speed");
+const readout = document.getElementById("clock");
+document.getElementById("scrims").addEventListener("change", e => {
+  for (const el of document.querySelectorAll(".scrim-top, .scrim-bottom, .chrome"))
+    el.style.display = e.target.checked ? "" : "none";
+});
+
+let shown = 0, last = performance.now();
+function frame(now) {
+  shown += (now - last) * 0.001 * parseFloat(speed.value);
+  last = now;
+
+  const w = canvas.clientWidth, h = canvas.clientHeight;
+  if (canvas.width !== w || canvas.height !== h) { canvas.width = w; canvas.height = h; }
+  gl.viewport(0, 0, canvas.width, canvas.height);
+  gl.uniform4f(u("AmbFrame"), shown, 1 / canvas.width, 1 / canvas.height, 0);
+  gl.drawArrays(gl.TRIANGLES, 0, 3);
+
+  readout.textContent = shown.toFixed(0) + "s in";
+  requestAnimationFrame(frame);
+}
+requestAnimationFrame(frame);
+</script>
+</body>
+</html>

@@ -278,10 +278,106 @@ static D3DPixelShader *g_pShapePixelShader = NULL;
 // failing to start.
 static bool g_shapesReady = false;
 
-static bool CompileShader(const char *entry, const char *profile, ID3DXBuffer **out)
+// ---------------------------------------------------------------------------
+// Ambient shader: Home's living background
+// ---------------------------------------------------------------------------
+//
+// Home shows the focused game's wallpaper. With nothing recent to show - a
+// fresh install, or a game the Store has no picture for - the page was flat
+// black, which reads as a screen that failed to draw rather than a screen
+// with nothing on it. This draws what's behind the wallpapers instead: a
+// charcoal wash with two or three broad bands of colour drifting slowly
+// across it, so an empty Home is still alive. One hardcoded look for now;
+// the colours are all constants (AmbTop/AmbBottom/AmbGlowA/AmbGlowB) so a
+// theme can hand it a different set later without touching the shader.
+//
+// No sin(): ps.2.0 has no sine instruction, and the one wave shape this
+// needs comes out of frac() and a smoothstep for a handful of ALU ops -
+//
+//   f = frac(x), t = |2f - 1|, w = (t*t*(3 - 2t)) * 2 - 1
+//
+// which is a smooth -1..1 wave of period 1, flat-topped at the turns, with
+// continuous slope where the periods join. Two of them at different rates
+// make a band that never visibly repeats.
+//
+// The whole thing is ALU with no branches and no texture reads, and it is
+// only drawn when something will actually show through it (see
+// DrawHomeWallpaper), so the frames that have a wallpaper up pay nothing.
+static const char g_strAmbientShader[] =
+    "struct VS_IN\n"
+    "{\n"
+    "    float2 Pos : POSITION;\n"
+    "    float2 Tex : TEXCOORD0;\n"
+    "};\n"
+    "struct VS_OUT\n"
+    "{\n"
+    "    float4 Position : POSITION;\n"
+    "    float2 Pixel : TEXCOORD0;\n"
+    "};\n"
+    "VS_OUT AmbientVertexShader( VS_IN In )\n"
+    "{\n"
+    "    VS_OUT Out;\n"
+    "    Out.Position.x = In.Pos.x - 0.5;\n"
+    "    Out.Position.y = In.Pos.y - 0.5;\n"
+    "    Out.Position.z = 0.0;\n"
+    "    Out.Position.w = 1.0;\n"
+    "    Out.Pixel = In.Pos;\n"
+    "    return Out;\n"
+    "}\n"
+    "uniform float4 AmbFrame : register(c1);\n" // x: seconds since the UI came up, y: 1/width, z: 1/height
+    "uniform float4 AmbTop : register(c2);\n"    // the wash, at the top of the screen
+    "uniform float4 AmbBottom : register(c3);\n" // and at the foot
+    "uniform float4 AmbGlowA : register(c4);\n"  // the main band: rgb, with its strength in a
+    "uniform float4 AmbGlowB : register(c5);\n"  // the two quieter bands
+    "float AmbWave( float x )\n"
+    "{\n"
+    "    float t = abs( frac( x ) * 2.0 - 1.0 );\n"
+    "    return ( t * t * ( 3.0 - 2.0 * t ) ) * 2.0 - 1.0;\n"
+    "}\n"
+    // How much of a band reaches this pixel: 1 along its middle, nothing
+    // `width` away, squared so the falloff is soft rather than a cone.
+    "float AmbBand( float dy, float width )\n"
+    "{\n"
+    "    float k = saturate( 1.0 - abs( dy ) / width );\n"
+    "    return k * k;\n"
+    "}\n"
+    "float4 AmbientPixelShader( VS_OUT In ) : COLOR0\n"
+    "{\n"
+    "    float2 uv = In.Pixel * AmbFrame.yz;\n"
+    "    float t = AmbFrame.x;\n"
+    "    float3 col = lerp( AmbTop.rgb, AmbBottom.rgb, uv.y );\n"
+    // All three bands sit between a fifth and two thirds of the way down,
+    // which is the only part of Home the wallpaper is ever seen through:
+    // the top scrim covers the first 150 pixels and the bottom one the last
+    // 460, and the empty state's own plate takes most of what's left below.
+    // Bands placed anywhere else are paid for and never seen.
+    "    float y1 = 0.42 + 0.11 * AmbWave( uv.x * 0.55 + t * 0.0345 )\n"
+    "                    + 0.05 * AmbWave( uv.x * 1.10 - t * 0.0219 );\n"
+    "    col += AmbGlowA.rgb * AmbGlowA.a * AmbBand( uv.y - y1, 0.30 );\n"
+    "    float y2 = 0.27 + 0.08 * AmbWave( uv.x * 0.42 - t * 0.0265 );\n"
+    "    col += AmbGlowB.rgb * AmbGlowB.a * AmbBand( uv.y - y2, 0.26 );\n"
+    "    float y3 = 0.60 + 0.07 * AmbWave( uv.x * 0.70 + t * 0.0173 );\n"
+    "    col += AmbGlowA.rgb * ( AmbGlowA.a * 0.5 ) * AmbBand( uv.y - y3, 0.26 );\n"
+    // A fraction of a level of noise, varying per pixel: without it a wash
+    // this dark and this flat shows every 8-bit step as a visible stripe on
+    // a TV, and the bands' edges are exactly where those stripes land.
+    "    col += ( frac( dot( In.Pixel, float2( 0.0637, 0.1051 ) ) ) - 0.5 ) * 0.005;\n"
+    "    return float4( col, 1.0 );\n"
+    "}\n";
+
+static D3DVertexShader *g_pAmbientVertexShader = NULL;
+static D3DPixelShader *g_pAmbientPixelShader = NULL;
+
+// False if it didn't compile - Home then draws a plain two-stop gradient
+// instead of the bands (see DrawAmbientBackground), which is still a page
+// rather than a black screen.
+static bool g_ambientReady = false;
+
+static bool CompileShader(const char *source, size_t length, const char *entry, const char *profile,
+                          ID3DXBuffer **out)
 {
     ID3DXBuffer *errors = NULL;
-    HRESULT hr = D3DXCompileShader(g_strShapeShader, sizeof(g_strShapeShader) - 1,
+    HRESULT hr = D3DXCompileShader(source, length,
                                    NULL, NULL, entry, profile, 0, out, &errors, NULL);
     if (FAILED(hr))
     {
@@ -297,14 +393,14 @@ static void CreateShapeShaders()
 {
     ID3DXBuffer *code = NULL;
 
-    if (!CompileShader("ShapeVertexShader", "vs.2.0", &code))
+    if (!CompileShader(g_strShapeShader, sizeof(g_strShapeShader) - 1, "ShapeVertexShader", "vs.2.0", &code))
         return;
     HRESULT hr = g_pd3dDevice->CreateVertexShader((DWORD *)code->GetBufferPointer(), &g_pShapeVertexShader);
     code->Release();
     if (FAILED(hr))
         return;
 
-    if (!CompileShader("ShapePixelShader", "ps.2.0", &code))
+    if (!CompileShader(g_strShapeShader, sizeof(g_strShapeShader) - 1, "ShapePixelShader", "ps.2.0", &code))
         return;
     hr = g_pd3dDevice->CreatePixelShader((DWORD *)code->GetBufferPointer(), &g_pShapePixelShader);
     code->Release();
@@ -312,6 +408,29 @@ static void CreateShapeShaders()
         return;
 
     g_shapesReady = true;
+}
+
+static void CreateAmbientShader()
+{
+    ID3DXBuffer *code = NULL;
+
+    // ps.2.0, as the shape shader is: the XDK's own compiler makes this 33
+    // instructions and 44 ALU ops, well inside the profile's sixty-four.
+    if (!CompileShader(g_strAmbientShader, sizeof(g_strAmbientShader) - 1, "AmbientPixelShader", "ps.2.0", &code))
+        return;
+    HRESULT hr = g_pd3dDevice->CreatePixelShader((DWORD *)code->GetBufferPointer(), &g_pAmbientPixelShader);
+    code->Release();
+    if (FAILED(hr))
+        return;
+
+    if (!CompileShader(g_strAmbientShader, sizeof(g_strAmbientShader) - 1, "AmbientVertexShader", "vs.2.0", &code))
+        return;
+    hr = g_pd3dDevice->CreateVertexShader((DWORD *)code->GetBufferPointer(), &g_pAmbientVertexShader);
+    code->Release();
+    if (FAILED(hr))
+        return;
+
+    g_ambientReady = true;
 }
 
 static bool CreateQuadResources()
@@ -720,6 +839,14 @@ static void Utf8ToWide(const char *in, WCHAR *out, int outSize)
 #define COL_PEEK_TOP       0x590E0E0E // the cut-off row, fading into the background
 #define COL_STORE_GLOW     0xFF17351A // the left end of a placeholder card
 
+// Home's background behind the wallpapers (see g_strAmbientShader). The
+// glows' alpha is how strongly they are added over the wash, not an opacity:
+// the background itself is always solid.
+#define COL_AMBIENT_TOP    0xFF121613 // the wash, a shade warmer than the other pages'
+#define COL_AMBIENT_BOTTOM 0xFF060807
+#define COL_AMBIENT_GLOW_A 0x4D1E7C2E // the main band: the dashboard's green, well off full
+#define COL_AMBIENT_GLOW_B 0x3C184A62 // the quieter two: a cold blue, to keep it from reading as one colour
+
 // Rounded corners need the shape shader; with it missing they come out square
 // anyway. Turning this off squares them deliberately.
 #define UI_ROUNDED_CORNERS 1
@@ -960,6 +1087,75 @@ static void FillRoundGradient(float x, float y, float w, float h, float radius,
                               D3DCOLOR colorA, D3DCOLOR colorB, bool vertical)
 {
     DrawShape(NULL, x, y, w, h, 0.0f, 0, 0, 1, 1, 0xFFFFFFFF, colorA, colorB, vertical, Shape(radius));
+}
+
+// Home's background: the charcoal wash with its bands drifting across it,
+// over the whole screen. Where the shader didn't compile this is the wash
+// on its own, which is still the app's own colour rather than black.
+//
+// The time it animates on is this function's own, from the first frame it
+// draws, so the motion doesn't depend on how long the console has been up -
+// and it is taken in seconds as a float, which stays exact enough for the
+// wave arithmetic for a session far longer than anyone leaves a dashboard
+// sitting on an empty page.
+static void DrawAmbientBackground()
+{
+    if (!g_ambientReady)
+    {
+        FillRoundGradient(0.0f, 0.0f, g_M.screenW, g_M.screenH, 0.0f, COL_AMBIENT_TOP, COL_AMBIENT_BOTTOM, true);
+        return;
+    }
+
+    static double startedAt = 0.0;
+    if (startedAt == 0.0)
+        startedAt = TimerMs();
+
+    float frame[4] = {(float)((TimerMs() - startedAt) * 0.001), 1.0f / g_M.screenW, 1.0f / g_M.screenH, 0.0f};
+    float top[4], bottom[4], glowA[4], glowB[4];
+    ColorToFloat4(COL_AMBIENT_TOP, top);
+    ColorToFloat4(COL_AMBIENT_BOTTOM, bottom);
+    ColorToFloat4(COL_AMBIENT_GLOW_A, glowA);
+    ColorToFloat4(COL_AMBIENT_GLOW_B, glowB);
+
+    g_pd3dDevice->SetPixelShaderConstantF(1, frame, 1);
+    g_pd3dDevice->SetPixelShaderConstantF(2, top, 1);
+    g_pd3dDevice->SetPixelShaderConstantF(3, bottom, 1);
+    g_pd3dDevice->SetPixelShaderConstantF(4, glowA, 1);
+    g_pd3dDevice->SetPixelShaderConstantF(5, glowB, 1);
+
+    g_pd3dDevice->SetTexture(0, NULL);
+    g_pd3dDevice->SetVertexDeclaration(g_pQuadVertexDecl);
+    g_pd3dDevice->SetVertexShader(g_pAmbientVertexShader);
+    g_pd3dDevice->SetPixelShader(g_pAmbientPixelShader);
+
+    // The same full state setup every other draw here does - each one sets
+    // the device's state in full rather than trusting what was left behind.
+    // Blending off: this is the bottom of the page and it is opaque.
+    g_pd3dDevice->SetRenderState(D3DRS_ALPHABLENDENABLE, FALSE);
+    g_pd3dDevice->SetRenderState(D3DRS_ALPHATESTENABLE, FALSE);
+    g_pd3dDevice->SetRenderState(D3DRS_FILLMODE, D3DFILL_SOLID);
+    g_pd3dDevice->SetRenderState(D3DRS_CULLMODE, D3DCULL_NONE);
+    g_pd3dDevice->SetRenderState(D3DRS_ZENABLE, FALSE);
+    g_pd3dDevice->SetRenderState(D3DRS_STENCILENABLE, FALSE);
+    g_pd3dDevice->SetRenderState(D3DRS_VIEWPORTENABLE, FALSE);
+    g_pd3dDevice->SetRenderState(D3DRS_COLORWRITEENABLE, 0x0000000F);
+    ApplyClip();
+
+    volatile FLOAT *pVertex;
+    if (SUCCEEDED(g_pd3dDevice->BeginVertices(D3DPT_QUADLIST, 4, sizeof(QuadVertex), (VOID **)&pVertex)))
+    {
+        const float w = g_M.screenW, h = g_M.screenH;
+        pVertex[0] = 0.0f;  pVertex[1] = 0.0f; pVertex[2] = 0.0f;  pVertex[3] = 0.0f;  // TL
+        pVertex[4] = w;     pVertex[5] = 0.0f; pVertex[6] = 1.0f;  pVertex[7] = 0.0f;  // TR
+        pVertex[8] = w;     pVertex[9] = h;    pVertex[10] = 1.0f; pVertex[11] = 1.0f; // BR
+        pVertex[12] = 0.0f; pVertex[13] = h;   pVertex[14] = 0.0f; pVertex[15] = 1.0f; // BL
+
+        g_pd3dDevice->EndVertices();
+    }
+
+    g_pd3dDevice->SetVertexDeclaration(NULL);
+    g_pd3dDevice->SetVertexShader(NULL);
+    g_pd3dDevice->SetPixelShader(NULL);
 }
 
 // A band of `width` just inside the edge of x,y,w,h.
@@ -2090,6 +2286,10 @@ bool InitGameListUI()
     CreateShapeShaders();
     dprintf("[ui] shape shaders %s\n", g_shapesReady ? "ready" : "unavailable - drawing square corners");
 
+    // Optional too: without it Home's background is a plain gradient.
+    CreateAmbientShader();
+    dprintf("[ui] ambient shader %s\n", g_ambientReady ? "ready" : "unavailable - drawing a flat wash");
+
     // The path argument is accepted and ignored - UiFont loads selawk.ttf
     // through XUI.
     if (FAILED(g_UiFont.Create(NULL)))
@@ -2128,6 +2328,8 @@ void ShutdownGameListUI()
     if (g_pWhiteTexture != NULL) { g_pWhiteTexture->Release(); g_pWhiteTexture = NULL; }
     if (g_pButtonAtlas != NULL) { g_pButtonAtlas->Release(); g_pButtonAtlas = NULL; }
     if (g_pNavIcons != NULL) { g_pNavIcons->Release(); g_pNavIcons = NULL; }
+    if (g_pAmbientPixelShader != NULL) { g_pAmbientPixelShader->Release(); g_pAmbientPixelShader = NULL; }
+    if (g_pAmbientVertexShader != NULL) { g_pAmbientVertexShader->Release(); g_pAmbientVertexShader = NULL; }
     if (g_pShapePixelShader != NULL) { g_pShapePixelShader->Release(); g_pShapePixelShader = NULL; }
     if (g_pShapeVertexShader != NULL) { g_pShapeVertexShader->Release(); g_pShapeVertexShader = NULL; }
     if (g_pQuadPixelShader != NULL) { g_pQuadPixelShader->Release(); g_pQuadPixelShader = NULL; }
@@ -2135,6 +2337,7 @@ void ShutdownGameListUI()
     if (g_pQuadVertexDecl != NULL) { g_pQuadVertexDecl->Release(); g_pQuadVertexDecl = NULL; }
 
     g_shapesReady = false;
+    g_ambientReady = false;
     g_Initialized = false;
 }
 
@@ -5496,15 +5699,23 @@ static HomeWallpapers HomeWallpaper(const HomePageView &view, int focus)
     return out;
 }
 
-// The wallpapers, over black - a game with no picture gets black rather than
-// the charcoal wash the other pages use, so Home reads as a picture that
-// went out rather than a page that failed to fill. The outgoing wallpaper
-// stays at full strength while something is coming in over it (fading both
-// at once would dip to black in the middle) and fades out only when there's
+// The wallpapers, over the ambient background - a game with no picture, and
+// an empty Home with no game at all, gets the drifting wash rather than the
+// flat charcoal the other pages use: Home is the one page whose whole
+// background is the picture, so when there is no picture it needs something
+// of its own rather than a black screen. The outgoing wallpaper stays at
+// full strength while something is coming in over it (fading both at once
+// would dip to the background in the middle) and fades out only when there's
 // nothing to replace it.
 static void DrawHomeWallpaper(const HomeWallpapers &art)
 {
-    FillRound(0.0f, 0.0f, g_M.screenW, g_M.screenH, 0.0f, 0xFF000000);
+    // A wallpaper that covers the screen on its own makes the background
+    // behind it so much wasted fill, which at a full screen of shader is
+    // worth not paying: the background is drawn only when some of it will
+    // actually be seen.
+    const bool covered = (art.to != NULL && art.t >= 1.0f) || (art.from != NULL && art.to != NULL);
+    if (!covered)
+        DrawAmbientBackground();
     DrawWallpaperLayer(art.from, art.to != NULL ? 1.0f : 1.0f - art.t);
     DrawWallpaperLayer(art.to, art.t);
 }
