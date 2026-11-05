@@ -1,0 +1,11 @@
+blank_issues_enabled: false
+contact_links:
+  - name: Setup Guide
+    url: https://github.com/JustGillin/omni360/blob/master/docs/Setup%20Guide.md
+    about: Setting Omni360 up step by step, including your archive.org keys.
+  - name: Known limitations
+    url: https://github.com/JustGillin/omni360/blob/master/README.md#known-limitations
+    about: Slow downloads, RAR games, interrupted installs - check here before reporting one.
+  - name: Ask a question
+    url: https://github.com/JustGillin/omni360/discussions
+    about: Anything that isn't a bug or a missing game.
