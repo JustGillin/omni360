@@ -45,7 +45,7 @@ The [Setup Guide](docs/Setup%20Guide.md) covers the whole thing step by step.
 Optional `settings.txt` keys change where things go, and the games folder can also be changed on the console in Settings:
 
 - `games-path:` — where games install, and where the library is scanned. Defaults to `Hdd1:\Content\0000000000000000`, where the dashboard keeps Games on Demand and arcade titles. Add more `games-path:` lines to scan more folders, such as `Usb0:\Content\0000000000000000` — the first is still where games install. See the Setup Guide.
-- `xbla-path:` — where DLC, title updates, arcade games and indie games are written. Same default. (The name is inherited from X-Store, which used the same key.)
+- `xbla-path:` — where DLC, title updates, arcade games and indie games are written. Not set by default: they go to the `Content\0000000000000000` folder of whichever drive `games-path:` is on, so moving your install folder to a USB drive moves your downloads there too. Set this key only to keep content on a different drive from your games. (The name is inherited from X-Store, which used the same key.)
 - `apps-path:`, `homebrew-path:` and `emulators-path:` — the folders the **Apps**, **Homebrew** and **Emulators** pages show, such as `Hdd1:\Apps` for dashboards and tools, `Hdd1:\Homebrew` for homebrew games and `Hdd1:\Emulators`. Each key can be listed more than once, and none is set by default. A page with no folders isn't in the **Games + Apps** sidebar. In Settings, every folder's row says whether it holds games, homebrew, apps or emulators, and left and right change it.
 
 </details>

@@ -60,7 +60,15 @@ static bool g_shutdown = false;
 static int g_nextId = 1;
 static unsigned long g_nextSequence = 1;
 static unsigned long g_nextFinishedSeq = 1;
+// Where the job being run installs to. Written only by the worker, when it
+// picks a job up, from g_settingsContentPath - so a path changed in Settings
+// halfway through a download can't move the rest of that download, and the
+// next job gets the new one.
 static char g_contentBasePath[512] = "";
+
+// The content path as Settings has it. Written by the UI thread under the
+// lock; read by the worker at job pickup.
+static char g_settingsContentPath[512] = "";
 
 // The job the worker is running, as a slot in g_jobs; -1 when idle. Written
 // only by the worker, under the lock.
@@ -631,6 +639,7 @@ static DWORD WINAPI WorkerEntry(LPVOID)
             SyncView(g_jobs[slot]);
             g_activeSlot = slot;
             work = g_jobs[slot];
+            CopyText(g_contentBasePath, sizeof(g_contentBasePath), g_settingsContentPath);
         }
 
         LeaveCriticalSection(&g_lock);
@@ -694,6 +703,7 @@ bool StartDownloadQueue(const char *contentBasePath)
     InitializeCriticalSection(&g_lock);
     memset(g_jobs, 0, sizeof(g_jobs));
     CopyText(g_contentBasePath, sizeof(g_contentBasePath), contentBasePath);
+    CopyText(g_settingsContentPath, sizeof(g_settingsContentPath), contentBasePath);
 
     g_wake = CreateEvent(NULL, FALSE, FALSE, NULL); // auto-reset
     if (g_wake == NULL)
@@ -727,6 +737,18 @@ bool StartDownloadQueue(const char *contentBasePath)
 
     dprintf("[queue] download worker started\n");
     return true;
+}
+
+void SetDownloadQueueContentPath(const char *contentBasePath)
+{
+    if (g_running)
+        EnterCriticalSection(&g_lock);
+    CopyText(g_settingsContentPath, sizeof(g_settingsContentPath),
+             contentBasePath != NULL ? contentBasePath : "");
+    if (!g_running)
+        CopyText(g_contentBasePath, sizeof(g_contentBasePath), g_settingsContentPath);
+    if (g_running)
+        LeaveCriticalSection(&g_lock);
 }
 
 bool StopDownloadQueue(DWORD timeoutMs)

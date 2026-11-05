@@ -71,7 +71,9 @@ extern "C" NTSTATUS XexGetModuleHandle(PSZ moduleName, PHANDLE outHandle);
 #define STORE_FILTER_KEY "store-filter: "   // the Store letters' filters and order: "sort=a-z;regions=usa,eur;..."
 #define HOMEBREW_MIRROR_KEY "homebrew-mirror: " // for testing: homebrew from "http://PC:8000", a folder of the repo's .7z files
 #define CREDENTIALS_FILE "game:\\ArchiveOrgKeys.txt"
-#define CONTENT_BASE_PATH_DEFAULT "Hdd1:\\Content\\0000000000000000"
+#define CONTENT_PATH_KEY "xbla-path: "   // X-Store's name for it, kept so an old settings.txt still works
+#define CONTENT_BASE_SUFFIX "\\Content\\0000000000000000" // the layout the dashboard and Aurora read content from
+#define CONTENT_BASE_PATH_DEFAULT "Hdd1:" CONTENT_BASE_SUFFIX
 #define GAMES_PATH_DEFAULT CONTENT_BASE_PATH_DEFAULT // where the dashboard itself keeps installed games
 #define MAX_INSTALLED_GAMES 256
 
@@ -175,24 +177,30 @@ static void NarrowToWide(const char *in, WCHAR *out, int outSize)
 //     Some people keep GOD games in a folder of their own instead (e.g.
 //     Hdd1:\Games, with the same TitleID\ContentType\ContentID layout under
 //     a different root) and point Aurora at it - this key is for them.
-//   - the CONTENT path: where downloaded DLC actually gets written. This is
-//     always the standard Content\0000000000000000 layout regardless of
-//     where the base game lives, since that's where Xbox/Aurora expect DLC
-//     to be installed. Reuses the "xbla-path:" key so an existing X-Store
+//   - the CONTENT path: where downloaded DLC, title updates and arcade and
+//     indie games actually get written. This is always the standard
+//     Content\0000000000000000 layout, since that's where Xbox/Aurora expect
+//     content to be installed - but it follows the games path's DRIVE, so
+//     someone who moves their install folder to a USB drive gets their
+//     downloads on that drive too instead of on the internal disk, which is
+//     the whole point of moving it. Reuses the "xbla-path:" key so an existing X-Store
 //     settings.txt still works without editing.
 // ---------------------------------------------------------------------------
 
-static void GetSettingsPath(const char *key, const char *defaultValue, char *outPath, size_t outPathSize)
+// Returns whether settings.txt actually had the key - the caller can then
+// tell a value someone set from the default it would have got anyway.
+static bool GetSettingsPath(const char *key, const char *defaultValue, char *outPath, size_t outPathSize)
 {
     strncpy(outPath, defaultValue, outPathSize - 1);
     outPath[outPathSize - 1] = '\0';
 
     FILE *fd = fopen(SETTINGS_FILE, "r");
     if (fd == NULL)
-        return;
+        return false;
 
     char line[512];
     size_t keyLen = strlen(key);
+    bool found = false;
 
     while (fgets(line, sizeof(line), fd) != NULL)
     {
@@ -208,18 +216,58 @@ static void GetSettingsPath(const char *key, const char *defaultValue, char *out
             {
                 strncpy(outPath, value, outPathSize - 1);
                 outPath[outPathSize - 1] = '\0';
+                found = true;
             }
             break;
         }
     }
 
     fclose(fd);
+    return found;
 }
 
-static void GetContentBasePath(char *outPath, size_t outPathSize)
+// "Hdd1:" from "Hdd1:\Content\0000000000000000". Empty if the path names no
+// drive at all, which NormaliseGamesPath already rules out for anything
+// typed in Settings.
+static void DriveOfPath(const char *path, char *out, size_t outSize)
 {
-    GetSettingsPath("xbla-path: ", CONTENT_BASE_PATH_DEFAULT, outPath, outPathSize);
+    const char *colon = strchr(path, ':');
+    size_t driveLen = (colon != NULL) ? (size_t)(colon - path) + 1 : 0;
+
+    if (driveLen == 0 || driveLen >= outSize)
+    {
+        out[0] = '\0';
+        return;
+    }
+
+    memcpy(out, path, driveLen);
+    out[driveLen] = '\0';
 }
+
+// Where DLC, title updates and arcade and indie games install: the standard
+// Content\0000000000000000 folder on whichever drive the install folder is
+// on. A hand-written "xbla-path:" line still wins, for anyone who set the
+// two to different drives on purpose.
+static void GetContentBasePath(const char *gamesPath, char *outPath, size_t outPathSize)
+{
+    if (GetSettingsPath(CONTENT_PATH_KEY, CONTENT_BASE_PATH_DEFAULT, outPath, outPathSize))
+        return;
+
+    char drive[16];
+    DriveOfPath(gamesPath, drive, sizeof(drive));
+
+    if (drive[0] == '\0')
+        return; // left at the default
+
+    _snprintf(outPath, outPathSize, "%s" CONTENT_BASE_SUFFIX, drive);
+    outPath[outPathSize - 1] = '\0';
+}
+
+// The content folder, where DLC, title updates and arcade and indie games
+// install. Set at startup and again whenever Settings moves the install
+// folder, so a download started afterwards goes to the new drive without
+// restarting the app.
+static char g_contentBase[MAX_TEXT_LENGTH] = CONTENT_BASE_PATH_DEFAULT;
 
 static void GetGamesPath(char *outPath, size_t outPathSize)
 {
@@ -1010,14 +1058,12 @@ static KeyEntryOutcome EnterCheckAndSaveKeys(std::string &accessKey, std::string
 // "Hdd1:" from "Hdd1:\Content\...", or the fallback if the path names no drive.
 static void DriveLabel(const char *path, char *out, size_t outSize, const char *fallback)
 {
-    _snprintf(out, outSize, "%s", fallback);
-    out[outSize - 1] = '\0';
+    DriveOfPath(path, out, outSize);
 
-    const char *colon = strchr(path, ':');
-    if (colon != NULL && (size_t)(colon - path) < outSize - 1)
+    if (out[0] == '\0')
     {
-        memcpy(out, path, (size_t)(colon - path) + 1);
-        out[colon - path + 1] = '\0';
+        _snprintf(out, outSize, "%s", fallback);
+        out[outSize - 1] = '\0';
     }
 }
 
@@ -1733,6 +1779,15 @@ static void ChangeGamesFolder(Library &lib, char *gamesPath, size_t gamesPathSiz
     SetDiscWorkerGamesPath(gamesPath);
     SetGameInstallerGamesPath(gamesPath);
 
+    // Downloads move with it. DLC, title updates and arcade and indie games
+    // have to live in Content\0000000000000000 for the dashboard and Aurora
+    // to see them, but that folder on the new drive - otherwise someone who
+    // moves their library to a USB drive still has every download land on
+    // the internal disk, which is the thing they were moving away from.
+    GetContentBasePath(gamesPath, g_contentBase, sizeof(g_contentBase));
+    SetDownloadQueueContentPath(g_contentBase);
+    dprintf("Content path now %s\n", g_contentBase);
+
     ScanLibrary(lib, gamesPath);
     outcome.libraryChanged = true;
 
@@ -1979,7 +2034,16 @@ static void BuildSettingsPage(SettingsPage &page, const Library &lib, const char
     page.count = 0;
 
     // --- The library's folders ---
-    _snprintf(page.installHelp, sizeof(page.installHelp), "Where Store and disc installs go - now %s", gamesPath);
+    // Names the content folder as well when it isn't the games folder
+    // itself, so it's clear where DLC, updates and arcade games land - they
+    // follow this drive, but always in its Content folder.
+    if (_stricmp(g_contentBase, gamesPath) == 0)
+        _snprintf(page.installHelp, sizeof(page.installHelp), "Where Store and disc installs go - now %s",
+                  gamesPath);
+    else
+        _snprintf(page.installHelp, sizeof(page.installHelp),
+                  "Where Store and disc installs go - now %s, with DLC and arcade games in %s",
+                  gamesPath, g_contentBase);
     page.installHelp[sizeof(page.installHelp) - 1] = '\0';
     AddSettingsRow(page, SETTINGS_VIEW_HEADING, "Folders");
     AddSettingsControl(page, SETTINGS_CONTROL_BUTTON, "Add folder", SETTINGS_ROW_ADD_FOLDER,
@@ -2561,9 +2625,6 @@ static char g_storeMeta[256];
 // The arcade or indie game whose page is open, or NULL for a disc's. Its one
 // version row is the RAR - the game, and anything packed with it.
 static const XblaGame *g_storeArcade = NULL;
-
-// The content folder, where arcade and indie games install - main's.
-static const char *g_contentBase = "";
 
 // Static rather than on main's stack: the picker's match arrays and the
 // queue's snapshot are tens of KB between them.
@@ -6647,14 +6708,13 @@ int main()
 
     StartupStep("UI init");
 
-    char contentBasePath[MAX_TEXT_LENGTH];
-    GetContentBasePath(contentBasePath, sizeof(contentBasePath));
-    g_contentBase = contentBasePath;
-    dprintf("Content path (DLC installs here): %s\n", contentBasePath);
-
     char gamesPath[MAX_TEXT_LENGTH];
     GetGamesPath(gamesPath, sizeof(gamesPath));
     dprintf("Games path (scanned for your library): %s\n", gamesPath);
+
+    // After the games path, which it follows the drive of.
+    GetContentBasePath(gamesPath, g_contentBase, sizeof(g_contentBase));
+    dprintf("Content path (DLC, updates and arcade games install here): %s\n", g_contentBase);
 
     // First thing, so the space a half-installed game from last time took is
     // back before anything else checks for room. (It was never listed: the
@@ -6793,7 +6853,7 @@ int main()
         {
             // Not fatal if it fails: everything but downloading still works,
             // and choosing a download then says why it can't.
-            downloadsStarted = StartDownloadQueue(contentBasePath);
+            downloadsStarted = StartDownloadQueue(g_contentBase);
         }
         else if (step == 4)
         {
@@ -6942,7 +7002,7 @@ int main()
 
         const double partRefresh = ImageTimerMs();
         if (shell.stale)
-            RefreshShell(shell, lib, contentBasePath, gamesPath);
+            RefreshShell(shell, lib, g_contentBase, gamesPath);
         else if (shell.settingsStale)
         {
             BuildSettingsPage(shell.settings, lib, gamesPath);

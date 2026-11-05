@@ -112,6 +112,10 @@ inline float JobFraction(const float *shares, int step, float stepFraction)
 // returns ENQUEUE_UNAVAILABLE.
 bool StartDownloadQueue(const char *contentBasePath);
 
+// After the install folder is changed in Settings. A download already
+// running keeps the path it started with; the next one picks this up.
+void SetDownloadQueueContentPath(const char *contentBasePath);
+
 // Cancels every job and waits up to timeoutMs for the worker to stop. A
 // transfer stops at its next progress report, but a request already waiting
 // on archive.org can't be interrupted, so this can take a few seconds.

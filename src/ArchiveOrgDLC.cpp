@@ -1253,6 +1253,24 @@ static std::string StagingPathFor(const std::string &destPath)
     return folder + "\\" + destPath.substr(lastSep + 1);
 }
 
+// Makes every folder in dirPath, one level at a time - the XDK's
+// CreateDirectory won't make parents. It starts from the drive, not from the
+// content folder: a drive that has never had content installed on it has no
+// Content\0000000000000000 to start under, and without this the download
+// finishes and then fails to move into place with error 3 (path not found).
+static void CreateDirectoryTree(const std::string &dirPath)
+{
+    size_t at = dirPath.find('\\');
+
+    while (at != std::string::npos)
+    {
+        CreateDirectoryA(dirPath.substr(0, at).c_str(), NULL); // ok if it already exists
+        at = dirPath.find('\\', at + 1);
+    }
+
+    CreateDirectoryA(dirPath.c_str(), NULL);
+}
+
 // Moves a finished staging copy over destPath, replacing any older copy in
 // one step.
 static bool MoveIntoPlace(const std::string &tempPath, const std::string &destPath,
@@ -1933,29 +1951,14 @@ static bool PrepareMember(const DlcRarMatch &pack, const DlcMember &member, cons
     // any real work against the files tested this session.
     std::string destPath = DlcMemberDestination(member, contentBasePath);
 
-    // Create the TitleID\ContentType\ subdirectories.
+    // Create the Content\0000000000000000\TitleID\ContentType\ folders. The
+    // whole chain, from the drive down: the content folder itself may not be
+    // there on a drive that has never had anything installed on it, which a
+    // USB stick someone has just pointed the install folder at usually
+    // hasn't.
     size_t lastSlash = destPath.find_last_of('\\');
     if (lastSlash != std::string::npos)
-    {
-        std::string destDir = destPath.substr(0, lastSlash);
-        // FileSystem.CreateDirectory-equivalent: XDK's CreateDirectory works
-        // one level at a time, so create each parent in turn.
-        std::string building = contentBasePath;
-        std::string remainder = destDir.substr(contentBasePath.size());
-        size_t start = 0;
-        while (start < remainder.size())
-        {
-            size_t next = remainder.find('\\', start);
-            if (next == std::string::npos)
-                next = remainder.size();
-            if (next > start)
-            {
-                building += "\\" + remainder.substr(start, next - start);
-                CreateDirectoryA(building.c_str(), NULL); // ok if it already exists
-            }
-            start = next + 1;
-        }
-    }
+        CreateDirectoryTree(destPath.substr(0, lastSlash));
 
     *outDestPath = destPath;
     return true;
@@ -2529,22 +2532,10 @@ bool DownloadTitleUpdate(const TitleUpdateMatch &update, unsigned long titleId,
 
     printFunction("Installing title update: %s -> %s\n", baseName, destPath.c_str());
 
-    // Create the destination folders. CreateDirectory works one level at a
-    // time here, same as the DLC path does it.
+    // Create the destination folders, the same way the DLC path does it.
     size_t lastSep = destPath.find_last_of('\\');
     if (lastSep != std::string::npos)
-    {
-        std::string dir = destPath.substr(0, lastSep);
-        size_t at = dir.find('\\');
-
-        while (at != std::string::npos)
-        {
-            CreateDirectoryA(dir.substr(0, at).c_str(), NULL); // ok if it already exists
-            at = dir.find('\\', at + 1);
-        }
-
-        CreateDirectoryA(dir.c_str(), NULL);
-    }
+        CreateDirectoryTree(destPath.substr(0, lastSep));
 
     // Same virtual-path trick the DLC side uses: archive.org extracts the
     // member server-side, so nothing here has to understand deflate. If that
