@@ -6808,7 +6808,7 @@ int main()
             if (PrepareGameListIcons(lib.games, lib.count, 4))
             {
                 loaded = true;
-                StartupStep("loading (the dot bouncing)");
+                StartupStep("loading (the disc spinning)");
 
                 // Box art, in the library's order so the first screenful
                 // comes first - fetching while the mark forms.
@@ -6828,7 +6828,7 @@ int main()
         dprintf("ERROR: the download worker didn't start - downloads are unavailable\n");
     if (!searchStarted)
         dprintf("ERROR: the search worker didn't start - searches are unavailable\n");
-    StartupStep("the mark forming and resting");
+    StartupStep("the disc seating and the word");
 
     // The shell loop: read the controller, act on it, draw a frame.
     //
