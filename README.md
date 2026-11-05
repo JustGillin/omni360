@@ -64,7 +64,7 @@ Omni360 is a store and a library in one app on the console.
 
 Everything downloads and installs in the background while you keep browsing, with disc games installed as Games on Demand, and a game disc in the drive can be copied to the hard drive the same way. Omni360 also keeps itself up to date, installing only releases signed with the project's key. Nothing downloads without you choosing it, and a popup says when each job finishes or fails.
 
-**Status: beta (0.13.0-beta), working on real hardware.** Every kind of install has been run end to end on a modded console with a real library.
+**Status: beta (0.13.1-beta), working on real hardware.** Every kind of install has been run end to end on a modded console with a real library.
 
 <br>
 
