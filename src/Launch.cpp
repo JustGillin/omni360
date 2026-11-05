@@ -100,28 +100,7 @@ static void LaunchPackage(const char *path, const char *xexName)
     dprintf("[launch] the loader refused %s: %08lX\n", device, result);
 }
 
-void LaunchInstalledGame(const InstalledGame &game)
-{
-    if (game.folder)
-    {
-        // Whichever the scan found it by.
-        char exe[600];
-        _snprintf(exe, sizeof(exe), "%s\\default.xex", game.packagePath);
-        exe[sizeof(exe) - 1] = '\0';
-        if (!IsFile(exe))
-        {
-            _snprintf(exe, sizeof(exe), "%s\\default.xbe", game.packagePath);
-            exe[sizeof(exe) - 1] = '\0';
-        }
-        LaunchExecutable(exe);
-        return;
-    }
-
-    // An Original Xbox game's package holds the disc's default.xbe.
-    LaunchPackage(game.packagePath, game.contentType == 0x00005000 ? "default.xbe" : "default.xex");
-}
-
-// An app's executable by its drive's name - "Hdd1:\Emulators\RetroArch\
+// A loose executable by its drive's name - "Hdd1:\Emulators\RetroArch\
 // default.xex" - as a disc only starts by "dvd:\default.xex". The drive names
 // main.cpp mounts are the kernel's, not this title's, so they're still there
 // for the loader once Omni360 has ended; mounted again first all the same.
@@ -140,6 +119,32 @@ static void LaunchByDriveName(const char *path)
             return;
         }
     }
+}
+
+void LaunchInstalledGame(const InstalledGame &game)
+{
+    if (game.folder)
+    {
+        // Whichever the scan found it by.
+        char exe[600];
+        _snprintf(exe, sizeof(exe), "%s\\default.xex", game.packagePath);
+        exe[sizeof(exe) - 1] = '\0';
+        if (!IsFile(exe))
+        {
+            _snprintf(exe, sizeof(exe), "%s\\default.xbe", game.packagePath);
+            exe[sizeof(exe) - 1] = '\0';
+        }
+        // By its drive's name first, then its device's path - the order an
+        // app goes in, and for the same reason: a game kept as a folder that
+        // Omni360 didn't install went back to the stock dashboard when the
+        // device's path was all it was given.
+        LaunchByDriveName(exe);
+        LaunchExecutable(exe);
+        return;
+    }
+
+    // An Original Xbox game's package holds the disc's default.xbe.
+    LaunchPackage(game.packagePath, game.contentType == 0x00005000 ? "default.xbe" : "default.xex");
 }
 
 void LaunchApp(const char *path)
