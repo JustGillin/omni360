@@ -52,12 +52,10 @@ DESCRIPTION : Tells a slow archive.org apart from a slow line, by measuring a
 #define VERDICT_MAX 200
 
 static const char kBlameArchive[] =
-    "archive.org is serving slowly right now. Other sites are quick from this console, so this isn't Omni360 - "
-    "downloads will still finish, they'll just take longer.";
+    "archive.org is slow right now, not your connection. Downloads will take longer than usual but will still finish.";
 
 static const char kBlameLine[] =
-    "Downloads are slow right now, and so is everything else from this console - it looks like the connection here "
-    "rather than archive.org.";
+    "Downloads are slow right now, and so is everything else - it looks like your connection rather than archive.org.";
 
 static CRITICAL_SECTION g_lock;
 static bool g_ready = false;
