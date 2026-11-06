@@ -62,7 +62,7 @@ Everything downloads and installs in the background while you keep browsing, wit
 
 Your library is read straight off the hard drive, covers and all, and games start from Omni360 just as they would from the dashboard - alongside your apps, homebrew and emulators, if you point it at folders for them. It opens on the games you played last, each under its own wallpaper, and keeps itself up to date, installing only releases signed with the project's key.
 
-**Status: beta (0.13.1-beta), working on real hardware.** Every kind of install has been run end to end on a modded console with a real library.
+**Status: beta (0.13.2-beta), working on real hardware.** Every kind of install has been run end to end on a modded console with a real library.
 
 <br>
 
