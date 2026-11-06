@@ -928,7 +928,11 @@ int DumpResponse(XboxTLSContext *ctx,
 
     if (totalWritten != totalContentLength && totalContentLength != 0)
     {
-        ERROR("Download has likely failed");
+        // Short of what the server promised. Usually the connection was cut
+        // off part way, which a caller downloading a range can resume from,
+        // so say how far it got rather than calling it a failure outright.
+        log_printf("\nCut off after %I64u of %I64u bytes\n", (unsigned long long)totalWritten,
+                   (unsigned long long)totalContentLength);
         goto failure;
     }
 

@@ -159,6 +159,38 @@ const br_hash_class* XboxTLS_GetHashVTable(XboxTLSHash hash) {
     }
 }
 
+// A thread-local slot, allocated the first time any thread needs one.
+static bool EnsureSlot(volatile LONG* slot) {
+    if (*slot == (LONG)TLS_OUT_OF_INDEXES) {
+        DWORD fresh = TlsAlloc();
+        if (fresh == TLS_OUT_OF_INDEXES)
+            return false;
+        // Another thread may have got there first; keep whichever won.
+        if (InterlockedCompareExchange(slot, (LONG)fresh, (LONG)TLS_OUT_OF_INDEXES) != (LONG)TLS_OUT_OF_INDEXES)
+            TlsFree(fresh);
+    }
+    return true;
+}
+
+// Why this thread's last socket read failed. BearSSL reports every
+// transport failure as the one code BR_ERR_IO, so without this a timeout
+// we asked for ourselves, a server hanging up and a reset all read the
+// same in the log. 0 is nothing recorded, XBOXTLS_PEER_CLOSED a clean
+// close by the peer, anything else a Winsock error.
+#define XBOXTLS_PEER_CLOSED 1
+static volatile LONG g_readErrSlot = (LONG)TLS_OUT_OF_INDEXES;
+
+static void XboxTLS_SetThreadReadError(DWORD err) {
+    if (EnsureSlot(&g_readErrSlot))
+        TlsSetValue((DWORD)g_readErrSlot, (LPVOID)(ULONG_PTR)err);
+}
+
+static DWORD XboxTLS_ThreadReadError() {
+    if (g_readErrSlot == (LONG)TLS_OUT_OF_INDEXES)
+        return 0;
+    return (DWORD)(ULONG_PTR)TlsGetValue((DWORD)g_readErrSlot);
+}
+
 /*
  * Low-level read function for BearSSL's I/O abstraction layer.
  *
@@ -171,17 +203,24 @@ const br_hash_class* XboxTLS_GetHashVTable(XboxTLSHash hash) {
  *   - len: Maximum number of bytes to read
  *
  * Returns:
- *   Number of bytes read, or a negative value on error.
+ *   Number of bytes read, or a negative value on error. The reason for a
+ *   failure is left in this thread's slot, for XboxTLS_Read to report.
  */
 static int tls_socket_read(void* ctx, unsigned char* buf, size_t len) {
     SOCKET s = *(SOCKET*)ctx;
     int want = (len > (size_t)INT_MAX) ? INT_MAX : (int)len;
     int r = recv(s, (char*)buf, want, 0);
 
-    if (r <= 0) {
+    if (r == 0) {
+        XboxTLS_SetThreadReadError(XBOXTLS_PEER_CLOSED);
+        return -1;
+    }
+    if (r < 0) {
+        XboxTLS_SetThreadReadError((DWORD)WSAGetLastError());
         return -1;
     }
 
+    XboxTLS_SetThreadReadError(0);
     return r;
 }
 
@@ -209,15 +248,8 @@ static int tls_socket_write(void* ctx, const unsigned char* buf, size_t len) {
 static volatile LONG g_timeoutSlot = (LONG)TLS_OUT_OF_INDEXES;
 
 void XboxTLS_SetThreadIoTimeout(unsigned long timeoutMs) {
-    if (g_timeoutSlot == (LONG)TLS_OUT_OF_INDEXES) {
-        DWORD slot = TlsAlloc();
-        if (slot == TLS_OUT_OF_INDEXES)
-            return;
-        // Another thread may have got there first; keep whichever won.
-        if (InterlockedCompareExchange(&g_timeoutSlot, (LONG)slot, (LONG)TLS_OUT_OF_INDEXES) != (LONG)TLS_OUT_OF_INDEXES)
-            TlsFree(slot);
-    }
-    TlsSetValue((DWORD)g_timeoutSlot, (LPVOID)(ULONG_PTR)timeoutMs);
+    if (EnsureSlot(&g_timeoutSlot))
+        TlsSetValue((DWORD)g_timeoutSlot, (LPVOID)(ULONG_PTR)timeoutMs);
 }
 
 static DWORD XboxTLS_IoTimeoutForThisThread() {
@@ -797,8 +829,21 @@ int XboxTLS_Read(XboxTLSContext* ctx, void* buf, int len) {
         // what happens at the end of every single request.
         int err = br_ssl_engine_last_error(&ic->sc.eng);
         if (err != BR_ERR_OK) {
-            char msg[64];
-            sprintf(msg, "TLS read error code: %d", err);
+            char msg[128];
+            const DWORD why = XboxTLS_ThreadReadError();
+            // BR_ERR_IO is every transport failure at once, and the common
+            // one by far is the timeout this thread asked for - a server
+            // that went quiet, which the caller resumes from. Say which it
+            // was, so a routine stall doesn't read like a broken download.
+            if (err == BR_ERR_IO && why == WSAETIMEDOUT)
+                sprintf(msg, "TLS read: nothing arrived for %lu ms, dropping the connection",
+                        XboxTLS_IoTimeoutForThisThread());
+            else if (err == BR_ERR_IO && why == XBOXTLS_PEER_CLOSED)
+                sprintf(msg, "TLS read: the server closed the connection");
+            else if (err == BR_ERR_IO)
+                sprintf(msg, "TLS read: the connection failed, socket error %lu", why);
+            else
+                sprintf(msg, "TLS read error code: %d", err);
             debug_tls(msg);
         }
     }
