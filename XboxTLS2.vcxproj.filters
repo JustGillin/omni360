@@ -220,6 +220,9 @@
     <ClCompile Include="src\Featured.cpp">
       <Filter>Source Files\Store</Filter>
     </ClCompile>
+    <ClCompile Include="src\ServiceCheck.cpp">
+      <Filter>Source Files\Network</Filter>
+    </ClCompile>
     <ClCompile Include="src\UiText.cpp">
       <Filter>Source Files\Interface</Filter>
     </ClCompile>
@@ -1277,6 +1280,9 @@
     </ClInclude>
     <ClInclude Include="src\Featured.h">
       <Filter>Source Files\Store</Filter>
+    </ClInclude>
+    <ClInclude Include="src\ServiceCheck.h">
+      <Filter>Source Files\Network</Filter>
     </ClInclude>
     <ClInclude Include="src\TrustAnchors.h">
       <Filter>Source Files\Network</Filter>

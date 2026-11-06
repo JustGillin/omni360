@@ -7,6 +7,7 @@ DESCRIPTION : The Store's featured games, from featured.json in the
 
 #include "Featured.h"
 #include "StoreCatalog.h" // StoreGameByTitleId: only games the Store has
+#include "ServiceCheck.h" // GetProbeNotice, when the file hasn't set one
 #include "downloadFile.h" // HttpsSession
 #include "OutputConsole.h"
 #include "cJSON.h"
@@ -378,13 +379,18 @@ void GetServiceNotice(char *out, size_t outSize)
 {
     if (out == NULL || outSize == 0)
         return;
-    if (!g_lockReady)
+    out[0] = '\0';
+    if (g_lockReady)
     {
-        out[0] = '\0';
-        return;
+        EnterCriticalSection(&g_lock);
+        _snprintf(out, outSize, "%s", g_notice);
+        out[outSize - 1] = '\0';
+        LeaveCriticalSection(&g_lock);
     }
-    EnterCriticalSection(&g_lock);
-    _snprintf(out, outSize, "%s", g_notice);
-    out[outSize - 1] = '\0';
-    LeaveCriticalSection(&g_lock);
+
+    // The file wins: it can say things no measurement here can know, and
+    // it's how a notice gets out without a release. Only when it has
+    // nothing to say does the console's own verdict show.
+    if (out[0] == '\0')
+        GetProbeNotice(out, outSize);
 }

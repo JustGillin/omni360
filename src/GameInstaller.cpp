@@ -14,6 +14,7 @@ DESCRIPTION : Downloads a Redump game's zip from archive.org and installs it as
 #include "downloadFile.h"
 #include "XboxTLS.h"       // XboxTLS_SetThreadIoTimeout
 #include "StoreArt.h"      // FetchTitleIcon
+#include "ServiceCheck.h"  // ReportConnectionRate: whose fault a slow one is
 #include "parsing.h"       // UrlEncodeFormValue
 #include "OutputConsole.h"
 #include "RarHeaders.h"     // a game kept in a RAR
@@ -631,6 +632,8 @@ static bool PieceProgress(unsigned long long done, unsigned long long, unsigned 
     unsigned long piece = 0;
     unsigned long long total = 0;
     double rate = 0.0, peerRate = 0.0;
+    unsigned long long windowClosed = 0; // bytes a second over it, if one just did
+    bool closed = false;
     std::string host;
 
     EnterCriticalSection(&g_lock);
@@ -657,6 +660,8 @@ static bool PieceProgress(unsigned long long done, unsigned long long, unsigned 
             const unsigned long long mine = got * 1000 / elapsed;
             rate = got / 1048576.0 / (elapsed / 1000.0);
             d->windowRate[slot] = mine;
+            windowClosed = mine;
+            closed = true;
 
             // The best any other connection managed over its last full
             // window. Nothing to compare against until one has finished.
@@ -691,6 +696,11 @@ static bool PieceProgress(unsigned long long done, unsigned long long, unsigned 
             host = HostOf(d->servers[d->serverAt]);
     }
     LeaveCriticalSection(&g_lock);
+
+    // One connection's honest throughput over a full window, for the check
+    // that works out whether a slow download is archive.org or this line.
+    if (closed)
+        ReportConnectionRate(windowClosed);
 
     if (slow && peerRate > 0.0)
         dprintf("[game] piece %lu on connection %d: %.2f MB/s from %s for %ds, against %.2f on the other "

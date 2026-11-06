@@ -30,6 +30,7 @@ end-to-end on real hardware against a real 27-game library.
 #include "Recents.h"
 #include "UiSound.h"
 #include "Featured.h"
+#include "ServiceCheck.h"
 #include "SpeedTest.h"
 #include "GameListUI.h"
 #include "DownloadQueue.h"
@@ -6855,7 +6856,9 @@ int main()
         else if (step == 1)
         {
             // The Store's featured games: the kept featured.json now,
-            // GitHub's shortly - see Featured.h.
+            // GitHub's shortly - see Featured.h. The service check shares
+            // that file's notice line, so it comes up alongside it.
+            StartServiceCheck();
             StartFeatured();
         }
         else if (step == 2)
