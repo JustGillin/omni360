@@ -32,6 +32,7 @@ static CRITICAL_SECTION g_lock;
 static bool g_lockReady = false;
 static FeaturedSet g_set;
 static unsigned long g_changes = 0;
+static char g_notice[NOTICE_MAX] = "";
 
 // ---------------------------------------------------------------------------
 // Dates
@@ -132,16 +133,51 @@ static bool ReadGames(const cJSON *games, FeaturedSet *out)
     return true;
 }
 
-// Today's set from the file's text: an event running today, else this week's
-// in the rotation. False if the file gives none that can be used.
-static bool Choose(const char *text, size_t len, const Today &today, FeaturedSet *out)
+// The notice running today, if there is one, into out - "" otherwise. Its
+// dates are optional; a notice without them stands until it leaves the file.
+static void ReadNotice(const cJSON *root, const Today &today, char *out, size_t outSize)
 {
+    out[0] = '\0';
+    const cJSON *notice = cJSON_GetObjectItemCaseSensitive(root, "notice");
+    const cJSON *text = cJSON_GetObjectItemCaseSensitive(notice, "text");
+    if (!cJSON_IsString(text) || text->valuestring == NULL || text->valuestring[0] == '\0')
+        return;
+
+    const cJSON *from = cJSON_GetObjectItemCaseSensitive(notice, "from");
+    const cJSON *to = cJSON_GetObjectItemCaseSensitive(notice, "to");
+    const long first = DateNumber(cJSON_IsString(from) ? from->valuestring : NULL);
+    const long last = DateNumber(cJSON_IsString(to) ? to->valuestring : NULL);
+    if (first != 0 || last != 0)
+    {
+        // Dated, so it needs a day to be judged against. Saying nothing
+        // beats a notice that outstays the trouble it described.
+        if (!today.known)
+            return;
+        const long now = today.y * 10000L + today.m * 100L + today.d;
+        if ((first != 0 && now < first) || (last != 0 && now > last))
+            return;
+    }
+
+    _snprintf(out, outSize, "%s", text->valuestring);
+    out[outSize - 1] = '\0';
+    dprintf("[featured] notice: %s\n", out);
+}
+
+// Today's set from the file's text: an event running today, else this week's
+// in the rotation. False if the file gives none that can be used. The
+// notice is read whatever comes of the set - the two are unrelated, and a
+// file with no usable set can still have something to say.
+static bool Choose(const char *text, size_t len, const Today &today, FeaturedSet *out, char *notice,
+                   size_t noticeSize)
+{
+    notice[0] = '\0';
     cJSON *root = cJSON_ParseWithLength(text, len);
     if (root == NULL)
     {
         dprintf("[featured] the file isn't JSON\n");
         return false;
     }
+    ReadNotice(root, today, notice, noticeSize);
 
     bool chosen = false;
     if (today.known)
@@ -202,6 +238,14 @@ static void Publish(const FeaturedSet &set)
     LeaveCriticalSection(&g_lock);
 }
 
+static void PublishNotice(const char *notice)
+{
+    EnterCriticalSection(&g_lock);
+    _snprintf(g_notice, sizeof(g_notice), "%s", notice != NULL ? notice : "");
+    g_notice[sizeof(g_notice) - 1] = '\0';
+    LeaveCriticalSection(&g_lock);
+}
+
 // ---------------------------------------------------------------------------
 // Fetching
 // ---------------------------------------------------------------------------
@@ -243,10 +287,13 @@ static DWORD WINAPI FetchEntry(LPVOID)
 
     FeaturedSet set;
     memset(&set, 0, sizeof(set));
+    char notice[NOTICE_MAX] = "";
     if (status == 200 && len <= FEATURED_MAX)
     {
         reply[len] = '\0';
-        if (Choose(reply, (size_t)len, today, &set))
+        const bool chosen = Choose(reply, (size_t)len, today, &set, notice, sizeof(notice));
+        PublishNotice(notice);
+        if (chosen)
         {
             Publish(set);
             // Kept for next time, and for offline.
@@ -291,8 +338,10 @@ void StartFeatured()
         kept[len] = '\0';
         FeaturedSet fromFile;
         memset(&fromFile, 0, sizeof(fromFile));
-        if (len > 0 && Choose(kept, len, ConsoleToday(), &fromFile))
+        char notice[NOTICE_MAX] = "";
+        if (len > 0 && Choose(kept, len, ConsoleToday(), &fromFile, notice, sizeof(notice)))
             set = fromFile;
+        PublishNotice(notice);
     }
     Publish(set);
 
@@ -322,5 +371,20 @@ void GetFeatured(FeaturedSet *out, unsigned long *changeCount)
     *out = g_set;
     if (changeCount != NULL)
         *changeCount = g_changes;
+    LeaveCriticalSection(&g_lock);
+}
+
+void GetServiceNotice(char *out, size_t outSize)
+{
+    if (out == NULL || outSize == 0)
+        return;
+    if (!g_lockReady)
+    {
+        out[0] = '\0';
+        return;
+    }
+    EnterCriticalSection(&g_lock);
+    _snprintf(out, outSize, "%s", g_notice);
+    out[outSize - 1] = '\0';
     LeaveCriticalSection(&g_lock);
 }

@@ -1,6 +1,8 @@
 #ifndef FEATURED_H
 #define FEATURED_H
 
+#include <stddef.h> // size_t
+
 // ---------------------------------------------------------------------------
 // The Store's featured games
 // ---------------------------------------------------------------------------
@@ -29,6 +31,18 @@
 // can't start an event early. The file is kept in game:\Store, so offline
 // the last one fetched is used, with the console's clock.
 
+// The same file can carry a notice, shown on the Queue page while it runs:
+//
+//   "notice": { "from": "2026-11-06", "to": "2026-11-13",
+//               "text": "archive.org is slow for everyone today." }
+//
+// For what isn't any one download's fault and isn't worth a release -
+// archive.org having a bad day, most of all, which otherwise reads as the
+// app being broken. from and to are optional and inclusive; without them
+// the notice stands until it's taken out of the file. A dated one says
+// nothing while the day isn't known, rather than guess.
+#define NOTICE_MAX 200
+
 #define FEATURED_MAX_GAMES 5
 
 struct FeaturedSet
@@ -45,5 +59,8 @@ void StartFeatured();
 // Today's set. changeCount goes up each time it changes - the fetch finishing
 // - so the Store can ask for the new games' wallpapers.
 void GetFeatured(FeaturedSet *out, unsigned long *changeCount);
+
+// Today's notice, or "" if there is none. Safe before StartFeatured.
+void GetServiceNotice(char *out, size_t outSize);
 
 #endif

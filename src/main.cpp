@@ -5909,12 +5909,23 @@ static void FormatTransferNumbers(const QueueJobSnapshot &job, char *out, size_t
         char total[64] = "";
         FormatBytes(job.bytesTotal, total, sizeof(total));
 
-        // Minutes/seconds cast down to int before formatting - small by
-        // definition, and it avoids relying on %llu width handling here.
-        int minutesLeft = (int)(job.secondsLeft / 60);
-        int secsLeft = (int)(job.secondsLeft % 60);
+        // Hours once there are any: a slow line can leave four of them, and
+        // "222:15 left" is a number nobody can place at a glance, where
+        // "3:42:15 left" reads as a time. Cast down to int before
+        // formatting - small by definition, and it avoids relying on %llu
+        // width handling here.
+        const int hoursLeft = (int)(job.secondsLeft / 3600);
+        const int minutesLeft = (int)((job.secondsLeft / 60) % 60);
+        const int secsLeft = (int)(job.secondsLeft % 60);
 
-        _snprintf(out, outSize, "%s of %s   %s/s   %d:%02d left", done, total, speed, minutesLeft, secsLeft);
+        char left[32];
+        if (hoursLeft > 0)
+            _snprintf(left, sizeof(left), "%d:%02d:%02d", hoursLeft, minutesLeft, secsLeft);
+        else
+            _snprintf(left, sizeof(left), "%d:%02d", minutesLeft, secsLeft);
+        left[sizeof(left) - 1] = '\0';
+
+        _snprintf(out, outSize, "%s of %s   %s/s   %s left", done, total, speed, left);
     }
     else
     {
@@ -8057,6 +8068,10 @@ int main()
                 view.recentFocus = shell.queueRecentFocus;
                 view.recentScroll = shell.queueRecentScroll;
                 view.recentFocused = shell.queueOnRecents && !shell.sidebarFocused;
+
+                char notice[NOTICE_MAX];
+                GetServiceNotice(notice, sizeof(notice));
+                view.notice = notice;
 
                 RenderQueueFrame(view, hints, hintCount);
 

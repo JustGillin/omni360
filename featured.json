@@ -1,4 +1,9 @@
 {
+  "notice": {
+    "from": "2026-11-06",
+    "to": "2026-11-13",
+    "text": "archive.org is serving slowly at the moment, for everyone. Downloads will still finish - they'll just take longer than usual."
+  },
   "events": [
     {
       "from": "2026-10-05",

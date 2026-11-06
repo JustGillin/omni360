@@ -730,6 +730,10 @@ struct QueuePageView
     int recentFocus;
     int recentScroll;
     bool recentFocused;
+
+    // A line across the top of the page, when something is wrong that no
+    // one download can explain - see GetServiceNotice. NULL or "" for none.
+    const char *notice;
 };
 
 void RenderQueueFrame(QueuePageView &view, const UiHint *hints, int hintCount);

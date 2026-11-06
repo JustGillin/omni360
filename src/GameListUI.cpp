@@ -7874,8 +7874,15 @@ void RenderQueueFrame(QueuePageView &view, const UiHint *hints, int hintCount)
     // The row sits above the cards, under the header: what just finished is
     // the first thing the page says, and the cards keep the foot of the
     // page they had before there was a row at all.
+    // A notice sits above everything else the page has, including the row
+    // of what just installed: it explains the numbers underneath it, so it
+    // has to be read first.
+    const char *notice = (view.notice != NULL && view.notice[0] != '\0') ? view.notice : NULL;
+    const float noticeH = (notice != NULL) ? (LineHeight(0.8f) * 1.2f + S(22.0f)) : 0.0f;
+    const float noticeGap = (notice != NULL) ? S(16.0f) : 0.0f;
+
     const float bandH = (recentCount > 0) ? QueueRecentBandH() : 0.0f;
-    const float listTop = g_M.listY + bandH;
+    const float listTop = g_M.listY + noticeH + noticeGap + bandH;
     const float listBottom = g_M.footerY - S(30.0f);
 
     int visibleRows = (int)((listBottom - listTop + QueueRowGap()) / rowH);
@@ -7889,7 +7896,7 @@ void RenderQueueFrame(QueuePageView &view, const UiHint *hints, int hintCount)
     // time, as the Home page's recents are.
     const float recTile = QueueRecentTile();
     const float recGap = QueueRecentGap();
-    const float bandTop = g_M.listY;
+    const float bandTop = g_M.listY + noticeH + noticeGap;
     const float recentY = bandTop + S(34.0f);
     const float recentNameY = recentY + recTile + S(8.0f);
 
@@ -7943,6 +7950,15 @@ void RenderQueueFrame(QueuePageView &view, const UiHint *hints, int hintCount)
 
     // --- Pass 1: quads ---
     DrawFrameBase(g_sidebar.focused);
+
+    if (notice != NULL)
+    {
+        // The keys notice's card and amber edge, which already mean "read
+        // this" on the Library page - without the button, as there is
+        // nothing here to press.
+        FillRound(g_M.contentX, g_M.listY, g_M.contentW, noticeH, g_M.radius, COL_SURFACE);
+        FillRound(g_M.contentX, g_M.listY, S(6.0f), noticeH, R(3.0f), COL_AMBER);
+    }
 
     for (int row = 0; row < visibleRows; ++row)
     {
@@ -8051,6 +8067,10 @@ void RenderQueueFrame(QueuePageView &view, const UiHint *hints, int hintCount)
         _snprintf(subtitle, sizeof(subtitle), "%d finished", count);
     subtitle[sizeof(subtitle) - 1] = '\0';
     DrawHeaderText("Queue", subtitle, showToast);
+
+    if (notice != NULL)
+        TextFit(g_M.contentX + S(22.0f), g_M.listY + S(11.0f), 0.8f, COL_TEXT, notice,
+                g_M.contentW - S(44.0f));
 
     DrawButtonHintText(footer, footerCount, g_M.footerY);
 
