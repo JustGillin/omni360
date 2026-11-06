@@ -543,19 +543,25 @@ private:
 
 static std::string HostOf(const std::string &url); // with the server ranking, below
 
-// A connection that averages less than the job's floor over a window is
-// dropped and its piece resumed - a server that trickles never trips the
-// HTTP client's timeout, which waits for nothing at all to arrive.
+// A connection that does badly over a window is dropped and its piece
+// resumed - a server that trickles never trips the HTTP client's timeout,
+// which waits for nothing at all to arrive.
 //
-// The floor is measured, not fixed. A flat 512 KB/s is a trickle to a line
-// that does 2-4 MB/s, but it was more than everything a slower line had, so
-// every window dropped, on every server, for ever (issue #3). Half of a
-// connection's fair share of the fastest server's probe instead, between
-// the bounds below - low enough to leave a slow line alone, high enough
-// that a server giving far less than it just promised still gets dropped.
+// "Badly" is judged against the other connections, not against a number.
+// Two fixed floors have now failed for the same reason: 512 KB/s was a
+// trickle to a line that does 2-4 MB/s but more than a slower line ever
+// had, and a floor set from the ranking probe fared no better, because the
+// probe's first 4 MB arrives about four times faster than the download that
+// follows it - 1.58 MB/s probed, 0.13-0.38 MB/s delivered, so every window
+// dropped and no piece finished (issue #3).
+//
+// The connections share one line, so they are each other's measure: one
+// far behind the others is stuck and worth re-opening, while all of them
+// equally slow is simply the line, and dropping them helps nothing. Below
+// SLOW_TRICKLE nothing is moving whatever the peers say.
 #define SLOW_WINDOW_MS     20000
-#define SLOW_FLOOR_MAX     (512ULL * 1024)
-#define SLOW_FLOOR_MIN     (48ULL * 1024)
+#define SLOW_TRICKLE       (48ULL * 1024)
+#define SLOW_PEER_SHARE    4 // dropped under a quarter of the best peer
 #define RESUME_LOG_MS      10000 // how often a resumed piece reports itself
 
 // How long a connection may receive nothing at all before it's dropped and
@@ -586,7 +592,6 @@ struct Download
     bool *done;
     unsigned long long doneBytes;
     unsigned long long movedBytes;  // everything received, finished pieces or not
-    unsigned long long floor;       // bytes a second a connection must hold
     unsigned long long inFlight[CONNECTIONS];
     unsigned long long resumedAt[CONNECTIONS]; // what a resumed piece already had
     DWORD threadIds[CONNECTIONS];
@@ -596,7 +601,9 @@ struct Download
     DWORD windowStart[CONNECTIONS];             // when the current window began
     unsigned long long windowFrom[CONNECTIONS]; // the request's bytes then
     DWORD lastLog[CONNECTIONS];
+    unsigned long long windowRate[CONNECTIONS]; // bytes a second over the last full window, 0 if none yet
     bool tooSlow[CONNECTIONS];                  // dropped by the slow check
+    bool trickled[CONNECTIONS];                 // and it was the server, not the connection
     bool failed;
     int failStatus;
     const bool *cancel;
@@ -623,7 +630,7 @@ static bool PieceProgress(unsigned long long done, unsigned long long, unsigned 
     int slot = -1;
     unsigned long piece = 0;
     unsigned long long total = 0;
-    double rate = 0.0;
+    double rate = 0.0, peerRate = 0.0;
     std::string host;
 
     EnterCriticalSection(&g_lock);
@@ -647,12 +654,26 @@ static bool PieceProgress(unsigned long long done, unsigned long long, unsigned 
         if (elapsed >= SLOW_WINDOW_MS)
         {
             const unsigned long long got = done - d->windowFrom[slot];
+            const unsigned long long mine = got * 1000 / elapsed;
             rate = got / 1048576.0 / (elapsed / 1000.0);
-            if (got * 1000 / elapsed < d->floor)
+            d->windowRate[slot] = mine;
+
+            // The best any other connection managed over its last full
+            // window. Nothing to compare against until one has finished.
+            unsigned long long peak = 0;
+            for (int i = 0; i < CONNECTIONS; ++i)
+            {
+                if (i != slot && d->windowRate[i] > peak)
+                    peak = d->windowRate[i];
+            }
+            const bool trickle = mine < SLOW_TRICKLE;
+            if (trickle || (peak > 0 && mine < peak / SLOW_PEER_SHARE))
             {
                 d->tooSlow[slot] = true;
+                d->trickled[slot] = trickle;
                 keepGoing = false;
                 slow = true;
+                peerRate = peak / 1048576.0;
             }
             d->windowStart[slot] = now;
             d->windowFrom[slot] = done;
@@ -669,12 +690,16 @@ static bool PieceProgress(unsigned long long done, unsigned long long, unsigned 
         if (report || slow)
             host = HostOf(d->servers[d->serverAt]);
     }
-    const double floorMb = d->floor / 1048576.0;
     LeaveCriticalSection(&g_lock);
 
-    if (slow)
-        dprintf("[game] piece %lu on connection %d: %.2f MB/s from %s for %ds, under %.2f - dropping it to resume\n",
-                piece, slot + 1, rate, host.c_str(), SLOW_WINDOW_MS / 1000, floorMb);
+    if (slow && peerRate > 0.0)
+        dprintf("[game] piece %lu on connection %d: %.2f MB/s from %s for %ds, against %.2f on the other "
+                "connection - dropping it to resume\n",
+                piece, slot + 1, rate, host.c_str(), SLOW_WINDOW_MS / 1000, peerRate);
+    else if (slow)
+        dprintf("[game] piece %lu on connection %d: %.2f MB/s from %s for %ds - nothing is coming, dropping it to "
+                "resume\n",
+                piece, slot + 1, rate, host.c_str(), SLOW_WINDOW_MS / 1000);
     else if (report)
         dprintf("[game] piece %lu on connection %d (resumed, %s): %.1f MB in, %.2f MB/s\n", piece, slot + 1,
                 host.c_str(), total / 1048576.0, rate);
@@ -825,7 +850,9 @@ static DWORD WINAPI ConnectionEntry(LPVOID param)
             d->windowStart[slot] = GetTickCount();
             d->windowFrom[slot] = 0;
             d->lastLog[slot] = d->windowStart[slot];
+            d->windowRate[slot] = 0; // a new connection has nothing to show the others yet
             d->tooSlow[slot] = false;
+            d->trickled[slot] = false;
             LeaveCriticalSection(&g_lock);
 
             const char *target = (resumeFrom > 0) ? restPath : tempPath;
@@ -836,12 +863,19 @@ static DWORD WINAPI ConnectionEntry(LPVOID param)
             // Dropped by the slow check: what came is good, as if cut off.
             EnterCriticalSection(&g_lock);
             const bool dropped = d->tooSlow[slot] && !Stopping(d);
+            const bool trickled = d->trickled[slot];
             d->tooSlow[slot] = false;
+            d->trickled[slot] = false;
             LeaveCriticalSection(&g_lock);
             if (dropped && status == HTTP_STATUS_CANCELLED)
             {
                 status = 206;
-                StrikeServer(d, server, "Too slow");
+                // Only a server giving nothing to anyone is the server's
+                // fault. One connection behind its peers is that
+                // connection's, and re-opening it is the whole remedy -
+                // moving everything to another server would be a worse one.
+                if (trickled)
+                    StrikeServer(d, server, "Too slow");
             }
 
             // Whatever came of the rest, as long as it's the range asked for.
@@ -1040,13 +1074,14 @@ static int MetadataStrings(const char *item, const char *field, std::string *out
 // from each server that holds the item and from the one the redirect chose,
 // fastest first, into out - the download starts on the first and moves down
 // the list if a server goes bad. At least the redirect's. Returns how many.
-// bestRate takes the fastest server's probe in MB/s, or 0 if none was
-// measured - the download's slow floor is set from it.
+// The probe ranks the servers against each other, which it is good for.
+// It is not a measure of the download to come: its first 4 MB arrives
+// several times faster than the rest, so nothing downstream should take it
+// for a speed the line can hold.
 static int RankServers(GameJob *job, const std::string &redirected, const char *item, const char *encodedZip,
-                       const char *auth, unsigned long long zipSize, std::string *out, int maxOut, double *bestRate)
+                       const char *auth, unsigned long long zipSize, std::string *out, int maxOut)
 {
     const unsigned long long PROBE = 4ULL * 1024 * 1024;
-    *bestRate = 0.0;
     out[0] = redirected;
     if (zipSize < PROBE * 2)
         return 1;
@@ -1116,7 +1151,6 @@ static int RankServers(GameJob *job, const std::string &redirected, const char *
 
     if (ranked == 0)
         return 1;
-    *bestRate = rates[0];
     int n = 0;
     for (; n < ranked && n < maxOut; ++n)
         out[n] = candidates[n];
@@ -1376,9 +1410,7 @@ static void RunJob(GameJob *job, const char *gamesPath)
 
     SetPhase(job, GAME_STEP_FINDING, "Finding the fastest server", 0, 0, 0);
     std::string servers[MAX_SERVERS];
-    double bestRate = 0.0;
-    const int serverCount =
-        RankServers(job, url, req.item, encodedZip, auth, req.zipSize, servers, MAX_SERVERS, &bestRate);
+    const int serverCount = RankServers(job, url, req.item, encodedZip, auth, req.zipSize, servers, MAX_SERVERS);
     url = servers[0];
     if (Cancelled(job))
     {
@@ -1511,19 +1543,6 @@ static void RunJob(GameJob *job, const char *gamesPath)
     d.done = (bool *)calloc(d.pieceCount, sizeof(bool));
     d.doneBytes = 0;
     d.movedBytes = 0;
-
-    // Half of what one of CONNECTIONS connections should see if the line
-    // holds what the probe measured. Without a probe, the lowest bound: a
-    // guess that drops a connection the line can't beat is the one mistake
-    // that stops a download dead.
-    d.floor = SLOW_FLOOR_MIN;
-    if (bestRate > 0.0)
-    {
-        const unsigned long long share =
-            (unsigned long long)(bestRate * 1048576.0) / (CONNECTIONS * 2);
-        d.floor = share < SLOW_FLOOR_MIN ? SLOW_FLOOR_MIN : (share > SLOW_FLOOR_MAX ? SLOW_FLOOR_MAX : share);
-    }
-    dprintf("[game] a connection must hold %.2f MB/s (fastest server %.2f MB/s)\n", d.floor / 1048576.0, bestRate);
     d.failed = false;
     d.failStatus = 0;
     d.cancel = &job->cancel;
@@ -1537,7 +1556,9 @@ static void RunJob(GameJob *job, const char *gamesPath)
         d.windowStart[i] = 0;
         d.windowFrom[i] = 0;
         d.lastLog[i] = 0;
+        d.windowRate[i] = 0;
         d.tooSlow[i] = false;
+        d.trickled[i] = false;
     }
 
     // A zip's image is indexed for reading back out of its deflate stream;
