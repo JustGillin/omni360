@@ -557,14 +557,35 @@ static void RunDlcPack(const QueueJob &job, JobResult &result)
     }
 }
 
+// A title update is the zip downloaded and then unpacked here, so its bar has
+// a segment for each. Which one it is on is the one thing the worker can't
+// see from outside DownloadTitleUpdate, and this is the only code of ours
+// that runs while it is in there - so it asks, and sets the phase when the
+// answer changes rather than on every report.
+static int g_updateStep = -1;
+
+static bool TitleUpdateProgress(unsigned long long bytesDone, unsigned long long bytesTotal,
+                                unsigned long long bytesPerSec, unsigned long long secondsRemaining)
+{
+    const int step = ArchiveOrgUnpacking() ? 1 : 0;
+    if (step != g_updateStep)
+    {
+        g_updateStep = step;
+        SetActivePhase(step == 1 ? "Unpacking" : "Downloading", step, 2, step, 2, (float)step / 2.0f);
+    }
+
+    return WorkerDownloadProgress(bytesDone, bytesTotal, bytesPerSec, secondsRemaining);
+}
+
 static void RunTitleUpdate(const QueueJob &job, JobResult &result)
 {
-    // One file. The phase becomes "Downloading" with the first progress
-    // report, once DownloadTitleUpdate has read the update's own file list.
-    SetActivePhase("Reading the update", 0, 1, 0, 1, -1.0f);
+    // The phase becomes "Downloading" with the first progress report, once
+    // DownloadTitleUpdate has read the update's own file list.
+    g_updateStep = -1;
+    SetActivePhase("Reading the update", 0, 2, 0, 2, -1.0f);
 
     if (DownloadTitleUpdate(job.update, job.view.titleId, g_contentBasePath, job.authHeader, dprintf,
-                            WorkerDownloadProgress))
+                            TitleUpdateProgress))
     {
         SetResult(result, QUEUE_OUTCOME_INSTALLED, "Installed",
                   "Restart your dashboard to pick up the update.");

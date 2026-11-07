@@ -286,11 +286,26 @@ int FindTitleUpdates(const std::string &gameName, TitleUpdateMatch *outMatches, 
 //
 // The member NAME is the interesting part: it decides where the update
 // installs, and the two forms go to completely different places (see
-// DownloadTitleUpdate).
-bool ReadTitleUpdateMember(const TitleUpdateMatch &update, const char *authHeader,
-                           char *outMemberName, unsigned long outMemberNameSize,
-                           unsigned long *outUnpackedSize,
+// DownloadTitleUpdate). The rest is what it takes to unpack the member from
+// the zip on the console rather than asking archive.org to do it.
+struct TitleUpdateMember
+{
+    char name[512];
+    unsigned short method; // 0 stored, 8 deflate; anything else this can't unpack
+    unsigned long crc;     // CRC-32 of the unpacked member, to check against
+    unsigned long long packed;
+    unsigned long long unpacked;
+    unsigned long long localHeader; // where the member's local header sits in the zip
+};
+
+bool ReadTitleUpdateMember(const TitleUpdateMatch &update, const char *authHeader, TitleUpdateMember *out,
                            void printFunction(const char *_format, ...));
+
+// Whether the worker is unpacking a downloaded archive rather than
+// downloading one - for the phase the Queue page shows. Only meaningful from
+// inside a DownloadProgressFn the worker is being called through, and like
+// ArchiveOrgDiskFull it belongs to that one thread.
+bool ArchiveOrgUnpacking();
 
 // Downloads and installs one title update.
 //

@@ -27,6 +27,7 @@ rather than a scraped browser login session.
 #include "RarHeaders.h"
 #include "RarUnpack.h"
 #include "settings.h"
+#include "zlib/zlib.h" // inflate, to unpack a title update's zip here
 
 #include <xtl.h>
 #include <stdio.h>
@@ -1253,6 +1254,28 @@ static std::string StagingPathFor(const std::string &destPath)
     return folder + "\\" + destPath.substr(lastSep + 1);
 }
 
+// Where a title update's zip waits while it downloads. Not StagingPathFor's
+// name: that one is the unpacked member's, and the two sit side by side. The
+// zip's own file name is far past FATX's 42 characters, so this is its
+// checksum - which also ties what is staged to the one zip it came from, so a
+// resumed download can't be built on another update's bytes.
+static std::string TitleUpdateZipStagingPath(const std::string &destPath, const char *zipName)
+{
+    std::string staged = StagingPathFor(destPath);
+    size_t lastSep = staged.find_last_of('\\');
+    if (staged.empty() || lastSep == std::string::npos)
+        return "";
+
+    unsigned long key = crc32(0L, Z_NULL, 0);
+    key = crc32(key, (const Bytef *)zipName, (uInt)strlen(zipName));
+
+    char name[32];
+    _snprintf(name, sizeof(name), "\\TU%08lX.zip", key);
+    name[sizeof(name) - 1] = '\0';
+
+    return staged.substr(0, lastSep) + name;
+}
+
 // Makes every folder in dirPath, one level at a time - the XDK's
 // CreateDirectory won't make parents. It starts from the drive, not from the
 // content folder: a drive that has never had content installed on it has no
@@ -1449,20 +1472,23 @@ static bool ResumedProgress(unsigned long long bytesDone, unsigned long long byt
     return g_resumeProgressFn(g_resumeBase + bytesDone, g_resumeTotal, bytesPerSec, secondsRemaining);
 }
 
-// Downloads bytes [from, from + length) of the RAR into tempPath. The RAR is
-// served as a plain file and so honours Range: each attempt asks only for
-// what tempPath doesn't have yet and adds it to the end. A connection that
-// drops at 80% costs the last few MB, not the whole file.
+// Downloads bytes [from, from + length) of a file into tempPath. A real file
+// on archive.org - a DLC pack's RAR, a title update's zip - honours Range, so
+// each attempt asks only for what tempPath doesn't have yet and adds it to
+// the end. A connection that drops at 80% costs the last few MB, not the
+// whole file. (The /download/<item>/<archive>/<member> virtual paths are not
+// real files and ignore Range - measured - which is why anything that wants
+// to resume downloads the archive itself and unpacks it here.)
 //
 // tempPath is kept when this gives up, so the next try - even from a new
-// queue job - carries on from it. Its name is the package's content ID, so a
-// file there can only be an earlier piece of this same member.
+// queue job - carries on from it. Its name belongs to the one file it holds,
+// so what is there can only be an earlier piece of this same download.
 //
 // alsoNeeds is space wanted on top of the range itself (the unpacked file,
 // when the range is compressed data). Progress is reported against
 // reportTotal, with the range as its first `length` bytes. Returns 206 once
 // tempPath holds the whole range, or the status that stopped it.
-static int DownloadRarRange(const std::string &rarUrl, unsigned long long from, unsigned long long length,
+static int DownloadFileRange(const std::string &fileUrl0, unsigned long long from, unsigned long long length,
                             const std::string &tempPath, const std::string &destPath, unsigned long long alsoNeeds,
                             const char *authHeader, void printFunction(const char *_format, ...),
                             DownloadProgressFn progressFn, unsigned long long reportTotal)
@@ -1512,14 +1538,14 @@ static int DownloadRarRange(const std::string &rarUrl, unsigned long long from, 
         // archive.org's /download/ URL redirects to a storage server, and a
         // redirect followed in file mode would be written into the file. So
         // resolve it first with a one-byte request, then append from there.
-        std::string fileUrl = rarUrl;
+        std::string fileUrl = fileUrl0;
         {
             char redirect[2048] = "";
             unsigned long long redirectLen = sizeof(redirect) - 1;
             char headers[IAS3_AUTH_HEADER_MAX + 64];
             _snprintf(headers, sizeof(headers), "%sRange: bytes=0-0\r\n", authHeader != NULL ? authHeader : "");
             headers[sizeof(headers) - 1] = '\0';
-            int status = httpRequestHTTPS(rarUrl, HTTP_GET, NULL, headers, "", redirect, &redirectLen, false,
+            int status = httpRequestHTTPS(fileUrl0, HTTP_GET, NULL, headers, "", redirect, &redirectLen, false,
                                           NULL, 0, printFunction);
             NoteAuthStatus(status, authHeader);
             if (status == 302)
@@ -1602,7 +1628,7 @@ static int DownloadStoredMember(const std::string &rarUrl, const DlcMember &memb
         return -1;
     }
 
-    int status = DownloadRarRange(rarUrl, member.dataStart, member.unpSize, tempPath, destPath, 0,
+    int status = DownloadFileRange(rarUrl, member.dataStart, member.unpSize, tempPath, destPath, 0,
                                   authHeader, printFunction, progressFn, member.unpSize);
     if (status != 206)
         return status;
@@ -1812,7 +1838,7 @@ static int DownloadAndUnpackTogether(const std::string &rarUrl, const DlcMember 
     ResumeThread(thread);
 
     const DWORD downloadStart = GetTickCount();
-    status = DownloadRarRange(rarUrl, from, length, packedPath, destPath, member.unpSize,
+    status = DownloadFileRange(rarUrl, from, length, packedPath, destPath, member.unpSize,
                               authHeader, printFunction, OverlapDownloadProgress, length);
     const DWORD downloadSeconds = (GetTickCount() - downloadStart) / 1000;
 
@@ -2254,17 +2280,13 @@ int FindTitleUpdates(const std::string &gameName, TitleUpdateMatch *outMatches, 
 #define ZIP_EOCD_SIGNATURE 0x06054B50UL
 #define ZIP_CDFH_SIGNATURE 0x02014B50UL
 
-bool ReadTitleUpdateMember(const TitleUpdateMatch &update, const char *authHeader,
-                           char *outMemberName, unsigned long outMemberNameSize,
-                           unsigned long *outUnpackedSize,
+bool ReadTitleUpdateMember(const TitleUpdateMatch &update, const char *authHeader, TitleUpdateMember *out,
                            void printFunction(const char *_format, ...))
 {
-    if (outMemberName == NULL || outMemberNameSize == 0)
+    if (out == NULL)
         return false;
 
-    outMemberName[0] = '\0';
-    if (outUnpackedSize != NULL)
-        *outUnpackedSize = 0;
+    memset(out, 0, sizeof(*out));
 
     // Like Xbox Live Arcade's RAR names (see PackUrl), title-update names
     // contain spaces and parentheses - "Ace Combat 6 (Europe) (v2).zip" - so
@@ -2419,9 +2441,11 @@ bool ReadTitleUpdateMember(const TitleUpdateMatch &update, const char *authHeade
     }
 
     unsigned short method = ReadLE16(cd + 10);
+    unsigned long memberCrc = ReadLE32(cd + 16);
     unsigned long compressedSize = ReadLE32(cd + 20);
     unsigned long uncompressedSize = ReadLE32(cd + 24);
     unsigned short nameLen = ReadLE16(cd + 28);
+    unsigned long localHeader = ReadLE32(cd + 42);
 
     char memberName[512];
     unsigned short copyLen = nameLen;
@@ -2439,15 +2463,222 @@ bool ReadTitleUpdateMember(const TitleUpdateMatch &update, const char *authHeade
     // archive - which one you get depends on the update's vintage, not on
     // anything we control - so the caller has to branch per file.
     printFunction("[TU]   member: \"%s\"\n", memberName);
-    printFunction("[TU]   method=%u (0=stored, 8=deflate), packed=%lu, unpacked=%lu\n",
-                  (unsigned)method, compressedSize, uncompressedSize);
+    printFunction("[TU]   method=%u (0=stored, 8=deflate), packed=%lu, unpacked=%lu, crc %08lX, local header at %lu\n",
+                  (unsigned)method, compressedSize, uncompressedSize, memberCrc, localHeader);
 
-    strncpy(outMemberName, memberName, outMemberNameSize - 1);
-    outMemberName[outMemberNameSize - 1] = '\0';
+    strncpy(out->name, memberName, sizeof(out->name) - 1);
+    out->name[sizeof(out->name) - 1] = '\0';
+    out->method = method;
+    out->crc = memberCrc;
+    out->packed = compressedSize;
+    out->unpacked = uncompressedSize;
+    out->localHeader = localHeader;
 
-    if (outUnpackedSize != NULL)
-        *outUnpackedSize = uncompressedSize;
+    return true;
+}
 
+// ---------------------------------------------------------------------------
+// Unpacking a title update's zip on the console
+// ---------------------------------------------------------------------------
+//
+// archive.org will extract a zip member server-side, and that is how title
+// updates used to arrive: one request, nothing to decompress here. Two things
+// are wrong with it. The extraction ignores Range - measured against a public
+// item: a request for bytes 400000- of a member came back 200 with the whole
+// thing - so a transfer that drops has to start again from nothing. And it
+// gives up a few MB past a gigabyte (see EXTRACTED_SIZE_LIMIT), which leaves
+// the largest updates unfetchable at all.
+//
+// The zip itself is a real file, and real files honour Range. So it is
+// downloaded whole, resuming as everything else here does, and the member is
+// taken out of it with zlib. Costs the zip's own space while it installs, and
+// an inflate pass over it - against a download that is minutes rather than
+// seconds, both are cheap.
+
+// Whether the worker is unpacking rather than downloading, for the phase on
+// the Queue page. Module state read from the progress callback, for the same
+// one-thread reason as g_diskFull - see ArchiveOrgDiskFull.
+static bool g_unpacking = false;
+
+bool ArchiveOrgUnpacking()
+{
+    return g_unpacking;
+}
+
+#define ZIP_LFH_SIGNATURE 0x04034B50UL
+#define UNPACK_CHUNK (256 * 1024)
+
+// Writes member out of the zip at zipPath into destPath, checking its CRC-32
+// on the way. Stored members are copied; deflated ones go through zlib a
+// chunk at a time, so a 1.7GB update never needs to be anywhere but on the
+// drive. Returns true once destPath holds the member whole and correct.
+static bool ExtractZipMember(const std::string &zipPath, const TitleUpdateMember &member,
+                             const std::string &destPath, void printFunction(const char *_format, ...),
+                             DownloadProgressFn progressFn)
+{
+    FILE *zip = fopen(zipPath.c_str(), "rb");
+    if (zip == NULL)
+    {
+        printFunction("ERROR: the downloaded zip couldn't be opened\n");
+        return false;
+    }
+
+    // The local header repeats the name and extra fields at their own
+    // lengths - the central directory's are not the same - so where the data
+    // starts can only be read from here.
+    unsigned char local[30];
+    if (_fseeki64(zip, (__int64)member.localHeader, SEEK_SET) != 0 || fread(local, 1, 30, zip) != 30 ||
+        ReadLE32(local) != ZIP_LFH_SIGNATURE)
+    {
+        printFunction("ERROR: the member's local header is missing from the zip\n");
+        fclose(zip);
+        return false;
+    }
+
+    const unsigned long long dataStart = member.localHeader + 30 + ReadLE16(local + 26) + ReadLE16(local + 28);
+    if (_fseeki64(zip, (__int64)dataStart, SEEK_SET) != 0)
+    {
+        printFunction("ERROR: the member's data is past the end of the zip\n");
+        fclose(zip);
+        return false;
+    }
+
+    FILE *out = fopen(destPath.c_str(), "wb");
+    if (out == NULL)
+    {
+        printFunction("ERROR: couldn't write %s\n", destPath.c_str());
+        fclose(zip);
+        return false;
+    }
+
+    unsigned char *in = (unsigned char *)malloc(UNPACK_CHUNK);
+    unsigned char *outBuf = (unsigned char *)malloc(UNPACK_CHUNK);
+    z_stream zs;
+    memset(&zs, 0, sizeof(zs));
+
+    // Raw deflate: a zip member has no zlib header of its own, which is what
+    // the negative window size asks for.
+    const bool deflated = (member.method == 8);
+    bool ok = (in != NULL && outBuf != NULL);
+    if (ok && deflated && inflateInit2(&zs, -MAX_WBITS) != Z_OK)
+        ok = false;
+
+    unsigned long crc = crc32(0L, Z_NULL, 0);
+    unsigned long long read = 0, written = 0;
+    bool cancelled = false;
+    DWORD lastReport = GetTickCount();
+
+    while (ok && read < member.packed && written < member.unpacked)
+    {
+        const unsigned long long left = member.packed - read;
+        const unsigned long want = (left > UNPACK_CHUNK) ? UNPACK_CHUNK : (unsigned long)left;
+        const size_t got = fread(in, 1, want, zip);
+        if (got == 0)
+        {
+            printFunction("ERROR: the zip ended %I64u bytes early\n", member.packed - read);
+            ok = false;
+            break;
+        }
+        read += got;
+
+        if (!deflated)
+        {
+            crc = crc32(crc, in, (uInt)got);
+            ok = (fwrite(in, 1, got, out) == got);
+            written += got;
+        }
+        else
+        {
+            zs.next_in = in;
+            zs.avail_in = (uInt)got;
+            while (ok)
+            {
+                zs.next_out = outBuf;
+                zs.avail_out = UNPACK_CHUNK;
+
+                const int z = inflate(&zs, Z_NO_FLUSH);
+                if (z != Z_OK && z != Z_STREAM_END && z != Z_BUF_ERROR)
+                {
+                    printFunction("ERROR: the member wouldn't decompress (zlib %d)\n", z);
+                    ok = false;
+                    break;
+                }
+
+                const unsigned long produced = UNPACK_CHUNK - zs.avail_out;
+                if (produced > 0)
+                {
+                    crc = crc32(crc, outBuf, (uInt)produced);
+                    if (fwrite(outBuf, 1, produced, out) != produced)
+                    {
+                        printFunction("ERROR: couldn't write the unpacked update - is the drive full?\n");
+                        ok = false;
+                        break;
+                    }
+                    written += produced;
+                }
+
+                if (z == Z_STREAM_END)
+                    break;
+
+                // Room left in the output buffer means inflate gave back
+                // everything this input can produce, whether or not it has
+                // consumed all of it. Only a buffer filled to the brim may
+                // have more waiting - including after the last of the input,
+                // which is why this isn't a test of avail_in: a final chunk
+                // that happened to fill the buffer exactly would have left
+                // the rest of the member inside zlib.
+                if (zs.avail_out > 0 || produced == 0)
+                    break;
+            }
+        }
+
+        // Cheap enough to do every chunk, but the callback drives the UI's
+        // numbers and there is no point moving them faster than it draws.
+        const DWORD now = GetTickCount();
+        if (progressFn != NULL && (now - lastReport >= 100 || written >= member.unpacked))
+        {
+            lastReport = now;
+            if (!progressFn(written, member.unpacked, 0, 0))
+            {
+                cancelled = true;
+                break;
+            }
+        }
+    }
+
+    if (deflated)
+        inflateEnd(&zs);
+    free(in);
+    free(outBuf);
+    if (fclose(out) != 0)
+        ok = false;
+    fclose(zip);
+
+    if (cancelled)
+    {
+        DeleteFileA(destPath.c_str());
+        return false;
+    }
+
+    if (ok && written != member.unpacked)
+    {
+        printFunction("ERROR: unpacked %I64u bytes, expected %I64u\n", written, member.unpacked);
+        ok = false;
+    }
+
+    if (ok && crc != member.crc)
+    {
+        printFunction("ERROR: the unpacked update failed its checksum (%08lX, expected %08lX)\n", crc, member.crc);
+        ok = false;
+    }
+
+    if (!ok)
+    {
+        DeleteFileA(destPath.c_str());
+        return false;
+    }
+
+    printFunction("[TU]   unpacked %I64u bytes, crc %08lX\n", written, crc);
     return true;
 }
 
@@ -2493,17 +2724,13 @@ bool DownloadTitleUpdate(const TitleUpdateMatch &update, unsigned long titleId,
 {
     g_keysRejected = false;
     g_diskFull = false;
+    g_unpacking = false;
 
-    char memberName[512];
-    unsigned long unpackedSize = 0;
-
-    if (!ReadTitleUpdateMember(update, authHeader, memberName, sizeof(memberName),
-                               &unpackedSize, printFunction))
-    {
+    TitleUpdateMember member;
+    if (!ReadTitleUpdateMember(update, authHeader, &member, printFunction))
         return false;
-    }
 
-    const char *baseName = MemberBaseName(memberName);
+    const char *baseName = MemberBaseName(member.name);
     if (baseName[0] == '\0')
     {
         ERROR_LOG("title update member has no filename");
@@ -2537,15 +2764,62 @@ bool DownloadTitleUpdate(const TitleUpdateMatch &update, unsigned long titleId,
     if (lastSep != std::string::npos)
         CreateDirectoryTree(destPath.substr(0, lastSep));
 
-    // Same virtual-path trick the DLC side uses: archive.org extracts the
-    // member server-side, so nothing here has to understand deflate. If that
-    // turns out not to work for zip the request simply fails, and the caller
-    // reports it rather than writing a corrupt file.
     char encodedZip[512];
-    char encodedMember[1024];
+    if (!UrlEncodeFormValue(update.filename, encodedZip, sizeof(encodedZip)))
+    {
+        ERROR_LOG("title update name too long to URL-encode");
+        return false;
+    }
 
-    if (!UrlEncodeFormValue(update.filename, encodedZip, sizeof(encodedZip)) ||
-        !UrlEncodeFormValue(memberName, encodedMember, sizeof(encodedMember)))
+    // The zip downloaded whole and unpacked here. Anything this can't inflate
+    // falls through to archive.org's own extraction below - which is one
+    // request and no unpacking, but cannot be resumed and stops a few MB past
+    // a gigabyte.
+    if (member.method == 0 || member.method == 8)
+    {
+        const std::string zipUrl = TITLE_UPDATE_DOWNLOAD_BASE + std::string(encodedZip);
+        const std::string zipPath = TitleUpdateZipStagingPath(destPath, update.filename);
+        const std::string tempPath = StagingPathFor(destPath);
+
+        if (zipPath.empty() || tempPath.empty())
+        {
+            printFunction("ERROR: no drive in destination path: %s\n", destPath.c_str());
+            return false;
+        }
+
+        // The zip and the unpacked member are both on the drive at once, so
+        // ask for room for the pair.
+        const int status = DownloadFileRange(zipUrl, 0, update.size, zipPath, destPath, member.unpacked, authHeader,
+                                             printFunction, progressFn, update.size);
+        if (status != 206)
+        {
+            printFunction("ERROR: title update download failed (status %d)\n", status);
+            return false; // the part that arrived stays, for the next try
+        }
+
+        g_unpacking = true;
+        const bool unpacked = ExtractZipMember(zipPath, member, tempPath, printFunction, progressFn);
+        g_unpacking = false;
+
+        if (!unpacked)
+        {
+            // The zip goes too: either it isn't the file its name says it is,
+            // or what came out of it didn't check out, and keeping it would
+            // only hand the same bad bytes to the next try.
+            DeleteFileA(zipPath.c_str());
+            return false;
+        }
+
+        DeleteFileA(zipPath.c_str());
+        return MoveIntoPlace(tempPath, destPath, printFunction);
+    }
+
+    // archive.org extracts the member server-side, so nothing here has to
+    // understand the method it used.
+    printFunction("[TU]   method %u isn't one this can unpack - asking archive.org to\n", (unsigned)member.method);
+
+    char encodedMember[1024];
+    if (!UrlEncodeFormValue(member.name, encodedMember, sizeof(encodedMember)))
     {
         ERROR_LOG("title update name too long to URL-encode");
         return false;
@@ -2556,13 +2830,11 @@ bool DownloadTitleUpdate(const TitleUpdateMatch &update, unsigned long titleId,
     // Through a temporary file and renamed into place, with retries - see
     // DownloadUrlToFile - so a failed transfer can't leave a truncated update
     // where the dashboard will load it.
-    int httpStatus = DownloadUrlToFile(url, destPath, authHeader, unpackedSize, printFunction, progressFn);
+    int httpStatus = DownloadUrlToFile(url, destPath, authHeader, member.unpacked, printFunction, progressFn);
 
     if (httpStatus != 200 && httpStatus != 206)
     {
         printFunction("ERROR: title update download failed (status %d)\n", httpStatus);
-        printFunction("       If this is a 404, archive.org is not serving zip members\n");
-        printFunction("       pre-extracted, which would need inflate support here.\n");
         return false;
     }
 
