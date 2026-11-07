@@ -407,6 +407,7 @@
     <ClInclude Include="src\Launch.h" />
     <ClInclude Include="src\LibraryCache.h" />
     <ClInclude Include="src\Recents.h" />
+    <ClInclude Include="src\QueueState.h" />
     <ClInclude Include="src\UiSound.h" />
     <ClInclude Include="src\Featured.h" />
     <ClInclude Include="src\ServiceCheck.h" />
@@ -490,6 +491,7 @@
     <ClCompile Include="src\Launch.cpp" />
     <ClCompile Include="src\LibraryCache.cpp" />
     <ClCompile Include="src\Recents.cpp" />
+    <ClCompile Include="src\QueueState.cpp" />
     <ClCompile Include="src\UiSound.cpp" />
     <ClCompile Include="src\Featured.cpp" />
     <ClCompile Include="src\ServiceCheck.cpp" />

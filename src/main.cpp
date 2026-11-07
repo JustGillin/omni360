@@ -6394,6 +6394,23 @@ static void RenderPickerFrame(Shell &shell, UiHint *hints, int hintCount)
     }
 }
 
+// The header from keys already saved, asking for nothing. Restoring the queue
+// at launch must not stop to prompt: a console whose keys have gone simply
+// has nothing to restore from archive.org, and says so when the jobs fail.
+static bool QuietAuthHeader(char *out, unsigned long long outSize)
+{
+    out[0] = '\0';
+
+    std::string accessKey, secretKey;
+    if (!LoadSavedKeys(accessKey, secretKey))
+    {
+        dprintf("[queue] no saved keys - anything kept from archive.org will need them\n");
+        return false;
+    }
+
+    return BuildIas3AuthHeader(accessKey, secretKey, out, outSize);
+}
+
 // The auth header is built once and kept, and only rebuilt after the keys
 // change or archive.org refuses them.
 static bool EnsureAuthHeader(bool &haveAuth, char *authHeader, unsigned long long authHeaderSize)
@@ -6869,6 +6886,15 @@ int main()
             // Not fatal if it fails: everything but downloading still works,
             // and choosing a download then says why it can't.
             downloadsStarted = StartDownloadQueue(g_contentBase);
+
+            // Whatever was still downloading when the app last closed goes
+            // back in the queue and carries on by itself - that is the point
+            // of keeping it. Both workers are up by now.
+            char keptAuth[IAS3_AUTH_HEADER_MAX];
+            QuietAuthHeader(keptAuth, sizeof(keptAuth));
+            if (downloadsStarted)
+                RestoreDownloadQueue(keptAuth);
+            RestoreGameInstalls(keptAuth);
         }
         else if (step == 4)
         {

@@ -19,6 +19,7 @@ DESCRIPTION : Downloads a Redump game's zip from archive.org and installs it as
 #include "OutputConsole.h"
 #include "RarHeaders.h"     // a game kept in a RAR
 #include "RarUnpack.h"      // ...and unpacked here, if compressed
+#include "QueueState.h"     // the jobs, kept between runs
 #include "zlib/zlib.h"      // crc32, for checking one
 
 #include <xtl.h>
@@ -334,6 +335,46 @@ static void StagingRoot(const char *gamesPath, char *out, size_t outSize)
     DriveOf(gamesPath, drive, sizeof(drive));
     _snprintf(out, outSize, "%s\\" STAGING_FOLDER, drive);
     out[outSize - 1] = '\0';
+}
+
+// ---------------------------------------------------------------------------
+// The installs still to do, kept between runs - see QueueState.h
+// ---------------------------------------------------------------------------
+
+#define INSTALL_STATE_FILE "game:\\QueuedInstalls.txt"
+#define INSTALL_STATE_MAX  (8 * 1024) // MAX_GAME_JOBS of a few hundred bytes
+
+// Under the lock. The pieces on the drive are only half of carrying on: this
+// is the half that says which game they belong to. Not written while the app
+// is closing - closing cancels every job, and the file has to keep them.
+static void SaveInstallStateLocked()
+{
+    if (!g_running || g_shutdown)
+        return;
+
+    char text[INSTALL_STATE_MAX];
+    size_t at = 0;
+    text[0] = '\0';
+    AppendQueueStateText(text, sizeof(text), &at,
+                         "# Omni360 - the game installs still to do when this was written\nformat=1\n");
+
+    int jobs = 0;
+    for (int i = 0; i < MAX_GAME_JOBS; ++i)
+    {
+        const GameJob &job = g_jobs[i];
+        if (!job.used || job.snap.state == QUEUE_FINISHED)
+            continue;
+
+        AppendQueueStateText(text, sizeof(text), &at, "job=game\nitem=%s\nfile=%s\nsize=%I64u\nname=%s\ntitleid=%08lX\n",
+                             job.request.item, job.request.zipName, job.request.zipSize, job.request.name,
+                             job.request.titleId);
+        jobs++;
+    }
+
+    if (jobs > 0)
+        WriteQueueStateFile(INSTALL_STATE_FILE, text);
+    else
+        DeleteQueueStateFile(INSTALL_STATE_FILE);
 }
 
 // ---------------------------------------------------------------------------
@@ -1139,6 +1180,10 @@ static void Finish(GameJob *job, QueueOutcome outcome, const char *text, const c
     s.resultText[sizeof(s.resultText) - 1] = '\0';
     _snprintf(s.resultDetail, sizeof(s.resultDetail), "%s", detail != NULL ? detail : "");
     s.resultDetail[sizeof(s.resultDetail) - 1] = '\0';
+
+    // One fewer install for the next run to pick up - unless this is the app
+    // closing, which SaveInstallStateLocked sits out.
+    SaveInstallStateLocked();
 }
 
 // A game's three steps, and each one's share of the whole job's percentage -
@@ -2261,12 +2306,71 @@ GameEnqueueResult EnqueueGameInstall(const GameRequest &request, const char *aut
         job.snap.gameName[sizeof(job.snap.gameName) - 1] = '\0';
         _snprintf(job.snap.title, sizeof(job.snap.title), "%s", request.zipName);
         job.snap.title[sizeof(job.snap.title) - 1] = '\0';
+        SaveInstallStateLocked();
     }
 
     LeaveCriticalSection(&g_lock);
     if (result == GAME_QUEUED)
         SetEvent(g_wake);
     return result;
+}
+
+// Queues again whatever install was still to do when the app last closed.
+// Its pieces are already on the drive - see the staging notes above - so this
+// is what points at them again.
+void RestoreGameInstalls(const char *authHeader)
+{
+    if (!g_running)
+        return;
+
+    char *text = ReadQueueStateFile(INSTALL_STATE_FILE);
+    if (text == NULL)
+        return;
+
+    GameRequest request;
+    memset(&request, 0, sizeof(request));
+    bool inJob = false;
+    int queued = 0;
+
+    char *at = text, *key = NULL, *value = NULL;
+    while (NextQueueStateLine(&at, &key, &value))
+    {
+        // A "job=" line ends the one before it and starts the next.
+        if (strcmp(key, "job") == 0)
+        {
+            if (inJob && request.zipName[0] != '\0' && EnqueueGameInstall(request, authHeader) == GAME_QUEUED)
+                queued++;
+            memset(&request, 0, sizeof(request));
+            inJob = (strcmp(value, "game") == 0);
+            continue;
+        }
+
+        if (!inJob)
+            continue;
+
+        if (strcmp(key, "item") == 0)
+            _snprintf(request.item, sizeof(request.item), "%s", value);
+        else if (strcmp(key, "file") == 0)
+            _snprintf(request.zipName, sizeof(request.zipName), "%s", value);
+        else if (strcmp(key, "size") == 0)
+            request.zipSize = _strtoui64(value, NULL, 10);
+        else if (strcmp(key, "name") == 0)
+            _snprintf(request.name, sizeof(request.name), "%s", value);
+        else if (strcmp(key, "titleid") == 0)
+            request.titleId = strtoul(value, NULL, 16);
+
+        request.item[sizeof(request.item) - 1] = '\0';
+        request.zipName[sizeof(request.zipName) - 1] = '\0';
+        request.name[sizeof(request.name) - 1] = '\0';
+    }
+
+    if (inJob && request.zipName[0] != '\0' && EnqueueGameInstall(request, authHeader) == GAME_QUEUED)
+        queued++; // the last block has no "job=" after it
+
+    free(text);
+
+    if (queued > 0)
+        dprintf("[game] picked %d install%s back up from last time\n", queued, queued == 1 ? "" : "s");
 }
 
 int SnapshotGameJobs(QueueJobSnapshot *out, int maxJobs)

@@ -158,6 +158,13 @@ struct HomebrewJobSpec
 
 EnqueueResult EnqueueHomebrew(const HomebrewJobSpec &spec);
 
+// Queues again whatever was still waiting when the app last closed, in the
+// order it was waiting in - see QueueState.h. Call it once, after
+// StartDownloadQueue; it does nothing if the worker never started or there is
+// nothing kept. authHeader is given to every restored archive.org job, so
+// keys changed since are the ones used.
+void RestoreDownloadQueue(const char *authHeader);
+
 // Copies the jobs out in the order the Queue page lists them: the active one,
 // then the waiting ones in the order they'll run, then finished ones, most
 // recent first. Returns how many were written.

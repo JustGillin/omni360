@@ -10,10 +10,12 @@ DESCRIPTION : the download queue - DLC packs and title updates, installed one
 #include "downloadFile.h" // FormatBytes, DownloadProgressFn
 #include "HttpPlain.h"    // HttpDownloadPlain, for a homebrew mirror
 #include "SevenZip.h"
+#include "QueueState.h"   // the jobs, kept between runs
 #include "OutputConsole.h"
 
 #include <xtl.h>
 #include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
 
 // Enough for the largest pack seen so far with room to spare; ListDlcMembers
@@ -123,6 +125,76 @@ static void SyncView(QueueJob &job)
     job.view.kind = job.kind;
     job.view.state = job.state;
     job.view.outcome = job.outcome;
+}
+
+// ---------------------------------------------------------------------------
+// The queue, kept between runs - see QueueState.h
+// ---------------------------------------------------------------------------
+
+#define QUEUE_STATE_FILE "game:\\QueuedDownloads.txt"
+#define QUEUE_STATE_MAX  (96 * 1024) // 32 jobs, a homebrew spec being the longest
+
+// Under the lock. Writes every job still to do, which is what the next run
+// reads. Nothing is written while the app is closing: closing cancels every
+// job, and the file has to keep them.
+static void SaveQueueStateLocked()
+{
+    if (!g_running || g_shutdown)
+        return;
+
+    char *text = (char *)malloc(QUEUE_STATE_MAX);
+    if (text == NULL)
+        return;
+
+    size_t at = 0;
+    text[0] = '\0';
+    AppendQueueStateText(text, QUEUE_STATE_MAX, &at,
+                         "# Omni360 - the downloads still to do when this was written\nformat=1\n");
+
+    int jobs = 0;
+    for (int i = 0; i < MAX_QUEUE_JOBS; ++i)
+    {
+        const QueueJob &job = g_jobs[i];
+        if (!job.used || job.state == QUEUE_FINISHED)
+            continue;
+
+        if (job.kind == QUEUE_JOB_DLC_PACK)
+        {
+            AppendQueueStateText(text, QUEUE_STATE_MAX, &at,
+                                 "job=dlc\ngame=%s\ntitleid=%08lX\nitem=%s\nonly=%s\nfile=%s\nsize=%I64u\nscore=%d\n",
+                                 job.view.gameName, job.view.titleId, job.pack.item, job.pack.only,
+                                 job.pack.filename, job.pack.size, job.pack.score);
+        }
+        else if (job.kind == QUEUE_JOB_TITLE_UPDATE)
+        {
+            AppendQueueStateText(text, QUEUE_STATE_MAX, &at,
+                                 "job=update\ngame=%s\ntitleid=%08lX\nfile=%s\nsize=%I64u\nscore=%d\nver=%d\n"
+                                 "region=%s\n",
+                                 job.view.gameName, job.view.titleId, job.update.filename, job.update.size,
+                                 job.update.score, job.update.version, job.update.region);
+        }
+        else if (job.kind == QUEUE_JOB_HOMEBREW)
+        {
+            AppendQueueStateText(text, QUEUE_STATE_MAX, &at, "job=homebrew\ntitle=%s\nkind=%s\nfolder=%s\nmirror=%s\n",
+                                 job.homebrew.title, job.homebrew.kindFolder, job.homebrew.folder,
+                                 job.homebrew.mirror);
+            for (int u = 0; u < job.homebrew.urlCount && u < HOMEBREW_MAX_URLS; ++u)
+                AppendQueueStateText(text, QUEUE_STATE_MAX, &at, "url=%s\n", job.homebrew.urls[u]);
+        }
+        else
+        {
+            continue; // disc and game installs are their own workers' to keep
+        }
+
+        jobs++;
+    }
+
+    if (jobs > 0)
+        WriteQueueStateFile(QUEUE_STATE_FILE, text);
+    else
+        DeleteQueueStateFile(QUEUE_STATE_FILE);
+
+    free(text);
 }
 
 // ---------------------------------------------------------------------------
@@ -604,6 +676,10 @@ static void FinishJob(QueueJob &job, const JobResult &result, bool notify)
     CopyText(job.view.resultDetail, sizeof(job.view.resultDetail), result.detail);
     job.view.phase[0] = '\0';
     SyncView(job);
+
+    // One fewer job for the next run to pick up - unless this is the app
+    // closing, which SaveQueueStateLocked sits out.
+    SaveQueueStateLocked();
 }
 
 static DWORD WINAPI WorkerEntry(LPVOID)
@@ -869,6 +945,7 @@ static EnqueueResult Enqueue(QueueJobKind kind, const DlcRarMatch *pack, const T
     CopyText(job.view.title, sizeof(job.view.title), filename);
     job.view.fraction = -1.0f;
     SyncView(job);
+    SaveQueueStateLocked();
 
     LeaveCriticalSection(&g_lock);
 
@@ -895,6 +972,131 @@ EnqueueResult EnqueueHomebrew(const HomebrewJobSpec &spec)
     _snprintf(where, sizeof(where), "%s\\%s", spec.kindFolder, spec.folder);
     where[sizeof(where) - 1] = '\0';
     return Enqueue(QUEUE_JOB_HOMEBREW, NULL, NULL, where, 0, "", &spec);
+}
+
+// ---------------------------------------------------------------------------
+// Picking the queue back up
+// ---------------------------------------------------------------------------
+
+// One job's worth of what the file said, filled in a field at a time.
+struct RestoredJob
+{
+    int kind; // -1 until a "job=" line says
+    DlcRarMatch pack;
+    TitleUpdateMatch update;
+    HomebrewJobSpec homebrew;
+    char gameName[128];
+    unsigned long titleId;
+};
+
+static void StartRestored(RestoredJob &job, int kind)
+{
+    memset(&job, 0, sizeof(job));
+    job.kind = kind;
+}
+
+// Queues what one block of the file described. The jobs go back in the order
+// they were written, which is the order they were waiting in.
+static void QueueRestored(const RestoredJob &job, const char *authHeader, int *queued)
+{
+    EnqueueResult result = ENQUEUE_UNAVAILABLE;
+
+    if (job.kind == QUEUE_JOB_DLC_PACK && job.pack.filename[0] != '\0')
+        result = EnqueueDlcPack(job.pack, job.gameName, job.titleId, authHeader);
+    else if (job.kind == QUEUE_JOB_TITLE_UPDATE && job.update.filename[0] != '\0')
+        result = EnqueueTitleUpdate(job.update, job.gameName, job.titleId, authHeader);
+    else if (job.kind == QUEUE_JOB_HOMEBREW && job.homebrew.urlCount > 0)
+        result = EnqueueHomebrew(job.homebrew);
+    else
+        return;
+
+    if (result == ENQUEUE_ADDED)
+        (*queued)++;
+    else
+        dprintf("[queue] couldn't put a kept job back (%d)\n", (int)result);
+}
+
+void RestoreDownloadQueue(const char *authHeader)
+{
+    if (!g_running)
+        return;
+
+    char *text = ReadQueueStateFile(QUEUE_STATE_FILE);
+    if (text == NULL)
+        return;
+
+    RestoredJob job;
+    StartRestored(job, -1);
+
+    int queued = 0;
+    char *at = text, *key = NULL, *value = NULL;
+
+    while (NextQueueStateLine(&at, &key, &value))
+    {
+        // A "job=" line ends the one before it and starts the next.
+        if (strcmp(key, "job") == 0)
+        {
+            QueueRestored(job, authHeader, &queued);
+            StartRestored(job, strcmp(value, "dlc") == 0      ? (int)QUEUE_JOB_DLC_PACK
+                               : strcmp(value, "update") == 0 ? (int)QUEUE_JOB_TITLE_UPDATE
+                               : strcmp(value, "homebrew") == 0 ? (int)QUEUE_JOB_HOMEBREW
+                                                                : -1);
+            continue;
+        }
+
+        if (job.kind < 0)
+            continue; // the header, or a kind this build doesn't know
+
+        if (strcmp(key, "game") == 0)
+            CopyText(job.gameName, sizeof(job.gameName), value);
+        else if (strcmp(key, "titleid") == 0)
+            job.titleId = strtoul(value, NULL, 16);
+        else if (job.kind == QUEUE_JOB_DLC_PACK)
+        {
+            if (strcmp(key, "item") == 0)
+                CopyText(job.pack.item, sizeof(job.pack.item), value);
+            else if (strcmp(key, "only") == 0)
+                CopyText(job.pack.only, sizeof(job.pack.only), value);
+            else if (strcmp(key, "file") == 0)
+                CopyText(job.pack.filename, sizeof(job.pack.filename), value);
+            else if (strcmp(key, "size") == 0)
+                job.pack.size = _strtoui64(value, NULL, 10);
+            else if (strcmp(key, "score") == 0)
+                job.pack.score = atoi(value);
+        }
+        else if (job.kind == QUEUE_JOB_TITLE_UPDATE)
+        {
+            if (strcmp(key, "file") == 0)
+                CopyText(job.update.filename, sizeof(job.update.filename), value);
+            else if (strcmp(key, "size") == 0)
+                job.update.size = _strtoui64(value, NULL, 10);
+            else if (strcmp(key, "score") == 0)
+                job.update.score = atoi(value);
+            else if (strcmp(key, "ver") == 0)
+                job.update.version = atoi(value);
+            else if (strcmp(key, "region") == 0)
+                CopyText(job.update.region, sizeof(job.update.region), value);
+        }
+        else if (job.kind == QUEUE_JOB_HOMEBREW)
+        {
+            if (strcmp(key, "title") == 0)
+                CopyText(job.homebrew.title, sizeof(job.homebrew.title), value);
+            else if (strcmp(key, "kind") == 0)
+                CopyText(job.homebrew.kindFolder, sizeof(job.homebrew.kindFolder), value);
+            else if (strcmp(key, "folder") == 0)
+                CopyText(job.homebrew.folder, sizeof(job.homebrew.folder), value);
+            else if (strcmp(key, "mirror") == 0)
+                CopyText(job.homebrew.mirror, sizeof(job.homebrew.mirror), value);
+            else if (strcmp(key, "url") == 0 && job.homebrew.urlCount < HOMEBREW_MAX_URLS)
+                CopyText(job.homebrew.urls[job.homebrew.urlCount++], sizeof(job.homebrew.urls[0]), value);
+        }
+    }
+
+    QueueRestored(job, authHeader, &queued); // the last block has no "job=" after it
+    free(text);
+
+    if (queued > 0)
+        dprintf("[queue] picked %d job%s back up from last time\n", queued, queued == 1 ? "" : "s");
 }
 
 // Display order: active, then waiting by sequence, then finished newest first.

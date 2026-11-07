@@ -68,6 +68,11 @@ enum GameEnqueueResult
 // authHeader is copied into the job.
 GameEnqueueResult EnqueueGameInstall(const GameRequest &request, const char *authHeader);
 
+// Queues again whatever install was still to do when the app last closed -
+// see QueueState.h. Its download is still on the drive, so it carries on
+// rather than starting over. Call it once, after StartGameInstaller.
+void RestoreGameInstalls(const char *authHeader);
+
 // The active job first, then waiting ones in order, then finished, newest first.
 // A game job's snapshot has the zip's name as its title.
 int SnapshotGameJobs(QueueJobSnapshot *out, int maxJobs);
