@@ -15,23 +15,32 @@ DESCRIPTION : Tells a slow archive.org apart from a slow line, by measuring a
 #include <string.h>
 #include <stdarg.h>
 
-// A megabyte of nothing in particular, kept in the repository for this. The
-// contents API rather than raw.githubusercontent.com, for the same reason
-// Featured.cpp uses it: api.github.com is the host the update check already
-// trusts (USERTrust ECC, in TrustAnchors.h).
+// A megabyte of nothing in particular, kept in the repository for this.
+//
+// raw.githubusercontent.com rather than the contents API that Featured.cpp
+// uses: api.github.com allows 60 requests an hour from one address without a
+// token, and a long slow download would spend a fifth of that on probing,
+// on top of the update check and the featured fetch. Raw content isn't on
+// that limit. It chains to ISRG Root X1, already in TrustAnchors.h, so it
+// costs no new anchor.
 //
 // The file's bytes are random so that nothing in the path can usefully
 // compress it - we ask for identity encoding, and GitHub honours that, but a
 // megabyte that squeezed down to nothing would read as a fast line and the
 // mistake would be invisible.
-#define PROBE_URL    "https://api.github.com/repos/JustGillin/omni360/contents/probe.bin"
-#define PROBE_ACCEPT "Accept: application/vnd.github.raw+json\r\n"
+//
+// Worth knowing when reading a verdict: this is a CDN edge and usually
+// nearer than archive.org's one origin, so the comparison leans a little
+// towards naming archive.org. CLEARLY_FASTER is set wide enough to live
+// with that.
+#define PROBE_URL    "https://raw.githubusercontent.com/JustGillin/omni360/master/probe.bin"
+#define PROBE_ACCEPT ""
 #define PROBE_BYTES  (1024 * 1024)
 
 // The small file fetched first, to pay for DNS, the connect and the TLS
 // handshake before anything is timed. On this console the handshake is the
 // slow part of a short request, and it would swamp the measurement.
-#define WARM_URL    "https://api.github.com/repos/JustGillin/omni360/contents/featured.json"
+#define WARM_URL    "https://raw.githubusercontent.com/JustGillin/omni360/master/featured.json"
 #define WARM_ACCEPT PROBE_ACCEPT
 #define WARM_MAX    (64 * 1024)
 
