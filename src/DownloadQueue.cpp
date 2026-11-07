@@ -210,6 +210,16 @@ static void SaveQueueStateLocked()
 // Worker side - everything below until the public API runs on the worker
 // ---------------------------------------------------------------------------
 
+// Under the lock. Whether this job should stop what it is doing, for any
+// reason. Every progress callback asks this and nothing else: a callback
+// returning false is the only thing that stops a transfer, so one that tests
+// a flag of its own instead is a pause or a cancel that does nothing but
+// change the words on screen.
+static bool JobShouldStop(const QueueJob &job)
+{
+    return job.cancelRequested || job.pauseRequested || g_shutdown;
+}
+
 // Why the job in hand is stopping: for now - the app closing, or the user
 // pausing it - rather than for good. What a half-finished download leaves
 // behind turns on this, the same way a game install's staging does.
@@ -228,8 +238,7 @@ static bool ActiveJobStoppingForNow()
 static bool ActiveJobCancelled()
 {
     EnterCriticalSection(&g_lock);
-    bool cancelled = g_shutdown || (g_activeSlot >= 0 && (g_jobs[g_activeSlot].cancelRequested ||
-                                                          g_jobs[g_activeSlot].pauseRequested));
+    bool cancelled = g_shutdown || (g_activeSlot >= 0 && JobShouldStop(g_jobs[g_activeSlot]));
     LeaveCriticalSection(&g_lock);
     return cancelled;
 }
@@ -318,10 +327,7 @@ static bool WorkerDownloadProgress(unsigned long long bytesDone, unsigned long l
             SetJobProgress(job, ((float)job.fileIndex + withinFile) / (float)job.fileCount);
         }
 
-        if (job.kind == QUEUE_JOB_TITLE_UPDATE)
-            CopyText(job.view.phase, sizeof(job.view.phase), "Downloading");
-
-        keepGoing = !job.cancelRequested && !g_shutdown;
+        keepGoing = !JobShouldStop(job);
     }
     LeaveCriticalSection(&g_lock);
 
@@ -344,7 +350,7 @@ static bool WorkerListProgress(unsigned long long bytesScanned, unsigned long lo
     {
         QueueJob &job = g_jobs[g_activeSlot];
         SetJobProgress(job, (archiveSize > 0) ? (float)((double)bytesScanned / (double)archiveSize) : -1.0f);
-        keepGoing = !job.cancelRequested && !g_shutdown;
+        keepGoing = !JobShouldStop(job);
     }
     LeaveCriticalSection(&g_lock);
 

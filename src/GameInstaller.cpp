@@ -827,14 +827,18 @@ struct Download
     bool failed;
     int failStatus;
     const bool *cancel;
+    const bool *pause;        // the other way a job stops - see Stopping
     HANDLE pieceReady;        // auto-reset: a piece finished, or the download stopped
 };
 
 static Download *g_download = NULL;
 
+// The connections and the indexer ask this between every read, and nothing
+// else: a pause that isn't here is one that changes the words on screen and
+// leaves the download running.
 static bool Stopping(const Download *d)
 {
-    return d->failed || *d->cancel || g_shutdown;
+    return d->failed || *d->cancel || *d->pause || g_shutdown;
 }
 
 // The HTTP client's progress, for whichever connection is calling: the bytes
@@ -1256,7 +1260,7 @@ static bool ConvertProgressFn(unsigned long long done, unsigned long long total,
     SetPhase(p->job, GAME_STEP_INSTALLING, "Installing", done, total, ms > 3000 ? done * 1000 / ms : 0);
 
     EnterCriticalSection(&g_lock);
-    bool keepGoing = !p->job->cancel && !g_shutdown;
+    bool keepGoing = !p->job->cancel && !p->job->pause && !g_shutdown;
     LeaveCriticalSection(&g_lock);
     return keepGoing;
 }
@@ -1875,6 +1879,7 @@ static void RunJob(GameJob *job, const char *gamesPath)
     d.failed = false;
     d.failStatus = 0;
     d.cancel = &job->cancel;
+    d.pause = &job->pause;
     d.pieceReady = CreateEvent(NULL, FALSE, FALSE, NULL);
     for (int i = 0; i < CONNECTIONS; ++i)
     {
