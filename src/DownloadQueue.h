@@ -145,6 +145,13 @@ EnqueueResult EnqueueTitleUpdate(const TitleUpdateMatch &update, const char *gam
 // does - and deleted. With a mirror ("http://192.168.1.10:8000"), each
 // archive is fetched from there by its file name instead of from its URL -
 // for testing against a folder of them served over the LAN.
+//
+// An archive stopped part way through is kept, under a name of its own taken
+// from its URL, and queueing that homebrew again asks consolemods.org for
+// the rest with a Range request instead of fetching all of it again. The
+// largest of them is 287 MB. A cancel throws the part away; a pause, the app
+// closing or a dropped connection keep it. The LAN mirror always starts over
+// - its client has no Range, and over the LAN it doesn't need one.
 #define HOMEBREW_MAX_URLS 4
 
 struct HomebrewJobSpec

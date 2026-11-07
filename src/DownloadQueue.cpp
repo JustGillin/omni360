@@ -12,6 +12,7 @@ DESCRIPTION : the download queue - DLC packs and title updates, installed one
 #include "SevenZip.h"
 #include "QueueState.h"   // the jobs, kept between runs
 #include "OutputConsole.h"
+#include "zlib/zlib.h"    // crc32, to name a download's staging file
 
 #include <xtl.h>
 #include <stdio.h>
@@ -209,6 +210,18 @@ static void SaveQueueStateLocked()
 // Worker side - everything below until the public API runs on the worker
 // ---------------------------------------------------------------------------
 
+// Why the job in hand is stopping: for now - the app closing, or the user
+// pausing it - rather than for good. What a half-finished download leaves
+// behind turns on this, the same way a game install's staging does.
+static bool ActiveJobStoppingForNow()
+{
+    EnterCriticalSection(&g_lock);
+    const bool forNow = g_shutdown || (g_activeSlot >= 0 && g_jobs[g_activeSlot].pauseRequested &&
+                                       !g_jobs[g_activeSlot].cancelRequested);
+    LeaveCriticalSection(&g_lock);
+    return forNow;
+}
+
 // True once the job in hand should stop, whether for good or for now: a
 // pause stops the transfer exactly as a cancel does, and FinishJob is where
 // the two part company.
@@ -271,10 +284,20 @@ static void SetActivePhase(const char *phase, int step, int stepCount, int fileI
 // From downloadFile.cpp's read loop, about every 100ms. Kept to a few stores
 // under the lock - this runs between socket reads, so anything slow here
 // costs download speed.
+// A resumed transfer reports only the range it asked for. This is what was
+// already on the drive before it started, added back so the bar carries on
+// from where it stopped rather than starting over. Worker-only, like
+// everything else in this section, and zero for a transfer from the start.
+static unsigned long long g_progressBase = 0;
+
 static bool WorkerDownloadProgress(unsigned long long bytesDone, unsigned long long bytesTotal,
                                    unsigned long long bytesPerSec, unsigned long long secondsRemaining)
 {
     bool keepGoing = true;
+
+    bytesDone += g_progressBase;
+    if (bytesTotal > 0)
+        bytesTotal += g_progressBase;
 
     EnterCriticalSection(&g_lock);
     if (g_activeSlot >= 0)
@@ -583,17 +606,51 @@ static const char *UrlFileName(const char *url)
     return slash != NULL ? slash + 1 : url;
 }
 
+static unsigned long long FileSizeOf(const char *path)
+{
+    WIN32_FILE_ATTRIBUTE_DATA attrs;
+    if (!GetFileAttributesExA(path, GetFileExInfoStandard, &attrs))
+        return 0;
+    return ((unsigned long long)attrs.nFileSizeHigh << 32) | attrs.nFileSizeLow;
+}
+
+// Where one archive's download waits. A name of its own, from the URL, so a
+// partial left behind can never be taken for another archive's - including
+// the next part of this same install, which used to share the one name.
+// FATX allows 42 characters, which these file names go past, so it is the
+// URL's checksum rather than its name.
+static void HomebrewStagingPath(const char *kindFolder, const char *url, char *out, size_t outSize)
+{
+    unsigned long key = crc32(0L, Z_NULL, 0);
+    key = crc32(key, (const Bytef *)url, (uInt)strlen(url));
+    _snprintf(out, outSize, "%s\\Omni360-%08lX.7z", kindFolder, key);
+    out[outSize - 1] = '\0';
+}
+
 // Each archive downloaded beside where it's going, unpacked, and deleted.
+//
+// A download that stops part way is kept, and the next run of the job asks
+// ConsoleMods for the rest with a Range request rather than fetching the
+// whole thing again - measured at 287 MB for the largest of them, which is a
+// couple of minutes at the speed these consoles get. consolemods.org answers
+// a Range request with a 206 and the right Content-Range, so this is a plain
+// resume; the LAN test mirror's client has none, and a folder served over
+// the LAN doesn't need one.
 static void RunHomebrew(const QueueJob &job, JobResult &result)
 {
     const HomebrewJobSpec &hb = job.homebrew;
     char archive[600], dest[600];
-    _snprintf(archive, sizeof(archive), "%s\\Omni360-download.7z", hb.kindFolder);
-    archive[sizeof(archive) - 1] = '\0';
     _snprintf(dest, sizeof(dest), "%s\\%s", hb.kindFolder, hb.folder);
     dest[sizeof(dest) - 1] = '\0';
     CreateDirectoryA(hb.kindFolder, NULL); // the first install of its kind; already there is fine
     int skippedNames = 0;
+
+    // Before these had a name each, every homebrew download went through one
+    // shared "Omni360-download.7z". A build from then that stopped part way
+    // left one behind that nothing will ever pick up.
+    _snprintf(archive, sizeof(archive), "%s\\Omni360-download.7z", hb.kindFolder);
+    archive[sizeof(archive) - 1] = '\0';
+    remove(archive);
 
     for (int i = 0; i < hb.urlCount; ++i)
     {
@@ -613,14 +670,69 @@ static void RunHomebrew(const QueueJob &job, JobResult &result)
         SetActivePhase(phase, 0, 1, i, hb.urlCount, (float)i / (float)hb.urlCount);
 
         dprintf("[homebrew] %s: %s\n", hb.title, url);
-        const int status = (_strnicmp(url, "http://", 7) == 0)
-                               ? HttpDownloadPlain(url, archive, WorkerDownloadProgress)
-                               : httpRequestHTTPS(url, HTTP_GET, NULL, NULL, archive, NULL, NULL, true, NULL, 0,
-                                                  dprintf, 0, WorkerDownloadProgress);
-        if (status != 200)
+        HomebrewStagingPath(hb.kindFolder, hb.urls[i], archive, sizeof(archive));
+
+        int status = 0;
+        if (_strnicmp(url, "http://", 7) == 0)
         {
+            // The LAN mirror: no Range, so always from the start.
             remove(archive);
-            if (status == HTTP_STATUS_CANCELLED || ActiveJobCancelled())
+            status = HttpDownloadPlain(url, archive, WorkerDownloadProgress);
+        }
+        else
+        {
+            const unsigned long long staged = FileSizeOf(archive);
+            char range[64];
+
+            if (staged > 0)
+            {
+                _snprintf(range, sizeof(range), "Range: bytes=%I64u-\r\n", staged);
+                range[sizeof(range) - 1] = '\0';
+                dprintf("[homebrew] %I64u bytes of %s are already here - asking for the rest\n", staged,
+                        UrlFileName(url));
+            }
+
+            g_progressBase = staged; // so the bar carries on rather than restarting
+            status = httpRequestHTTPS(url, HTTP_GET, NULL, staged > 0 ? range : NULL, archive, NULL, NULL, true,
+                                      NULL, 0, dprintf, 0, WorkerDownloadProgress, staged > 0);
+            g_progressBase = 0;
+
+            // 416 is the server saying there is nothing past what's here:
+            // the archive was already whole when it stopped, and only the
+            // unpacking is left. Anything else that isn't the range asked
+            // for - a server that ignored Range and answered 200, which
+            // httpRequestHTTPS refuses to append over a partial file -
+            // starts the download over, once.
+            if (staged > 0 && status == 416)
+            {
+                dprintf("[homebrew] %s was already complete\n", UrlFileName(url));
+                status = 200;
+            }
+            else if (staged > 0 && status != 200 && status != 206 && status != HTTP_STATUS_CANCELLED &&
+                     !ActiveJobCancelled())
+            {
+                dprintf("[homebrew] couldn't carry on (status %d) - fetching %s from the start\n", status,
+                        UrlFileName(url));
+                remove(archive);
+                status = httpRequestHTTPS(url, HTTP_GET, NULL, NULL, archive, NULL, NULL, true, NULL, 0, dprintf, 0,
+                                          WorkerDownloadProgress);
+            }
+        }
+
+        if (status != 200 && status != 206)
+        {
+            // What came down is kept unless the user gave up on it, or the
+            // server says this URL will never deliver: a pause, the app
+            // closing or a dropped connection all leave a partial the next
+            // run carries on from.
+            const bool cancelled = (status == HTTP_STATUS_CANCELLED || ActiveJobCancelled());
+            if (status == 403 || status == 404 || (cancelled && !ActiveJobStoppingForNow()))
+                remove(archive);
+            else
+                dprintf("[homebrew] keeping %I64u bytes of %s for next time\n", FileSizeOf(archive),
+                        UrlFileName(url));
+
+            if (cancelled)
             {
                 SetResult(result, QUEUE_OUTCOME_CANCELLED, "Cancelled",
                           i == 0 ? "Nothing was installed." : "Its first parts are installed.");
@@ -648,12 +760,20 @@ static void RunHomebrew(const QueueJob &job, JobResult &result)
         int leftOut = 0;
         const SevenZipResult unpacked = ExtractSevenZip(archive, dest, hb.folder, WorkerUnpackProgress, &leftOut);
         skippedNames += leftOut;
-        remove(archive);
+
         if (unpacked == SEVEN_ZIP_CANCELLED)
         {
+            // Stopped during the unpacking, with the whole archive on the
+            // drive. Set aside for now, that is worth keeping: carrying on
+            // asks for a range past its end, is told 416, and unpacks what is
+            // already here without fetching any of it again.
+            if (!ActiveJobStoppingForNow())
+                remove(archive);
             SetResult(result, QUEUE_OUTCOME_CANCELLED, "Cancelled", "Some of its files may already be there.");
             return;
         }
+
+        remove(archive); // unpacked, or no good - either way it is spent
         if (unpacked != SEVEN_ZIP_OK)
         {
             char detail[160];
