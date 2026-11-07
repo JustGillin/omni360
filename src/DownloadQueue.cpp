@@ -37,7 +37,8 @@ struct QueueJob
     QueueJobState state;
     QueueOutcome outcome;
     bool cancelRequested;
-    bool handedOver; // finished, and already returned by TakeFinishedQueueJob
+    bool pauseRequested; // stop like a cancel, but keep the job - see FinishJob
+    bool handedOver;     // finished, and already returned by TakeFinishedQueueJob
 
     DlcRarMatch pack;          // QUEUE_JOB_DLC_PACK
     TitleUpdateMatch update;   // QUEUE_JOB_TITLE_UPDATE
@@ -158,6 +159,10 @@ static void SaveQueueStateLocked()
         if (!job.used || job.state == QUEUE_FINISHED)
             continue;
 
+        // pauseRequested counts as paused even before the transfer has
+        // noticed: the app closing in between must not restart it.
+        const int paused = (job.state == QUEUE_PAUSED || job.pauseRequested) ? 1 : 0;
+
         if (job.kind == QUEUE_JOB_DLC_PACK)
         {
             AppendQueueStateText(text, QUEUE_STATE_MAX, &at,
@@ -186,6 +191,9 @@ static void SaveQueueStateLocked()
             continue; // disc and game installs are their own workers' to keep
         }
 
+        if (paused)
+            AppendQueueStateText(text, QUEUE_STATE_MAX, &at, "paused=1\n");
+
         jobs++;
     }
 
@@ -201,10 +209,14 @@ static void SaveQueueStateLocked()
 // Worker side - everything below until the public API runs on the worker
 // ---------------------------------------------------------------------------
 
+// True once the job in hand should stop, whether for good or for now: a
+// pause stops the transfer exactly as a cancel does, and FinishJob is where
+// the two part company.
 static bool ActiveJobCancelled()
 {
     EnterCriticalSection(&g_lock);
-    bool cancelled = g_shutdown || (g_activeSlot >= 0 && g_jobs[g_activeSlot].cancelRequested);
+    bool cancelled = g_shutdown || (g_activeSlot >= 0 && (g_jobs[g_activeSlot].cancelRequested ||
+                                                          g_jobs[g_activeSlot].pauseRequested));
     LeaveCriticalSection(&g_lock);
     return cancelled;
 }
@@ -239,7 +251,12 @@ static void SetActivePhase(const char *phase, int step, int stepCount, int fileI
         QueueJob &job = g_jobs[g_activeSlot];
         job.fileIndex = fileIndex;
         job.fileCount = fileCount;
-        CopyText(job.view.phase, sizeof(job.view.phase), phase);
+
+        // Asked to pause, and the transfer hasn't come back round to noticing
+        // yet. Say so, rather than go on reporting a download the user has
+        // already stopped.
+        CopyText(job.view.phase, sizeof(job.view.phase),
+                 (job.pauseRequested && !job.cancelRequested) ? "Pausing" : phase);
         job.view.bytesDone = 0;
         job.view.bytesTotal = 0;
         job.view.bytesPerSec = 0;
@@ -667,6 +684,20 @@ static void RunHomebrew(const QueueJob &job, JobResult &result)
 // themselves, nor for the jobs failed alongside a refused one.
 static void FinishJob(QueueJob &job, const JobResult &result, bool notify)
 {
+    // A pause stopped the transfer the same way a cancel would, but the job
+    // isn't over: it goes back to the queue to wait for the word. Decided
+    // here, under the lock, so no frame of the UI ever sees it finished -
+    // one that did would raise a popup for a download that is only resting.
+    if (result.outcome == QUEUE_OUTCOME_CANCELLED && job.pauseRequested && !job.cancelRequested && !g_shutdown)
+    {
+        job.state = QUEUE_PAUSED;
+        job.view.phase[0] = '\0';
+        job.view.fraction = -1.0f;
+        SyncView(job);
+        SaveQueueStateLocked();
+        return;
+    }
+
     job.state = QUEUE_FINISHED;
     job.outcome = result.outcome;
     job.finishedSeq = g_nextFinishedSeq++;
@@ -893,9 +924,11 @@ static int FreeSlot()
     return oldestFinished;
 }
 
+// paused is for jobs coming back from a previous run that were set aside
+// then: everything else is queued ready to run.
 static EnqueueResult Enqueue(QueueJobKind kind, const DlcRarMatch *pack, const TitleUpdateMatch *update,
                              const char *gameName, unsigned long titleId, const char *authHeader,
-                             const HomebrewJobSpec *homebrew = NULL)
+                             const HomebrewJobSpec *homebrew = NULL, bool paused = false)
 {
     if (!g_running)
         return ENQUEUE_UNAVAILABLE;
@@ -929,7 +962,8 @@ static EnqueueResult Enqueue(QueueJobKind kind, const DlcRarMatch *pack, const T
     job.id = g_nextId++;
     job.sequence = g_nextSequence++;
     job.kind = kind;
-    job.state = QUEUE_WAITING;
+    job.state = paused ? QUEUE_PAUSED : QUEUE_WAITING;
+    job.pauseRequested = paused;
     job.outcome = QUEUE_OUTCOME_NONE;
 
     if (pack != NULL)
@@ -965,13 +999,18 @@ EnqueueResult EnqueueTitleUpdate(const TitleUpdateMatch &update, const char *gam
     return Enqueue(QUEUE_JOB_TITLE_UPDATE, NULL, &update, gameName, titleId, authHeader);
 }
 
-EnqueueResult EnqueueHomebrew(const HomebrewJobSpec &spec)
+static EnqueueResult EnqueueHomebrewSpec(const HomebrewJobSpec &spec, bool paused)
 {
     // The row's second line: where it's going.
     char where[600];
     _snprintf(where, sizeof(where), "%s\\%s", spec.kindFolder, spec.folder);
     where[sizeof(where) - 1] = '\0';
-    return Enqueue(QUEUE_JOB_HOMEBREW, NULL, NULL, where, 0, "", &spec);
+    return Enqueue(QUEUE_JOB_HOMEBREW, NULL, NULL, where, 0, "", &spec, paused);
+}
+
+EnqueueResult EnqueueHomebrew(const HomebrewJobSpec &spec)
+{
+    return EnqueueHomebrewSpec(spec, false);
 }
 
 // ---------------------------------------------------------------------------
@@ -987,6 +1026,7 @@ struct RestoredJob
     HomebrewJobSpec homebrew;
     char gameName[128];
     unsigned long titleId;
+    bool paused;
 };
 
 static void StartRestored(RestoredJob &job, int kind)
@@ -1002,11 +1042,12 @@ static void QueueRestored(const RestoredJob &job, const char *authHeader, int *q
     EnqueueResult result = ENQUEUE_UNAVAILABLE;
 
     if (job.kind == QUEUE_JOB_DLC_PACK && job.pack.filename[0] != '\0')
-        result = EnqueueDlcPack(job.pack, job.gameName, job.titleId, authHeader);
+        result = Enqueue(QUEUE_JOB_DLC_PACK, &job.pack, NULL, job.gameName, job.titleId, authHeader, NULL, job.paused);
     else if (job.kind == QUEUE_JOB_TITLE_UPDATE && job.update.filename[0] != '\0')
-        result = EnqueueTitleUpdate(job.update, job.gameName, job.titleId, authHeader);
+        result = Enqueue(QUEUE_JOB_TITLE_UPDATE, NULL, &job.update, job.gameName, job.titleId, authHeader, NULL,
+                         job.paused);
     else if (job.kind == QUEUE_JOB_HOMEBREW && job.homebrew.urlCount > 0)
-        result = EnqueueHomebrew(job.homebrew);
+        result = EnqueueHomebrewSpec(job.homebrew, job.paused);
     else
         return;
 
@@ -1051,6 +1092,8 @@ void RestoreDownloadQueue(const char *authHeader)
             CopyText(job.gameName, sizeof(job.gameName), value);
         else if (strcmp(key, "titleid") == 0)
             job.titleId = strtoul(value, NULL, 16);
+        else if (strcmp(key, "paused") == 0)
+            job.paused = (atoi(value) != 0);
         else if (job.kind == QUEUE_JOB_DLC_PACK)
         {
             if (strcmp(key, "item") == 0)
@@ -1106,7 +1149,8 @@ static int DisplayRank(const QueueJob &job)
     {
     case QUEUE_ACTIVE:  return 0;
     case QUEUE_WAITING: return 1;
-    default:            return 2;
+    case QUEUE_PAUSED:  return 2; // still the queue's, just not moving
+    default:            return 3; // finished
     }
 }
 
@@ -1115,7 +1159,7 @@ static bool ListsBefore(const QueueJob &a, const QueueJob &b)
     int ra = DisplayRank(a), rb = DisplayRank(b);
     if (ra != rb)
         return ra < rb;
-    if (ra == 2)
+    if (ra == 3)
         return a.finishedSeq > b.finishedSeq;
     return a.sequence < b.sequence;
 }
@@ -1187,20 +1231,98 @@ void CancelQueueJob(int id)
         if (!job.used || job.id != id)
             continue;
 
-        if (job.state == QUEUE_WAITING)
+        // Set first, and in every case: it is what tells FinishJob this is a
+        // cancel rather than a pause, for a job that was paused already.
+        job.cancelRequested = true;
+
+        if (job.state == QUEUE_WAITING || job.state == QUEUE_PAUSED)
         {
-            // Never started, so it can finish right here.
+            // Never started, or not running now, so it can finish right here.
             JobResult result;
             SetResult(result, QUEUE_OUTCOME_CANCELLED, "Cancelled", "Nothing was installed.");
             FinishJob(job, result, false);
         }
-        else if (job.state == QUEUE_ACTIVE)
+        break; // an active job's worker finishes it
+    }
+    LeaveCriticalSection(&g_lock);
+}
+
+void PauseQueueJob(int id)
+{
+    if (!g_running)
+        return;
+
+    EnterCriticalSection(&g_lock);
+    for (int i = 0; i < MAX_QUEUE_JOBS; ++i)
+    {
+        QueueJob &job = g_jobs[i];
+        if (!job.used || job.id != id || job.state == QUEUE_FINISHED || job.state == QUEUE_PAUSED)
+            continue;
+
+        job.pauseRequested = true;
+
+        if (job.state == QUEUE_WAITING)
         {
-            job.cancelRequested = true; // the worker finishes it
+            // Nothing is in flight, so it is paused as of now.
+            job.state = QUEUE_PAUSED;
+            job.view.fraction = -1.0f;
+            SyncView(job);
+            SaveQueueStateLocked();
+        }
+        else
+        {
+            // The transfer stops at its next progress report; until then it
+            // is still downloading, and the row says so rather than claiming
+            // a pause that hasn't happened yet. FinishJob sets the state.
+            CopyText(job.view.phase, sizeof(job.view.phase), "Pausing");
+            SaveQueueStateLocked(); // saved as paused in case the app closes meanwhile
         }
         break;
     }
     LeaveCriticalSection(&g_lock);
+}
+
+void ResumeQueueJob(int id)
+{
+    if (!g_running)
+        return;
+
+    bool woken = false;
+
+    EnterCriticalSection(&g_lock);
+    for (int i = 0; i < MAX_QUEUE_JOBS; ++i)
+    {
+        QueueJob &job = g_jobs[i];
+        if (!job.used || job.id != id)
+            continue;
+
+        if (job.state == QUEUE_PAUSED)
+        {
+            job.pauseRequested = false;
+            job.state = QUEUE_WAITING;
+
+            // Back of the queue, not its old place: the jobs that waited
+            // their turn all along shouldn't be overtaken by one that was
+            // set aside.
+            job.sequence = g_nextSequence++;
+            SyncView(job);
+            SaveQueueStateLocked();
+            woken = true;
+        }
+        else if (job.state == QUEUE_ACTIVE && job.pauseRequested)
+        {
+            // Changed their mind before the transfer noticed - it never
+            // stopped, so there is nothing to start again.
+            job.pauseRequested = false;
+            job.view.phase[0] = '\0';
+            SaveQueueStateLocked();
+        }
+        break;
+    }
+    LeaveCriticalSection(&g_lock);
+
+    if (woken)
+        SetEvent(g_wake);
 }
 
 void RemoveQueueJob(int id)

@@ -92,6 +92,13 @@ bool GameZipInstalledAs(const char *zipName, unsigned long *outTitleId, unsigned
 void ForgetInstalledZip(const char *zipName);
 int PendingGameJobCount();
 void CancelGameJob(int id);
+
+// Sets an install aside without giving it up: the download stops like a
+// cancel, but its pieces are kept and the job stays in the queue, paused
+// across a restart too. Resuming puts it back to waiting, and it carries on
+// from the pieces rather than starting over.
+void PauseGameJob(int id);
+void ResumeGameJob(int id);
 void RemoveGameJob(int id);
 bool TakeFinishedGameJob(QueueJobSnapshot *out);
 

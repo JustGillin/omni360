@@ -50,6 +50,7 @@ struct GameJob
     GameRequest request;
     char auth[AUTH_MAX];
     bool cancel;
+    bool pause; // stop like a cancel, but keep the job and its pieces
     bool handedOver;
 };
 
@@ -368,6 +369,12 @@ static void SaveInstallStateLocked()
         AppendQueueStateText(text, sizeof(text), &at, "job=game\nitem=%s\nfile=%s\nsize=%I64u\nname=%s\ntitleid=%08lX\n",
                              job.request.item, job.request.zipName, job.request.zipSize, job.request.name,
                              job.request.titleId);
+
+        // job.pause counts as paused even before the download has noticed:
+        // the app closing in between must not restart it.
+        if (job.snap.state == QUEUE_PAUSED || (job.pause && !job.cancel))
+            AppendQueueStateText(text, sizeof(text), &at, "paused=1\n");
+
         jobs++;
     }
 
@@ -1173,6 +1180,21 @@ static DWORD WINAPI ConnectionEntry(LPVOID param)
 static void Finish(GameJob *job, QueueOutcome outcome, const char *text, const char *detail, bool notify)
 {
     QueueJobSnapshot &s = job->snap;
+
+    // A pause stopped the download the same way a cancel would, but the
+    // install isn't over: it goes back to the queue to wait for the word.
+    // Decided here, under the lock, so no frame of the UI ever sees it
+    // finished - one that did would raise a popup for an install that is only
+    // resting, and TakeFinishedGameJob would hand it over as done.
+    if (outcome == QUEUE_OUTCOME_CANCELLED && job->pause && !job->cancel && !g_shutdown)
+    {
+        s.state = QUEUE_PAUSED;
+        s.phase[0] = '\0';
+        s.fraction = -1.0f;
+        SaveInstallStateLocked();
+        return;
+    }
+
     s.state = QUEUE_FINISHED;
     s.outcome = outcome;
     s.notify = notify;
@@ -1204,7 +1226,11 @@ static void SetPhase(GameJob *job, GameStep step, const char *phase, unsigned lo
 {
     EnterCriticalSection(&g_lock);
     QueueJobSnapshot &s = job->snap;
-    _snprintf(s.phase, sizeof(s.phase), "%s", phase);
+
+    // Asked to pause, and the connections haven't come back round to
+    // noticing yet - one stalled can take STALL_TIMEOUT_MS. Say so, rather
+    // than go on reporting a download the user has already stopped.
+    _snprintf(s.phase, sizeof(s.phase), "%s", (job->pause && !job->cancel) ? "Pausing" : phase);
     s.phase[sizeof(s.phase) - 1] = '\0';
     s.bytesDone = done;
     s.bytesTotal = total;
@@ -1242,12 +1268,25 @@ static void FinishLocked(GameJob *job, QueueOutcome outcome, const char *text, c
     LeaveCriticalSection(&g_lock);
 }
 
+// True once the install in hand should stop, whether for good or for now: a
+// pause stops the download exactly as a cancel does, and Finish is where the
+// two part company.
 static bool Cancelled(GameJob *job)
 {
     EnterCriticalSection(&g_lock);
-    bool c = job->cancel || g_shutdown;
+    bool c = job->cancel || job->pause || g_shutdown;
     LeaveCriticalSection(&g_lock);
     return c;
+}
+
+// Set aside by the user, rather than given up on. Like the app closing, it
+// keeps what has been downloaded - see EndStaging.
+static bool Paused(GameJob *job)
+{
+    EnterCriticalSection(&g_lock);
+    const bool paused = job->pause && !job->cancel;
+    LeaveCriticalSection(&g_lock);
+    return paused;
 }
 
 // The app closing, rather than this job being stopped. The two arrive the
@@ -2010,12 +2049,12 @@ static void RunJob(GameJob *job, const char *gamesPath)
                     indexer->Finished() ? 1 : 0, indexer->Out(), member.unpacked, indexer->Crc(), member.crc);
         delete indexer;
 
-        // The app closing keeps what's downloaded; the user stopping it
-        // doesn't. A download that simply failed - archive.org stopping, the
-        // keys refused - keeps it too, as it was good as far as it got; one
-        // that arrived whole and then failed its checksum does not, as its
-        // bytes are the problem.
-        EndStaging(dir, !compressedRar && (cancelled ? ClosingDown() : !indexOk));
+        // The app closing keeps what's downloaded, and so does a pause - the
+        // whole point of one. The user stopping it doesn't. A download that
+        // simply failed - archive.org stopping, the keys refused - keeps it
+        // too, as it was good as far as it got; one that arrived whole and
+        // then failed its checksum does not, as its bytes are the problem.
+        EndStaging(dir, !compressedRar && (cancelled ? (ClosingDown() || Paused(job)) : !indexOk));
 
         if (cancelled)
             FinishLocked(job, QUEUE_OUTCOME_CANCELLED, "Stopped", "Nothing was installed.", false);
@@ -2125,7 +2164,7 @@ static void RunJob(GameJob *job, const char *gamesPath)
     // long part.
     free(points);
     EndStaging(dir, !compressedRar && (result == GOD_WRITE_FAILED ||
-                                       (result == GOD_CANCELLED && ClosingDown())));
+                                       (result == GOD_CANCELLED && (ClosingDown() || Paused(job)))));
 
     if (result == GOD_OK)
     {
@@ -2260,7 +2299,9 @@ void SetGameInstallerGamesPath(const char *gamesPath)
         LeaveCriticalSection(&g_lock);
 }
 
-GameEnqueueResult EnqueueGameInstall(const GameRequest &request, const char *authHeader)
+// paused is for an install coming back from a previous run that was set aside
+// then: everything else is queued ready to run.
+static GameEnqueueResult EnqueueGame(const GameRequest &request, const char *authHeader, bool paused)
 {
     if (!g_running)
         return GAME_INSTALLER_UNAVAILABLE;
@@ -2299,7 +2340,8 @@ GameEnqueueResult EnqueueGameInstall(const GameRequest &request, const char *aut
         strncpy(job.auth, authHeader != NULL ? authHeader : "", sizeof(job.auth) - 1);
         job.snap.id = g_nextId++;
         job.snap.kind = QUEUE_JOB_GAME_INSTALL;
-        job.snap.state = QUEUE_WAITING;
+        job.snap.state = paused ? QUEUE_PAUSED : QUEUE_WAITING;
+        job.pause = paused;
         job.snap.titleId = request.titleId;
         job.snap.fraction = -1.0f;
         _snprintf(job.snap.gameName, sizeof(job.snap.gameName), "%s", request.name);
@@ -2313,6 +2355,11 @@ GameEnqueueResult EnqueueGameInstall(const GameRequest &request, const char *aut
     if (result == GAME_QUEUED)
         SetEvent(g_wake);
     return result;
+}
+
+GameEnqueueResult EnqueueGameInstall(const GameRequest &request, const char *authHeader)
+{
+    return EnqueueGame(request, authHeader, false);
 }
 
 // Queues again whatever install was still to do when the app last closed.
@@ -2330,6 +2377,7 @@ void RestoreGameInstalls(const char *authHeader)
     GameRequest request;
     memset(&request, 0, sizeof(request));
     bool inJob = false;
+    bool paused = false;
     int queued = 0;
 
     char *at = text, *key = NULL, *value = NULL;
@@ -2338,9 +2386,10 @@ void RestoreGameInstalls(const char *authHeader)
         // A "job=" line ends the one before it and starts the next.
         if (strcmp(key, "job") == 0)
         {
-            if (inJob && request.zipName[0] != '\0' && EnqueueGameInstall(request, authHeader) == GAME_QUEUED)
+            if (inJob && request.zipName[0] != '\0' && EnqueueGame(request, authHeader, paused) == GAME_QUEUED)
                 queued++;
             memset(&request, 0, sizeof(request));
+            paused = false;
             inJob = (strcmp(value, "game") == 0);
             continue;
         }
@@ -2358,13 +2407,15 @@ void RestoreGameInstalls(const char *authHeader)
             _snprintf(request.name, sizeof(request.name), "%s", value);
         else if (strcmp(key, "titleid") == 0)
             request.titleId = strtoul(value, NULL, 16);
+        else if (strcmp(key, "paused") == 0)
+            paused = (atoi(value) != 0);
 
         request.item[sizeof(request.item) - 1] = '\0';
         request.zipName[sizeof(request.zipName) - 1] = '\0';
         request.name[sizeof(request.name) - 1] = '\0';
     }
 
-    if (inJob && request.zipName[0] != '\0' && EnqueueGameInstall(request, authHeader) == GAME_QUEUED)
+    if (inJob && request.zipName[0] != '\0' && EnqueueGame(request, authHeader, paused) == GAME_QUEUED)
         queued++; // the last block has no "job=" after it
 
     free(text);
@@ -2383,6 +2434,9 @@ int SnapshotGameJobs(QueueJobSnapshot *out, int maxJobs)
     for (int i = NextJob(QUEUE_ACTIVE, 0, false); i >= 0 && n < maxJobs; i = NextJob(QUEUE_ACTIVE, g_jobs[i].snap.id, false))
         out[n++] = g_jobs[i].snap;
     for (int i = NextJob(QUEUE_WAITING, 0, false); i >= 0 && n < maxJobs; i = NextJob(QUEUE_WAITING, g_jobs[i].snap.id, false))
+        out[n++] = g_jobs[i].snap;
+    // After the ones still going, before the ones that are over.
+    for (int i = NextJob(QUEUE_PAUSED, 0, false); i >= 0 && n < maxJobs; i = NextJob(QUEUE_PAUSED, g_jobs[i].snap.id, false))
         out[n++] = g_jobs[i].snap;
     for (int i = NextJob(QUEUE_FINISHED, 0x7FFFFFFF, true); i >= 0 && n < maxJobs; i = NextJob(QUEUE_FINISHED, g_jobs[i].snap.id, true))
         out[n++] = g_jobs[i].snap;
@@ -2414,11 +2468,102 @@ void CancelGameJob(int id)
     EnterCriticalSection(&g_lock);
     for (int i = 0; i < MAX_GAME_JOBS; ++i)
     {
-        if (g_jobs[i].used && g_jobs[i].snap.id == id && g_jobs[i].snap.state != QUEUE_FINISHED)
-            g_jobs[i].cancel = true;
+        GameJob &job = g_jobs[i];
+        if (!job.used || job.snap.id != id || job.snap.state == QUEUE_FINISHED)
+            continue;
+
+        job.cancel = true;
+
+        // A paused job has no worker to notice - it finishes here. Its
+        // download goes with it, as any cancelled one's does.
+        if (job.snap.state == QUEUE_PAUSED)
+        {
+            char root[300], dir[320];
+            StagingRoot(g_gamesPath, root, sizeof(root));
+            StagingDirFor(root, job.request, dir, sizeof(dir));
+            Finish(&job, QUEUE_OUTCOME_CANCELLED, "Stopped", "Nothing was installed.", false);
+            LeaveCriticalSection(&g_lock);
+            DiscardStaging(dir);
+            SetEvent(g_wake);
+            return;
+        }
     }
     LeaveCriticalSection(&g_lock);
     SetEvent(g_wake);
+}
+
+void PauseGameJob(int id)
+{
+    if (!g_running)
+        return;
+
+    EnterCriticalSection(&g_lock);
+    for (int i = 0; i < MAX_GAME_JOBS; ++i)
+    {
+        GameJob &job = g_jobs[i];
+        if (!job.used || job.snap.id != id || job.snap.state == QUEUE_FINISHED ||
+            job.snap.state == QUEUE_PAUSED)
+            continue;
+
+        job.pause = true;
+
+        if (job.snap.state == QUEUE_WAITING)
+        {
+            // Nothing is in flight, so it is paused as of now.
+            job.snap.state = QUEUE_PAUSED;
+            job.snap.fraction = -1.0f;
+            SaveInstallStateLocked();
+        }
+        else
+        {
+            // The connections stop at their next progress report; until then
+            // it is still downloading, and the row says so rather than
+            // claiming a pause that hasn't happened yet. Finish sets the
+            // state.
+            _snprintf(job.snap.phase, sizeof(job.snap.phase), "%s", "Pausing");
+            job.snap.phase[sizeof(job.snap.phase) - 1] = '\0';
+            SaveInstallStateLocked(); // saved as paused in case the app closes meanwhile
+        }
+        break;
+    }
+    LeaveCriticalSection(&g_lock);
+}
+
+void ResumeGameJob(int id)
+{
+    if (!g_running)
+        return;
+
+    bool woken = false;
+
+    EnterCriticalSection(&g_lock);
+    for (int i = 0; i < MAX_GAME_JOBS; ++i)
+    {
+        GameJob &job = g_jobs[i];
+        if (!job.used || job.snap.id != id)
+            continue;
+
+        if (job.snap.state == QUEUE_PAUSED)
+        {
+            job.pause = false;
+            job.snap.state = QUEUE_WAITING;
+            SaveInstallStateLocked();
+            woken = true;
+        }
+        else if (job.snap.state == QUEUE_ACTIVE && job.pause)
+        {
+            // Changed their mind before the download noticed - it never
+            // stopped, so there is nothing to start again.
+            job.pause = false;
+            job.snap.phase[0] = '\0';
+            SaveInstallStateLocked();
+        }
+        break;
+    }
+    LeaveCriticalSection(&g_lock);
+
+    if (woken)
+        SetEvent(g_wake);
 }
 
 void RemoveGameJob(int id)

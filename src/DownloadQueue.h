@@ -38,7 +38,8 @@ enum QueueJobState
 {
     QUEUE_WAITING,
     QUEUE_ACTIVE,
-    QUEUE_FINISHED // see outcome for how
+    QUEUE_FINISHED, // see outcome for how
+    QUEUE_PAUSED    // set aside by the user; waits for the word to carry on
 };
 
 enum QueueOutcome
@@ -176,6 +177,17 @@ int PendingDownloadCount();
 // A waiting job is cancelled on the spot; the active one stops at its next
 // progress report. Files that already finished stay installed.
 void CancelQueueJob(int id);
+
+// Sets a job aside without giving it up. A waiting job is paused on the spot;
+// the active one stops at its next progress report, like a cancel, but what
+// it has downloaded is kept and the job stays in the queue. Resuming puts it
+// back to waiting, at the end of the queue's order rather than its old place
+// - the jobs that have been waiting all along go first.
+//
+// A paused job is kept paused across a restart: it is the one thing in the
+// queue that doesn't start itself again.
+void PauseQueueJob(int id);
+void ResumeQueueJob(int id);
 
 // Drops a finished job from the list. Does nothing to one that hasn't
 // finished.

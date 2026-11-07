@@ -4214,7 +4214,9 @@ static StoreInstallState ArcadeInstallState(const Library &lib, float *outFracti
         const QueueJobSnapshot &job = jobs[i];
         if (job.kind != QUEUE_JOB_DLC_PACK || job.state == QUEUE_FINISHED || strcmp(job.title, g_storeArcade->rar) != 0)
             continue;
-        if (job.state == QUEUE_WAITING)
+        // A paused job is in the queue but not moving - queued is the nearest
+        // of the Store's words for it, and far nearer than "installing".
+        if (job.state == QUEUE_WAITING || job.state == QUEUE_PAUSED)
             return STORE_INSTALL_QUEUED;
         *outFraction = job.fraction;
         return STORE_INSTALL_INSTALLING;
@@ -4276,7 +4278,7 @@ static StoreDiscProgress ProgressOfDisc(const Library &lib, const StoreRelease *
     {
         if (jobs[i].state == QUEUE_FINISHED || strcmp(jobs[i].title, disc->zip) != 0)
             continue;
-        if (jobs[i].state == QUEUE_WAITING)
+        if (jobs[i].state == QUEUE_WAITING || jobs[i].state == QUEUE_PAUSED)
             return STORE_DISC_QUEUED;
         if (outFraction != NULL)
             *outFraction = jobs[i].fraction;
@@ -4322,7 +4324,7 @@ static StoreInstallState DiscJobState(unsigned long titleId, float *outFraction)
     {
         if (jobs[i].titleId != titleId || jobs[i].state == QUEUE_FINISHED)
             continue;
-        if (jobs[i].state == QUEUE_WAITING)
+        if (jobs[i].state == QUEUE_WAITING || jobs[i].state == QUEUE_PAUSED)
             return STORE_INSTALL_QUEUED;
         *outFraction = jobs[i].fraction;
         return STORE_INSTALL_INSTALLING;
@@ -6119,6 +6121,15 @@ static void SnapshotQueue(Shell &shell, const Library &lib)
             row.showBar = true;
             row.fraction = -1.0f;
         }
+        else if (job.state == QUEUE_PAUSED)
+        {
+            // Dimmed like a waiting job, since that is what it is - one that
+            // won't be picked up until it's told to.
+            _snprintf(status, statusSize, "Paused - what's downloaded is kept");
+            row.tone = QUEUE_ROW_WAITING;
+            row.showBar = true;
+            row.fraction = -1.0f;
+        }
         else if (job.state == QUEUE_ACTIVE)
         {
             const char *phase = job.phase[0] != '\0' ? job.phase : "Starting";
@@ -7612,6 +7623,28 @@ int main()
                 else
                     RemoveQueueJob(id);
             }
+            else if ((pressed & XINPUT_GAMEPAD_A) && !shell.queueOnRecents && shell.queueCount > 0)
+            {
+                // Pause and resume, not asked about: nothing is lost either
+                // way, and the row says which it is now.
+                const QueueJobSnapshot &job = shell.queueJobs[shell.queueSelected];
+
+                if (job.state == QUEUE_FINISHED || IsDiscJobId(job.id))
+                {
+                    // Nothing to pause.
+                }
+                else if (job.state == QUEUE_PAUSED)
+                {
+                    if (IsGameJobId(job.id))
+                        ResumeGameJob(job.id);
+                    else
+                        ResumeQueueJob(job.id);
+                }
+                else if (IsGameJobId(job.id))
+                    PauseGameJob(job.id);
+                else
+                    PauseQueueJob(job.id);
+            }
             else if ((pressed & XINPUT_GAMEPAD_X) && !shell.queueOnRecents && shell.queueCount > 0)
             {
                 const QueueJobSnapshot &job = shell.queueJobs[shell.queueSelected];
@@ -8078,7 +8111,16 @@ int main()
                     }
                     else
                     {
-                        bool finished = (shell.queueJobs[shell.queueSelected].state == QUEUE_FINISHED);
+                        const QueueJobSnapshot &sel = shell.queueJobs[shell.queueSelected];
+                        const bool finished = (sel.state == QUEUE_FINISHED);
+
+                        // A disc install copies from the drive and has no
+                        // pause - there is nothing to keep and nothing to
+                        // carry on from.
+                        if (!finished && !IsDiscJobId(sel.id))
+                            hintCount = AddHint(hints, hintCount, UI_BUTTON_A,
+                                                sel.state == QUEUE_PAUSED ? L"Resume" : L"Pause");
+
                         hintCount = finished ? AddHint(hints, hintCount, UI_BUTTON_X, L"Remove")
                                              : AddHint(hints, hintCount, UI_BUTTON_X, L"Stop download", L"Stop");
                     }
