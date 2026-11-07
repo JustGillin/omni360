@@ -291,6 +291,15 @@ static void DriveOf(const char *path, char *out, size_t outSize)
     out[n] = '\0';
 }
 
+// A file's size, or 0.
+static unsigned long long FileSize(const char *path)
+{
+    WIN32_FILE_ATTRIBUTE_DATA attrs;
+    if (!GetFileAttributesExA(path, GetFileExInfoStandard, &attrs))
+        return 0;
+    return ((unsigned long long)attrs.nFileSizeHigh << 32) | attrs.nFileSizeLow;
+}
+
 // Every file in a folder, then the folder.
 static void RemoveFolder(const char *dir)
 {
@@ -325,6 +334,168 @@ static void StagingRoot(const char *gamesPath, char *out, size_t outSize)
     DriveOf(gamesPath, drive, sizeof(drive));
     _snprintf(out, outSize, "%s\\" STAGING_FOLDER, drive);
     out[outSize - 1] = '\0';
+}
+
+// ---------------------------------------------------------------------------
+// What a download leaves behind
+// ---------------------------------------------------------------------------
+//
+// The pieces stay on the drive when the app closes part way through, so the
+// next run carries on from them instead of fetching 7-9 GB again. That only
+// works if a later run can find them and be sure of them, which is what the
+// two things here are for.
+//
+// The folder is named from the download itself - the item and the file in it
+// - rather than from the job's id, which starts again at GAME_JOB_ID_BASE
+// every run and so named a folder nothing could ever look up again.
+//
+// Beside the pieces is a note saying which file they came from and how it was
+// shaped. A piece is only good for the file it was cut from, and archive.org
+// does replace files under the same name, so the pieces are used only when
+// the note matches what the server says today, byte for byte; otherwise the
+// folder is thrown away and the download starts over. The note is also what
+// marks a folder as this scheme's: one without it is from before this and is
+// swept at startup.
+
+#define STAGING_NOTE "staged.txt"
+
+// FATX allows 42 characters, which the item and file name together go well
+// past, so the folder is named by their checksum.
+static unsigned long StagingKey(const char *item, const char *zipName)
+{
+    unsigned long key = crc32(0L, Z_NULL, 0);
+    key = crc32(key, (const Bytef *)item, (uInt)strlen(item) + 1); // the NUL keeps the two apart
+    return crc32(key, (const Bytef *)zipName, (uInt)strlen(zipName));
+}
+
+static void StagingDirFor(const char *root, const GameRequest &req, char *out, size_t outSize)
+{
+    _snprintf(out, outSize, "%s\\G%08lX", root, StagingKey(req.item, req.zipName));
+    out[outSize - 1] = '\0';
+}
+
+static void StagingNotePath(const char *dir, char *out, size_t outSize)
+{
+    _snprintf(out, outSize, "%s\\" STAGING_NOTE, dir);
+    out[outSize - 1] = '\0';
+}
+
+// Everything the pieces depend on: the file they were cut from and where the
+// image sits inside it. Compared whole, so anything that moves invalidates
+// them.
+static void StagingNoteText(const GameRequest &req, unsigned long long dataStart, unsigned long long packed,
+                            unsigned long crc, char *out, size_t outSize)
+{
+    _snprintf(out, outSize, "item=%s\nzip=%s\nsize=%I64u\nstart=%I64u\npacked=%I64u\ncrc=%08lX\n",
+              req.item, req.zipName, req.zipSize, dataStart, packed, crc);
+    out[outSize - 1] = '\0';
+}
+
+#define STAGING_NOTE_MAX 768
+
+static bool WriteStagingNote(const char *dir, const char *text)
+{
+    char path[600];
+    StagingNotePath(dir, path, sizeof(path));
+
+    FILE *f = fopen(path, "wb");
+    if (f == NULL)
+        return false;
+    const size_t n = strlen(text);
+    const bool written = (fwrite(text, 1, n, f) == n);
+    return (fclose(f) == 0) && written;
+}
+
+// The note as it is on disk, or "" if there is none.
+static void ReadStagingNote(const char *dir, char *out, size_t outSize)
+{
+    out[0] = '\0';
+
+    char path[600];
+    StagingNotePath(dir, path, sizeof(path));
+
+    FILE *f = fopen(path, "rb");
+    if (f == NULL)
+        return;
+    const size_t n = fread(out, 1, outSize - 1, f);
+    fclose(f);
+    out[n] = '\0';
+}
+
+// Which pieces of the download are already whole. A piece counts only at
+// exactly the length it covers: a shorter one was cut off mid-transfer, and
+// is fetched again rather than trusted.
+static unsigned long long ScanStagedPieces(const ZipPieces &pieces, unsigned long pieceCount,
+                                           unsigned long long needed, bool *done, unsigned long *outCount)
+{
+    unsigned long long bytes = 0;
+    unsigned long count = 0;
+
+    for (unsigned long index = 0; index < pieceCount; ++index)
+    {
+        unsigned long long from = (unsigned long long)index * PIECE_SIZE;
+        unsigned long long length = (from + PIECE_SIZE > needed) ? needed - from : PIECE_SIZE;
+
+        char path[320];
+        pieces.PiecePath(index, path, sizeof(path));
+        if (FileSize(path) != length)
+            continue;
+
+        done[index] = true;
+        bytes += length;
+        count++;
+    }
+
+    *outCount = count;
+    return bytes;
+}
+
+// Throws a staged download away. The note goes first: a piece still held open
+// somewhere can refuse to be deleted, and a folder left half-removed must not
+// be one a later run carries on from - without its note it is something
+// nothing picks up and the next startup sweeps.
+static void DiscardStaging(const char *dir)
+{
+    char path[600];
+    StagingNotePath(dir, path, sizeof(path));
+    DeleteFileA(path);
+    RemoveFolder(dir);
+}
+
+// Removes staging folders no download can pick up again: the ones from before
+// the pieces were kept, which are named after a job id this run will never
+// issue, and any left without a readable note.
+static void SweepStaging(const char *root)
+{
+    char pattern[600];
+    _snprintf(pattern, sizeof(pattern), "%s\\*", root);
+    pattern[sizeof(pattern) - 1] = '\0';
+
+    WIN32_FIND_DATAA fd;
+    HANDLE h = FindFirstFileA(pattern, &fd);
+    if (h == INVALID_HANDLE_VALUE)
+        return;
+
+    do
+    {
+        if (strcmp(fd.cFileName, ".") == 0 || strcmp(fd.cFileName, "..") == 0)
+            continue;
+        if (!(fd.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY))
+            continue;
+
+        char dir[600], note[STAGING_NOTE_MAX];
+        _snprintf(dir, sizeof(dir), "%s\\%s", root, fd.cFileName);
+        dir[sizeof(dir) - 1] = '\0';
+
+        ReadStagingNote(dir, note, sizeof(note));
+        if (note[0] == '\0')
+        {
+            dprintf("[game] clearing out %s - nothing says what it was downloading\n", dir);
+            RemoveFolder(dir);
+        }
+    } while (FindNextFileA(h, &fd));
+
+    FindClose(h);
 }
 
 // ---------------------------------------------------------------------------
@@ -737,15 +908,6 @@ static void StrikeServer(Download *d, int server, const char *why)
         dprintf("[game] %s on %s again - moving to %s\n", why, from.c_str(), to.c_str());
 }
 
-// A file's size, or 0.
-static unsigned long long FileSize(const char *path)
-{
-    WIN32_FILE_ATTRIBUTE_DATA attrs;
-    if (!GetFileAttributesExA(path, GetFileExInfoStandard, &attrs))
-        return 0;
-    return ((unsigned long long)attrs.nFileSizeHigh << 32) | attrs.nFileSizeLow;
-}
-
 // Adds one file's bytes to the end of another.
 static bool AppendFile(const char *path, const char *more)
 {
@@ -794,6 +956,10 @@ static DWORD WINAPI ConnectionEntry(LPVOID param)
     for (;;)
     {
         EnterCriticalSection(&g_lock);
+        // Pieces an earlier run already finished are on the drive - step over
+        // them rather than fetching them again.
+        while (d->nextPiece < d->pieceCount && d->done[d->nextPiece])
+            d->nextPiece++;
         if (Stopping(d) || d->nextPiece >= d->pieceCount)
         {
             LeaveCriticalSection(&g_lock);
@@ -1037,6 +1203,35 @@ static bool Cancelled(GameJob *job)
     bool c = job->cancel || g_shutdown;
     LeaveCriticalSection(&g_lock);
     return c;
+}
+
+// The app closing, rather than this job being stopped. The two arrive the
+// same way - StopGameInstaller cancels every job - but they mean opposite
+// things for what's been downloaded: closing keeps it, stopping throws it
+// away. See EndStaging.
+static bool ClosingDown()
+{
+    EnterCriticalSection(&g_lock);
+    const bool closing = g_shutdown;
+    LeaveCriticalSection(&g_lock);
+    return closing;
+}
+
+// What becomes of the pieces when a job ends. Keeping them is what lets the
+// next run carry on, so they're kept whenever the download might still be
+// wanted: the app closed, archive.org gave up, the drive filled. They go when
+// there's nothing to carry on to - the game installed - or when carrying on
+// would be wrong: the user stopped it, or what came down turned out to be no
+// good.
+static void EndStaging(const char *dir, bool keep)
+{
+    if (!keep)
+    {
+        DiscardStaging(dir);
+        return;
+    }
+
+    dprintf("[game] keeping what's downloaded in %s - the next run carries on from it\n", dir);
 }
 
 // The host part of an https:// URL.
@@ -1493,14 +1688,63 @@ static void RunJob(GameJob *job, const char *gamesPath)
     dprintf("[game] %s: \"%s\", %I64u packed from %I64u, %I64u unpacked, crc %08lX\n", req.zipName, member.name,
             member.packed, dataStart, member.unpacked, member.crc);
 
+    char root[300], dir[320], note[STAGING_NOTE_MAX], wasHere[STAGING_NOTE_MAX];
+    StagingRoot(gamesPath, root, sizeof(root));
+    CreateDirectoryA(root, NULL);
+    StagingDirFor(root, req, dir, sizeof(dir));
+    StagingNoteText(req, dataStart, member.packed, member.crc, note, sizeof(note));
+
+    // What a run before this one left here, if it was downloading this same
+    // file. A compressed RAR's pieces are deleted as the unpacking passes
+    // them, and the unpacking itself can't be picked up part way through, so
+    // those always start over.
+    ReadStagingNote(dir, wasHere, sizeof(wasHere));
+    const bool pickUp = !compressedRar && wasHere[0] != '\0' && strcmp(wasHere, note) == 0;
+    if (!pickUp)
+    {
+        if (wasHere[0] != '\0')
+            dprintf("[game] what's staged here isn't this download any more - starting over\n");
+        DiscardStaging(dir);
+    }
+
+    if (!CreateDirectoryA(dir, NULL))
+    {
+        const DWORD attrs = GetFileAttributesA(dir);
+        if (attrs == (DWORD)-1 || !(attrs & FILE_ATTRIBUTE_DIRECTORY))
+        {
+            FinishLocked(job, QUEUE_OUTCOME_FAILED, "Couldn't install", "The staging folder couldn't be made.", true);
+            return;
+        }
+    }
+    if (!WriteStagingNote(dir, note))
+        dprintf("[game] couldn't write the note in %s - this download won't be picked up again\n", dir);
+
+    // --- Download, and index as the pieces land -----------------------------
+    ZipPieces pieces(dir, PIECE_SIZE);
+
+    const unsigned long pieceCount = (unsigned long)((needed + PIECE_SIZE - 1) / PIECE_SIZE);
+    bool *done = (bool *)calloc(pieceCount, sizeof(bool));
+    bool *wasStaged = (bool *)calloc(pieceCount, sizeof(bool)); // of those, the ones that were already here
+    unsigned long long stagedBytes = 0;
+    unsigned long stagedPieces = 0;
+    if (done != NULL && wasStaged != NULL && pickUp)
+    {
+        stagedBytes = ScanStagedPieces(pieces, pieceCount, needed, done, &stagedPieces);
+        memcpy(wasStaged, done, pieceCount * sizeof(bool));
+        if (stagedPieces > 0)
+            dprintf("[game] %lu of %lu pieces are already here (%I64u MB) - carrying on from them\n", stagedPieces,
+                    pieceCount, stagedBytes / (1024 * 1024));
+    }
+
     // Room for the zip and the game. The game is at most the image's size;
     // checked again, exactly, once the image says how big the game is. A
     // compressed RAR is unpacked to an image first, and its download is
     // deleted as the unpacking passes it: at worst the whole download and the
-    // image, or the image and the game.
+    // image, or the image and the game. Pieces already staged are space
+    // already spent, so only the rest of the download is asked for.
     const unsigned long long spaceNeeded = compressedRar
         ? (needed > member.unpacked ? needed : member.unpacked) + member.unpacked
-        : needed + member.unpacked;
+        : (needed - stagedBytes) + member.unpacked;
     unsigned long long freeSpace = 0;
     if (DriveFreeSpace(gamesPath, &freeSpace) && freeSpace < spaceNeeded + SPACE_MARGIN)
     {
@@ -1509,24 +1753,13 @@ static void RunJob(GameJob *job, const char *gamesPath)
         FormatBytes(freeSpace, freeText, sizeof(freeText));
         _snprintf(detail, sizeof(detail), "It needs up to %s while it installs, and %s is free.", needText, freeText);
         detail[sizeof(detail) - 1] = '\0';
+        free(done);
+        free(wasStaged);
+        if (stagedPieces == 0)
+            DiscardStaging(dir); // nothing of worth in it - don't leave it sitting there
         FinishLocked(job, QUEUE_OUTCOME_NO_SPACE, "Not enough space", detail, true);
         return;
     }
-
-    char root[300], dir[320];
-    StagingRoot(gamesPath, root, sizeof(root));
-    CreateDirectoryA(root, NULL);
-    _snprintf(dir, sizeof(dir), "%s\\G%d", root, job->snap.id);
-    dir[sizeof(dir) - 1] = '\0';
-    RemoveFolder(dir);
-    if (!CreateDirectoryA(dir, NULL))
-    {
-        FinishLocked(job, QUEUE_OUTCOME_FAILED, "Couldn't install", "The staging folder couldn't be made.", true);
-        return;
-    }
-
-    // --- Download, and index as the pieces land -----------------------------
-    ZipPieces pieces(dir, PIECE_SIZE);
 
     // A compressed RAR's image, unpacked.
     char imageDir[340];
@@ -1535,7 +1768,9 @@ static void RunJob(GameJob *job, const char *gamesPath)
     ZipPieces imagePieces(imageDir, PIECE_SIZE);
     if (compressedRar && !CreateDirectoryA(imageDir, NULL))
     {
-        RemoveFolder(dir);
+        free(done);
+        free(wasStaged);
+        DiscardStaging(dir);
         FinishLocked(job, QUEUE_OUTCOME_FAILED, "Couldn't install", "The staging folder couldn't be made.", true);
         return;
     }
@@ -1548,10 +1783,10 @@ static void RunJob(GameJob *job, const char *gamesPath)
     d.auth = auth;
     d.pieces = &pieces;
     d.total = needed;
-    d.pieceCount = (unsigned long)((needed + PIECE_SIZE - 1) / PIECE_SIZE);
+    d.pieceCount = pieceCount;
     d.nextPiece = 0;
-    d.done = (bool *)calloc(d.pieceCount, sizeof(bool));
-    d.doneBytes = 0;
+    d.done = done;
+    d.doneBytes = stagedBytes;
     d.movedBytes = 0;
     d.failed = false;
     d.failStatus = 0;
@@ -1578,14 +1813,17 @@ static void RunJob(GameJob *job, const char *gamesPath)
     unsigned long crc = crc32(0L, Z_NULL, 0);
     unsigned char *chunk = (unsigned char *)malloc(1024 * 1024);
 
-    if (d.done == NULL || d.pieceReady == NULL || (indexer != NULL && !indexer->Ok()) || chunk == NULL)
+    if (d.done == NULL || wasStaged == NULL || d.pieceReady == NULL || (indexer != NULL && !indexer->Ok()) ||
+        chunk == NULL)
     {
         free(d.done);
+        free(wasStaged);
         if (d.pieceReady != NULL)
             CloseHandle(d.pieceReady);
         delete indexer;
         free(chunk);
-        RemoveFolder(dir);
+        if (stagedPieces == 0)
+            DiscardStaging(dir);
         FinishLocked(job, QUEUE_OUTCOME_FAILED, "Couldn't install", "Out of memory.", true);
         return;
     }
@@ -1646,8 +1884,16 @@ static void RunJob(GameJob *job, const char *gamesPath)
                 bytes += d.inFlight[i];
             LeaveCriticalSection(&g_lock);
 
+            // A download picked up from an earlier run reads its way back
+            // through what's already here before the first new byte arrives -
+            // the deflate stream can only be indexed from its start. That
+            // reads the drive rather than the network, so it says so, and the
+            // speed is of what this run has fetched, not of the drive.
             DWORD ms = GetTickCount() - downloadStart;
-            SetPhase(job, GAME_STEP_DOWNLOADING, "Downloading", bytes, needed, ms > 3000 ? bytes * 1000 / ms : 0);
+            unsigned long long fetched = bytes > stagedBytes ? bytes - stagedBytes : 0;
+            SetPhase(job, GAME_STEP_DOWNLOADING,
+                     wasStaged[index] ? "Checking what's already downloaded" : "Downloading", bytes, needed,
+                     ms > 3000 ? fetched * 1000 / ms : 0);
 
             if (ready || stop)
             {
@@ -1697,6 +1943,7 @@ static void RunJob(GameJob *job, const char *gamesPath)
     g_download = NULL;
     CloseHandle(d.pieceReady);
     free(d.done);
+    free(wasStaged);
     free(chunk);
 
     DWORD downloadSeconds = (GetTickCount() - downloadStart) / 1000;
@@ -1717,7 +1964,13 @@ static void RunJob(GameJob *job, const char *gamesPath)
             dprintf("[game] the image didn't check out: finished %d, %I64u of %I64u bytes, crc %08lX (want %08lX)\n",
                     indexer->Finished() ? 1 : 0, indexer->Out(), member.unpacked, indexer->Crc(), member.crc);
         delete indexer;
-        RemoveFolder(dir);
+
+        // The app closing keeps what's downloaded; the user stopping it
+        // doesn't. A download that simply failed - archive.org stopping, the
+        // keys refused - keeps it too, as it was good as far as it got; one
+        // that arrived whole and then failed its checksum does not, as its
+        // bytes are the problem.
+        EndStaging(dir, !compressedRar && (cancelled ? ClosingDown() : !indexOk));
 
         if (cancelled)
             FinishLocked(job, QUEUE_OUTCOME_CANCELLED, "Stopped", "Nothing was installed.", false);
@@ -1757,8 +2010,10 @@ static void RunJob(GameJob *job, const char *gamesPath)
     GodResult result = GodInspect(image, &info);
     if (result != GOD_OK)
     {
+        // Downloaded whole and checked, but it isn't a disc image this can
+        // read - fetching it again would only arrive at the same place.
         free(points);
-        RemoveFolder(dir);
+        EndStaging(dir, false);
         FinishLocked(job, QUEUE_OUTCOME_FAILED, "Couldn't install", GodResultText(result), true);
         return;
     }
@@ -1776,8 +2031,11 @@ static void RunJob(GameJob *job, const char *gamesPath)
         FormatBytes(freeSpace, freeText, sizeof(freeText));
         _snprintf(detail, sizeof(detail), "It needs %s, and %s is free.", needText, freeText);
         detail[sizeof(detail) - 1] = '\0';
+        // The download is here and checks out - it's the game it makes that
+        // won't fit. Kept, so freeing space and choosing it again installs
+        // from what's already down rather than fetching it all over again.
         free(points);
-        RemoveFolder(dir);
+        EndStaging(dir, !compressedRar);
         FinishLocked(job, QUEUE_OUTCOME_NO_SPACE, "Not enough space", detail, true);
         return;
     }
@@ -1816,8 +2074,13 @@ static void RunJob(GameJob *job, const char *gamesPath)
                 info.usedSize / (1024 * 1024), (double)info.usedSize / (1024.0 * 1024.0) / (double)seconds,
                 timings.readMs / 1000.0, timings.hashMs / 1000.0, timings.writeMs / 1000.0);
 
+    // Installed, so there's nothing left to carry on to. A convert stopped by
+    // the app closing, or by a drive that wouldn't take the writes, keeps the
+    // download instead: it is whole and checked, and getting it again is the
+    // long part.
     free(points);
-    RemoveFolder(dir);
+    EndStaging(dir, !compressedRar && (result == GOD_WRITE_FAILED ||
+                                       (result == GOD_CANCELLED && ClosingDown())));
 
     if (result == GOD_OK)
     {
@@ -1887,10 +2150,13 @@ bool StartGameInstaller(const char *gamesPath)
     InitializeCriticalSection(&g_lock);
     SetGameInstallerGamesPath(gamesPath); // reads what's installed, too
 
-    // A session that ended mid-download leaves its pieces behind.
+    // A session that ended mid-download leaves its pieces behind, and they
+    // stay: choosing that game again carries on from them instead of fetching
+    // 7-9 GB a second time. Only what no download could ever pick up again is
+    // cleared out here - see SweepStaging.
     char root[300];
     StagingRoot(gamesPath, root, sizeof(root));
-    RemoveFolder(root);
+    SweepStaging(root);
 
     g_wake = CreateEvent(NULL, FALSE, FALSE, NULL);
     if (g_wake == NULL)
@@ -2056,15 +2322,42 @@ void RemoveGameJob(int id)
     if (!g_running)
         return;
 
+    char dir[320] = "";
+
     EnterCriticalSection(&g_lock);
     for (int i = 0; i < MAX_GAME_JOBS; ++i)
     {
         // Only once main.cpp has seen it finish, so no popup goes missing.
         if (g_jobs[i].used && g_jobs[i].snap.id == id && g_jobs[i].snap.state == QUEUE_FINISHED &&
             g_jobs[i].handedOver)
+        {
             g_jobs[i].used = false;
+
+            // A job that failed or ran out of space keeps its download, for
+            // choosing the game again to carry on from. Clearing the row is
+            // the user saying they're done with it, so the pieces go with it
+            // - unless the game has since been queued again, in which case
+            // that job is downloading into them as we speak.
+            const unsigned long key = StagingKey(g_jobs[i].request.item, g_jobs[i].request.zipName);
+            bool inUse = false;
+            for (int j = 0; j < MAX_GAME_JOBS && !inUse; ++j)
+            {
+                inUse = g_jobs[j].used && g_jobs[j].snap.state != QUEUE_FINISHED &&
+                        StagingKey(g_jobs[j].request.item, g_jobs[j].request.zipName) == key;
+            }
+
+            if (!inUse)
+            {
+                char root[300];
+                StagingRoot(g_gamesPath, root, sizeof(root));
+                StagingDirFor(root, g_jobs[i].request, dir, sizeof(dir));
+            }
+        }
     }
     LeaveCriticalSection(&g_lock);
+
+    if (dir[0] != '\0')
+        DiscardStaging(dir);
 }
 
 bool TakeFinishedGameJob(QueueJobSnapshot *out)

@@ -20,9 +20,17 @@
 //   2. The converter reads the image out of the downloaded zip through that
 //      index, and writes the game where the dashboard and Aurora find it.
 //
-// The staging folder is removed when the job ends, however it ends. Space
-// needed is the zip and the installed game; the 7-9GB image itself is never
-// written out.
+// The staging folder is removed once the game is installed, and when the user
+// stops a job or what came down turns out to be no good. It is kept when the
+// app closes part way through, when archive.org gives up and when the drive
+// fills: choosing that game again then carries on from the pieces already
+// there rather than fetching 7-9GB a second time. Space needed is the zip and
+// the installed game; the image itself is never written out.
+//
+// What is kept is tied to the file it came from by a note beside the pieces,
+// so a file replaced on archive.org since can't be stitched onto an old
+// download. A compressed RAR is the exception: its pieces are consumed as it
+// unpacks, and the unpacking has no restart point, so those start over.
 //
 // One game at a time, on a worker of its own, so a game doesn't hold up DLC
 // and title updates or a disc install. Jobs are reported in the download
@@ -42,8 +50,9 @@ struct GameRequest
     unsigned long titleId; // for the Queue's box art; 0 if not known yet
 };
 
-// gamesPath is where games install. Also clears out any staging folder an
-// earlier session left.
+// gamesPath is where games install. Also clears out staging folders no
+// download can pick up again - the ones from before downloads were kept, and
+// any whose note is missing.
 bool StartGameInstaller(const char *gamesPath);
 bool StopGameInstaller(DWORD timeoutMs);
 void SetGameInstallerGamesPath(const char *gamesPath);

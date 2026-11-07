@@ -6769,7 +6769,8 @@ int main()
     if (!StartDiscWorker(gamesPath))
         dprintf("ERROR: the disc worker didn't start - discs can't be installed\n");
 
-    // Also clears out what an install interrupted last time left staged.
+    // An install interrupted last time keeps its pieces: choosing that game
+    // again carries on from them.
     if (!StartGameInstaller(gamesPath))
         dprintf("ERROR: the game installer didn't start - games can't be installed\n");
     StartupStep("art, disc and installer workers");
@@ -8156,8 +8157,8 @@ int main()
     StopDiscWorker(15000);
 
     // A game install's connections stop at their next progress report, and
-    // the converter at its next 816KB; the staging folder goes next launch
-    // if it can't be removed now.
+    // the converter at its next 816KB. What it had downloaded stays on the
+    // drive - choosing that game again picks it up where this left it.
     StopGameInstaller(20000);
 
     // A search still out would only be thrown away - a short wait is plenty.
