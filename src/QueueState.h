@@ -50,4 +50,23 @@ bool NextQueueStateLine(char **at, char **key, char **value);
 // and *at stops at size - 1. Used to build the file a job at a time.
 void AppendQueueStateText(char *buffer, size_t size, size_t *at, const char *format, ...);
 
+// ---------------------------------------------------------------------------
+// What finished last time, and the one line about it
+// ---------------------------------------------------------------------------
+//
+// The queues also keep what finished, as records rather than as jobs - see
+// the note on records in DownloadQueue.cpp. Each queue puts its own back, but
+// the user hears about them once: three toasts at launch would stack over the
+// startup screen, and what they want to know is whether anything failed while
+// they were asleep.
+//
+// So each queue counts what it restored here, and main.cpp reads the total
+// after the three restores and says it in a single toast. Launch is on the UI
+// thread, one restore after another, so these need no lock of their own.
+
+void NoteRestoredRecord(bool failed);
+
+// The totals so far, zeroed as they're read.
+void TakeRestoredTally(int *finished, int *failed);
+
 #endif

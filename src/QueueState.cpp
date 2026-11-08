@@ -140,6 +140,31 @@ bool NextQueueStateLine(char **at, char **key, char **value)
     }
 }
 
+// ---------------------------------------------------------------------------
+// What was put back at launch - see QueueState.h
+// ---------------------------------------------------------------------------
+
+static int g_restoredFinished = 0;
+static int g_restoredFailed = 0;
+
+void NoteRestoredRecord(bool failed)
+{
+    g_restoredFinished++;
+    if (failed)
+        g_restoredFailed++;
+}
+
+void TakeRestoredTally(int *finished, int *failed)
+{
+    if (finished != NULL)
+        *finished = g_restoredFinished;
+    if (failed != NULL)
+        *failed = g_restoredFailed;
+
+    g_restoredFinished = 0;
+    g_restoredFailed = 0;
+}
+
 void AppendQueueStateText(char *buffer, size_t size, size_t *at, const char *format, ...)
 {
     if (*at + 1 >= size)

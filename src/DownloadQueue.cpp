@@ -136,9 +136,13 @@ static void SyncView(QueueJob &job)
 #define QUEUE_STATE_FILE "game:\\QueuedDownloads.txt"
 #define QUEUE_STATE_MAX  (96 * 1024) // 32 jobs, a homebrew spec being the longest
 
+// How many finished rows are kept, the oldest dropped. The jobs still to do
+// are written first and are never dropped for a record's sake.
+#define MAX_FINISHED_KEPT 12
+
 // Under the lock. Writes every job still to do, which is what the next run
-// reads. Nothing is written while the app is closing: closing cancels every
-// job, and the file has to keep them.
+// reads, and a record of each one that finished. Nothing is written while the
+// app is closing: closing cancels every job, and the file has to keep them.
 static void SaveQueueStateLocked()
 {
     if (!g_running || g_shutdown)
@@ -198,7 +202,60 @@ static void SaveQueueStateLocked()
         jobs++;
     }
 
-    if (jobs > 0)
+    // Then what finished, as records rather than as jobs. The difference is
+    // the whole point. A job put back is a job run again, and one that failed
+    // would fail again on every launch - which is why finished jobs were left
+    // out of this file to begin with. A record is never run: it is the row
+    // saying what happened, and nothing more.
+    //
+    // Without them, a night of downloads ends with the console off, a game
+    // not installed and nothing on screen saying why. A crash or the power
+    // going at the wall loses them the same way, so this is worth having
+    // whether or not anything switches the console off on purpose.
+    //
+    // Cancelled ones are left out: the user did that one and knows.
+    int order[MAX_QUEUE_JOBS];
+    int records = 0;
+
+    for (int i = 0; i < MAX_QUEUE_JOBS; ++i)
+    {
+        const QueueJob &job = g_jobs[i];
+        if (!job.used || job.state != QUEUE_FINISHED || job.outcome == QUEUE_OUTCOME_CANCELLED)
+            continue;
+        if (job.kind != QUEUE_JOB_DLC_PACK && job.kind != QUEUE_JOB_TITLE_UPDATE && job.kind != QUEUE_JOB_HOMEBREW)
+            continue;
+
+        // Kept in the order they finished as they are found. There are 32
+        // slots at the most, so an insertion sort is the whole of it.
+        int pos = records;
+        while (pos > 0 && g_jobs[order[pos - 1]].finishedSeq > job.finishedSeq)
+        {
+            order[pos] = order[pos - 1];
+            pos--;
+        }
+        order[pos] = i;
+        records++;
+    }
+
+    // The newest MAX_FINISHED_KEPT of them, written oldest first so that
+    // reading the file back in order gives them their finished order again.
+    int first = records - MAX_FINISHED_KEPT;
+    if (first < 0)
+        first = 0;
+
+    for (int i = first; i < records; ++i)
+    {
+        const QueueJob &job = g_jobs[order[i]];
+        AppendQueueStateText(text, QUEUE_STATE_MAX, &at,
+                             "done=%s\ngame=%s\ntitleid=%08lX\ntitle=%s\noutcome=%d\nresult=%s\ndetail=%s\n",
+                             job.kind == QUEUE_JOB_DLC_PACK       ? "dlc"
+                             : job.kind == QUEUE_JOB_TITLE_UPDATE ? "update"
+                                                                  : "homebrew",
+                             job.view.gameName, job.view.titleId, job.view.title, (int)job.outcome,
+                             job.view.resultText, job.view.resultDetail);
+    }
+
+    if (jobs > 0 || records > 0)
         WriteQueueStateFile(QUEUE_STATE_FILE, text);
     else
         DeleteQueueStateFile(QUEUE_STATE_FILE);
@@ -1164,28 +1221,108 @@ EnqueueResult EnqueueHomebrew(const HomebrewJobSpec &spec)
 // Picking the queue back up
 // ---------------------------------------------------------------------------
 
-// One job's worth of what the file said, filled in a field at a time.
+// One block's worth of what the file said, filled in a field at a time:
+// either a job still to do, or - with finished set - a record of one that is
+// already over, which goes back as a row and is never run.
 struct RestoredJob
 {
-    int kind; // -1 until a "job=" line says
+    int kind; // -1 until a "job=" or "done=" line says
+    bool finished;
     DlcRarMatch pack;
     TitleUpdateMatch update;
     HomebrewJobSpec homebrew;
     char gameName[128];
     unsigned long titleId;
     bool paused;
+
+    // A record's own fields. A job builds its title from the pack or update
+    // it names; a record has only what it was called at the time.
+    char title[256];
+    int outcome;
+    char resultText[64];
+    char resultDetail[160];
 };
 
-static void StartRestored(RestoredJob &job, int kind)
+static void StartRestored(RestoredJob &job, int kind, bool finished)
 {
     memset(&job, 0, sizeof(job));
     job.kind = kind;
+    job.finished = finished;
+}
+
+// What a "job=" or "done=" line names, or -1 for a kind this build doesn't
+// know - a file written by a newer one.
+static int RestoredKind(const char *value)
+{
+    if (strcmp(value, "dlc") == 0)
+        return (int)QUEUE_JOB_DLC_PACK;
+    if (strcmp(value, "update") == 0)
+        return (int)QUEUE_JOB_TITLE_UPDATE;
+    if (strcmp(value, "homebrew") == 0)
+        return (int)QUEUE_JOB_HOMEBREW;
+    return -1;
+}
+
+// A record of something that finished last time, put back as a row and
+// nothing else.
+//
+// handedOver is the trap. A finished job that hasn't been handed over is one
+// TakeFinishedQueueJob will give main.cpp, which raises its popup, clears
+// haveAuth on refused keys and sets a library rescan going. Restoring last
+// night's results without it would re-announce every one of them over the
+// startup screen and rescan for each. These have been seen already.
+static void RestoreFinishedRecord(const RestoredJob &rec)
+{
+    EnterCriticalSection(&g_lock);
+
+    // The jobs still to do have first claim on the slots: they were restored
+    // before this, and a record is only there to be read.
+    const int slot = FreeSlot();
+    if (slot < 0)
+    {
+        LeaveCriticalSection(&g_lock);
+        return;
+    }
+
+    QueueJob &job = g_jobs[slot];
+    memset(&job, 0, sizeof(job));
+
+    job.used = true;
+    job.id = g_nextId++;
+    job.sequence = g_nextSequence++;
+    job.finishedSeq = g_nextFinishedSeq++;
+    job.kind = (QueueJobKind)rec.kind;
+    job.state = QUEUE_FINISHED;
+    job.outcome = (QueueOutcome)rec.outcome;
+    job.handedOver = true;
+
+    job.view.titleId = rec.titleId;
+    CopyText(job.view.gameName, sizeof(job.view.gameName), rec.gameName);
+    CopyText(job.view.title, sizeof(job.view.title), rec.title);
+    CopyText(job.view.resultText, sizeof(job.view.resultText), rec.resultText);
+    CopyText(job.view.resultDetail, sizeof(job.view.resultDetail), rec.resultDetail);
+    job.view.fraction = -1.0f;
+    job.view.notify = false;
+    SyncView(job);
+
+    LeaveCriticalSection(&g_lock);
+
+    NoteRestoredRecord(rec.outcome != QUEUE_OUTCOME_INSTALLED && rec.outcome != QUEUE_OUTCOME_ALREADY_INSTALLED);
 }
 
 // Queues what one block of the file described. The jobs go back in the order
 // they were written, which is the order they were waiting in.
 static void QueueRestored(const RestoredJob &job, const char *authHeader, int *queued)
 {
+    if (job.kind < 0)
+        return;
+
+    if (job.finished)
+    {
+        RestoreFinishedRecord(job);
+        return;
+    }
+
     EnqueueResult result = ENQUEUE_UNAVAILABLE;
 
     if (job.kind == QUEUE_JOB_DLC_PACK && job.pack.filename[0] != '\0')
@@ -1214,21 +1351,19 @@ void RestoreDownloadQueue(const char *authHeader)
         return;
 
     RestoredJob job;
-    StartRestored(job, -1);
+    StartRestored(job, -1, false);
 
     int queued = 0;
     char *at = text, *key = NULL, *value = NULL;
 
     while (NextQueueStateLine(&at, &key, &value))
     {
-        // A "job=" line ends the one before it and starts the next.
-        if (strcmp(key, "job") == 0)
+        // A "job=" or "done=" line ends the block before it and starts the
+        // next: one still to do, or a record of one that is over.
+        if (strcmp(key, "job") == 0 || strcmp(key, "done") == 0)
         {
             QueueRestored(job, authHeader, &queued);
-            StartRestored(job, strcmp(value, "dlc") == 0      ? (int)QUEUE_JOB_DLC_PACK
-                               : strcmp(value, "update") == 0 ? (int)QUEUE_JOB_TITLE_UPDATE
-                               : strcmp(value, "homebrew") == 0 ? (int)QUEUE_JOB_HOMEBREW
-                                                                : -1);
+            StartRestored(job, RestoredKind(value), strcmp(key, "done") == 0);
             continue;
         }
 
@@ -1241,6 +1376,17 @@ void RestoreDownloadQueue(const char *authHeader)
             job.titleId = strtoul(value, NULL, 16);
         else if (strcmp(key, "paused") == 0)
             job.paused = (atoi(value) != 0);
+        else if (job.finished)
+        {
+            if (strcmp(key, "title") == 0)
+                CopyText(job.title, sizeof(job.title), value);
+            else if (strcmp(key, "outcome") == 0)
+                job.outcome = atoi(value);
+            else if (strcmp(key, "result") == 0)
+                CopyText(job.resultText, sizeof(job.resultText), value);
+            else if (strcmp(key, "detail") == 0)
+                CopyText(job.resultDetail, sizeof(job.resultDetail), value);
+        }
         else if (job.kind == QUEUE_JOB_DLC_PACK)
         {
             if (strcmp(key, "item") == 0)
@@ -1284,6 +1430,14 @@ void RestoreDownloadQueue(const char *authHeader)
 
     QueueRestored(job, authHeader, &queued); // the last block has no "job=" after it
     free(text);
+
+    // What is in memory now is what the file should say. Adding a job writes
+    // it, but putting a record back doesn't - and the records come after the
+    // jobs, so the last write of the restore would otherwise have left them
+    // all out.
+    EnterCriticalSection(&g_lock);
+    SaveQueueStateLocked();
+    LeaveCriticalSection(&g_lock);
 
     if (queued > 0)
         dprintf("[queue] picked %d job%s back up from last time\n", queued, queued == 1 ? "" : "s");
@@ -1488,6 +1642,11 @@ void RemoveQueueJob(int id)
         if (job.used && job.id == id && job.state == QUEUE_FINISHED && job.handedOver)
         {
             job.used = false;
+
+            // Now that a finished job is kept, clearing its row is a change
+            // to what the file holds. It wasn't before, which is why this
+            // didn't write it.
+            SaveQueueStateLocked();
             break;
         }
     }

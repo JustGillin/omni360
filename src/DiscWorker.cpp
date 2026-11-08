@@ -12,10 +12,12 @@ DESCRIPTION : Watches the disc drive and installs discs as Games on Demand, on
 #include "ArchiveOrgDLC.h" // DriveFreeSpace
 #include "downloadFile.h"  // FormatBytes
 #include "StoreArt.h"      // FetchTitleIcon
+#include "QueueState.h"
 #include "OutputConsole.h"
 
 #include <xtl.h>
 #include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
 
 // The system controller, through the kernel. Command 0x0A asks for the disc
@@ -281,6 +283,80 @@ static bool InstallProgressCallback(unsigned long long done, unsigned long long 
     return carryOn;
 }
 
+// ---------------------------------------------------------------------------
+// What finished, kept between runs - see QueueState.h
+// ---------------------------------------------------------------------------
+//
+// Only what finished. A disc install can't be picked back up the way a
+// download can: the disc may not be in the drive next time, and what
+// GodConvert had copied is removed when an install stops. So unlike the other
+// two queues this file holds records and nothing else - the row saying an
+// install worked, or why it didn't, which would otherwise be gone the moment
+// the console is switched off.
+//
+// See the note on records in DownloadQueue.cpp for why they are records
+// rather than jobs, and why they come back already handed over.
+
+#define DISC_STATE_FILE "game:\\FinishedDiscInstalls.txt"
+#define DISC_STATE_MAX  (8 * 1024)
+#define MAX_FINISHED_KEPT 4
+
+// Under the lock. Cancelled ones are left out: the user did that and knows.
+static void SaveDiscStateLocked()
+{
+    if (!g_running || g_shutdown)
+        return;
+
+    int order[MAX_DISC_JOBS];
+    int records = 0;
+
+    for (int i = 0; i < MAX_DISC_JOBS; ++i)
+    {
+        const DiscJob &job = g_jobs[i];
+        if (!job.used || job.snap.state != QUEUE_FINISHED || job.snap.outcome == QUEUE_OUTCOME_CANCELLED)
+            continue;
+
+        // By id, which is the order they finished in. Eight slots at the
+        // most, so an insertion sort is the whole of it.
+        int pos = records;
+        while (pos > 0 && g_jobs[order[pos - 1]].snap.id > job.snap.id)
+        {
+            order[pos] = order[pos - 1];
+            pos--;
+        }
+        order[pos] = i;
+        records++;
+    }
+
+    if (records == 0)
+    {
+        DeleteQueueStateFile(DISC_STATE_FILE);
+        return;
+    }
+
+    char text[DISC_STATE_MAX];
+    size_t at = 0;
+    text[0] = '\0';
+    AppendQueueStateText(text, sizeof(text), &at, "# Omni360 - the disc installs that finished\nformat=1\n");
+
+    int first = records - MAX_FINISHED_KEPT;
+    if (first < 0)
+        first = 0;
+
+    // Oldest first, so reading them back in order gives them their order.
+    for (int i = first; i < records; ++i)
+    {
+        const DiscJob &job = g_jobs[order[i]];
+        AppendQueueStateText(text, sizeof(text), &at,
+                             "done=disc\nname=%s\ntitleid=%08lX\nmediaid=%08lX\ntitle=%s\noutcome=%d\n"
+                             "result=%s\ndetail=%s\n",
+                             job.snap.gameName, job.snap.titleId, job.mediaId, job.snap.title,
+                             (int)job.snap.outcome, job.snap.resultText, job.snap.resultDetail);
+    }
+
+    WriteQueueStateFile(DISC_STATE_FILE, text);
+}
+
 // Under the lock.
 static void FinishJob(DiscJob *job, QueueOutcome outcome, const char *text, const char *detail, bool notify)
 {
@@ -293,6 +369,8 @@ static void FinishJob(DiscJob *job, QueueOutcome outcome, const char *text, cons
     _snprintf(s.resultDetail, sizeof(s.resultDetail), "%s", detail != NULL ? detail : "");
     s.resultDetail[sizeof(s.resultDetail) - 1] = '\0';
     g_disc.installing = false;
+
+    SaveDiscStateLocked();
 }
 
 static void RunInstall(DiscJob *job, const char *gamesPath)
@@ -672,6 +750,106 @@ static int FreeJobSlot()
     return oldest;
 }
 
+// Under the lock. Already handed over, which is the trap: a finished job that
+// hasn't been would be given to main.cpp, which raises its popup and sets a
+// library rescan going - so restoring last night's results without it would
+// re-announce every one of them over the startup screen.
+static void RestoreFinishedDiscLocked(const char *name, unsigned long titleId, unsigned long mediaId,
+                                      const char *title, int outcome, const char *resultText,
+                                      const char *resultDetail)
+{
+    const int slot = FreeJobSlot();
+    if (slot < 0)
+        return;
+
+    DiscJob &job = g_jobs[slot];
+    memset(&job, 0, sizeof(job));
+
+    job.used = true;
+    job.handedOver = true;
+    job.mediaId = mediaId;
+    job.snap.id = g_nextJobId++;
+    job.snap.kind = QUEUE_JOB_DISC_INSTALL;
+    job.snap.state = QUEUE_FINISHED;
+    job.snap.outcome = (QueueOutcome)outcome;
+    job.snap.titleId = titleId;
+    job.snap.fraction = -1.0f;
+    job.snap.notify = false;
+    _snprintf(job.snap.gameName, sizeof(job.snap.gameName), "%s", name);
+    job.snap.gameName[sizeof(job.snap.gameName) - 1] = '\0';
+    _snprintf(job.snap.title, sizeof(job.snap.title), "%s", title);
+    job.snap.title[sizeof(job.snap.title) - 1] = '\0';
+    _snprintf(job.snap.resultText, sizeof(job.snap.resultText), "%s", resultText);
+    job.snap.resultText[sizeof(job.snap.resultText) - 1] = '\0';
+    _snprintf(job.snap.resultDetail, sizeof(job.snap.resultDetail), "%s", resultDetail);
+    job.snap.resultDetail[sizeof(job.snap.resultDetail) - 1] = '\0';
+
+    NoteRestoredRecord(outcome != QUEUE_OUTCOME_INSTALLED && outcome != QUEUE_OUTCOME_ALREADY_INSTALLED);
+}
+
+void RestoreDiscRecords()
+{
+    if (!g_running)
+        return;
+
+    char *text = ReadQueueStateFile(DISC_STATE_FILE);
+    if (text == NULL)
+        return;
+
+    char name[128] = "", title[256] = "", resultText[64] = "", resultDetail[160] = "";
+    unsigned long titleId = 0, mediaId = 0;
+    int outcome = 0;
+    bool inDone = false;
+
+    EnterCriticalSection(&g_lock);
+
+    char *at = text, *key = NULL, *value = NULL;
+    while (NextQueueStateLine(&at, &key, &value))
+    {
+        // A "done=" line ends the record before it and starts the next.
+        if (strcmp(key, "done") == 0)
+        {
+            if (inDone)
+                RestoreFinishedDiscLocked(name, titleId, mediaId, title, outcome, resultText, resultDetail);
+
+            name[0] = title[0] = resultText[0] = resultDetail[0] = '\0';
+            titleId = mediaId = 0;
+            outcome = 0;
+            inDone = (strcmp(value, "disc") == 0);
+            continue;
+        }
+
+        if (!inDone)
+            continue;
+
+        if (strcmp(key, "name") == 0)
+            _snprintf(name, sizeof(name), "%s", value);
+        else if (strcmp(key, "titleid") == 0)
+            titleId = strtoul(value, NULL, 16);
+        else if (strcmp(key, "mediaid") == 0)
+            mediaId = strtoul(value, NULL, 16);
+        else if (strcmp(key, "title") == 0)
+            _snprintf(title, sizeof(title), "%s", value);
+        else if (strcmp(key, "outcome") == 0)
+            outcome = atoi(value);
+        else if (strcmp(key, "result") == 0)
+            _snprintf(resultText, sizeof(resultText), "%s", value);
+        else if (strcmp(key, "detail") == 0)
+            _snprintf(resultDetail, sizeof(resultDetail), "%s", value);
+
+        name[sizeof(name) - 1] = '\0';
+        title[sizeof(title) - 1] = '\0';
+        resultText[sizeof(resultText) - 1] = '\0';
+        resultDetail[sizeof(resultDetail) - 1] = '\0';
+    }
+
+    if (inDone) // the last record has no "done=" after it
+        RestoreFinishedDiscLocked(name, titleId, mediaId, title, outcome, resultText, resultDetail);
+
+    LeaveCriticalSection(&g_lock);
+    free(text);
+}
+
 DiscInstallResult QueueDiscInstall(unsigned long titleId, unsigned long mediaId, const char *name)
 {
     if (!g_running)
@@ -800,7 +978,13 @@ void RemoveDiscJob(int id)
         // Only once main.cpp has seen it finish, so no popup goes missing.
         if (g_jobs[i].used && g_jobs[i].snap.id == id && g_jobs[i].snap.state == QUEUE_FINISHED &&
             g_jobs[i].handedOver)
+        {
             g_jobs[i].used = false;
+
+            // Now that a finished install is kept, clearing its row is a
+            // change to what the file holds.
+            SaveDiscStateLocked();
+        }
     }
     LeaveCriticalSection(&g_lock);
 }

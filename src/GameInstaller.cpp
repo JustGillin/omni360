@@ -343,11 +343,20 @@ static void StagingRoot(const char *gamesPath, char *out, size_t outSize)
 // ---------------------------------------------------------------------------
 
 #define INSTALL_STATE_FILE "game:\\QueuedInstalls.txt"
-#define INSTALL_STATE_MAX  (8 * 1024) // MAX_GAME_JOBS of a few hundred bytes
+#define INSTALL_STATE_MAX  (24 * 1024) // MAX_GAME_JOBS of jobs and records both
+
+// How many finished rows are kept, the oldest dropped. There are only
+// MAX_GAME_JOBS slots and the installs still to do have first claim, so this
+// is half of them rather than most.
+#define MAX_FINISHED_KEPT 4
 
 // Under the lock. The pieces on the drive are only half of carrying on: this
 // is the half that says which game they belong to. Not written while the app
 // is closing - closing cancels every job, and the file has to keep them.
+//
+// What finished is written too, as records - see the note on records in
+// DownloadQueue.cpp. An install that failed overnight has to leave something
+// behind saying so.
 static void SaveInstallStateLocked()
 {
     if (!g_running || g_shutdown)
@@ -378,10 +387,109 @@ static void SaveInstallStateLocked()
         jobs++;
     }
 
-    if (jobs > 0)
+    // Then what finished, newest kept, written oldest first. Cancelled ones
+    // are left out: the user did that one and knows.
+    //
+    // The item and the file are in a record as well as a name, because
+    // clearing a failed row is what discards the pieces it left on the drive
+    // - and RemoveGameJob needs both to find them.
+    int order[MAX_GAME_JOBS];
+    int records = 0;
+
+    for (int i = 0; i < MAX_GAME_JOBS; ++i)
+    {
+        const GameJob &job = g_jobs[i];
+        if (!job.used || job.snap.state != QUEUE_FINISHED || job.snap.outcome == QUEUE_OUTCOME_CANCELLED)
+            continue;
+
+        // By id, which is the order they finished in. Eight slots at the
+        // most, so an insertion sort is the whole of it.
+        int pos = records;
+        while (pos > 0 && g_jobs[order[pos - 1]].snap.id > job.snap.id)
+        {
+            order[pos] = order[pos - 1];
+            pos--;
+        }
+        order[pos] = i;
+        records++;
+    }
+
+    int first = records - MAX_FINISHED_KEPT;
+    if (first < 0)
+        first = 0;
+
+    for (int i = first; i < records; ++i)
+    {
+        const GameJob &job = g_jobs[order[i]];
+        AppendQueueStateText(text, sizeof(text), &at,
+                             "done=game\nitem=%s\nfile=%s\nsize=%I64u\nname=%s\ntitleid=%08lX\n"
+                             "title=%s\noutcome=%d\nresult=%s\ndetail=%s\n",
+                             job.request.item, job.request.zipName, job.request.zipSize, job.request.name,
+                             job.request.titleId, job.snap.title, (int)job.snap.outcome, job.snap.resultText,
+                             job.snap.resultDetail);
+    }
+
+    if (jobs > 0 || records > 0)
         WriteQueueStateFile(INSTALL_STATE_FILE, text);
     else
         DeleteQueueStateFile(INSTALL_STATE_FILE);
+}
+
+// A record of an install that finished last time, put back as a row and
+// nothing else: never run again, and already handed over so main.cpp doesn't
+// re-announce it or rescan the library for it. See RestoreFinishedRecord in
+// DownloadQueue.cpp, which this follows.
+static void RestoreFinishedInstall(const GameRequest &request, const char *title, int outcome,
+                                   const char *resultText, const char *resultDetail)
+{
+    EnterCriticalSection(&g_lock);
+
+    // The installs still to do were restored first and have first claim.
+    int slot = -1, oldest = -1;
+    for (int i = 0; i < MAX_GAME_JOBS; ++i)
+    {
+        if (!g_jobs[i].used)
+        {
+            slot = i;
+            break;
+        }
+        if (g_jobs[i].snap.state == QUEUE_FINISHED && g_jobs[i].handedOver &&
+            (oldest < 0 || g_jobs[i].snap.id < g_jobs[oldest].snap.id))
+            oldest = i;
+    }
+    if (slot < 0)
+        slot = oldest;
+    if (slot < 0)
+    {
+        LeaveCriticalSection(&g_lock);
+        return;
+    }
+
+    GameJob &job = g_jobs[slot];
+    memset(&job, 0, sizeof(job));
+
+    job.used = true;
+    job.request = request;
+    job.handedOver = true;
+    job.snap.id = g_nextId++;
+    job.snap.kind = QUEUE_JOB_GAME_INSTALL;
+    job.snap.state = QUEUE_FINISHED;
+    job.snap.outcome = (QueueOutcome)outcome;
+    job.snap.titleId = request.titleId;
+    job.snap.fraction = -1.0f;
+    job.snap.notify = false;
+    _snprintf(job.snap.gameName, sizeof(job.snap.gameName), "%s", request.name);
+    job.snap.gameName[sizeof(job.snap.gameName) - 1] = '\0';
+    _snprintf(job.snap.title, sizeof(job.snap.title), "%s", title);
+    job.snap.title[sizeof(job.snap.title) - 1] = '\0';
+    _snprintf(job.snap.resultText, sizeof(job.snap.resultText), "%s", resultText);
+    job.snap.resultText[sizeof(job.snap.resultText) - 1] = '\0';
+    _snprintf(job.snap.resultDetail, sizeof(job.snap.resultDetail), "%s", resultDetail);
+    job.snap.resultDetail[sizeof(job.snap.resultDetail) - 1] = '\0';
+
+    LeaveCriticalSection(&g_lock);
+
+    NoteRestoredRecord(outcome != QUEUE_OUTCOME_INSTALLED && outcome != QUEUE_OUTCOME_ALREADY_INSTALLED);
 }
 
 // ---------------------------------------------------------------------------
@@ -2382,27 +2490,58 @@ void RestoreGameInstalls(const char *authHeader)
     GameRequest request;
     memset(&request, 0, sizeof(request));
     bool inJob = false;
+    bool inDone = false;
     bool paused = false;
     int queued = 0;
+
+    // A record's own fields, reset with the request at each block.
+    char title[256] = "", resultText[64] = "", resultDetail[160] = "";
+    int outcome = 0;
 
     char *at = text, *key = NULL, *value = NULL;
     while (NextQueueStateLine(&at, &key, &value))
     {
-        // A "job=" line ends the one before it and starts the next.
-        if (strcmp(key, "job") == 0)
+        // A "job=" or "done=" line ends the block before it and starts the
+        // next: an install still to do, or a record of one that is over.
+        if (strcmp(key, "job") == 0 || strcmp(key, "done") == 0)
         {
             if (inJob && request.zipName[0] != '\0' && EnqueueGame(request, authHeader, paused) == GAME_QUEUED)
                 queued++;
+            else if (inDone && request.zipName[0] != '\0')
+                RestoreFinishedInstall(request, title, outcome, resultText, resultDetail);
+
             memset(&request, 0, sizeof(request));
+            title[0] = resultText[0] = resultDetail[0] = '\0';
+            outcome = 0;
             paused = false;
-            inJob = (strcmp(value, "game") == 0);
+
+            const bool game = (strcmp(value, "game") == 0);
+            inJob = game && (strcmp(key, "job") == 0);
+            inDone = game && (strcmp(key, "done") == 0);
             continue;
         }
 
-        if (!inJob)
+        if (!inJob && !inDone)
             continue;
 
-        if (strcmp(key, "item") == 0)
+        if (inDone && strcmp(key, "title") == 0)
+        {
+            _snprintf(title, sizeof(title), "%s", value);
+            title[sizeof(title) - 1] = '\0';
+        }
+        else if (inDone && strcmp(key, "outcome") == 0)
+            outcome = atoi(value);
+        else if (inDone && strcmp(key, "result") == 0)
+        {
+            _snprintf(resultText, sizeof(resultText), "%s", value);
+            resultText[sizeof(resultText) - 1] = '\0';
+        }
+        else if (inDone && strcmp(key, "detail") == 0)
+        {
+            _snprintf(resultDetail, sizeof(resultDetail), "%s", value);
+            resultDetail[sizeof(resultDetail) - 1] = '\0';
+        }
+        else if (strcmp(key, "item") == 0)
             _snprintf(request.item, sizeof(request.item), "%s", value);
         else if (strcmp(key, "file") == 0)
             _snprintf(request.zipName, sizeof(request.zipName), "%s", value);
@@ -2420,10 +2559,21 @@ void RestoreGameInstalls(const char *authHeader)
         request.name[sizeof(request.name) - 1] = '\0';
     }
 
+    // The last block has no "job=" after it.
     if (inJob && request.zipName[0] != '\0' && EnqueueGame(request, authHeader, paused) == GAME_QUEUED)
-        queued++; // the last block has no "job=" after it
+        queued++;
+    else if (inDone && request.zipName[0] != '\0')
+        RestoreFinishedInstall(request, title, outcome, resultText, resultDetail);
 
     free(text);
+
+    // What is in memory now is what the file should say. Queueing an install
+    // writes it, but putting a record back doesn't - and the records come
+    // after the jobs, so the last write of the restore would otherwise have
+    // left them all out.
+    EnterCriticalSection(&g_lock);
+    SaveInstallStateLocked();
+    LeaveCriticalSection(&g_lock);
 
     if (queued > 0)
         dprintf("[game] picked %d install%s back up from last time\n", queued, queued == 1 ? "" : "s");
@@ -2606,6 +2756,11 @@ void RemoveGameJob(int id)
                 StagingRoot(g_gamesPath, root, sizeof(root));
                 StagingDirFor(root, g_jobs[i].request, dir, sizeof(dir));
             }
+
+            // Now that a finished install is kept, clearing its row is a
+            // change to what the file holds. It wasn't before, which is why
+            // this didn't write it.
+            SaveInstallStateLocked();
         }
     }
     LeaveCriticalSection(&g_lock);

@@ -98,6 +98,11 @@ DiscInstallResult QueueDiscInstall(unsigned long titleId, unsigned long mediaId,
 inline bool IsDiscJobId(int id) { return id >= DISC_JOB_ID_BASE && id < 2000000; }
 
 // The active one first, then finished ones, most recent first.
+// Puts back the rows for installs that finished in earlier runs. Records
+// only: a disc install is never picked back up, since the disc may not be in
+// the drive any more. Call it once, after StartDiscWorker.
+void RestoreDiscRecords();
+
 int SnapshotDiscJobs(QueueJobSnapshot *out, int maxJobs);
 int PendingDiscJobCount();
 void CancelDiscJob(int id);

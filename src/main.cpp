@@ -40,6 +40,7 @@ end-to-end on real hardware against a real 27-game library.
 #include "StoreCatalog.h"
 #include "DiscWorker.h"
 #include "GameInstaller.h"
+#include "QueueState.h" // TakeRestoredTally, for the one line about last time
 #include "UpdateCheck.h"
 #include "ArchiveOrgDLC.h"
 #include "downloadFile.h" // DownloadProgressFn + FormatBytes, for the progress callback
@@ -6901,11 +6902,17 @@ int main()
             // Whatever was still downloading when the app last closed goes
             // back in the queue and carries on by itself - that is the point
             // of keeping it. Both workers are up by now.
+            //
+            // Each of the three also puts back its rows for what finished,
+            // so a night that ended with the console switched off still has
+            // something on screen saying what happened. Those are records,
+            // not jobs: nothing here is run a second time.
             char keptAuth[IAS3_AUTH_HEADER_MAX];
             QuietAuthHeader(keptAuth, sizeof(keptAuth));
             if (downloadsStarted)
                 RestoreDownloadQueue(keptAuth);
             RestoreGameInstalls(keptAuth);
+            RestoreDiscRecords();
         }
         else if (step == 4)
         {
@@ -6941,6 +6948,32 @@ int main()
     if (!searchStarted)
         dprintf("ERROR: the search worker didn't start - searches are unavailable\n");
     StartupStep("the mark forming and resting");
+
+    // What finished in an earlier run, in one line - after the startup
+    // screen rather than during it, and one line rather than one a job,
+    // which would stack over each other. The thing worth waking up to is
+    // whether any of them failed, so that is what it leads with.
+    {
+        int restored = 0, restoredFailed = 0;
+        TakeRestoredTally(&restored, &restoredFailed);
+
+        if (restored > 0)
+        {
+            char heading[64], message[160];
+            _snprintf(heading, sizeof(heading), "%d download%s finished last time", restored,
+                      restored == 1 ? "" : "s");
+            heading[sizeof(heading) - 1] = '\0';
+
+            if (restoredFailed > 0)
+                _snprintf(message, sizeof(message), "%d of them didn't install - the Queue says why.",
+                          restoredFailed);
+            else
+                _snprintf(message, sizeof(message), "All of them installed. The Queue has the list.");
+            message[sizeof(message) - 1] = '\0';
+
+            ShowShellToast(heading, message, restoredFailed > 0 ? UI_TOAST_ERROR : UI_TOAST_SUCCESS);
+        }
+    }
 
     // The shell loop: read the controller, act on it, draw a frame.
     //
