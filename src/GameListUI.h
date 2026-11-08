@@ -536,6 +536,7 @@ struct StoreTileView
     const char *name;
     char letter;            // its A to Z tile's
     bool indie;             // an indie game: no cover, so the indie banner beside its name
+    bool unavailable;       // nobody has uploaded it: drawn faded, and A does nothing
 };
 
 // The Filter and sort panel, down the right over a letter's grid: a row each

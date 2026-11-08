@@ -4,6 +4,7 @@
 #define XBLIG_TITLES_DATA
 #define STORE_ROWS_DATA
 #define STORE_COLLECTIONS_DATA
+#define CATALOG_TITLES_DATA
 #include "StoreCatalog.h"
 #include "StoreRows.h"
 #include "StoreCollections.h"
@@ -437,6 +438,106 @@ int SearchStore(const char *query, StoreHit *out, int maxHits, int *outTotal)
 // ---------------------------------------------------------------------------
 // The letter pages' filters
 // ---------------------------------------------------------------------------
+
+int CatalogTitlesForLetter(char letter, StoreGame *out, int maxGames)
+{
+    if (out == NULL || maxGames <= 0)
+        return 0;
+
+    // A letter's are together, as the table is sorted the way the Store is.
+    int count = 0;
+    for (int i = 0; i < CATALOG_TITLE_COUNT && count < maxGames; ++i)
+    {
+        if (letter != STORE_LETTER_ALL && kCatalogTitles[i].letter != letter)
+        {
+            if (count > 0)
+                break;
+            continue;
+        }
+        StoreGame &game = out[count++];
+        game.name = kCatalogTitles[i].name;
+        game.titleId = kCatalogTitles[i].titleId;
+        game.regions = STORE_REGION_WORLD; // it has no region of its own
+        game.firstVersion = 0;
+        game.versionCount = 0;             // nothing to download
+        game.letter = kCatalogTitles[i].letter;
+        game.system = STORE_SYSTEM_XBOX360;
+    }
+    return count;
+}
+
+bool StoreGameMissing(const StoreGame &game)
+{
+    // Every game the Store can download has at least one version.
+    return game.versionCount == 0;
+}
+
+bool CatalogInfoOf(unsigned long titleId, StoreGameInfo *out)
+{
+    // Sorted by name, not by title ID, so there's no binary search to do -
+    // but it's a few hundred rows, asked about only for a letter's games.
+    for (int i = 0; titleId != 0 && i < CATALOG_TITLE_COUNT; ++i)
+    {
+        if (kCatalogTitles[i].titleId != titleId)
+            continue;
+        out->titleId = titleId;
+        out->ratings = kCatalogTitles[i].ratings;
+        out->stars = kCatalogTitles[i].stars;
+        out->genre = kCatalogTitles[i].genre;
+        out->tags = kCatalogTitles[i].tags;
+        return true;
+    }
+    return false;
+}
+
+static char LowerAscii(char c)
+{
+    return (c >= 'A' && c <= 'Z') ? (char)(c - 'A' + 'a') : c;
+}
+
+// How long the article a name starts with is, in the generator's order -
+// "an apple" isn't "a ".
+static int ArticleLen(const char *s)
+{
+    static const char *const kArticles[] = { "the ", "a ", "an " };
+    for (int i = 0; i < COUNT_OF(kArticles); ++i)
+    {
+        int n = 0;
+        while (kArticles[i][n] != '\0' && LowerAscii(s[n]) == kArticles[i][n])
+            ++n;
+        if (kArticles[i][n] == '\0')
+            return n;
+    }
+    return 0;
+}
+
+// A name boiled down the way make_store_titles.py's sort_key does. A name
+// longer than the buffer is cut, which only ever reorders two that agree
+// that far.
+static void StoreSortKey(const char *name, char *out, int outSize)
+{
+    if (name == NULL)
+        name = "";
+    name += ArticleLen(name);
+    int n = 0;
+    for (const char *p = name; *p != '\0' && n < outSize - 1; ++p)
+    {
+        const char c = LowerAscii(*p);
+        if ((c >= 'a' && c <= 'z') || (c >= '0' && c <= '9') || (c == ' ' && n > 0))
+            out[n++] = c;
+    }
+    while (n > 0 && out[n - 1] == ' ')
+        --n;
+    out[n] = '\0';
+}
+
+int CompareStoreNames(const char *a, const char *b)
+{
+    char keyA[128], keyB[128];
+    StoreSortKey(a, keyA, sizeof(keyA));
+    StoreSortKey(b, keyB, sizeof(keyB));
+    return strcmp(keyA, keyB);
+}
 
 bool StoreGameInfoOf(unsigned long titleId, StoreGameInfo *out)
 {

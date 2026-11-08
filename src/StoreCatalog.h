@@ -109,6 +109,31 @@ unsigned short StoreReleaseRegions(const StoreRelease *release);
 #define STORE_REGIONS_JPN  STORE_REGION_JAPAN
 #define STORE_REGIONS_ASIA (STORE_REGION_ASIA | STORE_REGION_KOREA | STORE_REGION_CHINA | STORE_REGION_TAIWAN)
 
+// ---------------------------------------------------------------------------
+// The games nobody has uploaded
+// ---------------------------------------------------------------------------
+
+#include "CatalogTitles.h" // CatalogTitle, CATALOG_TITLE_COUNT
+
+// A letter's missing games - the retail 360 games the Xbox Live catalog
+// lists that no archive.org item has - as StoreGames, so a letter's grid can
+// hold them beside the ones it can download. They come out in the same order
+// the Store's own do, with no versions (StoreGameMissing) and the regions of
+// a region-free game, so no region filter hides them.
+int CatalogTitlesForLetter(char letter, StoreGame *out, int maxGames);
+
+// Whether a grid's game is one of those: there's nothing to download.
+bool StoreGameMissing(const StoreGame &game);
+
+// A missing game's genre, tags and rating, which come from the catalog
+// rather than StoreRows.h. False for a title ID that isn't one.
+bool CatalogInfoOf(unsigned long titleId, StoreGameInfo *out);
+
+// Two names in the Store's own order - the generator's sort key: lower
+// case, a leading "The", "A" or "An" dropped, punctuation ignored. Negative,
+// zero or positive, as strcmp.
+int CompareStoreNames(const char *a, const char *b);
+
 // The Xbox Live Arcade and Indie Games lists, from XblaTitles.h and
 // XbligTitles.h (tools/make_xbla_titles.py): one RAR a game, in archive.org's
 // XBOX_360_XBLA and XBOX_360_XBLIG_1 to _5, sorted by name.

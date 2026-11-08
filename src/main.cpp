@@ -3117,8 +3117,9 @@ static const char *SectionName(int section)
 
 // The Store letters' filters and order, chosen on the Filter and sort panel -
 // Y on a letter of disc games. The regions, language and order are someone's
-// preferences, kept in settings.txt; genre, rating and Hide installed are
-// what they're looking for now, and are cleared when they leave the Store.
+// preferences, kept in settings.txt, as is whether to show the games nobody
+// has uploaded; genre and rating are what they're looking for now, and are
+// cleared when they leave the Store.
 // Arcade and indie games have nothing to filter by, so their letters show
 // everything, A to Z - and the Original Xbox's have no genres or ratings.
 enum StoreSort
@@ -3162,13 +3163,10 @@ struct StoreFilter
     int genre;             // 0 for any; a main genre, 1 to STORE_GENRE_COUNT; or FILTER_GENRE_FAMILY/KINECT
     int language;          // 0 for any, else 1 + StoreLanguageName's
     int rating;            // into kRatingNames: at least 2 + rating stars
-    bool hideInstalled;
+    bool showMissing;      // the games nobody has uploaded too, faded and unselectable
 };
 static StoreFilter g_filter;
 static bool g_filterRead = false;
-
-// main's library, for Hide installed.
-static const Library *g_storeLib = NULL;
 
 static const char *GenreValueName(int genre)
 {
@@ -3227,6 +3225,8 @@ static const StoreFilter &Filter()
         if (_stricmp(part, StoreLanguageName(l)) == 0)
             g_filter.language = 1 + l;
     }
+    FilterPart(line, "missing", part, sizeof(part));
+    g_filter.showMissing = (part[0] == '1');
     return g_filter;
 }
 
@@ -3240,8 +3240,8 @@ static void SaveFilter()
             AppendText(regions, sizeof(regions), regions[0] != '\0' ? "," : "", kFilterRegions[i].key);
     }
     char line[256];
-    _snprintf(line, sizeof(line), "sort=%s;regions=%s;language=%s", kSortKeys[f.sort], regions,
-              f.language > 0 ? StoreLanguageName(f.language - 1) : "");
+    _snprintf(line, sizeof(line), "sort=%s;regions=%s;language=%s;missing=%d", kSortKeys[f.sort], regions,
+              f.language > 0 ? StoreLanguageName(f.language - 1) : "", f.showMissing ? 1 : 0);
     line[sizeof(line) - 1] = '\0';
     if (!SetSettingsValue(STORE_FILTER_KEY, line))
         ShowMessageUI("Not saved", "settings.txt could not be written.", NULL);
@@ -3250,24 +3250,30 @@ static void SaveFilter()
 // Whether anything but the order is chosen.
 static bool FilterNarrows(const StoreFilter &f)
 {
-    return f.regions != 0 || f.genre != 0 || f.language != 0 || f.rating != 0 || f.hideInstalled;
+    return f.regions != 0 || f.genre != 0 || f.language != 0 || f.rating != 0;
 }
 
-// Clears genre, rating and Hide installed. True if any was set.
+// Clears genre and rating. True if either was set.
 static bool ClearSessionFilters()
 {
     Filter(); // read before it's changed
-    if (g_filter.genre == 0 && g_filter.rating == 0 && !g_filter.hideInstalled)
+    if (g_filter.genre == 0 && g_filter.rating == 0)
         return false;
     g_filter.genre = 0;
     g_filter.rating = 0;
-    g_filter.hideInstalled = false;
     return true;
 }
 
 // Whether a section's letters can be sorted and filtered by genre and
 // rating: not the Original Xbox's, which the catalog has none of.
 static bool SectionHasInfo(int section)
+{
+    return section != SECTION_XBOX;
+}
+
+// Whether a section's letters can show the games nobody has uploaded:
+// CatalogTitles.h is the 360's retail discs, so only the front page's.
+static bool SectionHasMissing(int section)
 {
     return section != SECTION_XBOX;
 }
@@ -3283,6 +3289,8 @@ static StoreFilter FilterFor(int section)
         f.genre = 0;
         f.rating = 0;
     }
+    if (!SectionHasMissing(section))
+        f.showMissing = false;
     return f;
 }
 
@@ -3299,28 +3307,6 @@ static unsigned short FilterRegionMask(const StoreFilter &f)
     return mask != 0 ? (unsigned short)(mask | STORE_REGION_WORLD) : 0;
 }
 
-// Installed: in the library by its title ID, or any of its discs installed
-// from the Store.
-static bool StoreGameInstalled(const StoreGame &game)
-{
-    for (int i = 0; g_storeLib != NULL && game.titleId != 0 && i < g_storeLib->count; ++i)
-    {
-        if (g_storeLib->games[i].titleId == game.titleId)
-            return true;
-    }
-    for (int v = 0; v < game.versionCount; ++v)
-    {
-        const StoreRelease *release = StoreReleaseOf(&game, v);
-        for (int d = 0; release != NULL && d < release->discCount; ++d)
-        {
-            const StoreDisc *disc = StoreReleaseDisc(release, d);
-            if (disc != NULL && IsGameZipInstalled(disc->zip))
-                return true;
-        }
-    }
-    return false;
-}
-
 static bool FilterLets(const StoreFilter &f, const StoreGame &game, const StoreGameInfo *info)
 {
     const unsigned short regions = FilterRegionMask(f);
@@ -3335,11 +3321,12 @@ static bool FilterLets(const StoreFilter &f, const StoreGame &game, const StoreG
             : info->genre != f.genre)
             return false;
     }
-    if (f.language != 0 && !(StoreGameLanguages(&game) & (1UL << (f.language - 1))))
+    // A missing game has no versions, so no languages either - the language
+    // filter would hide every one of them rather than narrow them down.
+    if (f.language != 0 && !StoreGameMissing(game) &&
+        !(StoreGameLanguages(&game) & (1UL << (f.language - 1))))
         return false;
     if (f.rating != 0 && (info == NULL || info->stars < (f.rating + 2) * 10))
-        return false;
-    if (f.hideInstalled && StoreGameInstalled(game))
         return false;
     return true;
 }
@@ -3384,9 +3371,33 @@ static int CompareForSort(const void *a, const void *b)
 // SECTION_XBOX.
 static int FilteredGamesForLetter(char letter, int section)
 {
-    const int all = (section == SECTION_XBOX) ? XboxGamesForLetter(letter, g_storeGames, MAX_STORE_GAMES)
-                                              : StoreGamesForLetter(letter, g_storeGames, MAX_STORE_GAMES);
+    int all = (section == SECTION_XBOX) ? XboxGamesForLetter(letter, g_storeGames, MAX_STORE_GAMES)
+                                        : StoreGamesForLetter(letter, g_storeGames, MAX_STORE_GAMES);
     const StoreFilter f = FilterFor(section);
+
+    // The games nobody has uploaded, merged in by name. Both lists are in
+    // the Store's order already, so it's the one pass.
+    if (f.showMissing)
+    {
+        static StoreGame gone[CATALOG_TITLE_COUNT];
+        static StoreGame merged[MAX_STORE_GAMES];
+        const int goneCount = CatalogTitlesForLetter(letter, gone, CATALOG_TITLE_COUNT);
+        if (goneCount > 0 && all + goneCount <= MAX_STORE_GAMES)
+        {
+            int i = 0, j = 0, n = 0;
+            while (i < all || j < goneCount)
+            {
+                if (j >= goneCount ||
+                    (i < all && CompareStoreNames(g_storeGames[i].name, gone[j].name) <= 0))
+                    merged[n++] = g_storeGames[i++];
+                else
+                    merged[n++] = gone[j++];
+            }
+            memcpy(g_storeGames, merged, n * sizeof(merged[0]));
+            all = n;
+        }
+    }
+
     if (!FilterNarrows(f) && f.sort == STORE_SORT_AZ)
         return all;
 
@@ -3398,7 +3409,11 @@ static int FilteredGamesForLetter(char letter, int section)
     for (int i = 0; i < all; ++i)
     {
         StoreGameInfo gi;
-        const bool has = StoreGameInfoOf(g_storeGames[i].titleId, &gi);
+        // A missing game's genre and rating are the catalog's, not
+        // StoreRows.h's, which covers only what the Store can download.
+        const bool has = StoreGameMissing(g_storeGames[i])
+                             ? CatalogInfoOf(g_storeGames[i].titleId, &gi)
+                             : StoreGameInfoOf(g_storeGames[i].titleId, &gi);
         if (!FilterLets(f, g_storeGames[i], has ? &gi : NULL))
             continue;
         g_storeGames[count] = g_storeGames[i];
@@ -3430,7 +3445,7 @@ static int FilteredGamesForLetter(char letter, int section)
 static const char *FilterSummary(int section, bool full)
 {
     const StoreFilter f = FilterFor(section);
-    const char *parts[FILTER_REGION_COUNT + 5];
+    const char *parts[FILTER_REGION_COUNT + 5]; // genre, language, rating, missing, sort
     int n = 0;
     for (int i = 0; i < FILTER_REGION_COUNT; ++i)
     {
@@ -3443,8 +3458,8 @@ static const char *FilterSummary(int section, bool full)
         parts[n++] = StoreLanguageName(f.language - 1);
     if (f.rating != 0)
         parts[n++] = kRatingNames[f.rating];
-    if (f.hideInstalled)
-        parts[n++] = "Not installed";
+    if (f.showMissing)
+        parts[n++] = "Missing shown";
     if (f.sort != STORE_SORT_AZ)
         parts[n++] = kSortNames[f.sort];
     if (n == 0)
@@ -3520,6 +3535,7 @@ static void OpenStoreLetter(Shell &shell, char letter, int section)
             g_storeTiles[i].name = g_arcadeGames[i]->name;
             g_storeTiles[i].letter = g_arcadeGames[i]->letter;
             g_storeTiles[i].indie = indie;
+            g_storeTiles[i].unavailable = false;
         }
     }
     else
@@ -3531,6 +3547,7 @@ static void OpenStoreLetter(Shell &shell, char letter, int section)
             g_storeTiles[i].name = g_storeGames[i].name;
             g_storeTiles[i].letter = g_storeGames[i].letter;
             g_storeTiles[i].indie = false;
+            g_storeTiles[i].unavailable = StoreGameMissing(g_storeGames[i]);
         }
     }
     shell.storeLetterArcade = arcade;
@@ -3555,6 +3572,7 @@ static void OpenStoreCollection(Shell &shell, int collection)
         g_storeTiles[i].name = g_storeGames[i].name;
         g_storeTiles[i].letter = g_storeGames[i].letter;
         g_storeTiles[i].indie = false;
+        g_storeTiles[i].unavailable = false; // a collection is games the Store has
     }
     shell.storeLetterArcade = false;
     shell.storeLetterSection = -1;
@@ -3607,7 +3625,7 @@ enum
     FILTER_ROW_GENRE = FILTER_ROW_REGIONS + FILTER_REGION_COUNT,
     FILTER_ROW_LANGUAGE,
     FILTER_ROW_RATING,
-    FILTER_ROW_HIDE_INSTALLED,
+    FILTER_ROW_SHOW_MISSING,
     FILTER_ROW_RESET,
     FILTER_ROW_COUNT
 };
@@ -3632,6 +3650,8 @@ static void FilterCheckRow(StoreFilterRowView &row, const char *label, bool on)
 // the Original Xbox's.
 static bool FilterRowDisabled(const Shell &shell, int row)
 {
+    if (row == FILTER_ROW_SHOW_MISSING)
+        return !SectionHasMissing(shell.storeLetterSection);
     return !SectionHasInfo(shell.storeLetterSection) &&
            (row == FILTER_ROW_SORT || row == FILTER_ROW_GENRE || row == FILTER_ROW_RATING);
 }
@@ -3652,7 +3672,7 @@ static const StoreFilterView *MakeFilterPanel(const Shell &shell)
     FilterValueRow(rows[FILTER_ROW_LANGUAGE], "Language", f.language > 0 ? StoreLanguageName(f.language - 1) : "Any",
                    f.language, 1 + STORE_LANGUAGE_COUNT);
     FilterValueRow(rows[FILTER_ROW_RATING], "Rating", kRatingNames[f.rating], f.rating, FILTER_RATING_VALUES);
-    FilterCheckRow(rows[FILTER_ROW_HIDE_INSTALLED], "Hide installed games", f.hideInstalled);
+    FilterCheckRow(rows[FILTER_ROW_SHOW_MISSING], "Show games we don't have", f.showMissing);
     rows[FILTER_ROW_RESET].kind = STORE_FILTER_BUTTON;
     rows[FILTER_ROW_RESET].label = "Reset filters";
     for (int r = 0; r < FILTER_ROW_COUNT; ++r)
@@ -3728,10 +3748,10 @@ static bool StepFilterPanel(const UiInput &input, Shell &shell)
         return StepFilterValue(f.language, 1 + STORE_LANGUAGE_COUNT, step, a);
     case FILTER_ROW_RATING:
         return StepFilterValue(f.rating, FILTER_RATING_VALUES, step, a);
-    case FILTER_ROW_HIDE_INSTALLED:
+    case FILTER_ROW_SHOW_MISSING:
         if (!a)
             return false;
-        f.hideInstalled = !f.hideInstalled;
+        f.showMissing = !f.showMissing;
         return true;
     case FILTER_ROW_RESET:
         if (!a || (!FilterNarrows(f) && f.sort == STORE_SORT_AZ))
@@ -3751,7 +3771,7 @@ static int FilterSignature()
 {
     const StoreFilter &f = Filter();
     return f.sort | (f.regions << 2) | (f.genre << 6) | (f.language << 11) | (f.rating << 16) |
-           ((f.hideInstalled ? 1 : 0) << 18);
+           ((f.showMissing ? 1 : 0) << 18);
 }
 
 // Search on the front page: the keyboard, then every list's games that
@@ -3783,6 +3803,7 @@ static bool OpenStoreSearch(Shell &shell)
     {
         const StoreHit &hit = g_searchHits[i];
         StoreTileView &tile = g_storeTiles[i];
+        tile.unavailable = false; // a search looks through what the Store has
         if (hit.game != NULL)
         {
             tile.titleId = hit.game->titleId;
@@ -6820,7 +6841,6 @@ int main()
     // actually waits on now draws a real frame instead of leaving whatever
     // was last on screen.
     Library lib;
-    g_storeLib = &lib;
     lib.count = 0;
     memset(lib.folderFound, 0, sizeof(lib.folderFound));
     lib.cacheDirty = false;
@@ -7667,8 +7687,10 @@ int main()
                 }
                 else if (shell.storeLetterArcade)
                     OpenArcadeGame(shell, *g_arcadeGames[shell.storeSelected]);
-                else
+                else if (!StoreGameMissing(g_storeGames[shell.storeSelected]))
                     OpenStoreGame(shell, g_storeGames[shell.storeSelected]);
+                // A game nobody has uploaded has no page to open: it's in
+                // the grid to be seen, not chosen.
             }
             else
                 StepStoreLetter(input, shell);
@@ -7952,8 +7974,8 @@ int main()
             break;
         }
 
-        // Genre, rating and Hide installed last only while the Store's open.
-        // A letter left open behind is shown again without them.
+        // Genre and rating last only while the Store's open. A letter left
+        // open behind is shown again without them.
         if (shell.page != SHELL_PAGE_STORE)
         {
             if (shell.storeFilterOpen)
@@ -8175,7 +8197,8 @@ int main()
                 }
                 else if (!shell.sidebarFocused)
                 {
-                    if (shell.storeGameCount > 0)
+                    // Nothing to open on a game nobody has uploaded.
+                    if (shell.storeGameCount > 0 && !g_storeTiles[shell.storeSelected].unavailable)
                         hintCount = AddHint(hints, hintCount, UI_BUTTON_A, L"View game", L"View");
                     hintCount = AddHint(hints, hintCount, UI_BUTTON_B, L"Store");
                     if (shell.storeSearch)

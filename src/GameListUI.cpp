@@ -7045,6 +7045,10 @@ static void DrawFilterPanelText(const StoreFilterView &panel)
 
 static void FormatThousands(unsigned long n, char *out, size_t outSize); // with the game page's helpers below
 
+// Over the tile of a game nobody has uploaded, so the grid reads at a
+// glance as what's there and what isn't.
+#define COL_TILE_UNAVAILABLE 0xA6000000
+
 void RenderStoreLetterFrame(StoreLetterView &view, const UiHint *hints, int hintCount)
 {
     if (!g_Initialized)
@@ -7122,6 +7126,8 @@ void RenderStoreLetterFrame(StoreLetterView &view, const UiHint *hints, int hint
             const bool indie = view.tiles[item].indie;
             D3DTexture *cover = indie ? IndieTile() : StoreCoverFor(view.tiles[item].titleId);
             DrawTileArt(cover, NULL, x, y, L.tile, h);
+            if (view.tiles[item].unavailable)
+                FillRound(x, y, L.tile, h, r, COL_TILE_UNAVAILABLE);
 
             if (!peek)
             {
@@ -7160,6 +7166,8 @@ void RenderStoreLetterFrame(StoreLetterView &view, const UiHint *hints, int hint
 
         ShadowRound(focusOX, focusOY + S(10.0f), focusS, focusS, r, S(26.0f), COL_SHADOW);
         DrawTileArt(cover, NULL, focusOX, focusOY, focusS, focusS);
+        if (view.tiles[focusItem].unavailable)
+            FillRound(focusOX, focusOY, focusS, focusS, r, COL_TILE_UNAVAILABLE);
         FocusRing(focusOX, focusOY, focusS, focusS, r);
         if (focusHasArt)
             FillRoundGradient(focusOX, focusOY + focusS - bandH, focusS, bandH, r, 0x00000000, 0xD9000000, true);
