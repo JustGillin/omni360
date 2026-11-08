@@ -793,6 +793,11 @@ void RenderProgressFrame(const char *title, const char *statusLine,
 // detailLine may be NULL. Call it before starting the slow work, not after.
 void RenderStatusFrame(const char *heading, const char *message, const char *detailLine);
 
+// Night mode's screen: black but for the time, with one line under it -
+// NULL for none. Both drift slowly, so six hours don't sit on the same
+// pixels. See NightMode.h.
+void RenderNightFrame(const char *clock, const char *message);
+
 // The frame left on screen as a game starts: its Xbox Live wallpaper - the
 // one the Store's game page shows - filling the screen, waiting a moment
 // for it if it isn't loaded. The name, as RenderStatusFrame draws it, for a

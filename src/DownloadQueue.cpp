@@ -1520,6 +1520,26 @@ int PendingDownloadCount()
     return pending;
 }
 
+int RunnableDownloadCount()
+{
+    if (!g_running)
+        return 0;
+
+    int running = 0;
+
+    EnterCriticalSection(&g_lock);
+    for (int i = 0; i < MAX_QUEUE_JOBS; ++i)
+    {
+        // An active job being paused is still counted: the transfer hasn't
+        // stopped yet, and it drops out of this the moment it has.
+        if (g_jobs[i].used && (g_jobs[i].state == QUEUE_WAITING || g_jobs[i].state == QUEUE_ACTIVE))
+            running++;
+    }
+    LeaveCriticalSection(&g_lock);
+
+    return running;
+}
+
 void CancelQueueJob(int id)
 {
     if (!g_running)

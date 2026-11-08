@@ -91,6 +91,10 @@ bool GameZipInstalledAs(const char *zipName, unsigned long *outTitleId, unsigned
 // After an uninstall: the zip's note is dropped, here and in Installed.txt.
 void ForgetInstalledZip(const char *zipName);
 int PendingGameJobCount();
+
+// The same, without the paused ones: installs that will finish if left
+// alone. What night mode waits on - see NightMode.h.
+int RunnableGameJobCount();
 void CancelGameJob(int id);
 
 // Sets an install aside without giving it up: the download stops like a

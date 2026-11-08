@@ -4160,6 +4160,52 @@ void RenderStatusFrame(const char *heading, const char *message, const char *det
     RenderStatusFrameInternal(heading, message, detailLine, NULL, 0);
 }
 
+// ---------------------------------------------------------------------------
+// Night mode's screen - see NightMode.h
+// ---------------------------------------------------------------------------
+//
+// The time, and a line under it, on black. That is the whole indicator: there
+// is no other sign that the console is armed, so it has to be unmistakably
+// not the shell.
+//
+// Dim rather than white. This is what a dark room looks at for six hours, and
+// a plasma or an OLED would wear a bright clock into the panel. For the same
+// reason the whole block walks a slow circle instead of sitting on one set of
+// pixels - a turn an hour, which at main.cpp's one redraw a minute is sixty
+// steps around.
+#define COL_NIGHT_CLOCK 0xFF8C8C8C
+#define COL_NIGHT_LINE  0xFF4A4A4A
+
+void RenderNightFrame(const char *clock, const char *message)
+{
+    if (!g_Initialized)
+        return;
+
+    const float angle = (float)(GetTickCount() % 3600000) * (6.2831853f / 3600000.0f);
+    const float centerX = g_M.screenW * 0.5f + cosf(angle) * (g_M.screenW * 0.16f);
+    const float centerY = g_M.screenH * 0.5f + sinf(angle) * (g_M.screenH * 0.16f);
+
+    g_pd3dDevice->Resume();
+    ClearClip();
+    g_pd3dDevice->SetRenderState(D3DRS_SCISSORTESTENABLE, FALSE);
+
+    // Properly black, not the shell's near-black: nothing else is on screen
+    // to make 0x0E look like anything but a lit panel.
+    g_pd3dDevice->Clear(0, NULL, D3DCLEAR_TARGET, 0xFF000000, 1.0f, 0);
+
+    g_UiFont.Begin();
+
+    TextMid(centerX, centerY, 2.6f, COL_NIGHT_CLOCK, clock, ATGFONT_CENTER_X);
+    if (message != NULL && message[0] != '\0')
+        TextMid(centerX, centerY + LineHeight(2.6f) * 0.9f, 0.8f, COL_NIGHT_LINE, message, ATGFONT_CENTER_X);
+
+    g_UiFont.SetBold(false);
+    g_UiFont.SetScaleFactors(1.0f, 1.0f);
+    g_UiFont.End();
+
+    EndFrame();
+}
+
 void ShowMessageUI(const char *heading, const char *message, const char *detailLine)
 {
     if (!g_Initialized)

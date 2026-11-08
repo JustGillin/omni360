@@ -181,6 +181,12 @@ int SnapshotDownloadQueue(QueueJobSnapshot *out, int maxJobs);
 // Waiting and active jobs - the sidebar's count.
 int PendingDownloadCount();
 
+// The same, without the paused ones: jobs that will finish if left alone.
+// Night mode waits on this rather than the count above, since a paused job
+// never finishes and waiting for one would leave the console on all night.
+// See NightMode.h.
+int RunnableDownloadCount();
+
 // A waiting job is cancelled on the spot; the active one stops at its next
 // progress report. Files that already finished stay installed.
 void CancelQueueJob(int id);

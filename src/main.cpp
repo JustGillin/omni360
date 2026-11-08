@@ -41,6 +41,7 @@ end-to-end on real hardware against a real 27-game library.
 #include "DiscWorker.h"
 #include "GameInstaller.h"
 #include "QueueState.h" // TakeRestoredTally, for the one line about last time
+#include "NightMode.h"
 #include "UpdateCheck.h"
 #include "ArchiveOrgDLC.h"
 #include "downloadFile.h" // DownloadProgressFn + FormatBytes, for the progress callback
@@ -6202,6 +6203,48 @@ static void PollUpdateCheck(Shell &shell)
     }
 }
 
+// Night mode's screen - see NightMode.h.
+//
+// Drawn when the minute changes or the countdown ticks, not sixty times a
+// second. Six hours of frames for a clock is the console's time spent on
+// nothing, and the downloads are what it should be spending it on. force is
+// the moment it is armed, when there is nothing on screen yet.
+static void DrawNightFrame(int secondsLeft, bool force)
+{
+    static int lastMinute = -1;
+    static int lastSeconds = -1;
+
+    SYSTEMTIME now;
+    GetLocalTime(&now);
+
+    if (!force && (int)now.wMinute == lastMinute && secondsLeft == lastSeconds)
+        return;
+
+    lastMinute = (int)now.wMinute;
+    lastSeconds = secondsLeft;
+
+    int hour = now.wHour % 12;
+    if (hour == 0)
+        hour = 12;
+
+    char clock[16];
+    _snprintf(clock, sizeof(clock), "%d:%02d %s", hour, (int)now.wMinute, now.wHour < 12 ? "AM" : "PM");
+    clock[sizeof(clock) - 1] = '\0';
+
+    char line[96];
+    if (secondsLeft > 0)
+        _snprintf(line, sizeof(line), "Switching off in %d second%s - press anything to stay on", secondsLeft,
+                  secondsLeft == 1 ? "" : "s");
+    else
+    {
+        const int running = RunningJobCount();
+        _snprintf(line, sizeof(line), "%d still going - switching off when they're done", running);
+    }
+    line[sizeof(line) - 1] = '\0';
+
+    RenderNightFrame(clock, line);
+}
+
 // Drains the jobs that finished since the last frame. Each one may have
 // changed what's on disk - the installed markers, the free space - so they're
 // refreshed; the ones worth hearing about get a popup.
@@ -7082,6 +7125,61 @@ int main()
 
         }
 
+        // Night mode. The shell is skipped entirely: the screen is black but
+        // for the clock, so there is nothing to keep up to date, and the
+        // downloads get the time back. What finished still drains above
+        // this, so the morning's Queue page is right.
+        if (NightModeOn())
+        {
+            const UiInput night = PollUiInput();
+            if (night.pressed != 0 || night.nav != 0)
+            {
+                // Any button at all, countdown or no countdown. One rule, so
+                // there is no way to think you cancelled the countdown and
+                // still have the console switch off later.
+                LeaveNightMode();
+                ResyncUiInput(); // the button that woke it mustn't also act
+                shell.stale = true;
+                continue;
+            }
+
+            int secondsLeft = 0;
+            if (!UpdateNightMode(&secondsLeft))
+            {
+                DrawNightFrame(secondsLeft, false);
+
+                // Not the shell's ~60fps: there is nothing moving, and a
+                // button press being noticed a tenth of a second later is
+                // not something anyone can feel.
+                Sleep(100);
+                continue;
+            }
+
+            // The countdown has run out. The workers stop first, exactly as
+            // they do when the app is closed normally, so a game install's
+            // staging is flushed and the disc drive is left alone - then the
+            // power goes.
+            RenderStatusFrame("Switching off", "Nothing left in the queue",
+                              "Stopping downloads and installs first.");
+            StopDownloadQueue(15000);
+            StopDiscWorker(15000);
+            StopGameInstaller(20000);
+            StopSearchWorker(3000);
+            StopCoverArt(3000);
+            StopStoreArt(3000);
+
+            PowerOffConsole();
+
+            // It came back, so the console is still on - and everything is
+            // stopped, so there is no shell to go back to. Leaving is as
+            // close to off as this can get from here.
+            LeaveNightMode();
+            RenderStatusFrame("Couldn't switch off", "The console didn't take the power-off",
+                              "Leaving Omni360 instead. What finished is in the Queue next time.");
+            Sleep(5000);
+            break;
+        }
+
         const double partDisc = ImageTimerMs();
         UpdateDisc(shell, lib, gamesPath);
 
@@ -7640,6 +7738,25 @@ int main()
             {
                 EnterPage(shell, SHELL_PAGE_HOME, false);
             }
+            else if (pressed & XINPUT_GAMEPAD_Y)
+            {
+                // Night mode, from anywhere on the page - this is where you
+                // are when you've just queued the night's downloads. A, B
+                // and X are all taken here; Y isn't. See NightMode.h.
+                if (ArmNightMode() == NIGHT_ARMED)
+                {
+                    // Black straight away - that is the indicator - and
+                    // acted so this frame doesn't go on to draw the Queue
+                    // page over the top of it.
+                    DrawNightFrame(0, true);
+                    acted = true;
+                }
+                else
+                    ShowShellToast("Nothing is downloading",
+                                   "Night mode switches the console off when the queue empties. "
+                                   "It's empty already.",
+                                   UI_TOAST_INFO);
+            }
             else if (input.nav == XINPUT_GAMEPAD_DPAD_LEFT && !shell.queueOnRecents)
             {
                 FocusSidebar(shell);
@@ -8157,6 +8274,12 @@ int main()
                         hintCount = finished ? AddHint(hints, hintCount, UI_BUTTON_X, L"Remove")
                                              : AddHint(hints, hintCount, UI_BUTTON_X, L"Stop download", L"Stop");
                     }
+
+                    // Only worth offering while something would finish - it
+                    // is refused otherwise.
+                    if (RunningJobCount() > 0)
+                        hintCount = AddHint(hints, hintCount, UI_BUTTON_Y, L"Night mode", L"Night");
+
                     hintCount = AddHint(hints, hintCount, UI_BUTTON_B, L"Home");
                 }
 

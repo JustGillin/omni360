@@ -2615,6 +2615,25 @@ int PendingGameJobCount()
     return n;
 }
 
+int RunnableGameJobCount()
+{
+    if (!g_running)
+        return 0;
+
+    int n = 0;
+    EnterCriticalSection(&g_lock);
+    for (int i = 0; i < MAX_GAME_JOBS; ++i)
+    {
+        // One being paused is still counted: its download hasn't stopped
+        // yet, and it drops out of this the moment it has.
+        if (g_jobs[i].used &&
+            (g_jobs[i].snap.state == QUEUE_WAITING || g_jobs[i].snap.state == QUEUE_ACTIVE))
+            n++;
+    }
+    LeaveCriticalSection(&g_lock);
+    return n;
+}
+
 void CancelGameJob(int id)
 {
     if (!g_running)
