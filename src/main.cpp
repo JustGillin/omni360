@@ -7080,7 +7080,12 @@ int main()
     for (;;)
     {
         const DWORD frameStart = GetTickCount();
-        if (lastFrame != 0 && frameStart - lastFrame > slowFrameMs)
+
+        // Night mode paces itself at Sleep(100) deliberately, so every pass
+        // of it is a slow frame by this threshold. A night of downloads
+        // would be thousands of lines saying so, with whatever actually
+        // went wrong buried somewhere in the middle of them.
+        if (lastFrame != 0 && frameStart - lastFrame > slowFrameMs && !NightModeOn())
             dprintf("[timing] slow frame: %lu ms (page %d)\n", (unsigned long)(frameStart - lastFrame), (int)shell.page);
         lastFrame = frameStart;
         const double partStart = ImageTimerMs();

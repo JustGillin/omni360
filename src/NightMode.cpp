@@ -14,9 +14,11 @@ DESCRIPTION : Waiting for the queues to drain overnight and then switching the
 #include <xtl.h>
 #include <string.h>
 
-// The system controller, through the kernel. The same call DiscWorker.cpp
-// declares for reading the disc tray: the XDK's xboxkrnl.lib exports it,
-// though no header declares it.
+// The SMC - the system management controller, the small chip on the
+// motherboard that is powered whenever the console is plugged in and that
+// runs the power button, the fans and the disc tray. Reached through the
+// kernel, by the same call DiscWorker.cpp declares for reading the tray:
+// the XDK's xboxkrnl.lib exports it, though no header declares it.
 extern "C" VOID HalSendSMCMessage(LPVOID input, LPVOID output);
 
 // ---------------------------------------------------------------------------
@@ -32,12 +34,15 @@ extern "C" VOID HalSendSMCMessage(LPVOID input, LPVOID output);
 // reboot. A wrong value here reboots the console at three in the morning,
 // which is the opposite of the point.
 //
-// So the system controller is asked directly instead. That is the same call
-// with the same 16-byte message and the same byte 0 = command as the tray
-// state in DiscWorker.cpp, which has been working on hardware for a while -
-// so the calling convention is one this codebase has already proven. The
-// bytes are libxenon's xenon_smc_power_shutdown, whose tray command is 0x0A,
-// the same as ours.
+// So the SMC is asked to do it directly instead. That is the same call with
+// the same 16-byte message and the same byte 0 = command as the tray state
+// in DiscWorker.cpp, which has been working on hardware for a while - so the
+// calling convention is one this codebase has already proven. The bytes are
+// libxenon's xenon_smc_power_shutdown, whose tray command is 0x0A, the same
+// as ours.
+//
+// Confirmed on hardware 2026-11-07: the console switched off inside the
+// call, and HalSendSMCMessage never returned.
 #define SMC_POWER     0x82
 #define SMC_POWER_OFF 0x01
 
@@ -118,11 +123,11 @@ void PowerOffConsole()
     request[0] = SMC_POWER;
     request[1] = SMC_POWER_OFF;
 
-    dprintf("[night] asking the system controller to switch off\n");
+    dprintf("[night] asking the SMC to switch the console off\n");
     HalSendSMCMessage(request, reply);
 
     // It doesn't come back when it works. If it does, the console is still
     // on, and the caller says so rather than leaving a black screen up.
     Sleep(3000);
-    dprintf("[night] still running - the controller didn't take the power-off\n");
+    dprintf("[night] still running - the SMC didn't take the power-off\n");
 }
