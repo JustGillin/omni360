@@ -40,6 +40,7 @@ struct QueueJob
     bool cancelRequested;
     bool pauseRequested; // stop like a cancel, but keep the job - see FinishJob
     bool handedOver;     // finished, and already returned by TakeFinishedQueueJob
+    bool told;           // a record, and already counted in a startup summary
 
     DlcRarMatch pack;          // QUEUE_JOB_DLC_PACK
     TitleUpdateMatch update;   // QUEUE_JOB_TITLE_UPDATE
@@ -253,6 +254,13 @@ static void SaveQueueStateLocked()
                                                                   : "homebrew",
                              job.view.gameName, job.view.titleId, job.view.title, (int)job.outcome,
                              job.view.resultText, job.view.resultDetail);
+
+        // Written only once it is true, like paused: a file from the build
+        // before this one has no told= line anywhere, and every record in it
+        // reads as not yet counted. That is one more summary on the first
+        // launch after updating, and silence from then on.
+        if (job.told)
+            AppendQueueStateText(text, QUEUE_STATE_MAX, &at, "told=1\n");
     }
 
     if (jobs > 0 || records > 0)
@@ -1241,6 +1249,7 @@ struct RestoredJob
     int outcome;
     char resultText[64];
     char resultDetail[160];
+    bool told;
 };
 
 static void StartRestored(RestoredJob &job, int kind, bool finished)
@@ -1296,6 +1305,11 @@ static void RestoreFinishedRecord(const RestoredJob &rec)
     job.outcome = (QueueOutcome)rec.outcome;
     job.handedOver = true;
 
+    // Counted by this launch if it hasn't been counted by one before, and
+    // either way it has been now. The save at the end of the restore is what
+    // puts that in the file.
+    job.told = true;
+
     job.view.titleId = rec.titleId;
     CopyText(job.view.gameName, sizeof(job.view.gameName), rec.gameName);
     CopyText(job.view.title, sizeof(job.view.title), rec.title);
@@ -1307,7 +1321,9 @@ static void RestoreFinishedRecord(const RestoredJob &rec)
 
     LeaveCriticalSection(&g_lock);
 
-    NoteRestoredRecord(rec.outcome != QUEUE_OUTCOME_INSTALLED && rec.outcome != QUEUE_OUTCOME_ALREADY_INSTALLED);
+    if (!rec.told)
+        NoteRestoredRecord(rec.outcome != QUEUE_OUTCOME_INSTALLED &&
+                           rec.outcome != QUEUE_OUTCOME_ALREADY_INSTALLED);
 }
 
 // Queues what one block of the file described. The jobs go back in the order
@@ -1386,6 +1402,8 @@ void RestoreDownloadQueue(const char *authHeader)
                 CopyText(job.resultText, sizeof(job.resultText), value);
             else if (strcmp(key, "detail") == 0)
                 CopyText(job.resultDetail, sizeof(job.resultDetail), value);
+            else if (strcmp(key, "told") == 0)
+                job.told = (atoi(value) != 0);
         }
         else if (job.kind == QUEUE_JOB_DLC_PACK)
         {

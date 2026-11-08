@@ -87,6 +87,7 @@ struct DiscJob
     QueueJobSnapshot snap;
     bool cancel;
     bool handedOver; // finished, and given to TakeFinishedDiscJob already
+    bool told;       // a record, and already counted in a startup summary
     unsigned long mediaId;
 };
 
@@ -352,6 +353,9 @@ static void SaveDiscStateLocked()
                              "result=%s\ndetail=%s\n",
                              job.snap.gameName, job.snap.titleId, job.mediaId, job.snap.title,
                              (int)job.snap.outcome, job.snap.resultText, job.snap.resultDetail);
+
+        if (job.told)
+            AppendQueueStateText(text, sizeof(text), &at, "told=1\n");
     }
 
     WriteQueueStateFile(DISC_STATE_FILE, text);
@@ -756,7 +760,7 @@ static int FreeJobSlot()
 // re-announce every one of them over the startup screen.
 static void RestoreFinishedDiscLocked(const char *name, unsigned long titleId, unsigned long mediaId,
                                       const char *title, int outcome, const char *resultText,
-                                      const char *resultDetail)
+                                      const char *resultDetail, bool told)
 {
     const int slot = FreeJobSlot();
     if (slot < 0)
@@ -767,6 +771,7 @@ static void RestoreFinishedDiscLocked(const char *name, unsigned long titleId, u
 
     job.used = true;
     job.handedOver = true;
+    job.told = true; // counted below if it wasn't already, and now it has been
     job.mediaId = mediaId;
     job.snap.id = g_nextJobId++;
     job.snap.kind = QUEUE_JOB_DISC_INSTALL;
@@ -784,7 +789,8 @@ static void RestoreFinishedDiscLocked(const char *name, unsigned long titleId, u
     _snprintf(job.snap.resultDetail, sizeof(job.snap.resultDetail), "%s", resultDetail);
     job.snap.resultDetail[sizeof(job.snap.resultDetail) - 1] = '\0';
 
-    NoteRestoredRecord(outcome != QUEUE_OUTCOME_INSTALLED && outcome != QUEUE_OUTCOME_ALREADY_INSTALLED);
+    if (!told)
+        NoteRestoredRecord(outcome != QUEUE_OUTCOME_INSTALLED && outcome != QUEUE_OUTCOME_ALREADY_INSTALLED);
 }
 
 void RestoreDiscRecords()
@@ -800,6 +806,7 @@ void RestoreDiscRecords()
     unsigned long titleId = 0, mediaId = 0;
     int outcome = 0;
     bool inDone = false;
+    bool told = false;
 
     EnterCriticalSection(&g_lock);
 
@@ -810,11 +817,12 @@ void RestoreDiscRecords()
         if (strcmp(key, "done") == 0)
         {
             if (inDone)
-                RestoreFinishedDiscLocked(name, titleId, mediaId, title, outcome, resultText, resultDetail);
+                RestoreFinishedDiscLocked(name, titleId, mediaId, title, outcome, resultText, resultDetail, told);
 
             name[0] = title[0] = resultText[0] = resultDetail[0] = '\0';
             titleId = mediaId = 0;
             outcome = 0;
+            told = false;
             inDone = (strcmp(value, "disc") == 0);
             continue;
         }
@@ -836,6 +844,8 @@ void RestoreDiscRecords()
             _snprintf(resultText, sizeof(resultText), "%s", value);
         else if (strcmp(key, "detail") == 0)
             _snprintf(resultDetail, sizeof(resultDetail), "%s", value);
+        else if (strcmp(key, "told") == 0)
+            told = (atoi(value) != 0);
 
         name[sizeof(name) - 1] = '\0';
         title[sizeof(title) - 1] = '\0';
@@ -844,7 +854,12 @@ void RestoreDiscRecords()
     }
 
     if (inDone) // the last record has no "done=" after it
-        RestoreFinishedDiscLocked(name, titleId, mediaId, title, outcome, resultText, resultDetail);
+        RestoreFinishedDiscLocked(name, titleId, mediaId, title, outcome, resultText, resultDetail, told);
+
+    // The records are all marked told now, and nothing else here writes the
+    // file - a disc install has to happen for FinishJob to save it - so
+    // without this they would be counted again on every launch.
+    SaveDiscStateLocked();
 
     LeaveCriticalSection(&g_lock);
     free(text);

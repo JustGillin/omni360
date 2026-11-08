@@ -52,6 +52,7 @@ struct GameJob
     bool cancel;
     bool pause; // stop like a cancel, but keep the job and its pieces
     bool handedOver;
+    bool told;  // a record, and already counted in a startup summary
 };
 
 static CRITICAL_SECTION g_lock;
@@ -427,6 +428,9 @@ static void SaveInstallStateLocked()
                              job.request.item, job.request.zipName, job.request.zipSize, job.request.name,
                              job.request.titleId, job.snap.title, (int)job.snap.outcome, job.snap.resultText,
                              job.snap.resultDetail);
+
+        if (job.told)
+            AppendQueueStateText(text, sizeof(text), &at, "told=1\n");
     }
 
     if (jobs > 0 || records > 0)
@@ -440,7 +444,7 @@ static void SaveInstallStateLocked()
 // re-announce it or rescan the library for it. See RestoreFinishedRecord in
 // DownloadQueue.cpp, which this follows.
 static void RestoreFinishedInstall(const GameRequest &request, const char *title, int outcome,
-                                   const char *resultText, const char *resultDetail)
+                                   const char *resultText, const char *resultDetail, bool told)
 {
     EnterCriticalSection(&g_lock);
 
@@ -471,6 +475,7 @@ static void RestoreFinishedInstall(const GameRequest &request, const char *title
     job.used = true;
     job.request = request;
     job.handedOver = true;
+    job.told = true; // counted below if it wasn't already, and now it has been
     job.snap.id = g_nextId++;
     job.snap.kind = QUEUE_JOB_GAME_INSTALL;
     job.snap.state = QUEUE_FINISHED;
@@ -489,7 +494,8 @@ static void RestoreFinishedInstall(const GameRequest &request, const char *title
 
     LeaveCriticalSection(&g_lock);
 
-    NoteRestoredRecord(outcome != QUEUE_OUTCOME_INSTALLED && outcome != QUEUE_OUTCOME_ALREADY_INSTALLED);
+    if (!told)
+        NoteRestoredRecord(outcome != QUEUE_OUTCOME_INSTALLED && outcome != QUEUE_OUTCOME_ALREADY_INSTALLED);
 }
 
 // ---------------------------------------------------------------------------
@@ -2497,6 +2503,7 @@ void RestoreGameInstalls(const char *authHeader)
     // A record's own fields, reset with the request at each block.
     char title[256] = "", resultText[64] = "", resultDetail[160] = "";
     int outcome = 0;
+    bool told = false;
 
     char *at = text, *key = NULL, *value = NULL;
     while (NextQueueStateLine(&at, &key, &value))
@@ -2508,12 +2515,13 @@ void RestoreGameInstalls(const char *authHeader)
             if (inJob && request.zipName[0] != '\0' && EnqueueGame(request, authHeader, paused) == GAME_QUEUED)
                 queued++;
             else if (inDone && request.zipName[0] != '\0')
-                RestoreFinishedInstall(request, title, outcome, resultText, resultDetail);
+                RestoreFinishedInstall(request, title, outcome, resultText, resultDetail, told);
 
             memset(&request, 0, sizeof(request));
             title[0] = resultText[0] = resultDetail[0] = '\0';
             outcome = 0;
             paused = false;
+            told = false;
 
             const bool game = (strcmp(value, "game") == 0);
             inJob = game && (strcmp(key, "job") == 0);
@@ -2541,6 +2549,8 @@ void RestoreGameInstalls(const char *authHeader)
             _snprintf(resultDetail, sizeof(resultDetail), "%s", value);
             resultDetail[sizeof(resultDetail) - 1] = '\0';
         }
+        else if (inDone && strcmp(key, "told") == 0)
+            told = (atoi(value) != 0);
         else if (strcmp(key, "item") == 0)
             _snprintf(request.item, sizeof(request.item), "%s", value);
         else if (strcmp(key, "file") == 0)
@@ -2563,7 +2573,7 @@ void RestoreGameInstalls(const char *authHeader)
     if (inJob && request.zipName[0] != '\0' && EnqueueGame(request, authHeader, paused) == GAME_QUEUED)
         queued++;
     else if (inDone && request.zipName[0] != '\0')
-        RestoreFinishedInstall(request, title, outcome, resultText, resultDetail);
+        RestoreFinishedInstall(request, title, outcome, resultText, resultDetail, told);
 
     free(text);
 
