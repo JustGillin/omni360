@@ -6235,7 +6235,7 @@ static void DrawNightFrame(int secondsLeft, bool force)
     const char *line;
     if (secondsLeft > 0)
     {
-        _snprintf(countdown, sizeof(countdown), "Switching off in %d second%s - press anything to stay on",
+        _snprintf(countdown, sizeof(countdown), "Turning off in %d second%s - press anything to stay on",
                   secondsLeft, secondsLeft == 1 ? "" : "s");
         countdown[sizeof(countdown) - 1] = '\0';
         line = countdown;
@@ -6247,7 +6247,7 @@ static void DrawNightFrame(int secondsLeft, bool force)
         // here would be vague about what it was counting and usually out
         // of date by the time anyone read it. The one thing worth saying
         // at one in the morning is that the console sees itself out.
-        line = "The console will switch off when the queued downloads are done";
+        line = "The console will turn off when the queued downloads are done";
     }
 
     RenderNightFrame(clock, line);
@@ -7172,7 +7172,7 @@ int main()
             // they do when the app is closed normally, so a game install's
             // staging is flushed and the disc drive is left alone - then the
             // power goes.
-            RenderStatusFrame("Switching off", "Nothing left in the queue",
+            RenderStatusFrame("Turning off", "Nothing left in the queue",
                               "Stopping downloads and installs first.");
             StopDownloadQueue(15000);
             StopDiscWorker(15000);
@@ -7187,7 +7187,7 @@ int main()
             // stopped, so there is no shell to go back to. Leaving is as
             // close to off as this can get from here.
             LeaveNightMode();
-            RenderStatusFrame("Couldn't switch off", "The console didn't take the power-off",
+            RenderStatusFrame("Couldn't turn off", "The console didn't take the power-off",
                               "Leaving Omni360 instead. What finished is in the Queue next time.");
             Sleep(5000);
             break;
@@ -7766,7 +7766,7 @@ int main()
                 }
                 else
                     ShowShellToast("Nothing is downloading",
-                                   "Night mode switches the console off when the queue empties. "
+                                   "Night mode turns the console off when the queue empties. "
                                    "It's empty already.",
                                    UI_TOAST_INFO);
             }
@@ -8291,7 +8291,7 @@ int main()
                     // Only worth offering while something would finish - it
                     // is refused otherwise.
                     if (RunningJobCount() > 0)
-                        hintCount = AddHint(hints, hintCount, UI_BUTTON_Y, L"Night mode", L"Night");
+                        hintCount = AddHint(hints, hintCount, UI_BUTTON_Y, L"Turn off when done", L"Night mode");
 
                     hintCount = AddHint(hints, hintCount, UI_BUTTON_B, L"Home");
                 }

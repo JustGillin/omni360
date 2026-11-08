@@ -72,7 +72,7 @@ NightArmResult ArmNightMode()
         return NIGHT_NOTHING_RUNNING;
 
     g_state = NIGHT_WATCHING;
-    dprintf("[night] armed - switching off once the queue drains\n");
+    dprintf("[night] armed - turning off once the queue drains\n");
     return NIGHT_ARMED;
 }
 
@@ -101,7 +101,7 @@ bool UpdateNightMode(int *secondsLeft)
 
         g_state = NIGHT_COUNTDOWN;
         g_countdownStart = GetTickCount();
-        dprintf("[night] nothing left running - switching off in %d seconds\n", NIGHT_COUNTDOWN_MS / 1000);
+        dprintf("[night] nothing left running - turning off in %d seconds\n", NIGHT_COUNTDOWN_MS / 1000);
     }
 
     const DWORD gone = GetTickCount() - g_countdownStart;
@@ -123,7 +123,7 @@ void PowerOffConsole()
     request[0] = SMC_POWER;
     request[1] = SMC_POWER_OFF;
 
-    dprintf("[night] asking the SMC to switch the console off\n");
+    dprintf("[night] asking the SMC to turn the console off\n");
     HalSendSMCMessage(request, reply);
 
     // It doesn't come back when it works. If it does, the console is still
