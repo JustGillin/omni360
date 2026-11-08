@@ -27,10 +27,13 @@ video marketplace's categories, and isn't named like a demo or a theme.
 The test is deliberately a little greedy: a missing game shown by mistake
 is a smaller fault than one quietly left out.
 
-A game counts as had when the Store or XBLA has its title ID, its
-effectiveTitleId, or its name. Name matching is needed because the catalog
-and Redump disagree about IDs more often than you'd think: BioShock 2 is
-0x54540867 in the catalog and 0x54540861 on its disc. match_key is
+A game counts as had when the Store, the Original Xbox list or XBLA has its
+title ID, its effectiveTitleId, or its name. Name matching is needed because
+the catalog and Redump disagree about IDs more often than you'd think:
+BioShock 2 is 0x54540867 in the catalog and 0x54540861 on its disc. It also
+catches the Xbox Originals re-releases, which sit among the catalog's 360
+entries under IDs of their own - Max Payne is downloadable from the Store's
+Original Xbox section, so it isn't missing. match_key is
 make_store_titles.py's, the same boiling-down it uses to match the two
 archive.org sets to each other.
 
@@ -48,10 +51,12 @@ import urllib.request
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from make_store_rows import (SKIP_GENRES, MAIN_GENRES, GENRE_NAMES, TAG_ROWS,
-                             ROW, store_games)
+                             store_games)
 from make_store_titles import sort_key, letter_of, match_key
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+STORE_TITLES = os.path.join(ROOT, "src", "StoreTitles.h")
+XBOX_TITLES = os.path.join(ROOT, "src", "XboxTitles.h")
 XBLA_TITLES = os.path.join(ROOT, "src", "XblaTitles.h")
 OUT_HEADER = os.path.join(ROOT, "src", "CatalogTitles.h")
 CACHE = os.path.join(ROOT, "tools", "cache", "catalog_all.json")
@@ -68,6 +73,10 @@ FIND_GAMES = ("http://catalog.xboxlive.com/Catalog/Catalog.asmx/Query?methodName
               "&Names=MediaTypes&Values=%d")
 
 ENTRY = re.compile(r"<entry .*?</entry>", re.S)
+# A StoreGame row in StoreTitles.h or XboxTitles.h. make_store_rows.py's ROW
+# won't do for both: an Original Xbox row carries a seventh field for its
+# system, so it stops short of the closing brace.
+GAME_ROW = re.compile(r'^\s*\{ "((?:[^"\\]|\\.)*)", 0x[0-9A-F]{8}, 0x[0-9A-F]+, \d+, \d+, \'.\'')
 XBLA_ROW = re.compile(r'^\s*\{ "((?:[^"\\]|\\.)*)", "(?:[^"\\]|\\.)*", \d+ULL, 0x([0-9A-F]{8}),')
 
 # Apps and TV shows that claim a real genre, so nothing else here catches
@@ -223,15 +232,16 @@ def catalog():
     return by_id, len(pages), total
 
 
-def store_names():
-    """Every 360 game the Store lists, by name. store_games() is by title ID
-    and so leaves out the 45 whose disc Redump's datfile couldn't be matched
-    to one - they're still games the Store can download, and their names are
-    all there is to recognise them by."""
+def game_names(path):
+    """Every game one of the Store's disc tables lists, by name. For
+    StoreTitles.h this is wider than store_games(), which is keyed by title
+    ID and so leaves out the 45 whose disc Redump's datfile couldn't be
+    matched to one - they're still games the Store can download, and their
+    names are all there is to recognise them by."""
     out = []
-    with open(os.path.join(ROOT, "src", "StoreTitles.h"), encoding="latin-1") as f:
+    with open(path, encoding="latin-1") as f:
         for line in f:
-            m = ROW.match(line)
+            m = GAME_ROW.match(line)
             if m:
                 out.append(m.group(1).encode("latin-1").decode("unicode_escape")
                            .encode("latin-1").decode("utf-8", "replace"))
@@ -287,8 +297,14 @@ def main():
     have_ids = set(store) | set(xbla)
     # Redump joins two titles on one disc with " ~ " - "Resident Evil:
     # Revelations ~ Biohazard - Revelations" - so index each side as well.
+    # Original Xbox games count as had too. The catalog carries the Xbox
+    # Originals re-releases among its 360 entries, under their own title IDs,
+    # so Max Payne came out as missing while sitting in the Store's Original
+    # Xbox section all along. Their names go in; their IDs don't, as the two
+    # systems' ID ranges aren't formally apart and a collision would hide a
+    # 360 game that really is missing.
     have_names = []
-    for n in store_names() + list(xbla.values()):
+    for n in game_names(STORE_TITLES) + game_names(XBOX_TITLES) + list(xbla.values()):
         have_names.append(n)
         if " ~ " in n:
             have_names += [part.strip() for part in n.split(" ~ ")]
@@ -346,8 +362,9 @@ def main():
          "// archive.org. Sorted the way the Store sorts, so a letter page can merge",
          "// them into its grid behind a filter.",
          "// Of the catalog's %d media-type-1 items, %d are games, not apps or avatar" % (total, len(games)),
-         "// items; the Store or XBLA has %d of those, leaving %d here."
-         % (len(games) - len(missing), len(missing)),
+         "// items; the Store, the Original Xbox list and XBLA have %d of those,"
+         % (len(games) - len(missing)),
+         "// leaving %d here." % len(missing),
          "//",
          "// Names are the catalog's fullTitle. XBLIG isn't compared: every indie game",
          "// shares the one XNA title ID.",

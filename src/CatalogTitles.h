@@ -5,7 +5,8 @@
 // archive.org. Sorted the way the Store sorts, so a letter page can merge
 // them into its grid behind a filter.
 // Of the catalog's 3369 media-type-1 items, 1868 are games, not apps or avatar
-// items; the Store or XBLA has 1547 of those, leaving 321 here.
+// items; the Store, the Original Xbox list and XBLA have 1556 of those,
+// leaving 312 here.
 //
 // Names are the catalog's fullTitle. XBLIG isn't compared: every indie game
 // shares the one XNA title ID.
@@ -27,7 +28,7 @@ struct CatalogTitle
     char letter;            // its A-Z tile: 'A' to 'Z', or '#'
 };
 
-#define CATALOG_TITLE_COUNT       321
+#define CATALOG_TITLE_COUNT       312
 #define CATALOG_MAX_LETTER_TITLES 32 // the most under one letter
 
 #ifdef CATALOG_TITLES_DATA
@@ -158,15 +159,12 @@ static const CatalogTitle kCatalogTitles[CATALOG_TITLE_COUNT] =
     { "Forza Horizon 2 Presents Fast & Furious", 0x4D530AB5, 42102, 2015, 45, 6, 0x00, 'F' },
     { "Forza Horizon 2 Racing Helmet", 0x413607FA, 0, 2015, 0, 6, 0x00, 'F' },
     { "Forza Motorsport 6 (Avatar Content Only)", 0x413607FC, 470, 2015, 40, 6, 0x00, 'F' },
-    { "Full Spectrum Warrior: Ten Hammers", 0x543807E1, 0, 2021, 0, 8, 0x00, 'F' },
     { "Gardenscapes", 0x554C0FA1, 0, 0, 0, 10, 0x01, 'G' },
     { "Gears of War 4 Store", 0x4D530AC1, 744, 2016, 40, 8, 0x00, 'G' },
     { "Gears of War: Ultimate Edition Store", 0x4D530AC0, 233, 2016, 40, 8, 0x00, 'G' },
     { "Gears of War (Windows)", 0x4D530842, 0, 2008, 0, 8, 0x00, 'G' },
     { "G.I. JOE (PAL)", 0x454108D9, 17, 2009, 30, 1, 0x00, 'G' },
     { "Gladius", 0x543807E2, 0, 2021, 0, 1, 0x00, 'G' },
-    { "Grand Theft Auto III", 0x54540881, 0, 0, 0, 1, 0x00, 'G' },
-    { "Grand Theft Auto: Vice City", 0x54540877, 0, 0, 0, 1, 0x00, 'G' },
     { "GTA IV", 0x5454083B, 0, 0, 0, 1, 0x00, 'G' },
     { "GTA: San Andreas", 0x54540876, 0, 0, 0, 1, 0x00, 'G' },
     { "GTR", 0x545107E9, 0, 2008, 0, 9, 0x00, 'G' },
@@ -211,8 +209,6 @@ static const CatalogTitle kCatalogTitles[CATALOG_TITLE_COUNT] =
     { "Mahjong Wisdom", 0x584109F1, 0, 0, 0, 5, 0x00, 'M' },
     { "Mahjongg Dimensions", 0x355A0FA0, 0, 0, 0, 10, 0x00, 'M' },
     { "Mass Effect 2 (JP)", 0x4541093D, 0, 2011, 0, 8, 0x00, 'M' },
-    { "Max Payne", 0x54540879, 0, 0, 0, 1, 0x00, 'M' },
-    { "Max Payne 2: The Fall of Max Payne", 0x54540878, 0, 0, 0, 1, 0x00, 'M' },
     { "Megamind Title Update Disc", 0x5451088E, 0, 2010, 0, 1, 0x00, 'M' },
     { "METAL GEAR SOLID PEACE WALKER HD EDITION", 0x4B4E083C, 19827, 2011, 42, 1, 0x00, 'M' },
     { "Metro 2033(J)", 0x53440800, 0, 0, 0, 8, 0x00, 'M' },
@@ -246,7 +242,6 @@ static const CatalogTitle kCatalogTitles[CATALOG_TITLE_COUNT] =
     { "Ninety-Nine Nights\xE2\x85\xA1/EU", 0x4B4E0816, 23, 2010, 40, 1, 0x00, 'N' },
     { "Ninety-Nine Nights\xE2\x85\xA1/JP", 0x4B4E0817, 1141, 2010, 40, 1, 0x00, 'N' },
     { "Ninety-Nine Nights\xE2\x85\xA1/KR", 0x4B4E0815, 1, 2010, 50, 1, 0x00, 'N' },
-    { "NINJA GAIDEN Black", 0x514707D1, 0, 2017, 0, 1, 0x00, 'N' },
     { "Oblivion", 0x425307E2, 0, 2010, 0, 7, 0x00, 'O' },
     { "Osmos", 0x58410A10, 0, 0, 0, 3, 0x01, 'O' },
     { "Overlord (JP)", 0x434D0802, 0, 2008, 0, 7, 0x00, 'O' },
@@ -261,7 +256,6 @@ static const CatalogTitle kCatalogTitles[CATALOG_TITLE_COUNT] =
     { "Poker Superstars III", 0x51320FA0, 0, 0, 0, 10, 0x00, 'P' },
     { "Prejudice", 0x544707D8, 0, 2011, 0, 8, 0x00, 'P' },
     { "Prey 2", 0x425307E5, 4739, 2012, 45, 8, 0x00, 'P' },
-    { "Prince of Persia Sands of Time", 0x5553085A, 0, 0, 0, 1, 0x00, 'P' },
     { "Prince of Persia The Two Thrones", 0x55530FA0, 0, 0, 0, 1, 0x00, 'P' },
     { "Prince of Persia Warrior Within", 0x55530859, 0, 0, 0, 1, 0x00, 'P' },
     { "Pro Cycling Manager Tour de France 2011 INT", 0x46450FA4, 0, 0, 0, 9, 0x00, 'P' },
@@ -317,7 +311,6 @@ static const CatalogTitle kCatalogTitles[CATALOG_TITLE_COUNT] =
     { "The Tale of Despereaux", 0x425407D5, 0, 2008, 0, 4, 0x00, 'T' },
     { "Test Drive Ferrari Racing Legend", 0x49470FA1, 0, 0, 0, 6, 0x00, 'T' },
     { "TextTwist 2", 0x36590FA0, 0, 0, 0, 5, 0x00, 'T' },
-    { "Thief: Deadly Shadows", 0x53510FA3, 0, 0, 0, 1, 0x00, 'T' },
     { "This is Vegas", 0x4D5707D3, 3043, 2008, 40, 1, 0x00, 'T' },
     { "Tiger Woods PGA Tour 12 The Masters", 0x45410FB8, 0, 0, 0, 9, 0x00, 'T' },
     { "Tiger Woods PGA TOUR 13 Early Release", 0x45410980, 0, 2012, 0, 9, 0x00, 'T' },
@@ -336,7 +329,6 @@ static const CatalogTitle kCatalogTitles[CATALOG_TITLE_COUNT] =
     { "Tron: Evolution", 0x425607F3, 0, 0, 0, 8, 0x00, 'T' },
     { "Tron: Evolution", 0x42560801, 0, 2010, 0, 1, 0x00, 'T' },
     { "Tropico 3 Gold Edition", 0x4B590FA0, 0, 0, 0, 10, 0x00, 'T' },
-    { "True Crime", 0x41560821, 10229, 2010, 42, 1, 0x00, 'T' },
     { "TS 2010: Blue Comet", 0x4E4E0FA3, 0, 0, 0, 10, 0x00, 'T' },
     { "Turning Point [FR/DE]", 0x434D0801, 1, 2008, 50, 8, 0x00, 'T' },
     { "Unreal Tournament 3", 0x4D5707F3, 0, 2008, 0, 8, 0x00, 'U' },
