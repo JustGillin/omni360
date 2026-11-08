@@ -6231,16 +6231,24 @@ static void DrawNightFrame(int secondsLeft, bool force)
     _snprintf(clock, sizeof(clock), "%d:%02d %s", hour, (int)now.wMinute, now.wHour < 12 ? "AM" : "PM");
     clock[sizeof(clock) - 1] = '\0';
 
-    char line[96];
+    char countdown[96];
+    const char *line;
     if (secondsLeft > 0)
-        _snprintf(line, sizeof(line), "Switching off in %d second%s - press anything to stay on", secondsLeft,
-                  secondsLeft == 1 ? "" : "s");
+    {
+        _snprintf(countdown, sizeof(countdown), "Switching off in %d second%s - press anything to stay on",
+                  secondsLeft, secondsLeft == 1 ? "" : "s");
+        countdown[sizeof(countdown) - 1] = '\0';
+        line = countdown;
+    }
     else
     {
-        const int running = RunningJobCount();
-        _snprintf(line, sizeof(line), "%d still going - switching off when they're done", running);
+        // No count of what is left, on purpose. Three queues feed this
+        // screen and it only redraws when the minute changes, so a number
+        // here would be vague about what it was counting and usually out
+        // of date by the time anyone read it. The one thing worth saying
+        // at one in the morning is that the console sees itself out.
+        line = "The console will switch off when the queued downloads are done";
     }
-    line[sizeof(line) - 1] = '\0';
 
     RenderNightFrame(clock, line);
 }
