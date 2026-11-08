@@ -6127,7 +6127,7 @@ static void SnapshotQueue(Shell &shell, const Library &lib)
         {
             // Dimmed like a waiting job, since that is what it is - one that
             // won't be picked up until it's told to.
-            _snprintf(status, statusSize, "Paused - what's downloaded is kept");
+            _snprintf(status, statusSize, "Paused");
             row.tone = QUEUE_ROW_WAITING;
             row.showBar = true;
             row.fraction = -1.0f;
