@@ -3706,6 +3706,23 @@ static bool StepFilterValue(int &value, int count, int step, bool wrap)
     return true;
 }
 
+// What the missing list is, and what it isn't, said as it's switched on.
+// The catalog is Xbox Live's whole marketplace rather than a list of retail
+// discs, and it spells a name however it likes, so no amount of filtering
+// gets it down to one clean row a game: make_catalog_titles.py drops what it
+// can recognise and the rest comes through. Better to say so than to let the
+// list read as authoritative.
+static void WarnAboutMissingGames()
+{
+    ShowAlertUI("Games we don't have",
+                "These come from the Xbox Live catalog, which lists more than the games that shipped on "
+                "disc and often shortens a name. Expect the same game twice - Call of Duty: World at War "
+                "is in there again as Call of Duty: WaW - along with demos, title update discs and a few "
+                "Original Xbox games.",
+                "None of them can be downloaded. Untick it to hide them again.",
+                "OK", NULL);
+}
+
 // The D-pad and A on the panel. True if a filter changed.
 static bool StepFilterPanel(const UiInput &input, Shell &shell)
 {
@@ -3752,6 +3769,8 @@ static bool StepFilterPanel(const UiInput &input, Shell &shell)
         if (!a)
             return false;
         f.showMissing = !f.showMissing;
+        if (f.showMissing)
+            WarnAboutMissingGames();
         return true;
     case FILTER_ROW_RESET:
         if (!a || (!FilterNarrows(f) && f.sort == STORE_SORT_AZ))
