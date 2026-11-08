@@ -4774,10 +4774,16 @@ static StoreGameView MakeStoreGameView(Shell &shell, const Library &lib)
             // to install and so would leave the button disabled.
             view.buttons[0] = "Install from disc";
         }
+        else if (StoreVersionCount() == 0)
+        {
+            // Nothing to install: a game nobody has uploaded, or one opened
+            // from the library that the Store's lists don't have.
+            view.buttons[0] = "Not available";
+            view.buttonDisabled[0] = true;
+        }
         else
         {
             view.buttons[0] = partial ? "Install remaining" : "Install";
-            view.buttonDisabled[0] = (StoreVersionCount() == 0);
         }
         break;
     }
@@ -4799,6 +4805,14 @@ static StoreGameView MakeStoreGameView(Shell &shell, const Library &lib)
         view.description = "An Original Xbox game, played through the 360's backwards compatibility - it's "
                            "on Microsoft's list of the games that run. Xbox Live's catalog doesn't list "
                            "Original Xbox games, so there's no description or screenshots for it here.";
+    }
+    else if (g_storeArcade == NULL && StoreGameMissing(g_storeGame))
+    {
+        // The catalog knows it - that's where it came from, so the synopsis
+        // and screenshots are the real ones - but there's nothing to
+        // download, and DLC or a title update without the game is no use.
+        view.unavailable = true;
+        view.buttonDisabled[1] = view.buttonDisabled[2] = true;
     }
     if (view.install == STORE_INSTALL_INSTALLED || (view.install == STORE_INSTALL_AVAILABLE && partial))
         view.buttons[3] = "Uninstall"; // else not shown
@@ -7687,10 +7701,8 @@ int main()
                 }
                 else if (shell.storeLetterArcade)
                     OpenArcadeGame(shell, *g_arcadeGames[shell.storeSelected]);
-                else if (!StoreGameMissing(g_storeGames[shell.storeSelected]))
+                else
                     OpenStoreGame(shell, g_storeGames[shell.storeSelected]);
-                // A game nobody has uploaded has no page to open: it's in
-                // the grid to be seen, not chosen.
             }
             else
                 StepStoreLetter(input, shell);
@@ -8197,8 +8209,7 @@ int main()
                 }
                 else if (!shell.sidebarFocused)
                 {
-                    // Nothing to open on a game nobody has uploaded.
-                    if (shell.storeGameCount > 0 && !g_storeTiles[shell.storeSelected].unavailable)
+                    if (shell.storeGameCount > 0)
                         hintCount = AddHint(hints, hintCount, UI_BUTTON_A, L"View game", L"View");
                     hintCount = AddHint(hints, hintCount, UI_BUTTON_B, L"Store");
                     if (shell.storeSearch)

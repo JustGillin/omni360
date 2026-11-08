@@ -7806,8 +7806,11 @@ void RenderStoreGameFrame(StoreGameView &view, const UiHint *hints, int hintCoun
     else
         TextWrapped(g_M.contentX, L.bodyY, 0.86f, WithAlpha(COL_DIM, see),
                     view.loading ? "Loading..."
-                                 : "The Xbox Live catalog has no entry for this game, so there's no synopsis or "
-                                   "screenshots. It can still be installed.",
+                    : view.unavailable
+                        ? "The Xbox Live catalog has no entry for this game, so there's no synopsis or "
+                          "screenshots - and nobody has uploaded it, so there's nothing to install."
+                        : "The Xbox Live catalog has no entry for this game, so there's no synopsis or "
+                          "screenshots. It can still be installed.",
                     bodyW, L.lineH, L.bodyLines);
 
     // More like this: its label, and a game's name under its focus - or on

@@ -634,6 +634,7 @@ struct StoreGameView
     unsigned long ratings;
     const char *description; // NULL: the page explains there's no catalog entry
     bool loading;           // the details haven't arrived yet
+    bool unavailable;       // nobody has uploaded it: there's nothing to install
     const int *screenshots; // their numbers, for STORE_ART_SCREEN + n
     int screenshotCount;
 
