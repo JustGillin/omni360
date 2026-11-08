@@ -106,7 +106,8 @@ The app shows a release's notes in **Settings → Updates**, with the Markdown t
 - a heading and a line or two of what's new;
 - short paragraphs and `-` bullet points — no tables, images or code blocks;
 - what someone on an older version needs to do, if anything;
-- a casual voice — the way you'd tell someone what changed, not a formal changelog.
+- a casual voice — the way you'd tell someone what changed, not a formal changelog;
+- the features, not how they work. No formats, protocols, size limits, file names or source files: someone reading this in Settings wants to know what's new. The breakdown belongs in the commit messages, where whoever needs it will look.
 
 About sixteen lines fit on the console's screen; the rest is cut off there, though not on GitHub.
 
