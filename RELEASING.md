@@ -71,12 +71,33 @@ git push && git push origin v0.2.4-beta
 
 Don't move a tag that's been published, or replace a release's files with a different build: two different builds would then both claim the same version. Fix a bad release with a new version instead.
 
-### 4. Publish it on GitHub
+### 4. Put it up as a draft
 
-1. **Releases → Draft a new release**, and choose the tag.
-2. Attach **both** files from `Release/dist/vX.Y.Z/`: `Omni360.xex` and `Omni360.xex.sig`.
-3. Leave **Set as a pre-release** unticked, and tick **Set as the latest release**, so it shows on the repository's front page. A pre-release is only offered to people already running a pre-release (a version with a `-` suffix), and never shows as the latest.
-4. Publish.
+Draft first, always. A draft is invisible: it isn't on the releases page, and the update check can't see it, so no console is offered the release while it sits in this state.
+
+```bash
+gh release create v0.2.4-beta --draft --title "v0.2.4-beta" --notes-file notes.md Release/dist/v0.2.4-beta/Omni360.xex Release/dist/v0.2.4-beta/Omni360.xex.sig
+```
+
+Or in the browser: **Releases → Draft a new release**, choose the tag, attach **both** files from `Release/dist/vX.Y.Z/` — `Omni360.xex` and `Omni360.xex.sig` — and **Save draft** rather than Publish.
+
+### 5. Read the notes, then publish
+
+**The notes are read and approved by you before the release goes out.** They are the one part of a release no script can check and the part everybody sees, so if someone else drafted them — Claude included — they do not go out unread. Read them back as they'll appear:
+
+```bash
+gh release view v0.2.4-beta --json body --jq .body
+```
+
+Reword until it sounds the way you want (`gh release edit v0.2.4-beta --notes-file notes.md`), then publish:
+
+```bash
+gh release edit v0.2.4-beta --draft=false --latest
+```
+
+`--latest` puts it on the repository's front page. Don't pass `--prerelease`: a pre-release is only offered to people already running one (a version with a `-` suffix), and never shows as the latest.
+
+The notes themselves stay editable after publishing — they aren't signed, and the console reads them fresh each time it looks. The XEX and its signature don't: see step 3.
 
 ### Writing the notes
 
@@ -84,7 +105,8 @@ The app shows a release's notes in **Settings → Updates**, with the Markdown t
 
 - a heading and a line or two of what's new;
 - short paragraphs and `-` bullet points — no tables, images or code blocks;
-- what someone on an older version needs to do, if anything.
+- what someone on an older version needs to do, if anything;
+- a casual voice — the way you'd tell someone what changed, not a formal changelog.
 
 About sixteen lines fit on the console's screen; the rest is cut off there, though not on GitHub.
 
