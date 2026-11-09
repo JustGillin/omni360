@@ -7,7 +7,7 @@
 #
 # The name after each '#' is only for reading - the title ID is the record.
 format=1
-marked=311
+marked=312
 catalog=312
 
 # Keep - it's a real game (32)
@@ -174,7 +174,8 @@ catalog=312
 475207F8=badname  # 旋光の輪舞DUO
 4B4F07EB=badname  # 真・三國無双 MULTI RAID
 
-# An Xbox test product (33)
+# An Xbox test product (34)
+345907D0=test  # Mystery Wheel
 584C07E0=test  # 33 Days of Halo 3
 58570854=test  # 360-Jumps und NOFX! Die T-Mobile Extreme Playgrounds in Duisburg
 414707D6=test  # Agora Test Game

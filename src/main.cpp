@@ -42,7 +42,6 @@ end-to-end on real hardware against a real 27-game library.
 #include "GameInstaller.h"
 #include "QueueState.h" // TakeRestoredTally, for the one line about last time
 #include "NightMode.h"
-#include "MissingGames.h"
 #include "UpdateCheck.h"
 #include "ArchiveOrgDLC.h"
 #include "downloadFile.h" // DownloadProgressFn + FormatBytes, for the progress callback
@@ -1570,8 +1569,7 @@ enum SettingsRow
     SETTINGS_ROW_LIBRARY_FOLDER, // one of g_folderRows: A adds or removes it
     SETTINGS_ROW_ADD_FOLDER,   // another library folder, typed
     SETTINGS_ROW_SOUNDS,       // the interface's sounds, on or off
-    SETTINGS_ROW_SPEED_TEST,   // where a download's speed goes - SpeedTest.h
-    SETTINGS_ROW_REVIEW_MISSING // the missing-games list, marked by hand - MissingGames.h
+    SETTINGS_ROW_SPEED_TEST    // where a download's speed goes - SpeedTest.h
 };
 
 // Rescans with the library folders now in settings.txt.
@@ -1975,7 +1973,7 @@ static void RemoveKeys(SettingsOutcome &outcome)
 // folders under a heading with Add folder and Change install folder, then
 // one line a setting. Rebuilt whenever something may have changed it, rather
 // than every frame - each rebuild reads the keys file.
-#define MAX_SETTINGS_ROWS (9 + MAX_FOLDER_ROWS)
+#define MAX_SETTINGS_ROWS (8 + MAX_FOLDER_ROWS)
 #define SETTINGS_MIDDOT "  \xC2\xB7  "
 
 struct SettingsPage
@@ -1990,7 +1988,6 @@ struct SettingsPage
     char folderStatus[MAX_FOLDER_ROWS][48];
     char folderHelp[MAX_FOLDER_ROWS][128];
     char keysStatus[64];
-    char missingStatus[64];
     char updatesStatus[96];
     char updatesHelp[96];
 
@@ -2212,16 +2209,6 @@ static void BuildSettingsPage(SettingsPage &page, const Library &lib, const char
                        "A soft tick as you move around, and a sound for A and B.");
     page.rows[page.count - 1].controls[0].on = UiSoundsSetting();
 
-    // Curating "Show games we don't have" - see MissingGames.h. The count is
-    // how far through the list the marking has got.
-    const int marked = MissingMarkedCount();
-    _snprintf(page.missingStatus, sizeof(page.missingStatus), "%d of %d marked", marked, CatalogTitleCount());
-    page.missingStatus[sizeof(page.missingStatus) - 1] = '\0';
-    AddSettingsRow(page, SETTINGS_VIEW_LINE, "Games we don't have").status = page.missingStatus;
-    AddSettingsControl(page, SETTINGS_CONTROL_BUTTON, "Review", SETTINGS_ROW_REVIEW_MISSING,
-                       "Go through the list behind the Store's \"Show games we don't have\" filter and mark "
-                       "what shouldn't be in it. Saved to missing-games.txt beside the app.");
-
     // The focus where it was, on a row that's still there.
     if (page.focusRow > page.count - 1)
         page.focusRow = page.count - 1;
@@ -2247,11 +2234,6 @@ static void StepSettingsRow(SettingsPage &page, int direction)
         }
     }
 }
-
-// The missing-games list, marked by hand: the screen is further down, where
-// the footer hints and the list page it draws are in scope. See
-// MissingGames.h for what it writes and why.
-static void ReviewMissingGamesUI();
 
 // Settings' speed test, with the saved keys if there are any - without them
 // it leaves archive.org out rather than asking for them.
@@ -2279,7 +2261,6 @@ static SettingsOutcome RunSettingsRow(SettingsRow row, int arg, Library &lib, ch
     case SETTINGS_ROW_ADD_FOLDER:   AddLibraryFolder(lib, gamesPath, outcome); break;
     case SETTINGS_ROW_SOUNDS:       ToggleUiSounds(); break;
     case SETTINGS_ROW_SPEED_TEST:   RunSpeedTest(gamesPath); break;
-    case SETTINGS_ROW_REVIEW_MISSING: ReviewMissingGamesUI(); break;
     default:                        break;
     }
 
@@ -3247,9 +3228,9 @@ static const StoreFilter &Filter()
     // On unless it was turned off. It shipped off behind a warning while the
     // list was the Xbox Live catalog minus the Store - 312 rows, a third of
     // them duplicates, PC games and test products. Every row has since been
-    // read by hand (MissingGames.h), which left 33 games that really did come
-    // out and really aren't on archive.org, so they belong on the letter
-    // pages by default. An older settings.txt that says missing=0 is someone
+    // read by hand (tools/data/missing-games.txt), which left 32 games that
+    // really did come out and really aren't on archive.org, so they belong on
+    // the letter pages by default. An older settings.txt that says missing=0 is someone
     // who didn't want them, and still doesn't.
     FilterPart(line, "missing", part, sizeof(part));
     g_filter.showMissing = (part[0] != '0');
@@ -3736,9 +3717,9 @@ static bool StepFilterValue(int &value, int count, int step, bool wrap)
 // warning: the catalog is Xbox Live's whole marketplace rather than a list of
 // retail discs, it spells a name however it likes, and no amount of filtering
 // got it down to one clean row a game. Every row has since been looked at by
-// hand (MissingGames.h, tools/data/missing-games.txt), which took it from 312
-// to 36, so what's left is worth standing behind - but it still can't be
-// downloaded, which is the thing worth saying.
+// hand (tools/data/missing-games.txt, which make_catalog_titles.py reads),
+// taking it from 312 rows to 32, so what's left is worth standing behind -
+// but it still can't be downloaded, which is the thing worth saying.
 static void WarnAboutMissingGames()
 {
     ShowAlertUI("Games we don't have",
@@ -6437,441 +6418,6 @@ static int AddHint(UiHint *hints, int count, UiButton button, const WCHAR *label
     return count + 1;
 }
 
-// ---------------------------------------------------------------------------
-// Marking the missing-games list
-// ---------------------------------------------------------------------------
-//
-// Why this is in the app at all, and what it writes, is in MissingGames.h.
-// Two ways in: the Review screen below, which walks the whole list, and X on
-// a faded tile or its game page, for the one you happened to notice.
-
-// The picker, over whichever screen asked: the marks, and - when the game
-// already carries one - taking it off. True if the mark changed.
-static bool MarkMissingGame(unsigned long titleId, const char *name)
-{
-    const char *labels[MISSING_MARK_COUNT];
-    const char *sublabels[MISSING_MARK_COUNT];
-    int marks[MISSING_MARK_COUNT];
-    int count = 0;
-
-    const int was = MissingMarkOf(titleId);
-    for (int m = 1; m < MISSING_MARK_COUNT; ++m)
-    {
-        labels[count] = MissingMarkName(m);
-        sublabels[count] = MissingMarkHelp(m);
-        marks[count] = m;
-        count++;
-    }
-    if (was != MISSING_MARK_NONE)
-    {
-        labels[count] = "Take the mark off";
-        sublabels[count] = "Back to not looked at yet.";
-        marks[count] = MISSING_MARK_NONE;
-        count++;
-    }
-
-    char subheading[192];
-    if (was != MISSING_MARK_NONE)
-        _snprintf(subheading, sizeof(subheading), "%s" SETTINGS_MIDDOT "marked %s", name, MissingMarkShort(was));
-    else
-        _snprintf(subheading, sizeof(subheading), "%s", name);
-    subheading[sizeof(subheading) - 1] = '\0';
-
-    const int chosen = ShowChoiceUI("What is this entry?", subheading, labels, sublabels, count, L"Mark");
-    if (chosen < 0 || marks[chosen] == was)
-        return false;
-
-    if (!SetMissingMark(titleId, marks[chosen]))
-        ShowMessageUI("Not saved", "The mark couldn't be written.", MissingMarksPath());
-    return true;
-}
-
-// The same from a grid or a game page, with a toast saying what it now
-// carries. Nothing happens for a game the Store can download: only the
-// catalog's own rows are the list being curated.
-static bool MarkMissingStoreGame(const StoreGame &game)
-{
-    if (!StoreGameMissing(game) || game.titleId == 0)
-        return false;
-
-    const bool changed = MarkMissingGame(game.titleId, game.name);
-    if (changed)
-    {
-        const int mark = MissingMarkOf(game.titleId);
-        if (mark != MISSING_MARK_NONE)
-            ShowShellToast(MissingMarkShort(mark), game.name, UI_TOAST_INFO);
-        else
-            ShowShellToast("Mark taken off", game.name, UI_TOAST_INFO);
-    }
-    ResyncUiInput();
-    return changed;
-}
-
-// Whether the game page showing is one of the catalog's missing rows - the
-// same test MakeStoreGameView uses for its "nothing to download" state. An
-// arcade, indie or Original Xbox game has no versions either, and none of
-// them is in the list being curated.
-static bool GamePageIsMissing()
-{
-    return g_storeArcade == NULL && !StoreGameIsIndie() && !StoreGameIsXbox() && StoreGameMissing(g_storeGame);
-}
-
-// The Review screen: every row of CatalogTitles.h, one decision at a time.
-//
-// What LB and RB move by. The list page works out how many rows fit itself
-// and doesn't say, so this is about a screenful rather than exactly one -
-// which is what a shoulder button is for on a list this long anyway.
-#define REVIEW_PAGE_ROWS 6
-
-// The rows on screen, which are not the catalog's rows: Review hides the
-// games already marked, so what is left to look at is the whole screen.
-// g_reviewIndex says which of the catalog's rows each screen row came from,
-// and g_reviewCount how many are showing.
-static const char *g_reviewLabels[CATALOG_TITLE_COUNT];
-static const char *g_reviewSublabels[CATALOG_TITLE_COUNT];
-static const char *g_reviewSections[CATALOG_TITLE_COUNT];
-static char g_reviewDetail[CATALOG_TITLE_COUNT][96];
-static char g_reviewLetters[CATALOG_TITLE_COUNT][8];
-static int g_reviewIndex[CATALOG_TITLE_COUNT];
-static int g_reviewCount = 0;
-
-// Whether the marked ones are in the list. Off is the point of the screen -
-// a decision made is a row you shouldn't have to read again - and Y turns it
-// on to go back over them. It outlives one sitting on purpose.
-static bool g_reviewShowMarked = false;
-
-// The catalog row a screen row came from, NULL past the end of the list.
-static const CatalogTitle *ReviewTitleAt(int row)
-{
-    return (row >= 0 && row < g_reviewCount) ? CatalogTitleAt(g_reviewIndex[row]) : NULL;
-}
-
-// One row: the game's name, then its mark and what the catalog knows about
-// it. The title ID is on it because that is what the file records, so a line
-// in the file can be matched back to the game on screen.
-static void BuildReviewRow(int row)
-{
-    const CatalogTitle *title = ReviewTitleAt(row);
-    if (title == NULL)
-        return;
-
-    g_reviewLabels[row] = (title->name[0] != '\0') ? title->name : "(no name)";
-
-    const int mark = MissingMarkOf(title->titleId);
-    char detail[96];
-    _snprintf(detail, sizeof(detail), "%s", mark != MISSING_MARK_NONE ? MissingMarkShort(mark) : "Not marked");
-    detail[sizeof(detail) - 1] = '\0';
-
-    if (title->year != 0)
-    {
-        char year[16];
-        _snprintf(year, sizeof(year), "%u", title->year);
-        year[sizeof(year) - 1] = '\0';
-        AppendText(detail, sizeof(detail), SETTINGS_MIDDOT, year);
-    }
-    if (title->genre != 0)
-        AppendText(detail, sizeof(detail), SETTINGS_MIDDOT, StoreGenreName(title->genre));
-
-    char id[24];
-    _snprintf(id, sizeof(id), "%08lX", title->titleId);
-    id[sizeof(id) - 1] = '\0';
-    AppendText(detail, sizeof(detail), SETTINGS_MIDDOT, id);
-
-    strncpy(g_reviewDetail[row], detail, sizeof(g_reviewDetail[row]) - 1);
-    g_reviewDetail[row][sizeof(g_reviewDetail[row]) - 1] = '\0';
-    g_reviewSublabels[row] = g_reviewDetail[row];
-}
-
-// Every catalog row the filter lets through, in the Store's order.
-static void BuildReviewRows()
-{
-    char lastLetter = '\0';
-    g_reviewCount = 0;
-    for (int i = 0; i < CatalogTitleCount(); ++i)
-    {
-        const CatalogTitle *title = CatalogTitleAt(i);
-        if (title == NULL)
-            continue;
-        if (!g_reviewShowMarked && MissingMarkOf(title->titleId) != MISSING_MARK_NONE)
-            continue;
-
-        const int row = g_reviewCount++;
-        g_reviewIndex[row] = i;
-        BuildReviewRow(row);
-
-        // A heading each time the letter changes - the table is in the
-        // Store's order, so they come out with the symbols first, then A to Z.
-        // With the marked ones hidden a letter can disappear entirely, which
-        // is why this counts the rows showing rather than the catalog's.
-        if (title->letter != lastLetter)
-        {
-            lastLetter = title->letter;
-            if (title->letter == '#')
-                _snprintf(g_reviewLetters[row], sizeof(g_reviewLetters[row]), "0-9");
-            else
-                _snprintf(g_reviewLetters[row], sizeof(g_reviewLetters[row]), "%c", title->letter);
-            g_reviewLetters[row][sizeof(g_reviewLetters[row]) - 1] = '\0';
-            g_reviewSections[row] = g_reviewLetters[row];
-        }
-        else
-        {
-            g_reviewSections[row] = NULL;
-        }
-    }
-}
-
-// Rebuilds the list after a mark or the filter changed, and puts the focus
-// back on the same game. When that game has just been marked and hidden,
-// the row it had now holds the next one along - which is where marking a
-// game and moving on wants the focus anyway.
-static void RebuildReviewRows(ListPageView &view)
-{
-    const int wasRow = view.selected;
-    const int wasCatalogRow = (wasRow >= 0 && wasRow < g_reviewCount) ? g_reviewIndex[wasRow] : 0;
-
-    BuildReviewRows();
-
-    int row = -1;
-    for (int i = 0; i < g_reviewCount && row < 0; ++i)
-    {
-        if (g_reviewIndex[i] == wasCatalogRow)
-            row = i;
-    }
-    if (row < 0)
-        row = wasRow;
-    if (row > g_reviewCount - 1)
-        row = g_reviewCount - 1;
-    if (row < 0)
-        row = 0;
-    view.selected = row;
-}
-
-// The triggers' jump, as the Store's letter pages do it: right goes to the
-// next letter, left to the start of this one and then the one before.
-static int StepReviewLetter(int from, int direction)
-{
-    const int count = g_reviewCount;
-    const CatalogTitle *here = ReviewTitleAt(from);
-    if (here == NULL)
-        return from;
-
-    if (direction > 0)
-    {
-        for (int i = from + 1; i < count; ++i)
-        {
-            if (ReviewTitleAt(i)->letter != here->letter)
-                return i;
-        }
-        return count - 1;
-    }
-
-    int start = from;
-    while (start > 0 && ReviewTitleAt(start - 1)->letter == here->letter)
-        start--;
-    if (start != from || start == 0)
-        return start;
-
-    const char before = ReviewTitleAt(start - 1)->letter;
-    int previous = start - 1;
-    while (previous > 0 && ReviewTitleAt(previous - 1)->letter == before)
-        previous--;
-    return previous;
-}
-
-// Walks the list and marks it. Its own loop rather than a page in the shell:
-// it is a curation tool reached from Settings, and nothing else in the app
-// needs to be live while it is up.
-static void ReviewMissingGamesUI()
-{
-    const int count = CatalogTitleCount();
-    if (count <= 0)
-    {
-        ShowMessageUI("Nothing to review", "This build's missing-games list is empty.", NULL);
-        return;
-    }
-
-    // Nothing left to look at: show the marked ones rather than an empty
-    // screen, so the sitting that finished the list can still go back over it.
-    if (count - MissingMarkedCount() <= 0)
-        g_reviewShowMarked = true;
-
-    BuildReviewRows();
-
-    // Where the last sitting got to, as the catalog's row rather than the
-    // screen's, so it survives the marked ones being hidden and shown again.
-    static int lastCatalogRow = 0;
-    int start = g_reviewCount - 1;
-    for (int i = 0; i < g_reviewCount; ++i)
-    {
-        if (g_reviewIndex[i] >= lastCatalogRow)
-        {
-            start = i;
-            break;
-        }
-    }
-    if (start < 0)
-        start = 0;
-
-    ListPageView view;
-    view.heading = "Review the missing games";
-    view.subheading = NULL;
-    view.labels = g_reviewLabels;
-    view.sublabels = g_reviewSublabels;
-    view.sections = g_reviewSections;
-    view.count = g_reviewCount;
-    view.selected = start;
-    view.scroll = 0; // the render scrolls down to wherever it was left
-    view.focused = true;
-    view.showCounter = true;
-
-    // Counting the marks walks both lists, so it's done when one changes
-    // rather than on every frame.
-    char subheading[192];
-    bool countChanged = true;
-
-    ResyncUiInput();
-    for (;;)
-    {
-        view.count = g_reviewCount;
-
-        if (countChanged)
-        {
-            countChanged = false;
-            const int marked = MissingMarkedCount();
-            if (g_reviewShowMarked)
-                _snprintf(subheading, sizeof(subheading), "%d of %d marked" SETTINGS_MIDDOT "written to %s",
-                          marked, count, MissingMarksPath());
-            else
-                _snprintf(subheading, sizeof(subheading), "%d left of %d" SETTINGS_MIDDOT "written to %s",
-                          count - marked, count, MissingMarksPath());
-            subheading[sizeof(subheading) - 1] = '\0';
-            view.subheading = subheading;
-        }
-
-        const UiInput input = PollUiInput();
-        const int selected = view.selected;
-        const CatalogTitle *title = ReviewTitleAt(selected);
-
-        if (input.pressed & XINPUT_GAMEPAD_B)
-        {
-            PlayUiSound(UI_SOUND_BACK);
-            if (title != NULL)
-                lastCatalogRow = g_reviewIndex[selected];
-            ResyncUiInput();
-            return;
-        }
-
-        if ((input.pressed & XINPUT_GAMEPAD_A) && title != NULL)
-        {
-            PlayUiSound(UI_SOUND_SELECT);
-            if (MarkMissingGame(title->titleId, g_reviewLabels[selected]))
-            {
-                countChanged = true;
-                if (g_reviewShowMarked)
-                {
-                    BuildReviewRow(selected);
-                    if (selected + 1 < g_reviewCount)
-                        view.selected = selected + 1; // on to the next, as a list of decisions
-                }
-                else
-                {
-                    // The row it had is the next game along now.
-                    RebuildReviewRows(view);
-                    if (g_reviewCount == 0)
-                    {
-                        ShowMessageUI("That's the list", "Every game in it carries a mark now - here they all "
-                                      "are again, to go back over.", MissingMarksPath());
-                        g_reviewShowMarked = true;
-                        RebuildReviewRows(view);
-                    }
-                }
-            }
-            ResyncUiInput();
-        }
-        else if ((input.pressed & XINPUT_GAMEPAD_X) && title != NULL &&
-                 MissingMarkOf(title->titleId) != MISSING_MARK_NONE)
-        {
-            if (!SetMissingMark(title->titleId, MISSING_MARK_NONE))
-                ShowMessageUI("Not saved", "The mark couldn't be written.", MissingMarksPath());
-            BuildReviewRow(selected);
-            countChanged = true;
-            PlayUiSound(UI_SOUND_BACK);
-        }
-        else if (input.pressed & XINPUT_GAMEPAD_Y)
-        {
-            // The marked ones in or out, keeping the focus where it is. Going
-            // back to hiding them while a marked game has the focus leaves it
-            // on whatever row that game held.
-            g_reviewShowMarked = !g_reviewShowMarked;
-            RebuildReviewRows(view);
-            if (g_reviewCount == 0)
-            {
-                // Hiding them all would leave an empty screen.
-                g_reviewShowMarked = true;
-                RebuildReviewRows(view);
-                ShowMessageUI("Nothing left to hide", "Every game in the list carries a mark.",
-                              MissingMarksPath());
-                ResyncUiInput();
-            }
-            countChanged = true;
-            PlayUiSound(UI_SOUND_SELECT);
-        }
-        else if (input.pressed & (XINPUT_GAMEPAD_LEFT_SHOULDER | XINPUT_GAMEPAD_RIGHT_SHOULDER))
-        {
-            const int step = (input.pressed & XINPUT_GAMEPAD_RIGHT_SHOULDER) ? REVIEW_PAGE_ROWS : -REVIEW_PAGE_ROWS;
-            int to = selected + step;
-            if (to < 0)
-                to = 0;
-            if (to > g_reviewCount - 1)
-                to = g_reviewCount - 1;
-            if (to != selected)
-            {
-                view.selected = to;
-                PlayUiSound(UI_SOUND_MOVE);
-            }
-        }
-        else if (input.triggers != 0)
-        {
-            const int to = StepReviewLetter(selected, (input.triggers & UI_TRIGGER_RIGHT) ? 1 : -1);
-            if (to != selected)
-            {
-                view.selected = to;
-                PlayUiSound(UI_SOUND_MOVE);
-            }
-        }
-        else if (input.nav == XINPUT_GAMEPAD_DPAD_UP && selected > 0)
-        {
-            view.selected = selected - 1;
-            PlayUiSound(UI_SOUND_MOVE);
-        }
-        else if (input.nav == XINPUT_GAMEPAD_DPAD_DOWN && selected + 1 < g_reviewCount)
-        {
-            view.selected = selected + 1;
-            PlayUiSound(UI_SOUND_MOVE);
-        }
-
-        // Whatever the focus is on now, not where it was before this frame's
-        // input moved it - a hint a frame behind reads as a flicker.
-        const CatalogTitle *focused = ReviewTitleAt(view.selected);
-
-        UiHint hints[6];
-        int hintCount = 0;
-        hintCount = AddHint(hints, hintCount, UI_BUTTON_A, L"Mark");
-        if (focused != NULL && MissingMarkOf(focused->titleId) != MISSING_MARK_NONE)
-            hintCount = AddHint(hints, hintCount, UI_BUTTON_X, L"Take mark off", L"Unmark");
-        if (g_reviewShowMarked)
-            hintCount = AddHint(hints, hintCount, UI_BUTTON_Y, L"Hide the marked ones", L"Hide marked");
-        else
-            hintCount = AddHint(hints, hintCount, UI_BUTTON_Y, L"Show the marked ones", L"Show all");
-        hintCount = AddHint(hints, hintCount, UI_BUTTON_B, L"Done");
-        hintCount = AddHint(hints, hintCount, UI_BUTTON_LBRB, L"Page");
-        hintCount = AddHint(hints, hintCount, UI_BUTTON_LTRT, L"Letter");
-
-        RenderListFrame(view, hints, hintCount);
-        Sleep(16);
-    }
-}
-
 // The DLC pack or title update picker, over whichever page opened it: a
 // search in progress or what it found.
 // A game's page, over the Store or the library, with the buttons that apply
@@ -6901,8 +6447,6 @@ static void RenderGamePageFrame(Shell &shell, const Library &lib, UiHint *hints,
             hintCount = AddHint(hints, hintCount, UI_BUTTON_B, L"Back");
             if (StoreVersionCount() > 1)
                 hintCount = AddHint(hints, hintCount, UI_BUTTON_Y, L"Versions");
-            if (GamePageIsMissing())
-                hintCount = AddHint(hints, hintCount, UI_BUTTON_X, L"Mark this entry", L"Mark");
         }
     }
 
@@ -7994,13 +7538,6 @@ int main()
                 shell.storeVersionsOpen = true;
                 shell.storeVersionFocus = shell.storeVersionChosen;
             }
-            else if ((pressed & XINPUT_GAMEPAD_X) && GamePageIsMissing())
-            {
-                // Nothing to install, so X marks it for the missing-games
-                // list instead. See MissingGames.h.
-                MarkMissingStoreGame(g_storeGame);
-                acted = true;
-            }
             else if ((pressed & XINPUT_GAMEPAD_B) && shell.page == SHELL_PAGE_LIBRARY)
             {
                 shell.libraryInGame = false; // back to the library's grid
@@ -8171,18 +7708,13 @@ int main()
                 if (FilterRowDisabled(shell, shell.storeFilterFocus))
                     shell.storeFilterFocus = FILTER_ROW_REGIONS;
             }
-            else if ((pressed & XINPUT_GAMEPAD_X) && !shell.storeSearch && !shell.storeLetterArcade &&
-                     shell.storeGameCount > 0 && StoreGameMissing(g_storeGames[shell.storeSelected]))
-            {
-                // A game nobody has uploaded: mark it for the missing-games
-                // list. See MissingGames.h.
-                MarkMissingStoreGame(g_storeGames[shell.storeSelected]);
-                acted = true;
-            }
             else if ((pressed & XINPUT_GAMEPAD_X) && LetterFiltersEmptied(shell))
             {
-                // Reset, as the panel's button.
+                // Reset, as the panel's button - and as there, back to the
+                // default rather than to nothing, which leaves the games we
+                // don't have showing.
                 memset(&g_filter, 0, sizeof(g_filter));
+                g_filter.showMissing = true;
                 SaveFilter();
                 RefilterLetter(shell);
             }
@@ -8716,9 +8248,6 @@ int main()
                         hintCount = AddHint(hints, hintCount, UI_BUTTON_Y, L"Filter and sort", L"Filter");
                     if (LetterFiltersEmptied(shell))
                         hintCount = AddHint(hints, hintCount, UI_BUTTON_X, L"Reset filters", L"Reset");
-                    else if (!shell.storeSearch && !shell.storeLetterArcade && shell.storeGameCount > 0 &&
-                             StoreGameMissing(g_storeGames[shell.storeSelected]))
-                        hintCount = AddHint(hints, hintCount, UI_BUTTON_X, L"Mark this entry", L"Mark");
                     if (shell.storeGameCount > StoreLetterVisibleRows() * StoreGridColumns())
                         hintCount = AddHint(hints, hintCount, UI_BUTTON_LBRB, L"Page");
                     if (LetterJumps(shell))

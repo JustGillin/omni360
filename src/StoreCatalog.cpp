@@ -472,16 +472,6 @@ bool StoreGameMissing(const StoreGame &game)
     return game.versionCount == 0;
 }
 
-int CatalogTitleCount()
-{
-    return CATALOG_TITLE_COUNT;
-}
-
-const CatalogTitle *CatalogTitleAt(int index)
-{
-    return (index >= 0 && index < CATALOG_TITLE_COUNT) ? &kCatalogTitles[index] : NULL;
-}
-
 bool CatalogInfoOf(unsigned long titleId, StoreGameInfo *out)
 {
     // Sorted by name, not by title ID, so there's no binary search to do -

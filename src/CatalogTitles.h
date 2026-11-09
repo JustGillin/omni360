@@ -6,9 +6,9 @@
 // them into its grid behind a filter.
 // Of the catalog's 3369 media-type-1 items, 1868 are games, not apps or avatar
 // items; the Store, the Original Xbox list and XBLA have 1556 of those,
-// leaving 33 here.
+// leaving 32 here.
 //
-// 279 more were marked by hand as not games anyone could own - duplicates
+// 280 more were marked by hand as not games anyone could own - duplicates
 // under a shortened name, title update discs, test products - and left out.
 // See tools/data/missing-games.txt.
 //
@@ -32,7 +32,7 @@ struct CatalogTitle
     char letter;            // its A-Z tile: 'A' to 'Z', or '#'
 };
 
-#define CATALOG_TITLE_COUNT       33
+#define CATALOG_TITLE_COUNT       32
 #define CATALOG_MAX_LETTER_TITLES 5 // the most under one letter
 
 #ifdef CATALOG_TITLES_DATA
@@ -60,7 +60,6 @@ static const CatalogTitle kCatalogTitles[CATALOG_TITLE_COUNT] =
     { "MLB 2K13", 0x545408AB, 7454, 2013, 42, 9, 0x00, 'M' },
     { "Monkey Island Special Edition Collection", 0x4C4107F8, 1, 2011, 50, 5, 0x00, 'M' },
     { "MX vs. ATV: Untamed", 0x545107DE, 28045, 2010, 40, 6, 0x00, 'M' },
-    { "Mystery Wheel", 0x345907D0, 0, 2799, 0, 1, 0x00, 'M' },
     { "NCAA March Madness08", 0x45410837, 209, 2008, 40, 9, 0x00, 'N' },
     { "NHL 2K10", 0x54540853, 5925, 2009, 38, 9, 0x00, 'N' },
     { "Pocketbike Racer", 0x4D538803, 235, 2008, 38, 6, 0x00, 'P' },
