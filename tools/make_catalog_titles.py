@@ -40,8 +40,17 @@ archive.org sets to each other.
 XBLIG is left out of the comparison entirely: every indie game shares the
 one XNA title ID (0x584E07D2), so there's nothing to match on.
 
+What's left over after all that is still not quite a list of retail discs:
+the catalog is the whole marketplace, and a shortened second name for a game
+already in the list has no tell in the data at all. That part is hand-kept.
+tools/data/missing-games.txt is the file Omni360's own Review screen writes
+(Settings > Games we don't have, see src/MissingGames.h) - copy it off the
+console into tools/data and every title ID in it marked as anything but
+"keep" is left out of the generated list.
+
 Run it after make_store_titles.py. Needs network access.
 """
+import io
 import json
 import os
 import re
@@ -60,6 +69,8 @@ XBOX_TITLES = os.path.join(ROOT, "src", "XboxTitles.h")
 XBLA_TITLES = os.path.join(ROOT, "src", "XblaTitles.h")
 OUT_HEADER = os.path.join(ROOT, "src", "CatalogTitles.h")
 CACHE = os.path.join(ROOT, "tools", "cache", "catalog_all.json")
+# Written by the console, copied here by hand - see the note above.
+MARKS = os.path.join(ROOT, "tools", "data", "missing-games.txt")
 
 PAGE_SIZE = 100
 MEDIA_TYPE = 1   # retail 360 games
@@ -259,6 +270,29 @@ def xbla_games():
     return out
 
 
+MARK_LINE = re.compile(r"^([0-9A-Fa-f]{8})\s*=\s*([a-z]+)")
+
+
+def hand_marks(path):
+    """The marks from the console's missing-games.txt: title ID -> the one
+    word saying what the entry is. Everything but "keep" is a row to leave
+    out. A missing file is not an error - this list is optional, and a clone
+    that hasn't curated anything should still generate."""
+    marks = {}
+    if not os.path.exists(path):
+        print("no %s - nothing left out by hand" % os.path.basename(path))
+        return marks
+    with io.open(path, encoding="utf-8") as f:
+        for line in f:
+            line = line.strip()
+            if not line or line.startswith("#"):
+                continue
+            m = MARK_LINE.match(line)
+            if m:
+                marks[int(m.group(1), 16)] = m.group(2)
+    return marks
+
+
 def is_game(e):
     if not e["name"] or JUNK_NAME.search(e["name"]):
         return False
@@ -336,6 +370,27 @@ def main():
     print("%d already had - %d by title ID, %d by name alone; %d missing"
           % (by_id + by_name, by_id, by_name, len(missing)))
 
+    # The hand-kept part: duplicates under a shortened name, title update
+    # discs, test products - whatever someone sat down and marked on the
+    # console. "keep" says a row was looked at and really is a missing game,
+    # so it stays.
+    marks = hand_marks(MARKS)
+    excluded = {t: m for t, m in marks.items() if m != "keep" and t in missing}
+    for t in excluded:
+        del missing[t]
+    stale = [t for t in marks if t not in missing and t not in excluded]
+    by_mark = {}
+    for m in excluded.values():
+        by_mark[m] = by_mark.get(m, 0) + 1
+    if marks:
+        print("%d left out by hand%s; %d missing after that"
+              % (len(excluded),
+                 (" (" + ", ".join("%s %d" % (m, n) for m, n in sorted(by_mark.items())) + ")") if by_mark else "",
+                 len(missing)))
+    if stale:
+        print("  %d mark%s for a title ID that isn't in the list any more - already "
+              "left out, or the Store has it now" % (len(stale), "" if len(stale) == 1 else "s"))
+
     genre_names = sorted(GENRE_NAMES.get(g, g) for g in MAIN_GENRES)
 
     def genre_of(e):
@@ -363,10 +418,15 @@ def main():
          "// them into its grid behind a filter.",
          "// Of the catalog's %d media-type-1 items, %d are games, not apps or avatar" % (total, len(games)),
          "// items; the Store, the Original Xbox list and XBLA have %d of those,"
-         % (len(games) - len(missing)),
+         % (len(games) - len(missing) - len(excluded)),
          "// leaving %d here." % len(missing),
-         "//",
-         "// Names are the catalog's fullTitle. XBLIG isn't compared: every indie game",
+         "//"]
+    if excluded:
+        L += ["// %d more were marked by hand as not games anyone could own - duplicates" % len(excluded),
+              "// under a shortened name, title update discs, test products - and left out.",
+              "// See tools/data/missing-games.txt.",
+              "//"]
+    L += ["// Names are the catalog's fullTitle. XBLIG isn't compared: every indie game",
          "// shares the one XNA title ID.",
          "",
          "#ifndef CATALOG_TITLES_H",

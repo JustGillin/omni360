@@ -125,6 +125,12 @@ int CatalogTitlesForLetter(char letter, StoreGame *out, int maxGames);
 // Whether a grid's game is one of those: there's nothing to download.
 bool StoreGameMissing(const StoreGame &game);
 
+// The table itself, for the screen that marks the list by hand
+// (MissingGames.h): how many rows it has, and one of them. NULL for an index
+// outside it.
+int CatalogTitleCount();
+const CatalogTitle *CatalogTitleAt(int index);
+
 // A missing game's genre, tags and rating, which come from the catalog
 // rather than StoreRows.h. False for a title ID that isn't one.
 bool CatalogInfoOf(unsigned long titleId, StoreGameInfo *out);
