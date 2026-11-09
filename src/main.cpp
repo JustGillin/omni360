@@ -3679,7 +3679,10 @@ static const StoreFilterView *MakeFilterPanel(const Shell &shell)
     FilterValueRow(rows[FILTER_ROW_LANGUAGE], "Language", f.language > 0 ? StoreLanguageName(f.language - 1) : "Any",
                    f.language, 1 + STORE_LANGUAGE_COUNT);
     FilterValueRow(rows[FILTER_ROW_RATING], "Rating", kRatingNames[f.rating], f.rating, FILTER_RATING_VALUES);
-    FilterCheckRow(rows[FILTER_ROW_SHOW_MISSING], "Show games we don't have", f.showMissing);
+    // Says why they're in the grid rather than whose fault it is. The row has
+    // about 424 design pixels for a label at this size, so it can't be the
+    // full "not available for download" without being truncated.
+    FilterCheckRow(rows[FILTER_ROW_SHOW_MISSING], "Show games you can't download", f.showMissing);
     rows[FILTER_ROW_RESET].kind = STORE_FILTER_BUTTON;
     rows[FILTER_ROW_RESET].label = "Reset filters";
     for (int r = 0; r < FILTER_ROW_COUNT; ++r)
@@ -3711,23 +3714,6 @@ static bool StepFilterValue(int &value, int count, int step, bool wrap)
     }
     value = next;
     return true;
-}
-
-// What the missing list is, said as it's switched on. It used to be a
-// warning: the catalog is Xbox Live's whole marketplace rather than a list of
-// retail discs, it spells a name however it likes, and no amount of filtering
-// got it down to one clean row a game. Every row has since been looked at by
-// hand (tools/data/missing-games.txt, which make_catalog_titles.py reads),
-// taking it from 312 rows to 32, so what's left is worth standing behind -
-// but it still can't be downloaded, which is the thing worth saying.
-static void WarnAboutMissingGames()
-{
-    ShowAlertUI("Games we don't have",
-                "Games the Xbox Live catalog lists that nobody has uploaded. The catalog carries far "
-                "more than the games that shipped on disc, so every row in this list was checked by "
-                "hand against what the Store holds.",
-                "None of them can be downloaded. Untick it to hide them again.",
-                "OK", NULL);
 }
 
 // The D-pad and A on the panel. True if a filter changed.
@@ -3775,9 +3761,11 @@ static bool StepFilterPanel(const UiInput &input, Shell &shell)
     case FILTER_ROW_SHOW_MISSING:
         if (!a)
             return false;
+        // No alert any more: it warned that the list was the whole Xbox Live
+        // marketplace - duplicates, demos, test products - which was true of
+        // the 312 rows it drew and isn't of the 32 left. The row says what it
+        // does, and the tiles it brings in are faded and unselectable.
         f.showMissing = !f.showMissing;
-        if (f.showMissing)
-            WarnAboutMissingGames();
         return true;
     case FILTER_ROW_RESET:
         if (!a || (!FilterNarrows(f) && f.sort == STORE_SORT_AZ))
