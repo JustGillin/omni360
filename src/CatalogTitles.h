@@ -6,9 +6,9 @@
 // them into its grid behind a filter.
 // Of the catalog's 3369 media-type-1 items, 1868 are games, not apps or avatar
 // items; the Store, the Original Xbox list and XBLA have 1556 of those,
-// leaving 36 here.
+// leaving 33 here.
 //
-// 276 more were marked by hand as not games anyone could own - duplicates
+// 279 more were marked by hand as not games anyone could own - duplicates
 // under a shortened name, title update discs, test products - and left out.
 // See tools/data/missing-games.txt.
 //
@@ -32,7 +32,7 @@ struct CatalogTitle
     char letter;            // its A-Z tile: 'A' to 'Z', or '#'
 };
 
-#define CATALOG_TITLE_COUNT       36
+#define CATALOG_TITLE_COUNT       33
 #define CATALOG_MAX_LETTER_TITLES 5 // the most under one letter
 
 #ifdef CATALOG_TITLES_DATA
@@ -62,7 +62,6 @@ static const CatalogTitle kCatalogTitles[CATALOG_TITLE_COUNT] =
     { "MX vs. ATV: Untamed", 0x545107DE, 28045, 2010, 40, 6, 0x00, 'M' },
     { "Mystery Wheel", 0x345907D0, 0, 2799, 0, 1, 0x00, 'M' },
     { "NCAA March Madness08", 0x45410837, 209, 2008, 40, 9, 0x00, 'N' },
-    { "NFS SHIFT 2 Unleashed", 0x45410FB2, 0, 0, 0, 6, 0x00, 'N' },
     { "NHL 2K10", 0x54540853, 5925, 2009, 38, 9, 0x00, 'N' },
     { "Pocketbike Racer", 0x4D538803, 235, 2008, 38, 6, 0x00, 'P' },
     { "Pro Evolution Soccer 6", 0x4B4E07DA, 28, 2008, 42, 9, 0x00, 'P' },
@@ -71,8 +70,6 @@ static const CatalogTitle kCatalogTitles[CATALOG_TITLE_COUNT] =
     { "Resident Evil 4", 0x4343081C, 105031, 2011, 45, 1, 0x00, 'R' },
     { "Sledge Hammer", 0x565107D1, 10, 2012, 38, 6, 0x00, 'S' },
     { "Tinker", 0x584109EB, 0, 0, 0, 5, 0x00, 'T' },
-    { "Tomb Raider: Legend", 0x53510FA6, 0, 0, 0, 10, 0x00, 'T' },
-    { "Tron: Evolution", 0x42560801, 0, 2010, 0, 1, 0x00, 'T' },
     { "\xE3\x81\x8A\xE5\xA7\x89\xE3\x83\x81\xE3\x83\xA3\xE3\x83\xB3\xE3\x83\x90\xE3\x83\xA9vorteX", 0x445007D2, 0, 2006, 0, 1, 0x00, 'V' },
     { "Warface", 0x4D530AA5, 19295, 2799, 38, 8, 0x00, 'W' },
 };

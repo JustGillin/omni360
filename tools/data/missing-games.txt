@@ -10,17 +10,14 @@ format=1
 marked=311
 catalog=312
 
-# Keep - it's a real game (35)
+# Keep - it's a real game (32)
 445007D2=keep  # お姉チャンバラvorteX
 584109EB=keep  # Tinker
-53510FA6=keep  # Tomb Raider: Legend
-42560801=keep  # Tron: Evolution
 565107D1=keep  # Sledge Hammer
 43430842=keep  # Resident Evil 0
 4343081C=keep  # Resident Evil 4
 415607D6=keep  # Quake 2
 45410837=keep  # NCAA March Madness08
-45410FB2=keep  # NFS SHIFT 2 Unleashed
 54540853=keep  # NHL 2K10
 4B4E083C=keep  # METAL GEAR SOLID PEACE WALKER HD EDITION
 545107DE=keep  # MX vs. ATV: Untamed
@@ -47,7 +44,10 @@ catalog=312
 4B4E07DA=keep  # Pro Evolution Soccer 6
 4D530AA5=keep  # Warface
 
-# Duplicate or regional variant (105)
+# Duplicate or regional variant (108)
+53510FA6=duplicate  # Tomb Raider: Legend
+42560801=duplicate  # Tron: Evolution
+45410FB2=duplicate  # NFS SHIFT 2 Unleashed
 54510852=duplicate  # 50 Cent: BotS (JP)
 494707F2=duplicate  # Alone In The Dark (JP)
 4E4D0854=duplicate  # ARMORED CORE V(ASIA)
