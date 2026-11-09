@@ -270,7 +270,7 @@ def xbla_games():
     return out
 
 
-MARK_LINE = re.compile(r"^([0-9A-Fa-f]{8})\s*=\s*([a-z]+)")
+MARK_LINE = re.compile(r"^([0-9A-Fa-f]{8})\s*=\s*([a-z0-9]+)")
 
 
 def hand_marks(path):

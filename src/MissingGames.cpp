@@ -17,17 +17,20 @@ DESCRIPTION : the hand-kept marks on the missing-games list, and the text file
 
 #define MISSING_MARKS_FILE "game:\\missing-games.txt"
 
-// The catalog's rows, and room for marks on title IDs that are no longer in
-// it. Those are kept deliberately: once a mark has been fed back into
+// Room for the whole file, which is not the same thing as room for the
+// catalog. Marks on title IDs that are no longer in the list are kept
+// deliberately: once a mark has been fed back into
 // tools/make_catalog_titles.py the game it named is gone from
 // CatalogTitles.h, and a file that then forgot it would undo the curation
-// the next time it was written.
-#define MISSING_MARKS_MAX (CATALOG_TITLE_COUNT + 256)
+// the next time it was written. So most of the file is rows that aren't in
+// the list any more - 276 of the 311 after the first pass - and sizing this
+// off CATALOG_TITLE_COUNT would throw the curation away as it succeeded.
+#define MISSING_MARKS_MAX 1024
 #define MISSING_NAME_MAX  72
 
-// Larger than the file can be - about 570 lines of 90 bytes - and still well
-// inside ReadQueueStateFile's own limit.
-#define MISSING_TEXT_MAX (96 * 1024)
+// Larger than the file can be - MISSING_MARKS_MAX lines of 90-odd bytes,
+// plus the headings - and still inside ReadQueueStateFile's own limit.
+#define MISSING_TEXT_MAX (160 * 1024)
 
 struct MarkEntry
 {

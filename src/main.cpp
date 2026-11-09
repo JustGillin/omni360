@@ -3725,19 +3725,19 @@ static bool StepFilterValue(int &value, int count, int step, bool wrap)
     return true;
 }
 
-// What the missing list is, and what it isn't, said as it's switched on.
-// The catalog is Xbox Live's whole marketplace rather than a list of retail
-// discs, and it spells a name however it likes, so no amount of filtering
-// gets it down to one clean row a game: make_catalog_titles.py drops what it
-// can recognise and the rest comes through. Better to say so than to let the
-// list read as authoritative.
+// What the missing list is, said as it's switched on. It used to be a
+// warning: the catalog is Xbox Live's whole marketplace rather than a list of
+// retail discs, it spells a name however it likes, and no amount of filtering
+// got it down to one clean row a game. Every row has since been looked at by
+// hand (MissingGames.h, tools/data/missing-games.txt), which took it from 312
+// to 36, so what's left is worth standing behind - but it still can't be
+// downloaded, which is the thing worth saying.
 static void WarnAboutMissingGames()
 {
     ShowAlertUI("Games we don't have",
-                "These come from the Xbox Live catalog, which lists more than the games that shipped on "
-                "disc and often shortens a name. Expect the same game twice - Call of Duty: World at War "
-                "is in there again as Call of Duty: WaW - along with demos, title update discs and a few "
-                "Original Xbox games.",
+                "Games the Xbox Live catalog lists that nobody has uploaded. The catalog carries far "
+                "more than the games that shipped on disc, so every row in this list was checked by "
+                "hand against what the Store holds.",
                 "None of them can be downloaded. Untick it to hide them again.",
                 "OK", NULL);
 }
