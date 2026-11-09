@@ -573,8 +573,76 @@ static void DropItemListing(ItemListing &listing)
     listing.size = 0;
 }
 
-int FindDlcRarFilenames(const std::string &gameName, DlcRarMatch *outMatches, int maxMatches,
-                        void printFunction(const char *_format, ...))
+// ---------------------------------------------------------------------------
+// The names a search matches on
+// ---------------------------------------------------------------------------
+//
+// Usually one: the game's. Two when the version chosen is an edition with a
+// name of its own, because the Store's entry is named after a whole title ID
+// and one title ID is sometimes two games. Grand Theft Auto IV and Episodes
+// from Liberty City are both 545407F2, so the entry is named for Episodes and
+// "Grand.theft.auto.4.dlc.rar" scores 37 against it - under the threshold,
+// nothing found - while "Grand Theft Auto IV", which is right there in the
+// version's own line, scores 87.
+//
+// A candidate is scored against both and keeps the better score. The worst a
+// wrong second name can do is widen the search a little: a name that doesn't
+// belong matches nothing, and the picker lists what it finds with its score
+// for someone to choose from.
+struct MatchQueries
+{
+    char text[2][512];
+    int count;
+};
+
+static MatchQueries PrepareQueries(const std::string &gameName, const std::string &editionName,
+                                   void printFunction(const char *_format, ...))
+{
+    MatchQueries q;
+    q.count = 0;
+
+    const std::string *names[2] = {&gameName, &editionName};
+    for (int i = 0; i < 2; ++i)
+    {
+        if (names[i]->empty())
+            continue;
+
+        char *into = q.text[q.count];
+        NormalizeForMatch(names[i]->c_str(), into, sizeof(q.text[0]));
+
+        // A multi-disc title carries its disc in the display name; the archive
+        // never does. See StripDiscSuffix.
+        const size_t beforeStrip = strlen(into);
+        StripDiscSuffix(into);
+        if (strlen(into) != beforeStrip)
+            printFunction("  Matching on \"%s\" (disc marker trimmed from the title)\n", into);
+
+        // The edition can normalize to the same thing as the game's name,
+        // which would only score everything twice.
+        if (into[0] == '\0' || (q.count > 0 && strcmp(q.text[0], into) == 0))
+            continue;
+        q.count++;
+    }
+
+    if (q.count > 1)
+        printFunction("  Also matching on \"%s\" (the version chosen)\n", q.text[1]);
+    return q;
+}
+
+static int ScoreQueries(const MatchQueries &q, const char *candidateNorm)
+{
+    int best = 0;
+    for (int i = 0; i < q.count; ++i)
+    {
+        const int score = ScoreDlcMatch(candidateNorm, q.text[i]);
+        if (score > best)
+            best = score;
+    }
+    return best;
+}
+
+int FindDlcRarFilenames(const std::string &gameName, const std::string &editionName, DlcRarMatch *outMatches,
+                        int maxMatches, void printFunction(const char *_format, ...))
 {
     // The listing for this item runs ~256KB; generous headroom.
     const char *listing = ItemListingJson(g_dlcListing, ARCHIVE_METADATA_URL, 2 * 1024 * 1024, printFunction);
@@ -598,16 +666,7 @@ int FindDlcRarFilenames(const std::string &gameName, DlcRarMatch *outMatches, in
         return -1;
     }
 
-    char normalizedQuery[512];
-    NormalizeForMatch(gameName.c_str(), normalizedQuery, sizeof(normalizedQuery));
-
-    // A multi-disc title carries its disc in the display name; the archive
-    // never does. See StripDiscSuffix.
-    size_t beforeStrip = strlen(normalizedQuery);
-    StripDiscSuffix(normalizedQuery);
-
-    if (strlen(normalizedQuery) != beforeStrip)
-        printFunction("  Matching on \"%s\" (disc marker trimmed from the title)\n", normalizedQuery);
+    const MatchQueries queries = PrepareQueries(gameName, editionName, printFunction);
 
     int matchCount = 0;
     cJSON *file;
@@ -626,7 +685,7 @@ int FindDlcRarFilenames(const std::string &gameName, DlcRarMatch *outMatches, in
         char normalizedName[512];
         NormalizeForMatch(name->valuestring, normalizedName, sizeof(normalizedName));
 
-        int score = ScoreDlcMatch(normalizedName, normalizedQuery);
+        int score = ScoreQueries(queries, normalizedName);
         if (score < DLC_MATCH_MIN_SCORE)
             continue;
 
@@ -2147,7 +2206,8 @@ static void ParseTitleUpdateName(const char *filename, int *outVersion, char *ou
     outRegion[o] = '\0';
 }
 
-int FindTitleUpdates(const std::string &gameName, TitleUpdateMatch *outMatches, int maxMatches,
+int FindTitleUpdates(const std::string &gameName, const std::string &editionName, TitleUpdateMatch *outMatches,
+                     int maxMatches,
                      void printFunction(const char *_format, ...))
 {
     // A larger limit than the DLC item's: this listing runs to a thousand-plus
@@ -2175,16 +2235,7 @@ int FindTitleUpdates(const std::string &gameName, TitleUpdateMatch *outMatches, 
         return -1;
     }
 
-    char normalizedQuery[512];
-    NormalizeForMatch(gameName.c_str(), normalizedQuery, sizeof(normalizedQuery));
-
-    // A multi-disc title carries its disc in the display name; the archive
-    // never does. See StripDiscSuffix.
-    size_t beforeStrip = strlen(normalizedQuery);
-    StripDiscSuffix(normalizedQuery);
-
-    if (strlen(normalizedQuery) != beforeStrip)
-        printFunction("  Matching on \"%s\" (disc marker trimmed from the title)\n", normalizedQuery);
+    const MatchQueries queries = PrepareQueries(gameName, editionName, printFunction);
 
     int matchCount = 0;
     cJSON *file;
@@ -2205,7 +2256,7 @@ int FindTitleUpdates(const std::string &gameName, TitleUpdateMatch *outMatches, 
         // Same scorer as the DLC side. It behaves better here, if anything:
         // these are ordinary game names rather than dot-separated scene
         // releases, so more of the query tends to land as whole words.
-        int score = ScoreDlcMatch(normalizedName, normalizedQuery);
+        int score = ScoreQueries(queries, normalizedName);
         if (score < DLC_MATCH_MIN_SCORE)
             continue;
 

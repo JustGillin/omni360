@@ -25,6 +25,7 @@ static bool g_pending = false;
 static int g_pendingId = 0;
 static SearchKind g_pendingKind = SEARCH_DLC;
 static char g_pendingName[256] = "";
+static char g_pendingEdition[256] = ""; // the second name to match on; empty for none
 
 // The last search to finish, until it's collected. Only one is kept: the UI
 // only ever waits on its newest request.
@@ -38,6 +39,7 @@ static SearchResult g_working;
 static DWORD WINAPI SearchEntry(LPVOID)
 {
     char gameName[256];
+    char editionName[256];
 
     for (;;)
     {
@@ -57,6 +59,7 @@ static DWORD WINAPI SearchEntry(LPVOID)
             g_working.requestId = g_pendingId;
             g_working.kind = g_pendingKind;
             memcpy(gameName, g_pendingName, sizeof(gameName));
+            memcpy(editionName, g_pendingEdition, sizeof(editionName));
             haveWork = true;
         }
 
@@ -68,13 +71,17 @@ static DWORD WINAPI SearchEntry(LPVOID)
             continue;
         }
 
-        dprintf("[search] %s for \"%s\" (request %d)\n",
-                g_working.kind == SEARCH_DLC ? "DLC" : "title updates", gameName, g_working.requestId);
+        dprintf("[search] %s for \"%s\"%s%s%s (request %d)\n",
+                g_working.kind == SEARCH_DLC ? "DLC" : "title updates", gameName,
+                editionName[0] != '\0' ? " or \"" : "", editionName, editionName[0] != '\0' ? "\"" : "",
+                g_working.requestId);
 
         if (g_working.kind == SEARCH_DLC)
-            g_working.count = FindDlcRarFilenames(gameName, g_working.packs, MAX_DLC_RAR_MATCHES, dprintf);
+            g_working.count = FindDlcRarFilenames(gameName, editionName, g_working.packs,
+                                                 MAX_DLC_RAR_MATCHES, dprintf);
         else
-            g_working.count = FindTitleUpdates(gameName, g_working.updates, MAX_TITLE_UPDATE_MATCHES, dprintf);
+            g_working.count = FindTitleUpdates(gameName, editionName, g_working.updates,
+                                               MAX_TITLE_UPDATE_MATCHES, dprintf);
 
         EnterCriticalSection(&g_lock);
         g_result = g_working;
@@ -153,7 +160,7 @@ bool StopSearchWorker(DWORD timeoutMs)
     return stopped;
 }
 
-int BeginSearch(SearchKind kind, const char *gameName)
+int BeginSearch(SearchKind kind, const char *gameName, const char *editionName)
 {
     if (!g_running)
         return 0;
@@ -166,6 +173,8 @@ int BeginSearch(SearchKind kind, const char *gameName)
     g_pendingKind = kind;
     strncpy(g_pendingName, gameName != NULL ? gameName : "", sizeof(g_pendingName) - 1);
     g_pendingName[sizeof(g_pendingName) - 1] = '\0';
+    strncpy(g_pendingEdition, editionName != NULL ? editionName : "", sizeof(g_pendingEdition) - 1);
+    g_pendingEdition[sizeof(g_pendingEdition) - 1] = '\0';
 
     LeaveCriticalSection(&g_lock);
 

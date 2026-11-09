@@ -162,8 +162,14 @@ struct DlcRarMatch
 // Duty 2" has three: Bonus/Invasion/Skirmish Pack), so this fills
 // outMatches (caller-allocated, up to maxMatches entries) and returns how
 // many were found, or -1 on a request/parse failure (0 just means no match).
-int FindDlcRarFilenames(const std::string &gameName, DlcRarMatch *outMatches, int maxMatches,
-                        void printFunction(const char *_format, ...));
+//
+// editionName is a second name to match on, empty for none: the Store's entry
+// is named after a title ID, and one title ID is sometimes two games - Grand
+// Theft Auto IV and Episodes from Liberty City are both 545407F2 - so the
+// edition shown on the version chosen finds DLC the entry's own name can't.
+// A candidate keeps the better of the two scores.
+int FindDlcRarFilenames(const std::string &gameName, const std::string &editionName, DlcRarMatch *outMatches,
+                        int maxMatches, void printFunction(const char *_format, ...));
 
 // Walks the pack's header chain (RAR4 or RAR5 - see RarHeaders.h) one entry at a time, each via a small,
 // precisely-targeted Range request (RAR stores headers interleaved with each
@@ -275,9 +281,10 @@ struct TitleUpdateMatch
 // Soft-matches gameName against the title-update item's file listing. Fills
 // outMatches (caller-allocated) sorted best-first - by score, then by version
 // descending, so the newest update for the best-matching name comes first.
-// Returns how many were found, or -1 on a request/parse failure.
-int FindTitleUpdates(const std::string &gameName, TitleUpdateMatch *outMatches, int maxMatches,
-                     void printFunction(const char *_format, ...));
+// Returns how many were found, or -1 on a request/parse failure. editionName
+// is the second name to match on, as FindDlcRarFilenames takes it.
+int FindTitleUpdates(const std::string &gameName, const std::string &editionName, TitleUpdateMatch *outMatches,
+                     int maxMatches, void printFunction(const char *_format, ...));
 
 // Reads the zip's single member: its name, and its uncompressed size (which
 // also serves as the progress/ETA hint for the download). One Range request in

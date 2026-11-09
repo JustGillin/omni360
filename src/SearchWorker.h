@@ -44,8 +44,10 @@ bool StartSearchWorker();
 bool StopSearchWorker(DWORD timeoutMs);
 
 // Asks for a search and returns its request id, or 0 if the worker isn't
-// running. gameName is copied.
-int BeginSearch(SearchKind kind, const char *gameName);
+// running. Both names are copied. editionName is the second name to match on
+// - the edition shown on the version chosen - and may be NULL or empty; see
+// FindDlcRarFilenames for why a game has two names worth searching.
+int BeginSearch(SearchKind kind, const char *gameName, const char *editionName);
 
 // True once the search with this id has finished, with its result in *out.
 // A result is handed out once; asking again for the same id returns false.

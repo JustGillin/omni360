@@ -1238,8 +1238,10 @@ struct Picker
     ShellPage page; // the page it's open over: the library, or a game in the Store
 
     // The game it's for - copied, since it may be the disc in the drive,
-    // which isn't in the library.
+    // which isn't in the library. editionName is the second name its search
+    // matches on, empty for none: see FindDlcRarFilenames.
     char gameName[256];
+    char editionName[128];
     unsigned long titleId;
     int count;
     int selected;
@@ -1257,19 +1259,65 @@ struct Picker
 // Where SearchResults land - static, as they're 8KB.
 static SearchResult g_searchResult;
 
-// Opens the picker for a game and starts its search.
+// The edition named on a version's line, if it has one: "Grand Theft Auto IV"
+// out of "Grand Theft Auto IV  ·  En, Fr, De, Es, It". Empty if it hasn't.
+//
+// The generator puts the edition first and only when that disc's own title
+// differs from the game's (build_releases in make_store_titles.py), so the
+// first part is the edition unless it's one of the other things that can lead:
+// a list of languages or a revision. Worth getting roughly right rather than
+// exactly - it is only ever a second thing to search for, and a string that
+// isn't an edition matches nothing.
+static void ReleaseEdition(const StoreRelease *release, char *out, size_t outSize)
+{
+    out[0] = '\0';
+    if (release == NULL || release->detail == NULL || release->detail[0] == '\0')
+        return;
+
+    const char *end = strstr(release->detail, "  \xC2\xB7  "); // STORE_MIDDOT, defined further down
+    const size_t len = (end != NULL) ? (size_t)(end - release->detail) : strlen(release->detail);
+    if (len == 0 || len >= outSize)
+        return;
+    memcpy(out, release->detail, len);
+    out[len] = '\0';
+
+    if (strncmp(out, "Rev ", 4) == 0)
+    {
+        out[0] = '\0';
+        return;
+    }
+
+    // Languages are two letters a word, comma-separated: "En", "En, Fr, De".
+    bool languages = true;
+    for (size_t i = 0; i + 1 < len && languages; i += 4)
+    {
+        if (!isalpha((unsigned char)out[i]) || !isalpha((unsigned char)out[i + 1]))
+            languages = false;
+        else if (i + 2 < len && (out[i + 2] != ',' || out[i + 3] != ' '))
+            languages = false;
+    }
+    if (languages)
+        out[0] = '\0';
+}
+
+// Opens the picker for a game and starts its search. editionName may be NULL:
+// the second name to look under, for a game whose Store entry is named after
+// another game sharing its title ID. See FindDlcRarFilenames.
 static void OpenPicker(Picker &picker, PickerKind kind, const char *gameName, unsigned long titleId,
-                       ShellPage page = SHELL_PAGE_LIBRARY)
+                       ShellPage page = SHELL_PAGE_LIBRARY, const char *editionName = NULL)
 {
     picker.kind = kind;
     picker.page = page;
     strncpy(picker.gameName, gameName, sizeof(picker.gameName) - 1);
     picker.gameName[sizeof(picker.gameName) - 1] = '\0';
+    strncpy(picker.editionName, editionName != NULL ? editionName : "", sizeof(picker.editionName) - 1);
+    picker.editionName[sizeof(picker.editionName) - 1] = '\0';
     picker.titleId = titleId;
     picker.count = 0;
     picker.selected = 0;
     picker.scroll = -1;
-    picker.requestId = BeginSearch(kind == PICKER_DLC ? SEARCH_DLC : SEARCH_TITLE_UPDATES, picker.gameName);
+    picker.requestId = BeginSearch(kind == PICKER_DLC ? SEARCH_DLC : SEARCH_TITLE_UPDATES, picker.gameName,
+                                   picker.editionName);
 
     // 0 means the search worker never started; the log says why.
     picker.status = (picker.requestId != 0) ? PICKER_SEARCHING : PICKER_UNREACHABLE;
@@ -7392,7 +7440,11 @@ int main()
             }
             else if ((pressed & XINPUT_GAMEPAD_A) && picker.status == PICKER_UNREACHABLE)
             {
-                OpenPicker(picker, picker.kind, picker.gameName, picker.titleId, picker.page); // try again
+                // Try again, under the same names.
+                char edition[128];
+                strncpy(edition, picker.editionName, sizeof(edition) - 1);
+                edition[sizeof(edition) - 1] = '\0';
+                OpenPicker(picker, picker.kind, picker.gameName, picker.titleId, picker.page, edition);
             }
             else if ((pressed & XINPUT_GAMEPAD_A) && picker.status == PICKER_READY)
             {
@@ -7587,9 +7639,17 @@ int main()
                 else if ((f == STORE_GAME_FOCUS_BUTTONS + 1 || f == STORE_GAME_FOCUS_BUTTONS + 2) && !StoreGameIsIndie() &&
                          !StoreGameIsXbox())
                 {
-                    // The library's pickers, open over this page.
+                    // The library's pickers, open over this page. The version
+                    // chosen can name a different game to the entry - the
+                    // entry is named for a title ID, and GTA IV shares one
+                    // with Episodes from Liberty City - so its edition goes
+                    // to the search as a second name to look under.
+                    char edition[128] = "";
+                    if (g_storeArcade == NULL)
+                        ReleaseEdition(StoreReleaseOf(&g_storeGame, shell.storeVersionChosen), edition,
+                                       sizeof(edition));
                     OpenPicker(shell.picker, f == STORE_GAME_FOCUS_BUTTONS + 1 ? PICKER_DLC : PICKER_TITLE_UPDATE,
-                               g_storeGame.name, g_storeGame.titleId, shell.page);
+                               g_storeGame.name, g_storeGame.titleId, shell.page, edition);
                 }
                 else if (f == STORE_GAME_FOCUS_BUTTONS + 3 && CanUninstallStoreVersion(lib, shell))
                 {
