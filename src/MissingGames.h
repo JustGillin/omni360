@@ -37,6 +37,8 @@ enum MissingMark
     MISSING_MARK_TEST,       // an Xbox test product
     MISSING_MARK_DLC_DISC,   // a DLC or title update disc, not a game
     MISSING_MARK_UNRELEASED, // announced, listed, then never released
+    MISSING_MARK_NOT_360,    // a PC, Original Xbox or Xbox One game
+    MISSING_MARK_APP,        // an app or a store page, not a game
     MISSING_MARK_OTHER,      // something else that doesn't belong
     MISSING_MARK_COUNT
 };

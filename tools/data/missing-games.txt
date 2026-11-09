@@ -7,10 +7,10 @@
 #
 # The name after each '#' is only for reading - the title ID is the record.
 format=1
-marked=182
+marked=311
 catalog=312
 
-# Keep - it's a real game (22)
+# Keep - it's a real game (35)
 445007D2=keep  # お姉チャンバラvorteX
 584109EB=keep  # Tinker
 53510FA6=keep  # Tomb Raider: Legend
@@ -33,8 +33,21 @@ catalog=312
 55530809=keep  # CSI-Hard Evidence
 41560823=keep  # Baja 1000
 41560800=keep  # Big Game Hunter
+464F07DC=keep  # All Round Hunter
+4D538801=keep  # Big Bumpin
+354807DE=keep  # The Book of Unwritten Tales 2
+4D530AB5=keep  # Forza Horizon 2 Presents Fast & Furious
+4F4707D2=keep  # John Daly's ProStroke Golf
+534E07DC=keep  # THE KING OF FIGHTERS XIII
+354807DD=keep  # Legend of Kay Anniversary
+4D5308AF=keep  # Lips: Number One Hits
+545408AB=keep  # MLB 2K13
+4C4107F8=keep  # Monkey Island Special Edition Collection
+4D538803=keep  # Pocketbike Racer
+4B4E07DA=keep  # Pro Evolution Soccer 6
+4D530AA5=keep  # Warface
 
-# Duplicate or regional variant (88)
+# Duplicate or regional variant (105)
 54510852=duplicate  # 50 Cent: BotS (JP)
 494707F2=duplicate  # Alone In The Dark (JP)
 4E4D0854=duplicate  # ARMORED CORE V(ASIA)
@@ -123,8 +136,25 @@ catalog=312
 534407F6=duplicate  # Kane&Lynch:Dead Men(J)
 4D530A55=duplicate  # Kinect Sports Ultimate Collection
 534307EF=duplicate  # Conflict:DeniedOps(DE)
+454108D8=duplicate  # Army of TWO: TFD
+4E4D081D=duplicate  # ASSAULT･HORIZON
+4B4F07F1=duplicate  # DW Strikeforce(Tc)
+454109DE=duplicate  # EA SPORTS FIFA 15
+45410999=duplicate  # EA Sports FIFA Soccer 13 Early Access
+454108D9=duplicate  # G.I. JOE (PAL)
+4156889A=duplicate  # Guitar Hero Compilation 2010
+4E4D07DB=duplicate  # THE IDOLM@STER
+4E4D0817=duplicate  # THE IDOLM@STER 2
+4E4D0818=duplicate  # THE IDOLM@STER 2
+41560924=duplicate  # King's Quest - Chapter 1: A Knight to Remember
+575207D5=duplicate  # Looney Tunes: AA EUR
+4E4D07D6=duplicate  # LoveFOOTBALL
+545107F3=duplicate  # MotoGP 06 Far East
+544707D8=duplicate  # Prejudice
+484507D7=duplicate  # Rugby Challenge 2 - The Lions Tour Edition
+555307F0=duplicate  # Tom Clancy's GRAW 2
 
-# No name, or a bad name (16)
+# No name, or a bad name (18)
 415407D5=badname  # キャサリン
 41560896=badname  # シンギュラリティ
 424107DF=badname  # 銀河英雄伝説
@@ -141,8 +171,10 @@ catalog=312
 4E4D080A=badname  # マグナカルタ2
 4E4D0811=badname  # 마그나카르타2
 535907D2=badname  # 戦極姫2～葉隠の乙女、風雲に乗ず～
+475207F8=badname  # 旋光の輪舞DUO
+4B4F07EB=badname  # 真・三國無双 MULTI RAID
 
-# An Xbox test product (31)
+# An Xbox test product (33)
 584C07E0=test  # 33 Days of Halo 3
 58570854=test  # 360-Jumps und NOFX! Die T-Mobile Extreme Playgrounds in Duisburg
 414707D6=test  # Agora Test Game
@@ -174,8 +206,10 @@ catalog=312
 4D5707E4=test  # Hour of Victory (PC)
 35530FA1=test  # Cubis Gold 2
 35530FA0=test  # Cubis Gold
+585807FB=test  # Champions of Gaming
+58570813=test  # EA Sports Challenge
 
-# A DLC or title update disc (7)
+# A DLC or title update disc (8)
 4D5308B4=dlcdisc  # Age of Empires III: The Asian Dynasties (Expansion Pack)
 53450856=dlcdisc  # VANQUISH OFFICIAL DEMO – VELOCITY ATTACK
 4E4E0FA1=dlcdisc  # Trainz Simulator DLC: Settle and Carlisle
@@ -183,6 +217,107 @@ catalog=312
 545408BB=dlcdisc  # Mafia III (Avatar Content Only)
 5451088E=dlcdisc  # Megamind Title Update Disc
 4541091C=dlcdisc  # Dragon Age: Awakening
+41560871=dlcdisc  # Guitar Hero VIP Pass
+
+# Never released (3)
+464F07FF=unreleased  # Ashes Cricket 2013
+394807D1=unreleased  # Clan of Champions
+545107E9=unreleased  # GTR
+
+# Not an Xbox 360 game (86)
+4E4D0FA2=notxbox360  # ACE COMBAT ASSAULT HORIZON Enhanced Edition
+543807DC=notxbox360  # Advent Rising
+4D530936=notxbox360  # Age of Empires III: Complete Collection
+4D530FA3=notxbox360  # Age of Empires Online
+53460FA1=notxbox360  # Ankh 2
+53460FA2=notxbox360  # Ankh 3
+554C0FA3=notxbox360  # Around the World in 80
+50470FA3=notxbox360  # Bookworm
+4F420FA0=notxbox360  # BubbleTown
+58410A1C=notxbox360  # CarneyVale: Showtime
+33390FA1=notxbox360  # Chainz 2: Relinked
+53430813=notxbox360  # ChampionshipManager 10
+50580FAB=notxbox360  # Cities in Motion
+50580FAC=notxbox360  # Cities in Motion
+46450FA1=notxbox360  # Cities XL 2011
+4E4E0FA2=notxbox360  # Classic Carbon City
+434D0820=notxbox360  # Colin McRae : Dirt 2
+50580FAE=notxbox360  # Darkest Hour
+45410FB1=notxbox360  # Darkspore
+55530860=notxbox360  # Dawn of Discovery Gold
+53510FA1=notxbox360  # Deus Ex: Invisible War
+543807E0=notxbox360  # Disney's Chicken Little
+4B590FA9=notxbox360  # Elements of War
+50580FAD=notxbox360  # EU 3: Chronicles
+50580FA6=notxbox360  # EU 3: Divine Wind
+50580FA7=notxbox360  # EU3:Heir to the Throne
+50580FA0=notxbox360  # Europa Universalis III
+46550FA1=notxbox360  # Family Feud Dream Home
+4D530935=notxbox360  # Flight Simulator X
+5345084E=notxbox360  # Football Manager 2010
+53450FA0=notxbox360  # Football Manager 2011
+554C0FA1=notxbox360  # Gardenscapes
+4D530842=notxbox360  # Gears of War (Windows)
+543807E2=notxbox360  # Gladius
+5454083B=notxbox360  # GTA IV
+54540876=notxbox360  # GTA: San Andreas
+543807D6=notxbox360  # Gun Valkyrie
+50580FA1=notxbox360  # Hearts of Iron III
+46550FA0=notxbox360  # Jewel Quest: The Sleepless Star
+50580FA2=notxbox360  # King Arthur - The Role-Playing Wargame
+50580FB0=notxbox360  # King Arthur Collection
+50580FA8=notxbox360  # King Arthur The Druids
+50580FA9=notxbox360  # King Arthur The Saxons
+4F430FA0=notxbox360  # King’s Bounty Platinum
+5A500FA1=notxbox360  # Kona's Crate
+57520FA1=notxbox360  # LEGO Universe
+584109F1=notxbox360  # Mahjong Wisdom
+355A0FA0=notxbox360  # Mahjongg Dimensions
+4D5308D2=notxbox360  # Microsoft Flight
+50580FAF=notxbox360  # MnB: With Fire & Sword
+50580FA3=notxbox360  # Mount and Blade Warband
+46450FA2=notxbox360  # The Next Big Thing
+58410A10=notxbox360  # Osmos
+4B590FA1=notxbox360  # Patrician IV
+4B590FA8=notxbox360  # Patrician: RoaD
+50580FB2=notxbox360  # Pirates of Black Cove
+51320FA0=notxbox360  # Poker Superstars III
+46450FA4=notxbox360  # Pro Cycling Manager Tour de France 2011 INT
+53510FAA=notxbox360  # Project: Snowblind
+543807E5=notxbox360  # Secret Weapons Over Normandy
+5553085B=notxbox360  # The Settlers 7: Paths to a Kingdom
+55530866=notxbox360  # Silent Hunter 5 : Battle of the Atlantic
+45410FAD=notxbox360  # The Sims 3 Ambitions
+45410FAC=notxbox360  # The Sims 3 Late Night
+45410FAE=notxbox360  # The Sims 3 World Adventures
+45410FB4=notxbox360  # The Sims Generations
+45410FAF=notxbox360  # The Sims Medieval
+45410FB7=notxbox360  # The Sims Medieval Pirates and Nobles
+51320FA1=notxbox360  # Slingo Deluxe
+543807E6=notxbox360  # STAR WARS Jedi Knight II Jedi Outcast
+543807E7=notxbox360  # STAR WARS Starfighter Special Edition
+36590FA1=notxbox360  # Super TextTwist
+54510882=notxbox360  # Supreme Commander: Forged Alliance
+50580FB1=notxbox360  # Supreme Ruler Cold War
+4C4107EB=notxbox360  # SWTCW: Republic Heroes
+36590FA0=notxbox360  # TextTwist 2
+45410FB8=notxbox360  # Tiger Woods PGA Tour 12 The Masters
+4E4E0FA0=notxbox360  # Trainz Simulator 2010: Engineer's Edition
+4E4E0FA4=notxbox360  # Trainz Simultor 12
+41560FA3=notxbox360  # Transformers: WFC
+4B590FA0=notxbox360  # Tropico 3 Gold Edition
+4E4E0FA3=notxbox360  # TS 2010: Blue Comet
+53460FA0=notxbox360  # A Vampyre Story
+50580FA4=notxbox360  # Victoria 2
+5553085F=notxbox360  # World In Conflict
+584109F0=notxbox360  # World of Goo
+
+# An app, not a game (5)
+4D530AC1=app  # Gears of War 4 Store
+4D530AC0=app  # Gears of War: Ultimate Edition Store
+584807E3=app  # Last.fm
+4D5308DA=app  # LiPS Music Store
+535107D6=app  # PlayOnline Viewer
 
 # Something else - look at it later (18)
 54510880=other  # Warhammer 40,000: Dawn of War - Dark Crusade

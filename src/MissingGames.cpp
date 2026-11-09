@@ -69,6 +69,12 @@ static const MarkText kMarks[MISSING_MARK_COUNT] =
     { "unreleased", "Never released", "Unreleased",
       "Announced far enough to get a catalog entry, then cancelled or quietly dropped - "
       "Prey 2, This is Vegas. Nobody owns it because it was never finished." },
+    { "notxbox360", "Not an Xbox 360 game", "Not 360",
+      "The catalog carries Games for Windows, Original Xbox and Xbox One titles beside the "
+      "360's - Europa Universalis III, Gun Valkyrie. A real game, on another machine." },
+    { "app", "An app, not a game", "App",
+      "Something the catalog files under a game's genre that nobody plays: a music store, a "
+      "viewer, a storefront for avatar items." },
     { "other", "Something else - look at it later", "Other",
       "It doesn't belong in the list, for a reason none of the others covers." },
 };
