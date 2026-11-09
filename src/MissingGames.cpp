@@ -66,6 +66,9 @@ static const MarkText kMarks[MISSING_MARK_COUNT] =
       "Something Microsoft put in the catalog to test it with, not a game anyone could buy." },
     { "dlcdisc", "A DLC or title update disc", "DLC disc",
       "A disc that carries add-ons or a title update rather than a game of its own." },
+    { "unreleased", "Never released", "Unreleased",
+      "Announced far enough to get a catalog entry, then cancelled or quietly dropped - "
+      "Prey 2, This is Vegas. Nobody owns it because it was never finished." },
     { "other", "Something else - look at it later", "Other",
       "It doesn't belong in the list, for a reason none of the others covers." },
 };

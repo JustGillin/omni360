@@ -6515,20 +6515,39 @@ static bool GamePageIsMissing()
 // which is what a shoulder button is for on a list this long anyway.
 #define REVIEW_PAGE_ROWS 6
 
+// The rows on screen, which are not the catalog's rows: Review hides the
+// games already marked, so what is left to look at is the whole screen.
+// g_reviewIndex says which of the catalog's rows each screen row came from,
+// and g_reviewCount how many are showing.
 static const char *g_reviewLabels[CATALOG_TITLE_COUNT];
 static const char *g_reviewSublabels[CATALOG_TITLE_COUNT];
 static const char *g_reviewSections[CATALOG_TITLE_COUNT];
 static char g_reviewDetail[CATALOG_TITLE_COUNT][96];
 static char g_reviewLetters[CATALOG_TITLE_COUNT][8];
+static int g_reviewIndex[CATALOG_TITLE_COUNT];
+static int g_reviewCount = 0;
 
-// One row's second line: its mark, then what the catalog knows about it. The
-// title ID is on it because that is what the file records, so a line in the
-// file can be matched back to the game on screen.
-static void BuildReviewRow(int i)
+// Whether the marked ones are in the list. Off is the point of the screen -
+// a decision made is a row you shouldn't have to read again - and Y turns it
+// on to go back over them. It outlives one sitting on purpose.
+static bool g_reviewShowMarked = false;
+
+// The catalog row a screen row came from, NULL past the end of the list.
+static const CatalogTitle *ReviewTitleAt(int row)
 {
-    const CatalogTitle *title = CatalogTitleAt(i);
+    return (row >= 0 && row < g_reviewCount) ? CatalogTitleAt(g_reviewIndex[row]) : NULL;
+}
+
+// One row: the game's name, then its mark and what the catalog knows about
+// it. The title ID is on it because that is what the file records, so a line
+// in the file can be matched back to the game on screen.
+static void BuildReviewRow(int row)
+{
+    const CatalogTitle *title = ReviewTitleAt(row);
     if (title == NULL)
         return;
+
+    g_reviewLabels[row] = (title->name[0] != '\0') ? title->name : "(no name)";
 
     const int mark = MissingMarkOf(title->titleId);
     char detail[96];
@@ -6550,60 +6569,81 @@ static void BuildReviewRow(int i)
     id[sizeof(id) - 1] = '\0';
     AppendText(detail, sizeof(detail), SETTINGS_MIDDOT, id);
 
-    strncpy(g_reviewDetail[i], detail, sizeof(g_reviewDetail[i]) - 1);
-    g_reviewDetail[i][sizeof(g_reviewDetail[i]) - 1] = '\0';
-    g_reviewSublabels[i] = g_reviewDetail[i];
+    strncpy(g_reviewDetail[row], detail, sizeof(g_reviewDetail[row]) - 1);
+    g_reviewDetail[row][sizeof(g_reviewDetail[row]) - 1] = '\0';
+    g_reviewSublabels[row] = g_reviewDetail[row];
 }
 
+// Every catalog row the filter lets through, in the Store's order.
 static void BuildReviewRows()
 {
     char lastLetter = '\0';
+    g_reviewCount = 0;
     for (int i = 0; i < CatalogTitleCount(); ++i)
     {
         const CatalogTitle *title = CatalogTitleAt(i);
-        g_reviewLabels[i] = (title->name[0] != '\0') ? title->name : "(no name)";
-        BuildReviewRow(i);
+        if (title == NULL)
+            continue;
+        if (!g_reviewShowMarked && MissingMarkOf(title->titleId) != MISSING_MARK_NONE)
+            continue;
+
+        const int row = g_reviewCount++;
+        g_reviewIndex[row] = i;
+        BuildReviewRow(row);
 
         // A heading each time the letter changes - the table is in the
         // Store's order, so they come out with the symbols first, then A to Z.
+        // With the marked ones hidden a letter can disappear entirely, which
+        // is why this counts the rows showing rather than the catalog's.
         if (title->letter != lastLetter)
         {
             lastLetter = title->letter;
             if (title->letter == '#')
-                _snprintf(g_reviewLetters[i], sizeof(g_reviewLetters[i]), "0-9");
+                _snprintf(g_reviewLetters[row], sizeof(g_reviewLetters[row]), "0-9");
             else
-                _snprintf(g_reviewLetters[i], sizeof(g_reviewLetters[i]), "%c", title->letter);
-            g_reviewLetters[i][sizeof(g_reviewLetters[i]) - 1] = '\0';
-            g_reviewSections[i] = g_reviewLetters[i];
+                _snprintf(g_reviewLetters[row], sizeof(g_reviewLetters[row]), "%c", title->letter);
+            g_reviewLetters[row][sizeof(g_reviewLetters[row]) - 1] = '\0';
+            g_reviewSections[row] = g_reviewLetters[row];
         }
         else
         {
-            g_reviewSections[i] = NULL;
+            g_reviewSections[row] = NULL;
         }
     }
 }
 
-// The next row with no mark on it, after `from`, wrapping once. -1 when
-// every row is marked.
-static int NextUnmarkedReviewRow(int from)
+// Rebuilds the list after a mark or the filter changed, and puts the focus
+// back on the same game. When that game has just been marked and hidden,
+// the row it had now holds the next one along - which is where marking a
+// game and moving on wants the focus anyway.
+static void RebuildReviewRows(ListPageView &view)
 {
-    const int count = CatalogTitleCount();
-    for (int step = 1; step <= count; ++step)
+    const int wasRow = view.selected;
+    const int wasCatalogRow = (wasRow >= 0 && wasRow < g_reviewCount) ? g_reviewIndex[wasRow] : 0;
+
+    BuildReviewRows();
+
+    int row = -1;
+    for (int i = 0; i < g_reviewCount && row < 0; ++i)
     {
-        const int i = (from + step) % count;
-        const CatalogTitle *title = CatalogTitleAt(i);
-        if (title != NULL && MissingMarkOf(title->titleId) == MISSING_MARK_NONE)
-            return i;
+        if (g_reviewIndex[i] == wasCatalogRow)
+            row = i;
     }
-    return -1;
+    if (row < 0)
+        row = wasRow;
+    if (row > g_reviewCount - 1)
+        row = g_reviewCount - 1;
+    if (row < 0)
+        row = 0;
+    view.selected = row;
 }
 
 // The triggers' jump, as the Store's letter pages do it: right goes to the
 // next letter, left to the start of this one and then the one before.
 static int StepReviewLetter(int from, int direction)
 {
-    const int count = CatalogTitleCount();
-    const CatalogTitle *here = CatalogTitleAt(from);
+    const int count = g_reviewCount;
+    const CatalogTitle *here = ReviewTitleAt(from);
     if (here == NULL)
         return from;
 
@@ -6611,21 +6651,21 @@ static int StepReviewLetter(int from, int direction)
     {
         for (int i = from + 1; i < count; ++i)
         {
-            if (CatalogTitleAt(i)->letter != here->letter)
+            if (ReviewTitleAt(i)->letter != here->letter)
                 return i;
         }
         return count - 1;
     }
 
     int start = from;
-    while (start > 0 && CatalogTitleAt(start - 1)->letter == here->letter)
+    while (start > 0 && ReviewTitleAt(start - 1)->letter == here->letter)
         start--;
     if (start != from || start == 0)
         return start;
 
-    const char before = CatalogTitleAt(start - 1)->letter;
+    const char before = ReviewTitleAt(start - 1)->letter;
     int previous = start - 1;
-    while (previous > 0 && CatalogTitleAt(previous - 1)->letter == before)
+    while (previous > 0 && ReviewTitleAt(previous - 1)->letter == before)
         previous--;
     return previous;
 }
@@ -6642,14 +6682,27 @@ static void ReviewMissingGamesUI()
         return;
     }
 
+    // Nothing left to look at: show the marked ones rather than an empty
+    // screen, so the sitting that finished the list can still go back over it.
+    if (count - MissingMarkedCount() <= 0)
+        g_reviewShowMarked = true;
+
     BuildReviewRows();
 
-    // Where the last sitting got to, so Review carries on rather than
-    // starting at the top again. Only for this run - the marks are the
-    // record, and Y finds the next unmarked row whatever happened.
-    static int lastSelected = 0;
-    if (lastSelected < 0 || lastSelected >= count)
-        lastSelected = 0;
+    // Where the last sitting got to, as the catalog's row rather than the
+    // screen's, so it survives the marked ones being hidden and shown again.
+    static int lastCatalogRow = 0;
+    int start = g_reviewCount - 1;
+    for (int i = 0; i < g_reviewCount; ++i)
+    {
+        if (g_reviewIndex[i] >= lastCatalogRow)
+        {
+            start = i;
+            break;
+        }
+    }
+    if (start < 0)
+        start = 0;
 
     ListPageView view;
     view.heading = "Review the missing games";
@@ -6657,8 +6710,8 @@ static void ReviewMissingGamesUI()
     view.labels = g_reviewLabels;
     view.sublabels = g_reviewSublabels;
     view.sections = g_reviewSections;
-    view.count = count;
-    view.selected = lastSelected;
+    view.count = g_reviewCount;
+    view.selected = start;
     view.scroll = 0; // the render scrolls down to wherever it was left
     view.focused = true;
     view.showCounter = true;
@@ -6671,23 +6724,31 @@ static void ReviewMissingGamesUI()
     ResyncUiInput();
     for (;;)
     {
+        view.count = g_reviewCount;
+
         if (countChanged)
         {
             countChanged = false;
-            _snprintf(subheading, sizeof(subheading), "%d of %d marked" SETTINGS_MIDDOT "written to %s",
-                      MissingMarkedCount(), count, MissingMarksPath());
+            const int marked = MissingMarkedCount();
+            if (g_reviewShowMarked)
+                _snprintf(subheading, sizeof(subheading), "%d of %d marked" SETTINGS_MIDDOT "written to %s",
+                          marked, count, MissingMarksPath());
+            else
+                _snprintf(subheading, sizeof(subheading), "%d left of %d" SETTINGS_MIDDOT "written to %s",
+                          count - marked, count, MissingMarksPath());
             subheading[sizeof(subheading) - 1] = '\0';
             view.subheading = subheading;
         }
 
         const UiInput input = PollUiInput();
         const int selected = view.selected;
-        const CatalogTitle *title = CatalogTitleAt(selected);
+        const CatalogTitle *title = ReviewTitleAt(selected);
 
         if (input.pressed & XINPUT_GAMEPAD_B)
         {
             PlayUiSound(UI_SOUND_BACK);
-            lastSelected = selected;
+            if (title != NULL)
+                lastCatalogRow = g_reviewIndex[selected];
             ResyncUiInput();
             return;
         }
@@ -6697,10 +6758,25 @@ static void ReviewMissingGamesUI()
             PlayUiSound(UI_SOUND_SELECT);
             if (MarkMissingGame(title->titleId, g_reviewLabels[selected]))
             {
-                BuildReviewRow(selected);
                 countChanged = true;
-                if (selected + 1 < count)
-                    view.selected = selected + 1; // on to the next, as a list of decisions
+                if (g_reviewShowMarked)
+                {
+                    BuildReviewRow(selected);
+                    if (selected + 1 < g_reviewCount)
+                        view.selected = selected + 1; // on to the next, as a list of decisions
+                }
+                else
+                {
+                    // The row it had is the next game along now.
+                    RebuildReviewRows(view);
+                    if (g_reviewCount == 0)
+                    {
+                        ShowMessageUI("That's the list", "Every game in it carries a mark now - here they all "
+                                      "are again, to go back over.", MissingMarksPath());
+                        g_reviewShowMarked = true;
+                        RebuildReviewRows(view);
+                    }
+                }
             }
             ResyncUiInput();
         }
@@ -6715,17 +6791,22 @@ static void ReviewMissingGamesUI()
         }
         else if (input.pressed & XINPUT_GAMEPAD_Y)
         {
-            const int next = NextUnmarkedReviewRow(selected);
-            if (next >= 0)
+            // The marked ones in or out, keeping the focus where it is. Going
+            // back to hiding them while a marked game has the focus leaves it
+            // on whatever row that game held.
+            g_reviewShowMarked = !g_reviewShowMarked;
+            RebuildReviewRows(view);
+            if (g_reviewCount == 0)
             {
-                view.selected = next;
-                PlayUiSound(UI_SOUND_MOVE);
-            }
-            else
-            {
-                ShowMessageUI("All marked", "Every game in the list carries a mark.", MissingMarksPath());
+                // Hiding them all would leave an empty screen.
+                g_reviewShowMarked = true;
+                RebuildReviewRows(view);
+                ShowMessageUI("Nothing left to hide", "Every game in the list carries a mark.",
+                              MissingMarksPath());
                 ResyncUiInput();
             }
+            countChanged = true;
+            PlayUiSound(UI_SOUND_SELECT);
         }
         else if (input.pressed & (XINPUT_GAMEPAD_LEFT_SHOULDER | XINPUT_GAMEPAD_RIGHT_SHOULDER))
         {
@@ -6733,8 +6814,8 @@ static void ReviewMissingGamesUI()
             int to = selected + step;
             if (to < 0)
                 to = 0;
-            if (to > count - 1)
-                to = count - 1;
+            if (to > g_reviewCount - 1)
+                to = g_reviewCount - 1;
             if (to != selected)
             {
                 view.selected = to;
@@ -6755,7 +6836,7 @@ static void ReviewMissingGamesUI()
             view.selected = selected - 1;
             PlayUiSound(UI_SOUND_MOVE);
         }
-        else if (input.nav == XINPUT_GAMEPAD_DPAD_DOWN && selected + 1 < count)
+        else if (input.nav == XINPUT_GAMEPAD_DPAD_DOWN && selected + 1 < g_reviewCount)
         {
             view.selected = selected + 1;
             PlayUiSound(UI_SOUND_MOVE);
@@ -6763,14 +6844,17 @@ static void ReviewMissingGamesUI()
 
         // Whatever the focus is on now, not where it was before this frame's
         // input moved it - a hint a frame behind reads as a flicker.
-        const CatalogTitle *focused = CatalogTitleAt(view.selected);
+        const CatalogTitle *focused = ReviewTitleAt(view.selected);
 
         UiHint hints[6];
         int hintCount = 0;
         hintCount = AddHint(hints, hintCount, UI_BUTTON_A, L"Mark");
         if (focused != NULL && MissingMarkOf(focused->titleId) != MISSING_MARK_NONE)
             hintCount = AddHint(hints, hintCount, UI_BUTTON_X, L"Take mark off", L"Unmark");
-        hintCount = AddHint(hints, hintCount, UI_BUTTON_Y, L"Next unmarked", L"Next");
+        if (g_reviewShowMarked)
+            hintCount = AddHint(hints, hintCount, UI_BUTTON_Y, L"Hide the marked ones", L"Hide marked");
+        else
+            hintCount = AddHint(hints, hintCount, UI_BUTTON_Y, L"Show the marked ones", L"Show all");
         hintCount = AddHint(hints, hintCount, UI_BUTTON_B, L"Done");
         hintCount = AddHint(hints, hintCount, UI_BUTTON_LBRB, L"Page");
         hintCount = AddHint(hints, hintCount, UI_BUTTON_LTRT, L"Letter");

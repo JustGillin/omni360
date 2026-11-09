@@ -1,0 +1,205 @@
+# Omni360 - the missing-games list, marked by hand
+#
+# Each line is a title ID from src/CatalogTitles.h and why it shouldn't be
+# in the "games we don't have" list. Everything but "keep" is something to
+# leave out of the next generated list; "keep" says the row really is a
+# game nobody has uploaded, and belongs there.
+#
+# The name after each '#' is only for reading - the title ID is the record.
+format=1
+marked=182
+catalog=312
+
+# Keep - it's a real game (22)
+445007D2=keep  # お姉チャンバラvorteX
+584109EB=keep  # Tinker
+53510FA6=keep  # Tomb Raider: Legend
+42560801=keep  # Tron: Evolution
+565107D1=keep  # Sledge Hammer
+43430842=keep  # Resident Evil 0
+4343081C=keep  # Resident Evil 4
+415607D6=keep  # Quake 2
+45410837=keep  # NCAA March Madness08
+45410FB2=keep  # NFS SHIFT 2 Unleashed
+54540853=keep  # NHL 2K10
+4B4E083C=keep  # METAL GEAR SOLID PEACE WALKER HD EDITION
+545107DE=keep  # MX vs. ATV: Untamed
+415907D8=keep  # Dreamkiller
+464A07D1=keep  # The Escapists
+545407F1=keep  # College Hoops 2K7
+54540818=keep  # College Hoops 2K8
+435907D2=keep  # Combat Wings: The Great Battles Of World War II
+45410968=keep  # Crysis
+55530809=keep  # CSI-Hard Evidence
+41560823=keep  # Baja 1000
+41560800=keep  # Big Game Hunter
+
+# Duplicate or regional variant (88)
+54510852=duplicate  # 50 Cent: BotS (JP)
+494707F2=duplicate  # Alone In The Dark (JP)
+4E4D0854=duplicate  # ARMORED CORE V(ASIA)
+4541084F=duplicate  # Army of Two (Asia)
+4541084C=duplicate  # Army of Two (EU)
+55530856=duplicate  # Assassin's Creed 2
+55530FA4=duplicate  # Assassin's Creed Brotherhood Deluxe Edition
+5343080C=duplicate  # Batman: AA GOTY
+4541091F=duplicate  # Battlefield: Bad Co. 2
+5553082A=duplicate  # BIA: HH JP
+54540871=duplicate  # BioShock 2 (JP)
+54540865=duplicate  # BioShock 2 (Kor)
+54540866=duplicate  # Borderlands (JP)
+425307EB=duplicate  # Brink(J)
+55530828=duplicate  # Brothers in Arms HH GR
+41560FA1=duplicate  # Call of Duty: WaW
+4E4D0FA1=duplicate  # Dark Souls Prepare to Die Edition
+54540804=duplicate  # The Darkness [German]
+574607D4=duplicate  # Darksiders II (J)
+41560928=duplicate  # Destiny: The Taken King - Digital Collector's Edition
+41560927=duplicate  # Destiny: The Taken King - Legendary Edition
+53510FA0=duplicate  # Deus Ex: Game of the Year Edition
+45410FA5=duplicate  # Dragon Age 2
+53440804=duplicate  # Dragon Age II (J)
+53440801=duplicate  # Dragon Age: Origins (J)
+5454084D=duplicate  # Duke Nukem Forever(JP)
+434607D1=duplicate  # F.E.A.R. 2 - JP
+54510830=duplicate  # WALL•E KOREA
+5858083B=duplicate  # Verizon Alan Wake
+4D5707F3=duplicate  # Unreal Tournament 3
+45410980=duplicate  # Tiger Woods PGA TOUR 13 Early Release
+454109AA=duplicate  # Tiger Woods PGA TOUR 14 - Early Access
+534407F5=duplicate  # Tomb Raider: Anniv.
+53510FA7=duplicate  # Tomb Raider: Anniversary
+534407FA=duplicate  # TombRaiderUnderworldJP
+4156092E=duplicate  # Transformers: The Cybertron Experience
+434D0801=duplicate  # Turning Point [FR/DE]
+425607F3=duplicate  # Tron: Evolution
+534407FF=duplicate  # Sacred 2 (J)
+54510836=duplicate  # Saints Row 2 BRD
+545107ED=duplicate  # Saints Row BRD
+564707D7=duplicate  # SBK09 (US)
+54540874=duplicate  # Sid Meier's Civilization IV: Complete
+454108AF=duplicate  # Skate 2 (DE)
+425307F2=duplicate  # Skyrim
+41560818=duplicate  # SOF Payback
+4D5707E5=duplicate  # Stranglehold
+535507D2=duplicate  # Stranglehold(JP)
+43430FA0=duplicate  # Super Street Fighter IV Arcade Edition
+5553081F=duplicate  # Rainbow Six Vegas 2
+55530862=duplicate  # Rainbow Six Vegas 2
+4B4E07F6=duplicate  # Rock Revolution (EU)
+4B4E07E9=duplicate  # PES2008 (US)
+425307E2=duplicate  # Oblivion
+434D0802=duplicate  # Overlord (JP)
+4541082D=duplicate  # NASCAR 08 EU
+45410879=duplicate  # NASCAR 09 EU
+445007F8=duplicate  # Nat Geo Wild Life
+54540823=duplicate  # NBA 2K8 (Japan)
+585708CE=duplicate  # NCAA Football 11 Sweepstakes
+45410989=duplicate  # NCAA Football 13 Early Release
+454109B8=duplicate  # NCAA FOOTBALL 14 - Early Access
+4541096A=duplicate  # NHL 12 Early Release
+4541099C=duplicate  # NHL 13 Early Release
+454109BF=duplicate  # NHL14 - Early Access
+4B4E0818=duplicate  # Ninety-Nine NightsⅡ/AP
+4B4E0815=duplicate  # Ninety-Nine NightsⅡ/KR
+4B4E0817=duplicate  # Ninety-Nine NightsⅡ/JP
+4B4E0816=duplicate  # Ninety-Nine NightsⅡ/EU
+4541098C=duplicate  # Madden NFL 13 Early Release
+454109C2=duplicate  # Madden NFL 25 Early Release
+4541093D=duplicate  # Mass Effect 2 (JP)
+53440800=duplicate  # Metro 2033(J)
+46450FA0=duplicate  # Divinity II - DKS
+4D530937=duplicate  # Fable: TLC
+4D530AA2=duplicate  # Fable Trilogy
+55530865=duplicate  # Far Cry 2 Fortune's Edition
+45410973=duplicate  # FIFA 12 Early Release
+454109C4=duplicate  # FIFA 14 - Early Access
+4541097F=duplicate  # FIFA Street Early Release
+413607FA=duplicate  # Forza Horizon 2 Racing Helmet
+53510FA4=duplicate  # Hitman 2: SA
+425307ED=duplicate  # Hunted(J)
+41560FA6=duplicate  # James Bond: Bloodstone
+5451081F=duplicate  # Juiced 2: HIN
+534407F6=duplicate  # Kane&Lynch:Dead Men(J)
+4D530A55=duplicate  # Kinect Sports Ultimate Collection
+534307EF=duplicate  # Conflict:DeniedOps(DE)
+
+# No name, or a bad name (16)
+415407D5=badname  # キャサリン
+41560896=badname  # シンギュラリティ
+424107DF=badname  # 銀河英雄伝説
+425307F7=badname  # サイコブレイク
+465307DF=badname  # アーマード・コアⅤ
+465307E3=badname  # アーマード・コアⅤ
+4D5387FB=badname  # ロストオデッセイ 体験版
+4E4D07EA=badname  # アイドルマスター ライブフォーユー！
+534407F4=badname  # バトルステーション： ミッドウェイ
+535107E6=badname  # ガン★ロコ
+535107EE=badname  # ニーア ゲシュタルト
+535907D1=badname  # 萌え萌え２次大戦（略）２☆ウルトラデラックス
+5553086D=badname  # ユアシェイプ フィットネス・エボルブ
+4E4D080A=badname  # マグナカルタ2
+4E4D0811=badname  # 마그나카르타2
+535907D2=badname  # 戦極姫2～葉隠の乙女、風雲に乗ず～
+
+# An Xbox test product (31)
+584C07E0=test  # 33 Days of Halo 3
+58570854=test  # 360-Jumps und NOFX! Die T-Mobile Extreme Playgrounds in Duisburg
+414707D6=test  # Agora Test Game
+584107D4=test  # Arcade Sessions
+433707D1=test  # An Awesome 360 Disc Game
+33390FA0=test  # 7 Wonders: Treasures of Seven
+554C0FA0=test  # 4 Elements
+4D530FA0=test  # Zoo Tycoon 2: Ultimate Collection
+584C07D6=test  # Xbox 360 Summer Blockbusters
+425407D5=test  # The Tale of Despereaux
+49470FA1=test  # Test Drive Ferrari Racing Legend
+585707FD=test  # Samsung
+4D530906=test  # Spartan Alpha
+45410FB3=test  # Spore
+54510872=test  # S.T.A.L.K.E.R.: Shadow of Chernobyl
+35530FA2=test  # Ranch Rush 2
+53460FA3=test  # Rise of Flight: ICE
+53450854=test  # Rome: Total War
+41560829=test  # Quantum of Solace PC
+58580822=test  # Project Natal
+4D5387EE=test  # N3Demo
+4D5387EF=test  # N3SDemo
+585807F4=test  # NHL 2K9 HHOF Tournament on Xbox LIVE
+4D5309C4=test  # ESPN Content
+454D07D4=test  # FlatOut UC (PC)
+413607FD=test  # Forza Avatar Test
+4D53080F=test  # Halo 2 (PC)
+584C07E1=test  # Hedley Game with Fame brought to you by Xbox Canada
+4D5707E4=test  # Hour of Victory (PC)
+35530FA1=test  # Cubis Gold 2
+35530FA0=test  # Cubis Gold
+
+# A DLC or title update disc (7)
+4D5308B4=dlcdisc  # Age of Empires III: The Asian Dynasties (Expansion Pack)
+53450856=dlcdisc  # VANQUISH OFFICIAL DEMO – VELOCITY ATTACK
+4E4E0FA1=dlcdisc  # Trainz Simulator DLC: Settle and Carlisle
+4D5387DA=dlcdisc  # PDZ Bonus Disc
+545408BB=dlcdisc  # Mafia III (Avatar Content Only)
+5451088E=dlcdisc  # Megamind Title Update Disc
+4541091C=dlcdisc  # Dragon Age: Awakening
+
+# Something else - look at it later (18)
+54510880=other  # Warhammer 40,000: Dawn of War - Dark Crusade
+5451883D=other  # Warhammer 40,000: Dawn of War II
+5451087F=other  # Warhammer 40k: Dawn of War
+58410A01=other  # Where's Waldo
+4D5707D3=other  # This is Vegas
+54590FA0=other  # RIFT
+54590FA2=other  # RIFT Ashes of History Edition
+54590FA1=other  # RIFT CE
+425307E5=other  # Prey 2
+55530FA0=other  # Prince of Persia The Two Thrones
+55530859=other  # Prince of Persia Warrior Within
+394F07D6=other  # Overwatch: Origins Edition
+57520833=other  # Mad Max
+5752083F=other  # Dying Light
+413607FC=other  # Forza Motorsport 6 (Avatar Content Only)
+4D5309B2=other  # Halo Legends
+554C0FA2=other  # Call of Atlantis
+4B590FA3=other  # Commandos Complete

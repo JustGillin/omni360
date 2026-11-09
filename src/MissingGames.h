@@ -10,8 +10,8 @@
 // the Original Xbox list and XBLA can download. The catalog is the whole
 // marketplace rather than a register of retail discs, so a few of those rows
 // are not games anybody could own - the same game again under a shortened
-// name, a title update disc, an Xbox test product, something with no real
-// name at all.
+// name, a title update disc, an Xbox test product, a game that was listed
+// and then cancelled, something with no real name at all.
 //
 // None of that has a tell in the data, which is why the filter ships off
 // behind a warning. Someone has to look at the list and say. This is the
@@ -36,6 +36,7 @@ enum MissingMark
     MISSING_MARK_BAD_NAME,   // no name, or a name that isn't a game's
     MISSING_MARK_TEST,       // an Xbox test product
     MISSING_MARK_DLC_DISC,   // a DLC or title update disc, not a game
+    MISSING_MARK_UNRELEASED, // announced, listed, then never released
     MISSING_MARK_OTHER,      // something else that doesn't belong
     MISSING_MARK_COUNT
 };
