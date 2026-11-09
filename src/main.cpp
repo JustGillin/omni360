@@ -3224,7 +3224,7 @@ static const StoreFilter &Filter()
     memset(&g_filter, 0, sizeof(g_filter));
 
     char line[256], part[64];
-    GetSettingsPath(STORE_FILTER_KEY, "sort=a-z", line, sizeof(line));
+    GetSettingsPath(STORE_FILTER_KEY, "sort=a-z;missing=1", line, sizeof(line));
 
     FilterPart(line, "sort", part, sizeof(part));
     for (int i = 0; i < STORE_SORT_COUNT; ++i)
@@ -3244,8 +3244,15 @@ static const StoreFilter &Filter()
         if (_stricmp(part, StoreLanguageName(l)) == 0)
             g_filter.language = 1 + l;
     }
+    // On unless it was turned off. It shipped off behind a warning while the
+    // list was the Xbox Live catalog minus the Store - 312 rows, a third of
+    // them duplicates, PC games and test products. Every row has since been
+    // read by hand (MissingGames.h), which left 33 games that really did come
+    // out and really aren't on archive.org, so they belong on the letter
+    // pages by default. An older settings.txt that says missing=0 is someone
+    // who didn't want them, and still doesn't.
     FilterPart(line, "missing", part, sizeof(part));
-    g_filter.showMissing = (part[0] == '1');
+    g_filter.showMissing = (part[0] != '0');
     return g_filter;
 }
 
@@ -3795,6 +3802,7 @@ static bool StepFilterPanel(const UiInput &input, Shell &shell)
         if (!a || (!FilterNarrows(f) && f.sort == STORE_SORT_AZ))
             return false;
         memset(&f, 0, sizeof(f));
+        f.showMissing = true; // back to the default, which is on - not to off
         return true;
     default:
         if (!a)
