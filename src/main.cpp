@@ -4038,12 +4038,13 @@ static void StepStoreLetter(const UiInput &input, Shell &shell)
 // A letter's first screenful of covers, asked for as its tile takes focus, so
 // they're arriving before it's opened. The letter's page asks again for what
 // it shows once it is. section is as OpenStoreLetter's. Indie games have
-// none.
+// none. Skipped while a download runs: the console can't fetch covers for
+// every letter scrolled past and keep the UI smooth at the same time.
 static void PrefetchLetterCovers(char letter, int section)
 {
     unsigned long ids[24];
     int idCount = 0;
-    if (section == SECTION_XBLIG)
+    if (section == SECTION_XBLIG || RunnableDownloadCount() > 0)
         return;
     if (section == SECTION_XBLA)
     {
