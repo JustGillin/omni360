@@ -137,7 +137,7 @@ Your library is read straight off the hard drive, covers and all, and games star
 - **Key entry** on the on-screen keyboard isn't masked.
 - **DLC matching is deliberately loose** — it has to cope with release-group names like `Halo.1.Combat.Evolved.Anniversary...` and abbreviated display names like `CoD: World at War`. It scores candidates 0-100 on how much of the game's name appears in the filename, and penalises a missing number heavily so "Halo 3" doesn't offer "Halo 4". You always confirm the pack yourself.
 - **Display names** are decoded as UTF-8 or UTF-16BE, whichever each package turns out to use; characters outside the BMP become `?`.
-- **Icons for Xbox 360 games won't sync if Xbox Live is blocked.** Omni360 fetches 360 game icons from `image.xboxlive.com` at startup and after an install. If your console uses Liveblock, Livestrong, or any other DNS-level Xbox Live block, that host won't resolve and the icons stay blank in the stock dashboard's Storage menu. Original Xbox game icons come from MobCat's game list instead and aren't affected.
+- **Some features won't work if Xbox Live is blocked.** Omni360 fetches game descriptions, Store artwork, wallpapers, and Xbox 360 game icons from Xbox Live. If your console uses Liveblock, Livestrong, or any other DNS-level Xbox Live block, those won't load. Original Xbox game icons come from MobCat's game list instead and aren't affected.
 
 <br>
 
