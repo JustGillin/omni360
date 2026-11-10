@@ -1,0 +1,22 @@
+# Omni360 - what the Store calls a game, where its discs don't agree
+#
+# A Store entry is one title ID. group_games in make_store_titles.py names it
+# after whichever of its discs sorts first, which is right until one title ID
+# turns out to be two games - then the entry carries one game's name and the
+# other is a version inside it.
+#
+# A line is TITLEID=the name to show. Everything after the first '=' is the
+# name, so a name may hold anything but a newline; only a line starting with
+# '#' is a comment. A title ID no game has is reported and ignored.
+#
+# Renaming doesn't split the entry - both games still share it - it only
+# decides which of them the tile and the page are named after. The other one
+# then shows as an edition on its own version, which is also how the console
+# finds its DLC: the search looks under the entry's name and the chosen
+# version's edition both. See FindDlcRarFilenames in src/ArchiveOrgDLC.cpp.
+
+# The Xbox Live catalog and src/TitleNames.h both call 545407F2 "GTA IV";
+# Episodes from Liberty City has its own ID there (5454086E) and only shares
+# this one on disc. Without this the entry reads Episodes from Liberty City,
+# because "Episodes" sorts before "IV".
+545407F2=Grand Theft Auto IV

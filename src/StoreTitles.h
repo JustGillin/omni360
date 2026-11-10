@@ -7,6 +7,9 @@
 // 3310 zips; title IDs matched: exact 2497, same title 625, region 104, TitleNames.h 25, none 59.
 // Then 76 from XBOX_360_1 to _6, for games the Redump collection lacks -
 // zips, and RARs that hold their disc image uncompressed.
+//
+// 1 game named by hand, where the discs sharing a title ID are not all
+// the same game. See tools/data/store-names.txt.
 
 #ifndef STORE_TITLES_H
 #define STORE_TITLES_H
@@ -7610,12 +7613,12 @@ static const StoreRelease kStoreReleases[] =
     { "Europe", "En, Fr, De, Es, It", 4905958824ULL, 1299, 1 },
     { "USA, Europe", "En, Fr, De, Es, It", 8022988580ULL, 1300, 1 },
     { "USA, Europe", "En, Fr", 7327703454ULL, 1301, 1 },
-    { "World", "En, Fr, De, Es, It", 6879723429ULL, 1302, 1 },
-    { "USA", "Grand Theft Auto IV  \302\267  En, Fr, De, Es, It", 6806103314ULL, 1303, 1 },
-    { "Japan", "", 6890297028ULL, 1304, 1 },
-    { "Australia", "Grand Theft Auto IV  \302\267  En, Fr, De, Es, It", 6806102642ULL, 1305, 1 },
-    { "Europe, Asia", "Grand Theft Auto IV  \302\267  En, Fr, De, Es, It", 6806106965ULL, 1306, 1 },
-    { "Japan", "Grand Theft Auto IV", 6813038025ULL, 1307, 1 },
+    { "World", "Grand Theft Auto: Episodes from Liberty City  \302\267  En, Fr, De, Es, It", 6879723429ULL, 1302, 1 },
+    { "USA", "En, Fr, De, Es, It", 6806103314ULL, 1303, 1 },
+    { "Japan", "Grand Theft Auto: Episodes from Liberty City", 6890297028ULL, 1304, 1 },
+    { "Australia", "En, Fr, De, Es, It", 6806102642ULL, 1305, 1 },
+    { "Europe, Asia", "En, Fr, De, Es, It", 6806106965ULL, 1306, 1 },
+    { "Japan", "", 6813038025ULL, 1307, 1 },
     { "World", "", 6941999584ULL, 1308, 1 },
     { "World  \302\267  2 discs", "En, Fr, De, Es, It, Pt, Zh, Ko, Pl, Ru", 16368552302ULL, 1309, 2 },
     { "Japan  \302\267  2 discs", "", 16374518127ULL, 1311, 2 },
@@ -9793,7 +9796,7 @@ static const StoreGame kStoreGames[] =
     { "The Golden Compass", 0x534507ED, 0x0005, 1221, 2, 'G' },
     { "GoldenEye 007: Reloaded", 0x415608AF, 0x0005, 1223, 1, 'G' },
     { "Grand Slam Tennis 2", 0x45410891, 0x0005, 1224, 1, 'G' },
-    { "Grand Theft Auto: Episodes from Liberty City", 0x545407F2, 0x003F, 1225, 6, 'G' },
+    { "Grand Theft Auto IV", 0x545407F2, 0x003F, 1225, 6, 'G' },
     { "Grand Theft Auto: San Andreas", 0x545408B8, 0x0002, 1231, 1, 'G' },
     { "Grand Theft Auto V", 0x545408A7, 0x000A, 1232, 2, 'G' },
     { "Gray Matter", 0x445407D4, 0x0004, 1234, 1, 'G' },

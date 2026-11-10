@@ -77,6 +77,8 @@ FILES_URL = "https://archive.org/metadata/%s/files"
 XBOX_DAT_URL = "http://redump.org/datfile/xbox/serial,version"
 XBOX_OUT_HEADER = os.path.join(ROOT, "src", "XboxTitles.h")
 XBOX_BACKCOMPAT = os.path.join(ROOT, "tools", "data", "xbox_backcompat.txt")
+# What to call a game whose entry its discs name wrongly - see hand_names.
+NAMES = os.path.join(ROOT, "tools", "data", "store-names.txt")
 # From https://r-roms.github.io/Microsoft/microsoft-xbox.
 XBOX_ITEMS = ["numberssymbols", "a", "b", "c_part1", "c_part2", "d_part1", "d_part2", "e", "f", "g", "h",
               "i", "j", "k", "l", "m_part1", "m_part2", "n_part1", "n_part2", "o_part1", "o_part2", "p", "q",
@@ -485,6 +487,69 @@ EDITION_WORDS = re.compile(r"\b(complete edition|game of the year edition|game o
                            r"limited edition|collectors edition|collector's edition|platinum hits|classics)\b", re.I)
 
 
+NAME_LINE = re.compile(r"^([0-9A-Fa-f]{8})\s*=\s*(.+?)\s*$")
+
+
+def hand_names(path):
+    """The names from tools/data/store-names.txt: title ID -> what the Store
+    should call that game instead.
+
+    A Store entry is one title ID, named by group_games after whichever of its
+    discs sorts first. That is right until one title ID is two games: 545407F2
+    is Grand Theft Auto IV's, and Episodes from Liberty City shares it, so
+    "Episodes" sorting before "IV" names the entry after the expansion. No
+    rule gets this right by itself - the catalog's own name for that ID is the
+    abbreviation "GTA IV" - so it is a list kept by hand.
+
+    A missing file is not an error: this is optional, and a clone without one
+    should still generate."""
+    names = {}
+    if not os.path.exists(path):
+        return names
+    with io.open(path, encoding="utf-8") as f:
+        for line in f:
+            line = line.strip()
+            if not line or line.startswith("#"):
+                continue
+            m = NAME_LINE.match(line)
+            if m:
+                names[int(m.group(1), 16)] = m.group(2)
+    return names
+
+
+def rename_games(store_games, names):
+    """Applies the hand-kept names, in place: a game keeps the slot its discs
+    put it in. The list isn't sorted by the names it ends up with anyway - a
+    game sits where its first disc sorted, and that disc can be a localized
+    one the USA disc then renames the game over - so re-sorting it here would
+    shuffle a hundred games that have nothing to do with this file.
+
+    Returns what was renamed, the title IDs no game has, and the ones whose
+    new name lands out of order among their neighbours - worth saying, since
+    nothing else will notice.
+
+    [(was, now)], [title ID], [(name, neighbour)]"""
+    renamed, misplaced = [], []
+    for i, g in enumerate(store_games):
+        new = names.get(g[2])
+        if new is None or new == g[1]:
+            continue
+        renamed.append((g[1], new))
+        g[1] = new
+        g[0] = letter_of(new)
+
+        for j, other in ((i - 1, store_games[i - 1]) if i > 0 else (None, None), \
+                         (i + 1, store_games[i + 1]) if i + 1 < len(store_games) else (None, None)):
+            if other is None or other[0] != g[0]:
+                continue
+            before, after = (other, g) if j < i else (g, other)
+            if sort_key(before[1]) > sort_key(after[1]):
+                misplaced.append((new, other[1]))
+
+    found = set(g[2] for g in store_games)
+    return renamed, sorted(t for t in names if t not in found), misplaced
+
+
 def load_backcompat():
     """The title IDs on the 360's backwards compatibility list."""
     ids = set()
@@ -791,6 +856,18 @@ def main():
 
     rows.sort()
     store_games = group_games(rows)
+
+    # Before the releases are built, so a disc whose title is no longer the
+    # game's name shows as an edition on its own version - which is how the
+    # console then finds its DLC. See hand_names.
+    renamed, stale_names, misplaced = ([], [], []) if xbox else rename_games(store_games, hand_names(NAMES))
+    for was, now in renamed:
+        print("renamed by hand: %s -> %s" % (was, now))
+    for t in stale_names:
+        print("  %08X in %s is no game here" % (t, os.path.basename(NAMES)))
+    for name, neighbour in misplaced:
+        print("  %s now sits out of order beside %s" % (name, neighbour))
+
     releases = [build_releases(rows, g) for g in store_games]
     most_versions = max(len(r) for r in releases)
     most_discs = max(len(r[3]) for rs in releases for r in rs)
@@ -820,6 +897,11 @@ def main():
     L.append("// %d zips; title IDs matched: %s." % (total, ", ".join("%s %d" % kv for kv in how.items())))
     L.append("// Then %d from XBOX_360_1 to _6, for games the Redump collection lacks -" % len(added))
     L.append("// zips, and RARs that hold their disc image uncompressed.")
+    if renamed:
+        L.append("//")
+        L.append("// %d game%s named by hand, where the discs sharing a title ID are not all" %
+                 (len(renamed), "" if len(renamed) == 1 else "s"))
+        L.append("// the same game. See tools/data/store-names.txt.")
     L.append("")
     L.append("#ifndef STORE_TITLES_H")
     L.append("#define STORE_TITLES_H")
