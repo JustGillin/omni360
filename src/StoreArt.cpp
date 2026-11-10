@@ -11,6 +11,12 @@ DESCRIPTION : The Store's artwork and details from Xbox Live, fetched and
 #include "ImageDecode.h"
 #include "MobCatTable.h"
 
+#define STB_IMAGE_WRITE_IMPLEMENTATION
+#define STBI_WRITE_NO_STDIO
+#pragma warning(push, 0)
+#include "stb_image_write.h"
+#pragma warning(pop)
+
 #include <xtl.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -828,7 +834,55 @@ StoreDetailsState GetStoreDetails(unsigned long titleId, StoreDetails *out)
 #define TITLE_ICON_URL   "http://image.xboxlive.com/global/t.%08lx/icon/0/8000"
 #define MOBCAT_ICON_URL  "https://raw.githubusercontent.com/MobCat/MobCats-original-xbox-game-list/main/icon/%.4s/%08lX.png"
 
-// OG Xbox icon from MobCat's repo - plain PNG, single request.
+struct PngWriteBuf { unsigned char *data; unsigned long len; unsigned long cap; bool overflow; };
+static void PngWriteCallback(void *ctx, void *data, int size)
+{
+    PngWriteBuf *b = (PngWriteBuf *)ctx;
+    if (b->len + (unsigned long)size > b->cap) { b->overflow = true; return; }
+    memcpy(b->data + b->len, data, (size_t)size);
+    b->len += (unsigned long)size;
+}
+
+// Decode src PNG, scale to outW x outH, re-encode as PNG into out[0..cap).
+// Returns the new size, or 0 on failure.
+static unsigned long ResizePng(const unsigned char *src, unsigned long srcSize,
+                               int outW, int outH,
+                               unsigned char *out, unsigned long cap)
+{
+    int srcW = 0, srcH = 0;
+    unsigned long *pixels = DecodeImageToArgb(src, srcSize, &srcW, &srcH);
+    if (pixels == NULL)
+        return 0;
+
+    unsigned long *scaled = (unsigned long *)malloc((size_t)outW * outH * sizeof(unsigned long));
+    bool ok = (scaled != NULL) && ScaleArgb(pixels, srcW, srcH, 0.0f, 0.0f, (float)srcW, (float)srcH, outW, outH, scaled);
+    free(pixels);
+
+    if (!ok) { free(scaled); return 0; }
+
+    // ARGB 0xAARRGGBB -> RGB bytes for stbi_write_png
+    unsigned char *rgb = (unsigned char *)malloc((size_t)outW * outH * 3);
+    if (rgb != NULL)
+    {
+        for (int i = 0; i < outW * outH; i++)
+        {
+            rgb[i * 3 + 0] = (unsigned char)(scaled[i] >> 16);
+            rgb[i * 3 + 1] = (unsigned char)(scaled[i] >> 8);
+            rgb[i * 3 + 2] = (unsigned char)(scaled[i]);
+        }
+    }
+    free(scaled);
+    if (rgb == NULL)
+        return 0;
+
+    PngWriteBuf wb = { out, 0, cap, false };
+    stbi_write_png_to_func(PngWriteCallback, &wb, outW, outH, 3, rgb, outW * 3);
+    free(rgb);
+    return (!wb.overflow && wb.len > 0) ? wb.len : 0;
+}
+
+// OG Xbox icon from MobCat's repo. If the source PNG is larger than capacity,
+// decode and re-encode at 64x64 so it fits in the GOD header slot.
 static bool FetchMobCatIcon(unsigned long titleId, unsigned char *out, unsigned long capacity, unsigned long *outSize)
 {
     char titleHex[9];
@@ -838,18 +892,38 @@ static bool FetchMobCatIcon(unsigned long titleId, unsigned char *out, unsigned 
     _snprintf(url, sizeof(url), MOBCAT_ICON_URL, titleHex, titleId);
     url[sizeof(url) - 1] = '\0';
 
-    char *buffer = (char *)malloc(capacity + 1);
+    // Allocate enough for a 128x128 source even when capacity is smaller.
+    const unsigned long downloadMax = capacity < 32768 ? 32768 : capacity;
+    char *buffer = (char *)malloc(downloadMax + 1);
     if (buffer == NULL)
         return false;
 
     unsigned long long len = 0;
-    const int status = HttpGetPlain(url, NULL, buffer, capacity, &len);
+    const int status = HttpGetPlain(url, NULL, buffer, downloadMax, &len);
     static const unsigned char kPng[8] = { 0x89, 'P', 'N', 'G', '\r', '\n', 0x1A, '\n' };
-    const bool ok = (status == 200 && len >= 8 && len <= capacity && memcmp(buffer, kPng, 8) == 0);
-    if (ok)
+    const bool isPng = (status == 200 && len >= 8 && memcmp(buffer, kPng, 8) == 0);
+
+    bool ok = false;
+    if (isPng && len <= capacity)
     {
         memcpy(out, buffer, (size_t)len);
         *outSize = (unsigned long)len;
+        ok = true;
+    }
+    else if (isPng && len <= downloadMax)
+    {
+        const unsigned long newSize = ResizePng((const unsigned char *)buffer, (unsigned long)len,
+                                                64, 64, out, capacity);
+        if (newSize > 0)
+        {
+            dprintf("[icons] %08lX: resized MobCat icon to 64x64 (%lu bytes)\n", titleId, newSize);
+            *outSize = newSize;
+            ok = true;
+        }
+        else
+        {
+            dprintf("[icons] %08lX: MobCat icon resize failed (%I64u bytes)\n", titleId, len);
+        }
     }
     else
     {
