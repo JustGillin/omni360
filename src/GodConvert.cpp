@@ -1089,3 +1089,36 @@ GodResult GodConvert(GodSource *source, const GodImageInfo &info, const char *co
     }
     return GOD_OK;
 }
+
+bool GodPatchIcon(const char *headerPath, const unsigned char *iconPng, unsigned long iconPngSize)
+{
+    if (headerPath == NULL || iconPng == NULL || iconPngSize == 0 || iconPngSize > GOD_ICON_MAX)
+        return false;
+
+    unsigned char *h = (unsigned char *)malloc(HEADER_SIZE);
+    if (h == NULL)
+        return false;
+
+    FILE *f = fopen(headerPath, "rb");
+    if (f == NULL) { free(h); return false; }
+    bool ok = fread(h, 1, HEADER_SIZE, f) == HEADER_SIZE;
+    fclose(f);
+    if (!ok) { free(h); return false; }
+
+    // Already has an icon - leave it alone.
+    if (ReadBE32(h + 0x1712) != 0 || ReadBE32(h + 0x1716) != 0)
+        { free(h); return false; }
+
+    WriteBE32(h + 0x1712, iconPngSize);
+    WriteBE32(h + 0x1716, iconPngSize);
+    memcpy(h + 0x171A, iconPng, iconPngSize);
+    memcpy(h + 0x571A, iconPng, iconPngSize);
+    Sha1(h + 0x344, HEADER_SIZE - 0x344, h + 0x32C);
+
+    f = fopen(headerPath, "wb");
+    if (f == NULL) { free(h); return false; }
+    ok = fwrite(h, 1, HEADER_SIZE, f) == HEADER_SIZE;
+    if (fclose(f) != 0) ok = false;
+    free(h);
+    return ok;
+}

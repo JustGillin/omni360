@@ -1617,7 +1617,8 @@ enum SettingsRow
     SETTINGS_ROW_LIBRARY_FOLDER, // one of g_folderRows: A adds or removes it
     SETTINGS_ROW_ADD_FOLDER,   // another library folder, typed
     SETTINGS_ROW_SOUNDS,       // the interface's sounds, on or off
-    SETTINGS_ROW_SPEED_TEST    // where a download's speed goes - SpeedTest.h
+    SETTINGS_ROW_SPEED_TEST,   // where a download's speed goes - SpeedTest.h
+    SETTINGS_ROW_RESYNC_LIBRARY // re-read the library from disk and re-fetch missing icons
 };
 
 // Rescans with the library folders now in settings.txt.
@@ -2217,6 +2218,10 @@ static void BuildSettingsPage(SettingsPage &page, const Library &lib, const char
                        "Checks how fast your internet, your console and archive.org are, to see what slows "
                        "downloads down. About a minute.");
 
+    AddSettingsRow(page, SETTINGS_VIEW_LINE, "Library");
+    AddSettingsControl(page, SETTINGS_CONTROL_BUTTON, "Resync", SETTINGS_ROW_RESYNC_LIBRARY,
+                       "Re-reads your installed games from disk and fills in any missing icons from Xbox Live.");
+
     // The version, and whether there's a newer one.
     UpdateInfo update;
     const UpdateState state = GetUpdateState(&update, NULL);
@@ -2294,6 +2299,8 @@ static void RunSpeedTest(const char *gamesPath)
     RunSpeedTestUI(keys ? header : NULL, gamesPath);
 }
 
+static void StartIconSync(const InstalledGame *games, int count);
+
 static SettingsOutcome RunSettingsRow(SettingsRow row, int arg, Library &lib, char *gamesPath, size_t gamesPathSize)
 {
     SettingsOutcome outcome = {false, false};
@@ -2309,6 +2316,11 @@ static SettingsOutcome RunSettingsRow(SettingsRow row, int arg, Library &lib, ch
     case SETTINGS_ROW_ADD_FOLDER:   AddLibraryFolder(lib, gamesPath, outcome); break;
     case SETTINGS_ROW_SOUNDS:       ToggleUiSounds(); break;
     case SETTINGS_ROW_SPEED_TEST:   RunSpeedTest(gamesPath); break;
+    case SETTINGS_ROW_RESYNC_LIBRARY:
+        ScanLibrary(lib, gamesPath);
+        StartIconSync(lib.games, lib.count);
+        outcome.libraryChanged = true;
+        break;
     default:                        break;
     }
 
@@ -6721,6 +6733,7 @@ static void AdoptLibrary(Shell &shell, Library &lib, Library &fresh, const char 
 
     RequestLibraryCovers(lib);
     SaveLibrary(lib, gamesPath);
+    StartIconSync(lib.games, lib.count);
     shell.stale = true;
 }
 
@@ -6734,6 +6747,115 @@ static void TakeFreshLibrary(Shell &shell, Library &lib, Library &fresh, const c
         return;
     }
     AdoptLibrary(shell, lib, fresh, gamesPath);
+}
+
+// ---------------------------------------------------------------------------
+// Syncing missing icons in the background
+// ---------------------------------------------------------------------------
+//
+// A game installed while offline (or when image.xboxlive.com was unreachable)
+// ends up with no icon in its GOD header - the dashboard shows a placeholder.
+// At startup, after the library is on screen, a worker thread walks every GOD
+// package, and for any whose header still has no icon it fetches one from Xbox
+// Live and patches it in. No UI, no progress bar - each patch is one HTTP
+// request (~1 KB) followed by one header rewrite (~44 KB).
+
+struct IconSyncState
+{
+    char  *paths;      // null-separated packagePath strings, one block
+    unsigned long *titleIds;
+    int    count;
+    HANDLE thread;
+    volatile LONG done;
+};
+
+static IconSyncState g_iconSync;
+
+static DWORD WINAPI IconSyncEntry(void *param)
+{
+    IconSyncState *s = (IconSyncState *)param;
+    static unsigned char icon[GOD_ICON_MAX];
+    const char *p = s->paths;
+    for (int i = 0; i < s->count; ++i, p += strlen(p) + 1)
+    {
+        unsigned long iconSize = 0;
+        if (FetchTitleIcon(s->titleIds[i], icon, sizeof(icon), &iconSize) && iconSize > 0)
+        {
+            if (GodPatchIcon(p, icon, iconSize))
+                dprintf("[icon sync] patched icon for title %08lx\n", s->titleIds[i]);
+        }
+    }
+    free(s->paths);
+    free(s->titleIds);
+    s->paths   = NULL;
+    s->titleIds = NULL;
+    s->count   = 0;
+    InterlockedExchange(&s->done, 1);
+    return 0;
+}
+
+// Queues a background icon-sync pass over `games`. Skips games that already
+// have an icon (either thumbnail slot populated), folders, and OG Xbox titles
+// (content type 0x00005000, which the Xbox Live icon endpoint won't have).
+// Safe to call more than once: if a sync is already running it is left alone.
+static void StartIconSync(const InstalledGame *games, int count)
+{
+    if (g_iconSync.thread != NULL &&
+        InterlockedCompareExchange(&g_iconSync.done, 0, 0) == 0)
+        return; // still running
+
+    if (g_iconSync.thread != NULL)
+    {
+        CloseHandle(g_iconSync.thread);
+        g_iconSync.thread = NULL;
+    }
+
+    // Build lists of paths + title IDs that need icons.
+    int need = 0;
+    size_t pathBytes = 0;
+    for (int i = 0; i < count; ++i)
+    {
+        const InstalledGame &g = games[i];
+        if (g.folder) continue;
+        if (g.contentType != GOD_CONTENT_GAMES_ON_DEMAND &&
+            g.contentType != GOD_CONTENT_XBOX_ORIGINAL) continue;
+        if (g.titleThumbnailSize > 0 || g.contentThumbnailSize > 0) continue;
+        need++;
+        pathBytes += strlen(g.packagePath) + 1;
+    }
+    dprintf("[icon sync] %d of %d installed game(s) missing an icon\n", need, count);
+    if (need == 0)
+        return;
+
+    char *paths = (char *)malloc(pathBytes);
+    unsigned long *ids = (unsigned long *)malloc(need * sizeof(unsigned long));
+    if (paths == NULL || ids == NULL) { free(paths); free(ids); return; }
+
+    char *dst = paths;
+    int idx = 0;
+    for (int i = 0; i < count; ++i)
+    {
+        const InstalledGame &g = games[i];
+        if (g.folder) continue;
+        if (g.contentType != GOD_CONTENT_GAMES_ON_DEMAND &&
+            g.contentType != GOD_CONTENT_XBOX_ORIGINAL) continue;
+        if (g.titleThumbnailSize > 0 || g.contentThumbnailSize > 0) continue;
+        size_t len = strlen(g.packagePath) + 1;
+        memcpy(dst, g.packagePath, len);
+        dst += len;
+        ids[idx++] = g.titleId;
+    }
+
+    g_iconSync.paths    = paths;
+    g_iconSync.titleIds = ids;
+    g_iconSync.count    = need;
+    InterlockedExchange(&g_iconSync.done, 0);
+    g_iconSync.thread = CreateThread(NULL, 64 * 1024, IconSyncEntry, &g_iconSync, 0, NULL);
+    if (g_iconSync.thread == NULL)
+    {
+        free(paths); free(ids);
+        g_iconSync.paths = NULL; g_iconSync.titleIds = NULL; g_iconSync.count = 0;
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -7080,6 +7202,9 @@ int main()
                 // Box art, in the library's order so the first screenful
                 // comes first - fetching while the mark forms.
                 RequestLibraryCovers(lib);
+
+                // Fill in missing icons for any game installed offline.
+                StartIconSync(lib.games, lib.count);
             }
         }
 

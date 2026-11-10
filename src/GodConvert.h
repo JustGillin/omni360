@@ -162,6 +162,13 @@ GodResult GodConvert(GodSource *source, const GodImageInfo &info, const char *co
                      char *outPackagePath, unsigned long outPackagePathSize,
                      GodTimings *outTimings = 0);
 
+// Patches an already-written package header to add an icon if it has none.
+// Reads the header, writes the icon into both thumbnail slots, recomputes the
+// SHA-1, and writes the header back. Returns true only when the icon was
+// written; false if the package already has one, the icon is too large, or
+// the file can't be read or written.
+bool GodPatchIcon(const char *headerPath, const unsigned char *iconPng, unsigned long iconPngSize);
+
 // For an install that ended too abruptly to clean up after itself - the
 // console switched off, or the Guide button back to the dashboard. GodConvert
 // removes its own partial output on every failure it sees; these are for the

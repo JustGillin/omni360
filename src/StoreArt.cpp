@@ -9,6 +9,7 @@ DESCRIPTION : The Store's artwork and details from Xbox Live, fetched and
 #include "HttpPlain.h"
 #include "OutputConsole.h"
 #include "ImageDecode.h"
+#include "MobCatTable.h"
 
 #include <xtl.h>
 #include <stdio.h>
@@ -824,13 +825,49 @@ StoreDetailsState GetStoreDetails(unsigned long titleId, StoreDetails *out)
 // A game's icon, for the packages GodConvert writes
 // ---------------------------------------------------------------------------
 
-#define TITLE_ICON_URL "http://image.xboxlive.com/global/t.%08lx/icon/0/8000"
+#define TITLE_ICON_URL   "http://image.xboxlive.com/global/t.%08lx/icon/0/8000"
+#define MOBCAT_ICON_URL  "https://raw.githubusercontent.com/MobCat/MobCats-original-xbox-game-list/main/icon/%.4s/%08lX.png"
+
+// OG Xbox icon from MobCat's repo - plain PNG, single request.
+static bool FetchMobCatIcon(unsigned long titleId, unsigned char *out, unsigned long capacity, unsigned long *outSize)
+{
+    char titleHex[9];
+    _snprintf(titleHex, sizeof(titleHex), "%08lX", titleId);
+
+    char url[160];
+    _snprintf(url, sizeof(url), MOBCAT_ICON_URL, titleHex, titleId);
+    url[sizeof(url) - 1] = '\0';
+
+    char *buffer = (char *)malloc(capacity + 1);
+    if (buffer == NULL)
+        return false;
+
+    unsigned long long len = 0;
+    const int status = HttpGetPlain(url, NULL, buffer, capacity, &len);
+    static const unsigned char kPng[8] = { 0x89, 'P', 'N', 'G', '\r', '\n', 0x1A, '\n' };
+    const bool ok = (status == 200 && len >= 8 && len <= capacity && memcmp(buffer, kPng, 8) == 0);
+    if (ok)
+    {
+        memcpy(out, buffer, (size_t)len);
+        *outSize = (unsigned long)len;
+    }
+    else
+    {
+        dprintf("[store] %08lX: no icon from MobCat (HTTP %d, %I64u bytes)\n", titleId, status, len);
+    }
+    free(buffer);
+    return ok;
+}
 
 bool FetchTitleIcon(unsigned long titleId, unsigned char *out, unsigned long capacity, unsigned long *outSize)
 {
     if (titleId == 0 || out == NULL || capacity < 8 || outSize == NULL)
         return false;
     *outSize = 0;
+
+    // OG Xbox titles are not on Xbox Live's icon endpoint - go straight to MobCat.
+    if (MobCatXmidForTitleId(titleId) != NULL)
+        return FetchMobCatIcon(titleId, out, capacity, outSize);
 
     char url[96];
     _snprintf(url, sizeof(url), TITLE_ICON_URL, titleId);
