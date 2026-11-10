@@ -584,6 +584,112 @@ static void ReadStagingNote(const char *dir, char *out, size_t outSize)
     out[n] = '\0';
 }
 
+// --- The deflate index, kept beside the pieces ------------------------------
+//
+// A zip's image can only be read at an offset once the stream has been
+// indexed, and indexing means decompressing the whole thing - minutes of
+// reading the drive back for a game of several gigabytes. A download that
+// arrives whole and then stops before it finishes installing - paused, or the
+// app closed - would pay that again on the way back in, so the points are
+// written next to the pieces and picked up with them. The file is stamped
+// with the staging note, so it dies with the download it belongs to.
+
+#define STAGING_INDEX "index.bin"
+#define STAGING_INDEX_MAGIC "OMNIIDX1"
+
+static void StagingIndexPath(const char *dir, char *out, size_t outSize)
+{
+    _snprintf(out, outSize, "%s\\" STAGING_INDEX, dir);
+    out[outSize - 1] = '\0';
+}
+
+static void DiscardStagingIndex(const char *dir)
+{
+    char path[600];
+    StagingIndexPath(dir, path, sizeof(path));
+    DeleteFileA(path);
+}
+
+// Best effort: a download that can't write its index still installs, it just
+// won't be as quick to pick up again.
+static bool WriteStagingIndex(const char *dir, const char *note, unsigned long long unpacked, unsigned long crc,
+                              const InflatePoint *points, int count)
+{
+    if (points == NULL || count <= 0)
+        return false;
+
+    char path[600];
+    StagingIndexPath(dir, path, sizeof(path));
+
+    FILE *f = fopen(path, "wb");
+    if (f == NULL)
+        return false;
+
+    const unsigned long noteLen = (unsigned long)strlen(note);
+    bool ok = fwrite(STAGING_INDEX_MAGIC, 1, 8, f) == 8 && fwrite(&noteLen, sizeof(noteLen), 1, f) == 1 &&
+              fwrite(note, 1, noteLen, f) == noteLen && fwrite(&unpacked, sizeof(unpacked), 1, f) == 1 &&
+              fwrite(&crc, sizeof(crc), 1, f) == 1 && fwrite(&count, sizeof(count), 1, f) == 1;
+    for (int i = 0; ok && i < count; ++i)
+        ok = fwrite(&points[i], sizeof(InflatePoint), 1, f) == 1;
+
+    if (fclose(f) != 0)
+        ok = false;
+    if (!ok)
+        DeleteFileA(path);
+    return ok;
+}
+
+// The points from an earlier run, if they're this same download's. The caller
+// owns what comes back and frees it the same way it frees the indexer's.
+static InflatePoint *ReadStagingIndex(const char *dir, const char *note, unsigned long long unpacked, unsigned long crc,
+                                      int *outCount)
+{
+    *outCount = 0;
+
+    char path[600];
+    StagingIndexPath(dir, path, sizeof(path));
+
+    FILE *f = fopen(path, "rb");
+    if (f == NULL)
+        return NULL;
+
+    char magic[8];
+    unsigned long noteLen = 0;
+    char theirs[STAGING_NOTE_MAX];
+    unsigned long long theirUnpacked = 0;
+    unsigned long theirCrc = 0;
+    int count = 0;
+    InflatePoint *points = NULL;
+
+    bool ok = fread(magic, 1, 8, f) == 8 && memcmp(magic, STAGING_INDEX_MAGIC, 8) == 0 &&
+              fread(&noteLen, sizeof(noteLen), 1, f) == 1 && noteLen < sizeof(theirs);
+    if (ok)
+    {
+        ok = fread(theirs, 1, noteLen, f) == noteLen;
+        theirs[ok ? noteLen : 0] = '\0';
+    }
+    ok = ok && strcmp(theirs, note) == 0 && fread(&theirUnpacked, sizeof(theirUnpacked), 1, f) == 1 &&
+         theirUnpacked == unpacked && fread(&theirCrc, sizeof(theirCrc), 1, f) == 1 && theirCrc == crc &&
+         fread(&count, sizeof(count), 1, f) == 1 && count > 0 && count < 100000;
+
+    if (ok)
+    {
+        points = (InflatePoint *)malloc((size_t)count * sizeof(InflatePoint));
+        ok = points != NULL;
+        for (int i = 0; ok && i < count; ++i)
+            ok = fread(&points[i], sizeof(InflatePoint), 1, f) == 1;
+    }
+    fclose(f);
+
+    if (!ok)
+    {
+        free(points);
+        return NULL;
+    }
+    *outCount = count;
+    return points;
+}
+
 // Which pieces of the download are already whole. A piece counts only at
 // exactly the length it covers: a shorter one was cut off mid-transfer, and
 // is fetched again rather than trusted.
@@ -1938,6 +2044,23 @@ static void RunJob(GameJob *job, const char *gamesPath)
                     pieceCount, stagedBytes / (1024 * 1024));
     }
 
+    // A run that got the whole zip down and then stopped before it finished
+    // installing left its deflate index beside the pieces. With it there is
+    // nothing left to fetch and nothing to read back: the install starts at
+    // once. A zip's only - a RAR has no index to keep.
+    InflatePoint *savedPoints = NULL;
+    int savedCount = 0;
+    if (!isRar && pickUp && stagedPieces == pieceCount)
+        savedPoints = ReadStagingIndex(dir, note, member.unpacked, member.crc, &savedCount);
+    const bool haveIndex = (savedPoints != NULL);
+    if (haveIndex)
+    {
+        dprintf("[game] the whole zip is here and indexed (%d restart points) - straight to installing\n", savedCount);
+        SetPhase(job, GAME_STEP_INSTALLING, "Installing", 0, 0, 0);
+    }
+    else
+        DiscardStagingIndex(dir); // it goes with this download's pieces or not at all
+
     // Room for the zip and the game. The game is at most the image's size;
     // checked again, exactly, once the image says how big the game is. A
     // compressed RAR is unpacked to an image first, and its download is
@@ -1957,6 +2080,7 @@ static void RunJob(GameJob *job, const char *gamesPath)
         detail[sizeof(detail) - 1] = '\0';
         free(done);
         free(wasStaged);
+        free(savedPoints);
         if (stagedPieces == 0)
             DiscardStaging(dir); // nothing of worth in it - don't leave it sitting there
         FinishLocked(job, QUEUE_OUTCOME_NO_SPACE, "Not enough space", detail, true);
@@ -1972,6 +2096,7 @@ static void RunJob(GameJob *job, const char *gamesPath)
     {
         free(done);
         free(wasStaged);
+        free(savedPoints);
         DiscardStaging(dir);
         FinishLocked(job, QUEUE_OUTCOME_FAILED, "Couldn't install", "The staging folder couldn't be made.", true);
         return;
@@ -2012,7 +2137,7 @@ static void RunJob(GameJob *job, const char *gamesPath)
     // A zip's image is indexed for reading back out of its deflate stream;
     // a stored RAR's needs only its CRC, and a compressed one's is checked as
     // it's unpacked.
-    InflateIndexer *indexer = isRar ? NULL : new InflateIndexer(member.unpacked);
+    InflateIndexer *indexer = (isRar || haveIndex) ? NULL : new InflateIndexer(member.unpacked);
     unsigned long crc = crc32(0L, Z_NULL, 0);
     unsigned char *chunk = (unsigned char *)malloc(1024 * 1024);
 
@@ -2021,6 +2146,7 @@ static void RunJob(GameJob *job, const char *gamesPath)
     {
         free(d.done);
         free(wasStaged);
+        free(savedPoints);
         if (d.pieceReady != NULL)
             CloseHandle(d.pieceReady);
         delete indexer;
@@ -2036,7 +2162,7 @@ static void RunJob(GameJob *job, const char *gamesPath)
     ConnectionArgs args[CONNECTIONS];
     HANDLE threads[CONNECTIONS];
     int started = 0;
-    for (int i = 0; i < CONNECTIONS; ++i)
+    for (int i = 0; !haveIndex && i < CONNECTIONS; ++i)
     {
         args[i].d = &d;
         args[i].slot = i;
@@ -2057,7 +2183,7 @@ static void RunJob(GameJob *job, const char *gamesPath)
     }
 
     const DWORD downloadStart = GetTickCount();
-    bool indexOk = (started > 0);
+    bool indexOk = haveIndex || (started > 0);
     RarUnpackResult unpacked = RAR_UNPACK_OK;
 
     if (compressedRar && indexOk)
@@ -2074,7 +2200,7 @@ static void RunJob(GameJob *job, const char *gamesPath)
                 (unsigned long)(unpackSeconds / 60), (unsigned long)(unpackSeconds % 60), (int)unpacked);
     }
 
-    for (unsigned long index = 0; !compressedRar && indexOk && index < d.pieceCount; ++index)
+    for (unsigned long index = 0; !compressedRar && !haveIndex && indexOk && index < d.pieceCount; ++index)
     {
         // Wait for this piece, reporting progress meanwhile.
         for (;;)
@@ -2090,13 +2216,31 @@ static void RunJob(GameJob *job, const char *gamesPath)
             // A download picked up from an earlier run reads its way back
             // through what's already here before the first new byte arrives -
             // the deflate stream can only be indexed from its start. That
-            // reads the drive rather than the network, so it says so, and the
-            // speed is of what this run has fetched, not of the drive.
+            // reads the drive rather than the network, so it says so, and it
+            // counts how far the reading has got rather than how many bytes
+            // are on the drive: those are all here from the first moment, and
+            // a bar sitting at 100% for several minutes looks like a hang.
+            // The speed is then the drive's; otherwise it's of what this run
+            // has fetched.
             DWORD ms = GetTickCount() - downloadStart;
-            unsigned long long fetched = bytes > stagedBytes ? bytes - stagedBytes : 0;
+            unsigned long long shown = bytes;
+            unsigned long long rate = 0;
+            if (wasStaged[index])
+            {
+                shown = (unsigned long long)index * PIECE_SIZE;
+                if (shown > needed)
+                    shown = needed;
+                if (ms > 3000)
+                    rate = shown * 1000 / ms;
+            }
+            else
+            {
+                unsigned long long fetched = bytes > stagedBytes ? bytes - stagedBytes : 0;
+                if (ms > 3000)
+                    rate = fetched * 1000 / ms;
+            }
             SetPhase(job, GAME_STEP_DOWNLOADING,
-                     wasStaged[index] ? "Checking what's already downloaded" : "Downloading", bytes, needed,
-                     ms > 3000 ? fetched * 1000 / ms : 0);
+                     wasStaged[index] ? "Checking what's already downloaded" : "Downloading", shown, needed, rate);
 
             if (ready || stop)
             {
@@ -2128,6 +2272,26 @@ static void RunJob(GameJob *job, const char *gamesPath)
             if (indexer == NULL)
                 crc = crc32(crc, chunk, take);
             from += take;
+
+            // A piece is tens of megabytes, and reading one back takes long
+            // enough that the bar would step rather than move.
+            if (wasStaged[index])
+            {
+                DWORD ms = GetTickCount() - downloadStart;
+                SetPhase(job, GAME_STEP_DOWNLOADING, "Checking what's already downloaded", from, needed,
+                         ms > 3000 ? from * 1000 / ms : 0);
+
+                // Reading a whole download back takes minutes; a pause or a
+                // stop shouldn't have to wait out the piece it lands in.
+                EnterCriticalSection(&g_lock);
+                bool stop = Stopping(&d);
+                LeaveCriticalSection(&g_lock);
+                if (stop)
+                {
+                    indexOk = false;
+                    break;
+                }
+            }
         }
     }
 
@@ -2153,7 +2317,8 @@ static void RunJob(GameJob *job, const char *gamesPath)
     dprintf("[game] downloaded %I64u MB in %lu:%02lu (%I64u MB of pieces finished)\n", d.movedBytes / (1024 * 1024),
             (unsigned long)(downloadSeconds / 60), (unsigned long)(downloadSeconds % 60), d.doneBytes / (1024 * 1024));
 
-    const bool imageOk = indexOk && (compressedRar ? unpacked == RAR_UNPACK_OK
+    const bool imageOk = indexOk && (haveIndex ? true
+                                     : compressedRar ? unpacked == RAR_UNPACK_OK
                                      : stored      ? (!hasCrc || crc == member.crc)
                                                    : (indexer->Finished() && indexer->Out() == member.unpacked &&
                                                       indexer->Crc() == member.crc));
@@ -2161,6 +2326,7 @@ static void RunJob(GameJob *job, const char *gamesPath)
     {
         bool cancelled = Cancelled(job);
         int failStatus = d.failStatus;
+        free(savedPoints);
         if (indexOk && !cancelled && stored)
             dprintf("[game] the image didn't check out: crc %08lX (want %08lX)\n", crc, member.crc);
         else if (indexOk && !cancelled && !compressedRar)
@@ -2195,9 +2361,14 @@ static void RunJob(GameJob *job, const char *gamesPath)
         return;
     }
 
-    int pointCount = 0;
-    InflatePoint *points = (indexer != NULL) ? indexer->TakePoints(&pointCount) : NULL;
+    int pointCount = savedCount;
+    InflatePoint *points = haveIndex ? savedPoints : (indexer != NULL) ? indexer->TakePoints(&pointCount) : NULL;
     delete indexer;
+
+    // Keep them beside the pieces, so a stop between here and the end of the
+    // install doesn't mean reading the whole download back again.
+    if (!haveIndex && points != NULL && !WriteStagingIndex(dir, note, member.unpacked, member.crc, points, pointCount))
+        dprintf("[game] the index couldn't be kept - picking this up again will have to read it all back\n");
     dprintf("[game] image checks out: %I64u bytes, crc %08lX%s, %d restart points\n", member.unpacked, member.crc,
             isRar && !hasCrc ? " (the RAR has none to check)" : "", pointCount);
 
