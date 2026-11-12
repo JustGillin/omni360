@@ -1089,19 +1089,6 @@ struct Download
     unsigned long long windowRate[CONNECTIONS]; // bytes a second over the last full window, 0 if none yet
     bool tooSlow[CONNECTIONS];                  // dropped by the slow check
     bool trickled[CONNECTIONS];                 // and it was the server, not the connection
-    // Where the connections' time went besides receiving, summed over every
-    // request - see HttpTransferStats. For the line at the end of a download.
-    unsigned long long setupMs;   // opening connections
-    unsigned long long waitedMs;  // standing still for the drive
-    unsigned long long driveMs;   // the drive's own time writing pieces
-    unsigned long requests;
-    unsigned long silences;       // connections dropped for going silent
-    // The log's once-a-minute line: what the download is really averaging,
-    // stalls and all, so one run can be set against another.
-    DWORD startTick;
-    DWORD minuteTick;
-    unsigned long long minuteBytes; // movedBytes at minuteTick
-    unsigned long minuteSilences;   // silences at minuteTick
     bool failed;
     int failStatus;
     const bool *cancel;
@@ -1196,34 +1183,7 @@ static bool PieceProgress(unsigned long long done, unsigned long long, unsigned 
         if (report || slow)
             host = HostOf(d->servers[d->serverAt]);
     }
-
-    // Once a minute, whichever connection gets here first.
-    bool minute = false;
-    double minuteRate = 0.0, runRate = 0.0;
-    unsigned long minuteSilences = 0, runSilences = 0, runSeconds = 0;
-    if (now - d->minuteTick >= 60000)
-    {
-        minute = true;
-        minuteRate = (d->movedBytes - d->minuteBytes) / 1048576.0 / ((now - d->minuteTick) / 1000.0);
-        runSeconds = (now - d->startTick) / 1000;
-        runRate = runSeconds > 0 ? d->movedBytes / 1048576.0 / runSeconds : 0.0;
-        minuteSilences = d->silences - d->minuteSilences;
-        runSilences = d->silences;
-        d->minuteTick = now;
-        d->minuteBytes = d->movedBytes;
-        d->minuteSilences = d->silences;
-    }
     LeaveCriticalSection(&g_lock);
-
-    if (minute)
-    {
-        SYSTEMTIME utc;
-        GetSystemTime(&utc);
-        dprintf("[game] %02d:%02d:%02d UTC, %d connections: %.2f MB/s over the last minute (%lu went silent), "
-                "%.2f MB/s over %lu:%02lu so far (%lu went silent)\n",
-                utc.wHour, utc.wMinute, utc.wSecond, CONNECTIONS, minuteRate, minuteSilences, runRate,
-                runSeconds / 60, runSeconds % 60, runSilences);
-    }
 
     // One connection's honest throughput over a full window, for the check
     // that works out whether a slow download is archive.org or this line.
@@ -1310,10 +1270,6 @@ static DWORD WINAPI ConnectionEntry(LPVOID param)
 
     XboxTLS_SetThreadIoTimeout(STALL_TIMEOUT_MS);
 
-    HttpTransferStats stats;
-    memset(&stats, 0, sizeof(stats));
-    HttpTrackThisThread(&stats);
-
     for (;;)
     {
         EnterCriticalSection(&g_lock);
@@ -1397,27 +1353,8 @@ static DWORD WINAPI ConnectionEntry(LPVOID param)
             status = httpRequestHTTPS(url, HTTP_GET, NULL, headers, target, NULL, &size, true, NULL, 0,
                                       QuietPrint, length - resumeFrom, PieceProgress);
 
-            // Gone silent, rather than closed or dropped by the slow check:
-            // ask another host for a megabyte while the silence lasts, to see
-            // whose it is. The log's answer, nothing more.
-            if (XboxTLS_LastReadTimedOutForThisThread() && !Stopping(d))
-            {
-                EnterCriticalSection(&g_lock);
-                const unsigned long nth = ++d->silences;
-                LeaveCriticalSection(&g_lock);
-                SYSTEMTIME utc;
-                GetSystemTime(&utc);
-                dprintf("[game] %02d:%02d:%02d UTC: connection %d went silent (%lu this download)\n", utc.wHour,
-                        utc.wMinute, utc.wSecond, slot + 1, nth);
-                ReportStall(HostOf(url).c_str(), STALL_TIMEOUT_MS);
-            }
-
             // Dropped by the slow check: what came is good, as if cut off.
             EnterCriticalSection(&g_lock);
-            d->setupMs += stats.setupMs;
-            d->waitedMs += stats.waitedMs;
-            d->driveMs += stats.driveMs;
-            d->requests++;
             const bool dropped = d->tooSlow[slot] && !Stopping(d);
             const bool trickled = d->trickled[slot];
             d->tooSlow[slot] = false;
@@ -1449,14 +1386,8 @@ static DWORD WINAPI ConnectionEntry(LPVOID param)
                 got = true;
                 DWORD ms = GetTickCount() - started;
                 double mb = (length - resumeFrom) / 1048576.0;
-                // The last request's own costs: opening the connection, the
-                // wait for the first byte, and any time it stood still for
-                // the drive - what a slow piece is slow from.
-                dprintf("[game] piece %lu on connection %d: %.1f MB in %.1fs, %.2f MB/s (%s) - connecting %.1fs, "
-                        "first byte %.1fs, waited on the drive %.1fs, drive writing %.1fs\n",
-                        index, slot + 1, mb, ms / 1000.0, ms > 0 ? mb / (ms / 1000.0) : 0.0, HostOf(url).c_str(),
-                        stats.setupMs / 1000.0, stats.firstByteMs / 1000.0, stats.waitedMs / 1000.0,
-                        stats.driveMs / 1000.0);
+                dprintf("[game] piece %lu on connection %d: %.1f MB in %.1fs, %.2f MB/s (%s)\n", index, slot + 1,
+                        mb, ms / 1000.0, ms > 0 ? mb / (ms / 1000.0) : 0.0, HostOf(url).c_str());
             }
             else if (!spoilt && status == 206 && onDisk > 0 && onDisk < length)
             {
@@ -1506,7 +1437,6 @@ static DWORD WINAPI ConnectionEntry(LPVOID param)
         SetEvent(d->pieceReady);
     }
 
-    HttpTrackThisThread(NULL);
     SetEvent(d->pieceReady);
     return 0;
 }
@@ -2404,15 +2334,6 @@ static void RunJob(GameJob *job, const char *gamesPath)
     d.done = done;
     d.doneBytes = stagedBytes;
     d.movedBytes = 0;
-    d.setupMs = 0;
-    d.waitedMs = 0;
-    d.driveMs = 0;
-    d.requests = 0;
-    d.silences = 0;
-    d.startTick = GetTickCount();
-    d.minuteTick = d.startTick;
-    d.minuteBytes = 0;
-    d.minuteSilences = 0;
     d.failed = false;
     d.failStatus = 0;
     d.cancel = &job->cancel;
@@ -2627,13 +2548,6 @@ static void RunJob(GameJob *job, const char *gamesPath)
     DWORD downloadSeconds = (GetTickCount() - downloadStart) / 1000;
     dprintf("[game] downloaded %I64u MB in %lu:%02lu (%I64u MB of pieces finished)\n", d.movedBytes / (1024 * 1024),
             (unsigned long)(downloadSeconds / 60), (unsigned long)(downloadSeconds % 60), d.doneBytes / (1024 * 1024));
-    // Summed over the connections, so against CONNECTIONS times the minutes
-    // above: what of the download wasn't spent receiving.
-    if (d.requests > 0)
-        dprintf("[game] of that, over %d connections and %lu requests: %.2f MB/s overall, %lu connections went "
-                "silent, %.0fs opening connections, %.0fs waiting on the drive (%.0fs of drive writing)\n",
-                CONNECTIONS, d.requests, downloadSeconds > 0 ? d.movedBytes / 1048576.0 / downloadSeconds : 0.0,
-                d.silences, d.setupMs / 1000.0, d.waitedMs / 1000.0, d.driveMs / 1000.0);
 
     const bool imageOk = indexOk && (haveIndex ? true
                                      : compressedRar ? unpacked == RAR_UNPACK_OK

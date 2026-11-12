@@ -68,21 +68,6 @@ int httpRequestHTTPS(const std::string URL, HttpMethod method, const char *reque
                      DownloadProgressFn progressFn = NULL,
                      bool appendToFile = false);
 
-/// Where a request's time went, for a caller that wants to know why a
-/// download is slower than the line. Filled by httpRequestHTTPS for the
-/// thread that asked with HttpTrackThisThread, zeroed as each request starts.
-struct HttpTransferStats
-{
-    unsigned long setupMs;     // DNS, connect and the TLS handshake
-    unsigned long firstByteMs; // from the request sent to the response's headers
-    unsigned long driveMs;     // spent writing the body to the drive
-    unsigned long waitedMs;    // the connection read nothing, waiting for the drive
-};
-
-/// The calling thread's requests report into stats from now on; NULL stops
-/// it. stats must outlive the tracking.
-void HttpTrackThisThread(HttpTransferStats *stats);
-
 /// @brief A connection kept open across a run of small GET requests.
 ///
 /// httpRequestHTTPS opens a new connection for every request - DNS lookup,

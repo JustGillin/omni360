@@ -244,13 +244,6 @@ void XboxTLS_SetThreadSuites(int mode);
  */
 unsigned short XboxTLS_LastSuiteForThisThread(void);
 
-/**
- * @brief Whether the calling thread's last socket read gave up because
- * nothing arrived within its timeout (XboxTLS_SetThreadIoTimeout) - a
- * connection gone silent, rather than one the server closed or reset.
- */
-int XboxTLS_LastReadTimedOutForThisThread(void);
-
 
 #ifdef __cplusplus
 }

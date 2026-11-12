@@ -308,10 +308,6 @@ void XboxTLS_SetThreadSuites(int mode) {
         TlsSetValue(slot, (LPVOID)(ULONG_PTR)mode);
 }
 
-int XboxTLS_LastReadTimedOutForThisThread(void) {
-    return XboxTLS_ThreadReadError() == (DWORD)WSAETIMEDOUT;
-}
-
 unsigned short XboxTLS_LastSuiteForThisThread(void) {
     if (g_lastSuiteSlot == (LONG)TLS_OUT_OF_INDEXES)
         return 0;
