@@ -88,6 +88,12 @@ bool IsGameZipInstalled(const char *zipName);
 // Original Xbox game, ...\00005000\TITLEID, its media ID being its title ID.
 bool GameZipInstalledAs(const char *zipName, unsigned long *outTitleId, unsigned long *outMediaId);
 
+// Where a folder game installs: a RAR of a game's files (the ZTM sets)
+// rather than its disc is unpacked to <this>\<game's name>, on the drive the
+// games folder is on. main.cpp makes sure the library scans it.
+#define FOLDER_GAMES_FOLDER "Games"
+void FolderGamesRoot(const char *gamesPath, char *out, size_t outSize);
+
 // After an uninstall: the zip's note is dropped, here and in Installed.txt.
 void ForgetInstalledZip(const char *zipName);
 int PendingGameJobCount();

@@ -56,6 +56,36 @@ RarUnpackResult RarUnpackFrom(RarUnpackInput *in, const char *memberName, RarUnp
                               RarUnpackProgressFn progressFn, void printFunction(const char *_format, ...));
 
 // ---------------------------------------------------------------------------
+// Folder games: every file in the RAR, into a folder
+// ---------------------------------------------------------------------------
+//
+// The ZTM sets hold games as extracted disc folders - default.xex and the
+// rest, hundreds of files under one top folder. dmc_unrar walks every header
+// before it unpacks anything, and a RAR's headers sit between its files'
+// data, so opening reads the archive from end to end; the unpacking then
+// goes through it again, file by file, in order.
+
+class RarUnpackAllInput : public RarUnpackInput
+{
+public:
+    // The headers are all read, and unpacking starts: `unpacked` bytes in all.
+    virtual void HeadersRead(unsigned long long unpacked) {}
+
+    // Nothing before offset will be read again - a downloaded copy of it can go.
+    virtual void Behind(unsigned long long offset) {}
+
+    // As the files are written; return false to stop.
+    virtual bool Unpacked(unsigned long long done, unsigned long long total) { return true; }
+};
+
+// Unpacks every file into destDir, which must exist, making the folders
+// below it. A top folder every name shares ("Crysis.1.USA.X360-ZTM\...") is
+// left out, so default.xex lands at destDir's top. Names that would leave
+// destDir, or that FATX can't hold, are refused as RAR_UNPACK_UNSUPPORTED.
+// What was written is left for the caller to remove on a failure.
+RarUnpackResult RarUnpackAll(RarUnpackAllInput *in, const char *destDir, void printFunction(const char *_format, ...));
+
+// ---------------------------------------------------------------------------
 // DLC: from a file to a file
 // ---------------------------------------------------------------------------
 //

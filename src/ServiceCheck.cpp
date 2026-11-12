@@ -8,6 +8,7 @@ DESCRIPTION : Tells a slow archive.org apart from a slow line, by measuring a
 #include "ServiceCheck.h"
 #include "downloadFile.h" // HttpsSession
 #include "OutputConsole.h"
+#include "dns.h" // ResolveDNS, for the stall probe's bare connects
 
 #include <xtl.h>
 #include <stdio.h>
@@ -162,6 +163,164 @@ static DWORD WINAPI ProbeEntry(LPVOID)
     g_worstSeen = 0;
     LeaveCriticalSection(&g_lock);
     return 0;
+}
+
+// ---------------------------------------------------------------------------
+// The same question, asked the moment a connection goes silent
+// ---------------------------------------------------------------------------
+//
+// The rate probe above compares speeds over minutes. A stall is a different
+// thing: both connections receive nothing at all for ten seconds and more,
+// and a new connection to the same server handshakes at once and then gets
+// nothing either. Whether GitHub's megabyte arrives during that says where
+// the silence is.
+
+#define STALL_PROBE_EVERY_MS (60 * 1000)
+#define STALL_PROBES_MAX     12
+
+static bool g_stallProbing = false;
+static DWORD g_lastStallProbe = 0;
+static int g_stallProbes = 0;
+static char g_stallHost[128] = "";
+static unsigned long g_stallSilentMs = 0;
+
+// How long a bare TCP connect to host takes, the lookup timed apart from it.
+// A connect is one round trip - tens of milliseconds. One that takes seconds
+// is a SYN that was lost and sent again, which is packet loss between this
+// console and that host, seen directly. -1 for a part that failed.
+#define XBOX_SO_BYPASS_SECURITY 0x5801
+
+static void TimeConnect(const char *host, unsigned short port, long *dnsMs, long *connectMs)
+{
+    *dnsMs = -1;
+    *connectMs = -1;
+
+    char ip[64] = "";
+    DWORD from = GetTickCount();
+    if (!ResolveDNS(host, ip, sizeof(ip)) || ip[0] == '\0')
+        return;
+    *dnsMs = (long)(GetTickCount() - from);
+
+    SOCKET s = socket(AF_INET, SOCK_STREAM, IPPROTO_TCP);
+    if (s == INVALID_SOCKET)
+        return;
+    BOOL yes = TRUE;
+    setsockopt(s, SOL_SOCKET, XBOX_SO_BYPASS_SECURITY, (PCSTR)&yes, sizeof(yes));
+
+    sockaddr_in sa;
+    memset(&sa, 0, sizeof(sa));
+    sa.sin_family = AF_INET;
+    sa.sin_port = htons(port);
+    sa.sin_addr.s_addr = inet_addr(ip);
+    from = GetTickCount();
+    if (connect(s, (sockaddr *)&sa, sizeof(sa)) != SOCKET_ERROR)
+        *connectMs = (long)(GetTickCount() - from);
+    closesocket(s);
+}
+
+static DWORD WINAPI StallProbeEntry(LPVOID)
+{
+    char host[sizeof(g_stallHost)];
+    EnterCriticalSection(&g_lock);
+    memcpy(host, g_stallHost, sizeof(host));
+    const unsigned long silentMs = g_stallSilentMs;
+    LeaveCriticalSection(&g_lock);
+
+    char *warm = (char *)malloc(WARM_MAX + 1);
+    char *body = (char *)malloc(PROBE_BYTES + 1);
+    HttpsSession *session = HttpsSessionOpen(QuietPrint);
+    if (warm != NULL && body != NULL && session != NULL)
+    {
+        // First, bare connects: the silent server, and two hosts that have
+        // nothing to do with it or each other. All three quick, and the
+        // packets are getting through - the server just isn't sending. Slow
+        // to all three, and they're being lost near this console.
+        static const char *const kOthers[2] = { "cachefly.cachefly.net", "raw.githubusercontent.com" };
+        static const unsigned short kOtherPorts[2] = { 80, 443 };
+        long dns[3], conn[3];
+        TimeConnect(host, 443, &dns[0], &conn[0]);
+        for (int i = 0; i < 2; ++i)
+            TimeConnect(kOthers[i], kOtherPorts[i], &dns[i + 1], &conn[i + 1]);
+        dprintf("[check] stall: connects in ms (lookup + connect, -1 failed) - %s %ld + %ld, CacheFly %ld + %ld, "
+                "GitHub %ld + %ld\n",
+                host, dns[0], conn[0], dns[1], conn[1], dns[2], conn[2]);
+
+        // The connect is timed here, unlike the rate probe's: a lookup or a
+        // handshake that hangs is an answer too.
+        unsigned long long warmLen = WARM_MAX;
+        const DWORD began = GetTickCount();
+        const int warmStatus = HttpsSessionGet(session, WARM_URL, WARM_ACCEPT, warm, &warmLen);
+        const DWORD connectMs = GetTickCount() - began;
+
+        if (warmStatus != 200)
+            dprintf("[check] stall: %s silent for %lus, and GitHub couldn't be reached either (HTTP %d after %.1fs) - "
+                    "the console's network stopped too\n",
+                    host, silentMs / 1000, warmStatus, connectMs / 1000.0);
+        else
+        {
+            unsigned long long len = PROBE_BYTES;
+            const DWORD from = GetTickCount();
+            const int status = HttpsSessionGet(session, PROBE_URL, PROBE_ACCEPT, body, &len);
+            DWORD took = GetTickCount() - from;
+            if (took == 0)
+                took = 1;
+            if (status != 200 || len != PROBE_BYTES)
+                dprintf("[check] stall: %s silent for %lus; GitHub connected in %.1fs but its megabyte didn't come "
+                        "(HTTP %d, %I64u bytes in %.1fs) - the console's network stopped too\n",
+                        host, silentMs / 1000, connectMs / 1000.0, status, len, took / 1000.0);
+            else
+                dprintf("[check] stall: %s silent for %lus; meanwhile GitHub connected in %.1fs and sent 1 MB in "
+                        "%.1fs (%.2f MB/s)\n",
+                        host, silentMs / 1000, connectMs / 1000.0, took / 1000.0,
+                        len * 1000 / took / 1048576.0);
+        }
+    }
+    HttpsSessionClose(session);
+    free(warm);
+    free(body);
+
+    EnterCriticalSection(&g_lock);
+    g_stallProbing = false;
+    LeaveCriticalSection(&g_lock);
+    return 0;
+}
+
+void ReportStall(const char *host, unsigned long silentMs)
+{
+    if (!g_ready)
+        return;
+
+    const DWORD now = GetTickCount();
+    bool probe = false;
+    EnterCriticalSection(&g_lock);
+    if (!g_stallProbing && g_stallProbes < STALL_PROBES_MAX &&
+        (g_stallProbes == 0 || now - g_lastStallProbe >= STALL_PROBE_EVERY_MS))
+    {
+        g_stallProbing = true;
+        g_stallProbes++;
+        g_lastStallProbe = now;
+        _snprintf(g_stallHost, sizeof(g_stallHost), "%s", host != NULL ? host : "the server");
+        g_stallHost[sizeof(g_stallHost) - 1] = '\0';
+        g_stallSilentMs = silentMs;
+        probe = true;
+    }
+    LeaveCriticalSection(&g_lock);
+    if (!probe)
+        return;
+
+    HANDLE thread = CreateThread(NULL, 128 * 1024, StallProbeEntry, NULL, CREATE_SUSPENDED, NULL);
+    if (thread == NULL)
+    {
+        EnterCriticalSection(&g_lock);
+        g_stallProbing = false;
+        LeaveCriticalSection(&g_lock);
+        return;
+    }
+#ifdef _XBOX
+    XSetThreadProcessor(thread, 5); // as the rate probe
+#endif
+    ResumeThread(thread);
+    CloseHandle(thread);
 }
 
 static void StartProbe()

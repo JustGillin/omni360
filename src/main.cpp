@@ -6367,6 +6367,26 @@ static void DrawNightFrame(int secondsLeft, bool force)
 // Drains the jobs that finished since the last frame. Each one may have
 // changed what's on disk - the installed markers, the free space - so they're
 // refreshed; the ones worth hearing about get a popup.
+// A folder game from the Store lands in <drive>:\Games (FolderGamesRoot),
+// which the library only looks in if settings.txt lists it - so once there's
+// one there, it's added as a games folder, unless it's listed as anything
+// already.
+static void EnsureFolderGamesScanned()
+{
+    char gamesPath[MAX_TEXT_LENGTH];
+    GetGamesPath(gamesPath, sizeof(gamesPath));
+    char root[64];
+    FolderGamesRoot(gamesPath, root, sizeof(root));
+    if (!FolderExists(root) || FolderScannedAsAnything(root, gamesPath) ||
+        g_moreGamesPathCount >= MAX_MORE_GAMES_PATHS)
+        return;
+    if (WriteFolderKind(FOLDER_GAMES, gamesPath, NULL, root))
+    {
+        ReadMoreGamesPaths();
+        dprintf("[store] %s added to the library's folders\n", root);
+    }
+}
+
 static void HandleFinishedDownloads(Shell &shell, bool &haveAuth)
 {
     QueueJobSnapshot job;
@@ -6376,7 +6396,11 @@ static void HandleFinishedDownloads(Shell &shell, bool &haveAuth)
     {
         shell.stale = true;
         if (job.outcome == QUEUE_OUTCOME_INSTALLED)
+        {
             shell.rescanLibrary = true;
+            if (IsGameJobId(job.id))
+                EnsureFolderGamesScanned();
+        }
 
         if (!job.notify)
             continue;

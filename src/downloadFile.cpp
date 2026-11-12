@@ -379,6 +379,250 @@ bool endsWith(const std::string &fullString,
                               ending.size(), ending) == 0;
 }
 
+// ---------------------------------------------------------------------------
+// Where a request's time went - see HttpTransferStats in downloadFile.h
+// ---------------------------------------------------------------------------
+
+static volatile LONG g_statsSlot = (LONG)TLS_OUT_OF_INDEXES;
+
+static bool EnsureStatsSlot()
+{
+    if (g_statsSlot == (LONG)TLS_OUT_OF_INDEXES)
+    {
+        DWORD fresh = TlsAlloc();
+        if (fresh == TLS_OUT_OF_INDEXES)
+            return false;
+        // Another thread may have got there first; keep whichever won.
+        if (InterlockedCompareExchange(&g_statsSlot, (LONG)fresh, (LONG)TLS_OUT_OF_INDEXES) !=
+            (LONG)TLS_OUT_OF_INDEXES)
+            TlsFree(fresh);
+    }
+    return true;
+}
+
+void HttpTrackThisThread(HttpTransferStats *stats)
+{
+    if (EnsureStatsSlot())
+        TlsSetValue((DWORD)g_statsSlot, stats);
+}
+
+static HttpTransferStats *ThreadStats()
+{
+    if (g_statsSlot == (LONG)TLS_OUT_OF_INDEXES)
+        return NULL;
+    return (HttpTransferStats *)TlsGetValue((DWORD)g_statsSlot);
+}
+
+// ---------------------------------------------------------------------------
+// Writing a download's body off the thread that receives it
+// ---------------------------------------------------------------------------
+//
+// The 360 gives a socket a 255 KB receive buffer and no more - about 70 ms of
+// a download. While the receiving thread is inside a write to the drive it
+// isn't reading the socket, the buffer fills, and the server stops sending
+// until it's read again. A PC's multi-megabyte window swallows those pauses;
+// here each one is time the connection stands still. So the body goes to a
+// thread of its own through a queue of blocks, and the receiving thread only
+// ever waits when the drive has fallen a whole queue behind.
+
+#define WRITER_BLOCK  (1024 * 1024)
+#define WRITER_BLOCKS 8
+
+struct AsyncWriter
+{
+    FILE *file;
+    char *memory;               // WRITER_BLOCKS blocks, one allocation
+    size_t sizes[WRITER_BLOCKS];
+    int head;                   // the block the drive is on, or will be next
+    int count;                  // blocks handed over and not yet written
+    int fillAt;                 // the block being filled, -1 if none is claimed
+    size_t fill;                // bytes in it
+    bool done;                  // nothing more is coming
+    bool failed;                // a write failed; the rest is thrown away
+    int failedErrno;
+    DWORD driveMs;
+    DWORD waitedMs;
+    CRITICAL_SECTION lock;
+    HANDLE dataReady;           // auto-reset: a block was handed over, or done
+    HANDLE spaceReady;          // auto-reset: a block was written
+    HANDLE thread;
+};
+
+static DWORD WINAPI AsyncWriterEntry(LPVOID param)
+{
+    AsyncWriter *w = (AsyncWriter *)param;
+    for (;;)
+    {
+        EnterCriticalSection(&w->lock);
+        const bool have = w->count > 0;
+        const bool done = w->done;
+        const bool failed = w->failed;
+        const int at = w->head;
+        LeaveCriticalSection(&w->lock);
+
+        if (!have)
+        {
+            if (done)
+                break;
+            WaitForSingleObject(w->dataReady, 1000);
+            continue;
+        }
+
+        bool ok = true;
+        int why = 0;
+        DWORD took = 0;
+        if (!failed)
+        {
+            const DWORD from = GetTickCount();
+            ok = fwrite(w->memory + (size_t)at * WRITER_BLOCK, 1, w->sizes[at], w->file) == w->sizes[at];
+            why = errno;
+            took = GetTickCount() - from;
+        }
+
+        EnterCriticalSection(&w->lock);
+        w->head = (w->head + 1) % WRITER_BLOCKS;
+        w->count--;
+        w->driveMs += took;
+        if (!ok)
+        {
+            w->failed = true;
+            w->failedErrno = why;
+        }
+        LeaveCriticalSection(&w->lock);
+        SetEvent(w->spaceReady);
+    }
+    return 0;
+}
+
+// NULL if it can't be set up - the caller writes on its own thread then, as
+// it always used to.
+static AsyncWriter *AsyncWriterStart(FILE *file)
+{
+    AsyncWriter *w = (AsyncWriter *)malloc(sizeof(AsyncWriter));
+    if (w == NULL)
+        return NULL;
+    memset(w, 0, sizeof(*w));
+    w->file = file;
+    w->fillAt = -1;
+    w->memory = (char *)malloc((size_t)WRITER_BLOCK * WRITER_BLOCKS);
+    w->dataReady = CreateEvent(NULL, FALSE, FALSE, NULL);
+    w->spaceReady = CreateEvent(NULL, FALSE, FALSE, NULL);
+    InitializeCriticalSection(&w->lock);
+    if (w->memory != NULL && w->dataReady != NULL && w->spaceReady != NULL)
+        w->thread = CreateThread(NULL, 64 * 1024, AsyncWriterEntry, w, CREATE_SUSPENDED, NULL);
+
+    if (w->thread == NULL)
+    {
+        DeleteCriticalSection(&w->lock);
+        if (w->dataReady != NULL)
+            CloseHandle(w->dataReady);
+        if (w->spaceReady != NULL)
+            CloseHandle(w->spaceReady);
+        free(w->memory);
+        free(w);
+        return NULL;
+    }
+
+#ifdef _XBOX
+    // The housekeeping core: this thread sleeps in the drive almost all the
+    // time, and must not share a hardware thread with a connection's
+    // decryption (1 and 4) or the installer's inflating (3).
+    XSetThreadProcessor(w->thread, 5);
+#endif
+    ResumeThread(w->thread);
+    return w;
+}
+
+// Hands the block being filled to the drive.
+static void AsyncWriterPush(AsyncWriter *w)
+{
+    EnterCriticalSection(&w->lock);
+    w->sizes[w->fillAt] = w->fill;
+    w->count++;
+    LeaveCriticalSection(&w->lock);
+    w->fillAt = -1;
+    w->fill = 0;
+    SetEvent(w->dataReady);
+}
+
+// False once a write has failed.
+static bool AsyncWriterWrite(AsyncWriter *w, const char *data, size_t len)
+{
+    while (len > 0)
+    {
+        if (w->fillAt < 0)
+        {
+            // A free block to fill - waiting here is the one place the
+            // connection can still stand still for the drive.
+            DWORD from = 0;
+            for (;;)
+            {
+                EnterCriticalSection(&w->lock);
+                const bool failed = w->failed;
+                const bool room = w->count < WRITER_BLOCKS;
+                if (room)
+                    w->fillAt = (w->head + w->count) % WRITER_BLOCKS;
+                LeaveCriticalSection(&w->lock);
+                if (failed)
+                    return false;
+                if (room)
+                    break;
+                if (from == 0)
+                    from = GetTickCount() | 1;
+                WaitForSingleObject(w->spaceReady, 1000);
+            }
+            if (from != 0)
+                w->waitedMs += GetTickCount() - from;
+            w->fill = 0;
+        }
+
+        size_t take = WRITER_BLOCK - w->fill;
+        if (take > len)
+            take = len;
+        memcpy(w->memory + (size_t)w->fillAt * WRITER_BLOCK + w->fill, data, take);
+        w->fill += take;
+        data += take;
+        len -= take;
+        if (w->fill == WRITER_BLOCK)
+            AsyncWriterPush(w);
+    }
+    return true;
+}
+
+// Writes out what's queued, stops the thread and frees the writer. False if
+// any of it didn't reach the file. The file itself stays the caller's.
+static bool AsyncWriterFinish(AsyncWriter *w, HttpTransferStats *stats)
+{
+    if (w->fillAt >= 0 && w->fill > 0)
+        AsyncWriterPush(w);
+
+    EnterCriticalSection(&w->lock);
+    w->done = true;
+    LeaveCriticalSection(&w->lock);
+    SetEvent(w->dataReady);
+    WaitForSingleObject(w->thread, INFINITE);
+    CloseHandle(w->thread);
+
+    const bool ok = !w->failed;
+    if (!ok)
+    {
+        _snprintf(g_bodyError, sizeof(g_bodyError), "disk write failed (errno %d) - is the drive full?", w->failedErrno);
+        g_bodyError[sizeof(g_bodyError) - 1] = '\0';
+    }
+    if (stats != NULL)
+    {
+        stats->driveMs += w->driveMs;
+        stats->waitedMs += w->waitedMs;
+    }
+
+    DeleteCriticalSection(&w->lock);
+    CloseHandle(w->dataReady);
+    CloseHandle(w->spaceReady);
+    free(w->memory);
+    free(w);
+    return ok;
+}
+
 int DumpResponse(XboxTLSContext *ctx,
                  const std::string filename,
                  char *outputBuffer,
@@ -434,6 +678,11 @@ int DumpResponse(XboxTLSContext *ctx,
     {
         writeToBuffer = true;
     }
+
+    AsyncWriter *writer = NULL; // the body's way to the drive, once it's streaming to a file
+    HttpTransferStats *stats = ThreadStats();
+    const DWORD responseStart = GetTickCount();
+    DWORD ownWriteMs = 0; // writes made on this thread, when there's no writer
 
     FILE *file = NULL;
     if (!writeToBuffer)
@@ -534,6 +783,8 @@ int DumpResponse(XboxTLSContext *ctx,
             buffer[r - 1] = tempChar;
 
             headersDone = true;
+            if (stats != NULL)
+                stats->firstByteMs = GetTickCount() - responseStart;
             chunked = HeaderContainsToken(headerBuffer, headerEnd, "Transfer-Encoding", "chunked");
             body = headerBuffer + headerEnd;
             bodyLen = headerLen - headerEnd;
@@ -786,6 +1037,14 @@ int DumpResponse(XboxTLSContext *ctx,
 
     if (!chunked) // When dowloading from Vimms lair, we request that the files is NOT chunked, so this loop 99% of the time should be what is used to download the majority of the file (except the header of course!!!)
     {
+        // Split files keep writing on this thread: the split moves to a new
+        // FILE part way through a read, which the writer doesn't follow.
+        // Small bodies too: they fit the file's own buffer, and a thread and
+        // a queue for a cover or a page of JSON would be all cost.
+        if (!writeToBuffer && !splitFile && file != NULL &&
+            (totalContentLength == 0 || totalContentLength > 4ULL * 1024 * 1024))
+            writer = AsyncWriterStart(file);
+
         while ((r = XboxTLS_Read(ctx, buffer, BUFFER_SIZE)) > 0)
         {
             if (r + bytesWrittenToCurrentFile > MAX_FILE_SIZE && splitFile) // As both XFat and FAT32 only support 4GB files, all downloaded files must be split (file.001, file.002, etc..). Up to 9 parts (.009) is supported
@@ -838,10 +1097,23 @@ int DumpResponse(XboxTLSContext *ctx,
                 continue;
             }
 
-            if (fwrite(buffer, sizeof(buffer[0]), r, file) < r)
+            if (writer != NULL)
             {
-                printFunction("Failed to write to file\n");
-                goto failure;
+                if (!AsyncWriterWrite(writer, buffer, (size_t)r))
+                {
+                    printFunction("Failed to write to file\n");
+                    goto failure;
+                }
+            }
+            else
+            {
+                const DWORD writeFrom = GetTickCount();
+                if (fwrite(buffer, sizeof(buffer[0]), r, file) < r)
+                {
+                    printFunction("Failed to write to file\n");
+                    goto failure;
+                }
+                ownWriteMs += GetTickCount() - writeFrom;
             }
 
             totalWritten += r;
@@ -916,6 +1188,20 @@ int DumpResponse(XboxTLSContext *ctx,
         }
     }
 
+    // Everything received is on its way to the file before anything is said
+    // about how the download went - a caller resuming a cut-off range counts
+    // on the file holding all of it.
+    if (writer != NULL)
+    {
+        const bool wrote = AsyncWriterFinish(writer, stats);
+        writer = NULL;
+        if (!wrote)
+        {
+            printFunction("Failed to write to file: %s\n", g_bodyError);
+            goto failure;
+        }
+    }
+
     if (outputBufferSize != NULL)
     {
         *outputBufferSize = totalWritten;
@@ -938,6 +1224,12 @@ int DumpResponse(XboxTLSContext *ctx,
 
 redirectSuccess:
 
+    if (stats != NULL)
+    {
+        stats->driveMs += ownWriteMs;
+        stats->waitedMs += ownWriteMs;
+    }
+
     if (file != NULL)
         fclose(file);
 
@@ -957,6 +1249,15 @@ failure:
     if (responseCode == 200)
     {
         responseCode = -1;
+    }
+
+    // What did arrive is kept: a cut-off or cancelled range resumes from it.
+    if (writer != NULL)
+        AsyncWriterFinish(writer, stats);
+    if (stats != NULL)
+    {
+        stats->driveMs += ownWriteMs;
+        stats->waitedMs += ownWriteMs;
     }
 
     if (file != NULL)
@@ -1089,6 +1390,11 @@ int httpRequestHTTPS(const std::string URL, HttpMethod method, const char *reque
         return false;
     }
 
+    HttpTransferStats *stats = ThreadStats();
+    if (stats != NULL)
+        memset(stats, 0, sizeof(*stats));
+    const DWORD setupStart = GetTickCount();
+
     // Step 1: Network stack setup
     XNetStartupParams xnsp = {0};
     xnsp.cfgSizeOfStruct = sizeof(xnsp);
@@ -1182,6 +1488,8 @@ int httpRequestHTTPS(const std::string URL, HttpMethod method, const char *reque
         log_printf("TLS connection failed\n");
         goto downloadFailed;
     }
+    if (stats != NULL)
+        stats->setupMs = GetTickCount() - setupStart;
 
     // Step 6: Send GET/POST request
     char request[1024 * 5];

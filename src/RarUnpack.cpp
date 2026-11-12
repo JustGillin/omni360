@@ -476,3 +476,247 @@ RarUnpackResult RarUnpackMember(const unsigned char *head, unsigned long headLen
         remove(outPath);
     return result;
 }
+
+// ---------------------------------------------------------------------------
+// Folder games: every file, into a folder
+// ---------------------------------------------------------------------------
+
+#define FATX_NAME_MAX 42
+
+struct FolderSink
+{
+    FILE *file;
+    RarUnpackAllInput *in;
+    unsigned long long done;
+    unsigned long long total;
+    bool writeFailed;
+    bool cancelled;
+};
+
+static bool WriteFolderChunk(void *opaque, void **buffer, dmc_unrar_size_t *bufferSize,
+                             dmc_unrar_size_t uncompressedSize, dmc_unrar_return *err)
+{
+    FolderSink *s = (FolderSink *)opaque;
+    if (uncompressedSize > 0 && fwrite(*buffer, 1, (size_t)uncompressedSize, s->file) != (size_t)uncompressedSize)
+    {
+        s->writeFailed = true;
+        *err = DMC_UNRAR_WRITE_FAIL;
+        return false;
+    }
+    s->done += uncompressedSize;
+    if (!s->in->Unpacked(s->done, s->total))
+    {
+        s->cancelled = true;
+        *err = DMC_UNRAR_USER_CANCEL;
+        return false;
+    }
+    return true;
+}
+
+// name ('/' separated) less `skip` leading characters, as a path under
+// destDir with '\' - or false for one that's empty, climbs out with "..",
+// names a drive, or has a part too long for FATX.
+static bool FolderPathOf(const char *destDir, const char *name, size_t skip, char *out, size_t outSize)
+{
+    const char *rel = name + skip;
+    if (*rel == '\0' || *rel == '/' || strchr(rel, ':') != NULL)
+        return false;
+
+    int n = _snprintf(out, outSize, "%s\\", destDir);
+    if (n < 0 || (size_t)n >= outSize)
+        return false;
+    size_t at = (size_t)n;
+
+    const char *part = rel;
+    for (;;)
+    {
+        const char *end = strchr(part, '/');
+        size_t len = (end != NULL) ? (size_t)(end - part) : strlen(part);
+        if (len == 0 || len > FATX_NAME_MAX || (len == 1 && part[0] == '.') ||
+            (len == 2 && part[0] == '.' && part[1] == '.'))
+            return false;
+        if (at + len + 2 > outSize)
+            return false;
+        memcpy(out + at, part, len);
+        at += len;
+        if (end == NULL || end[1] == '\0')
+            break;
+        out[at++] = '\\';
+        part = end + 1;
+    }
+    out[at] = '\0';
+    return true;
+}
+
+// Every folder along path past its first `from` characters - destDir's own
+// already exist - and the last part too when lastToo, for a directory entry.
+static void MakeFoldersAlong(const char *path, size_t from, bool lastToo)
+{
+    char dir[600];
+    size_t len = strlen(path);
+    if (len >= sizeof(dir))
+        return;
+    memcpy(dir, path, len + 1);
+    for (size_t i = from; i < len; ++i)
+    {
+        if (dir[i] == '\\')
+        {
+            dir[i] = '\0';
+            CreateDirectoryA(dir, NULL);
+            dir[i] = '\\';
+        }
+    }
+    if (lastToo)
+        CreateDirectoryA(dir, NULL);
+}
+
+RarUnpackResult RarUnpackAll(RarUnpackAllInput *in, const char *destDir, void printFunction(const char *_format, ...))
+{
+    InputStream stream;
+    stream.in = in;
+    stream.size = in->Size();
+    stream.at = 0;
+
+    dmc_unrar_archive archive;
+    dmc_unrar_return r = dmc_unrar_archive_init(&archive);
+    if (r != DMC_UNRAR_OK)
+    {
+        printFunction("ERROR: couldn't set up the unpacker: %s\n", dmc_unrar_strerror(r));
+        return RAR_UNPACK_BAD_DATA;
+    }
+    archive.io.funcs = &g_streamFuncs;
+    archive.io.opaque = &stream;
+    archive.io.size = stream.size;
+
+    r = dmc_unrar_archive_open(&archive);
+    if (r != DMC_UNRAR_OK)
+    {
+        printFunction("ERROR: couldn't read the RAR's headers: %s\n", dmc_unrar_strerror(r));
+        return RAR_UNPACK_BAD_DATA;
+    }
+
+    const dmc_unrar_size_t count = dmc_unrar_get_file_count(&archive);
+    static char name[1024]; // one install at a time
+
+    // The top folder they all share, if they do, and the total to unpack.
+    char top[256] = "";
+    size_t topLen = 0;
+    bool shared = true;
+    unsigned long long total = 0;
+    for (dmc_unrar_size_t i = 0; i < count; ++i)
+    {
+        if (dmc_unrar_get_filename(&archive, i, name, sizeof(name)) == 0)
+        {
+            dmc_unrar_archive_close(&archive);
+            printFunction("ERROR: file %u in the RAR has no readable name\n", (unsigned)i);
+            return RAR_UNPACK_BAD_DATA;
+        }
+        const bool isDir = dmc_unrar_file_is_directory(&archive, i) ? true : false;
+        if (!isDir)
+            total += dmc_unrar_get_file_stat(&archive, i)->uncompressed_size;
+
+        const char *slash = strchr(name, '/');
+        const size_t first = (slash != NULL) ? (size_t)(slash - name) : strlen(name);
+        if (slash == NULL && !isDir)
+            shared = false; // a file at the top
+        else if (topLen == 0 && first > 0 && first < sizeof(top))
+        {
+            memcpy(top, name, first);
+            top[first] = '\0';
+            topLen = first;
+        }
+        else if (first != topLen || strncmp(name, top, topLen) != 0)
+            shared = false;
+    }
+    const size_t skip = (shared && topLen > 0) ? topLen + 1 : 0;
+    printFunction("[rar] %u entries, %I64u bytes to unpack%s%s\n", (unsigned)count, total,
+                  skip ? ", from under " : "", skip ? top : "");
+    in->HeadersRead(total);
+
+    const size_t CHUNK = 4 * 1024 * 1024;
+    void *chunk = malloc(CHUNK);
+    void *fileBuffer = malloc(CHUNK);
+    if (chunk == NULL || fileBuffer == NULL)
+    {
+        free(chunk);
+        free(fileBuffer);
+        dmc_unrar_archive_close(&archive);
+        printFunction("ERROR: out of memory for unpacking\n");
+        return RAR_UNPACK_WRITE_FAILED;
+    }
+
+    const size_t destLen = strlen(destDir) + 1;
+    FolderSink sink;
+    sink.file = NULL;
+    sink.in = in;
+    sink.done = 0;
+    sink.total = total;
+    sink.writeFailed = false;
+    sink.cancelled = false;
+
+    RarUnpackResult result = RAR_UNPACK_OK;
+    for (dmc_unrar_size_t i = 0; i < count && result == RAR_UNPACK_OK; ++i)
+    {
+        dmc_unrar_get_filename(&archive, i, name, sizeof(name));
+        const bool isDir = dmc_unrar_file_is_directory(&archive, i) ? true : false;
+        if (isDir && strlen(name) <= skip)
+            continue; // the top folder itself
+
+        char path[600];
+        if (!FolderPathOf(destDir, name, skip, path, sizeof(path)))
+        {
+            printFunction("ERROR: can't unpack \"%s\" - not a name the drive can hold\n", name);
+            result = RAR_UNPACK_UNSUPPORTED;
+            break;
+        }
+        MakeFoldersAlong(path, destLen, isDir);
+        if (isDir)
+            continue;
+
+        r = dmc_unrar_file_is_supported(&archive, i);
+        if (r != DMC_UNRAR_OK)
+        {
+            printFunction("ERROR: can't unpack %s: %s\n", name, dmc_unrar_strerror(r));
+            result = RAR_UNPACK_UNSUPPORTED;
+            break;
+        }
+
+        // Its solid block's start is the earliest this reads; the archive
+        // before that is done with.
+        dmc_unrar_file_block *block = dmc_unrar_get_file(&archive, i);
+        if (block != NULL)
+            in->Behind((block->solid_start != NULL ? block->solid_start : block)->start_pos);
+
+        sink.file = fopen(path, "wb");
+        if (sink.file == NULL)
+        {
+            printFunction("ERROR: couldn't create %s\n", path);
+            result = RAR_UNPACK_WRITE_FAILED;
+            break;
+        }
+        setvbuf(sink.file, (char *)fileBuffer, _IOFBF, CHUNK);
+
+        const unsigned long long before = sink.done;
+        dmc_unrar_size_t produced = 0;
+        r = dmc_unrar_extract_file_with_callback(&archive, i, chunk, CHUNK, &produced, true, &sink, WriteFolderChunk);
+        const bool closed = (fclose(sink.file) == 0);
+        sink.file = NULL;
+
+        const unsigned long long size = dmc_unrar_get_file_stat(&archive, i)->uncompressed_size;
+        if (sink.cancelled)
+            result = RAR_UNPACK_CANCELLED;
+        else if (sink.writeFailed || !closed)
+            result = RAR_UNPACK_WRITE_FAILED;
+        else if (r != DMC_UNRAR_OK || sink.done - before != size)
+            result = RAR_UNPACK_BAD_DATA;
+
+        if (result != RAR_UNPACK_OK && result != RAR_UNPACK_CANCELLED)
+            printFunction("ERROR: unpacking %s stopped at %I64u of %I64u bytes: %s\n", name, sink.done - before, size,
+                          sink.writeFailed || !closed ? "couldn't write the file" : dmc_unrar_strerror(r));
+    }
+
+    free(chunk);
+    free(fileBuffer);
+    dmc_unrar_archive_close(&archive);
+    return result;
+}

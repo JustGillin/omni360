@@ -36,6 +36,14 @@ void StartServiceCheck();
 // standing verdict; a poor one may set a probe going. Returns at once.
 void ReportConnectionRate(unsigned long long bytesPerSec);
 
+// A connection to host just went silent: nothing arrived for silentMs and it
+// was dropped. While the silence is likely still going on, fetches the same
+// megabyte from GitHub and logs how that went - quick means the silence is
+// archive.org's or the route's to it, slow or unreachable means the console's
+// own network stopped too. Log only; it sets no verdict. At most one a
+// minute, and a dozen a run. Returns at once.
+void ReportStall(const char *host, unsigned long silentMs);
+
 // The last probe's verdict, or "" if there is none or it has gone stale.
 // Safe before StartServiceCheck.
 void GetProbeNotice(char *out, size_t outSize);

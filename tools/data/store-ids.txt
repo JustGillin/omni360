@@ -1,0 +1,60 @@
+# Omni360 - Store discs matched by hand
+#
+# make_store_titles.py ties a disc to its title ID by name, against Redump's
+# datfile. These are the ones no rule there gets right. Two kinds of line:
+#
+#   <zip in the Redump collection, without .zip> = <title ID>
+#       The datfile has no entry by that name, or a wrong serial.
+#
+#   <other-set item>/<file> = <title ID> <the game's Redump-style title>
+#       A disc in XBOX_360_1.._6 whose name doesn't match the Redump title,
+#       or that Redump has no retail entry for. It is taken as that game,
+#       whatever the Redump collection holds.
+#
+# File names are exact, odd characters and all. Title IDs are the Xbox Live
+# catalog's (src/CatalogTitles.h), checked against Redump's serial where it
+# has one.
+
+# The datfile has no "Major League Baseball 2K13" at all.
+Major League Baseball 2K13 (USA) = 545408AB
+# Renamed in the datfile since the zips were: "...Baja 1000 - The Official
+# Game" (AV-2083) and "...Tsugu Monotachi" (DP-2002).
+Score International Baja 1000 - World Championship Off Road Racing (USA, Europe) = 41560823
+Oneechanbara VorteX - Imichi o Tsugu Mono-tachi (Japan) = 445007D2
+# The datfile gives it the first Lips' serial, MS-2184; the catalog's ID for
+# Number One Hits is its own.
+Lips - Number One Hits (Europe) = 4D5308AF
+
+# "13" for "XIII" (SN-2012).
+XBOX_360_3/King of Fighters 13 [RF].zip = 534E07DC King of Fighters XIII, The
+# "Especial" (LA-2040).
+XBOX_360_4/Monkey Island Especial Edition Collection [PAL][NTSCU].zip = 4C4107F8 Monkey Island - Special Edition Collection
+# Redump knows only the Japanese disc, "Biohazard - Revival Selection
+# (Biohazard 4)" (CC-2076) - the same title ID.
+XBOX_360_5/Resident Evil 4 HD [NTSCU].zip = 4343081C Resident Evil 4 HD
+XBOX_360_5/Resident Evil 4 HD [PAL].zip = 4343081C Resident Evil 4 HD
+# "Great Battle of" for "Great Battles of" (CY-2002).
+XBOX_360_1/Combat Wings The Great Battle of World War II [NTSCJ].rar = 435907D2 Combat Wings - The Great Battles of World War II
+# Short for "CSI - Crime Scene Investigation - Hard Evidence" (US-2057).
+XBOX_360_1/CSI Hard Evidence [RF].rar = 55530809 CSI - Crime Scene Investigation - Hard Evidence
+
+# Folder games, from the ZTM sets (mx360gc*-x360-ztm): a RAR of a game's
+# extracted files - default.xex and the rest - rather than a disc image. The
+# installer unpacks every file into <drive>:\Games\<name>. Taken only from
+# here, for games no disc set has: most never had a retail disc (Games on
+# Demand, Xbox Live Arcade, the Burger King discs aside).
+mx360gcxpt1-x360-ztm/Big.Bumpin.USA.X360-ZTM.rar = 4D538801 Big Bumpin
+mx360gcxpt1-x360-ztm/Book.of.Unwritten.Tales.2.USA.X360-ZTM.rar = 354807DE Book of Unwritten Tales 2, The
+mx360gcxpt1-x360-ztm/College.Hoops.2K7.USA.X360-ZTM.rar = 545407F1 College Hoops 2K7
+mx360gcpt2-x360-ztm/College.Hoops.2K8.USA.X360-ZTM.rar = 54540818 College Hoops 2K8
+mx360gcpt2-x360-ztm/Crysis.1.USA.X360-ZTM.rar = 45410968 Crysis
+mx360gcpt2-x360-ztm/Escapists.USA.X360-ZTM.rar = 464A07D1 Escapists, The
+mx360gcpt3-x360-ztm/Forza.Horizon.2.Presents.Fast.&.Furious.USA.X360-ZTM.rar = 4D530AB5 Forza Horizon 2 Presents Fast & Furious
+mx360gcpt3-x360-ztm/Legend.of.Kay.Anniversary.USA.X360-ZTM.rar = 354807DD Legend of Kay Anniversary
+mx360gcpt4-x360-ztm/Metal.Gear.Solid.Peace.Walker.HD.USA.X360-ZTM.rar = 4B4E083C Metal Gear Solid - Peace Walker HD Edition
+mx360gcpt4-x360-ztm/NCAA.March.Madness.08.USA.X360-ZTM.rar = 45410837 NCAA March Madness 08
+mx360gcpt4-x360-ztm/NHL.2K10.USA.X360-ZTM.rar = 54540853 NHL 2K10
+mx360gcpt5-x360-ztm/PocketBike.Racer.USA.X360-ZTM.rar = 4D538803 Pocketbike Racer
+mx360gcpt5-x360-ztm/Quake.2.USA.X360-ZTM.rar = 415607D6 Quake II
+mx360gcpt5-x360-ztm/Resident.Evil.0.HD.Remaster.EUR.X360-ZTM.rar = 43430842 Resident Evil 0
+mx360gcpt6-x360-ztm/Warface.USA.X360-ZTM.rar = 4D530AA5 Warface

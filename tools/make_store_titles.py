@@ -79,6 +79,8 @@ XBOX_OUT_HEADER = os.path.join(ROOT, "src", "XboxTitles.h")
 XBOX_BACKCOMPAT = os.path.join(ROOT, "tools", "data", "xbox_backcompat.txt")
 # What to call a game whose entry its discs name wrongly - see hand_names.
 NAMES = os.path.join(ROOT, "tools", "data", "store-names.txt")
+# Discs whose title ID no rule here finds - see hand_ids.
+IDS = os.path.join(ROOT, "tools", "data", "store-ids.txt")
 # From https://r-roms.github.io/Microsoft/microsoft-xbox.
 XBOX_ITEMS = ["numberssymbols", "a", "b", "c_part1", "c_part2", "d_part1", "d_part2", "e", "f", "g", "h",
               "i", "j", "k", "l", "m_part1", "m_part2", "n_part1", "n_part2", "o_part1", "o_part2", "p", "q",
@@ -97,6 +99,14 @@ ITEMS = ["numberssymbols", "a_part1", "a_part2", "b_part1", "b_part2", "c_part1"
 OTHER_ITEMS = ["XBOX_360_2", "XBOX_360_3", "XBOX_360_4", "XBOX_360_5", "XBOX_360_6",
                "XBOX_360_1", "XBOX_360_1_OTHER"]
 RAR_CACHE = os.path.join(ROOT, "tools", "cache", "store_rars.json")
+
+# Folder games: RARs of a game's extracted files, from the ZTM sets. Only the
+# ones named in store-ids.txt - see hand_ids.
+FOLDER_ITEMS = ["mx360gcxpt1-x360-ztm", "mx360gcpt2-x360-ztm", "mx360gcpt3-x360-ztm", "mx360gcpt4-x360-ztm",
+                "mx360gcpt5-x360-ztm", "mx360gcpt6-x360-ztm"]
+# Their names' region tags: "Crysis.1.USA.X360-ZTM.rar".
+FOLDER_REGIONS = {"USA": "USA", "EUR": "Europe", "JPN": "Japan", "JAP": "Japan", "GER": "Germany",
+                  "FRA": "France", "SPA": "Spain", "ITA": "Italy", "ASIA": "Asia", "KOR": "Korea"}
 
 # Its names' region tags, as Redump's regions. "RF" is region free.
 OTHER_REGIONS = {"RF": "World", "NTSCU": "USA", "PAL": "Europe", "NTSCJ": "Japan"}
@@ -517,6 +527,44 @@ def hand_names(path):
     return names
 
 
+ID_LINE = re.compile(r"^(.+?)\s+=\s+([0-9A-Fa-f]{8})(?:\s+(.+?))?\s*$")
+
+
+def hand_ids(path):
+    """The matches from tools/data/store-ids.txt, for the discs whose names
+    defeat every rule: a zip Redump's datfile no longer has by that name, and
+    a disc of the other set spelled unlike the Redump title - "King of
+    Fighters 13" for "XIII" - or one Redump has no retail entry for at all.
+
+    Also every folder game - a ZTM RAR - the Store offers: those are taken
+    from here alone.
+
+    Returns {zip stem: title ID} for the Redump collection's,
+    {"item/file": (title ID, Redump-style title)} for the other set's, and
+    the same for the folder games. A missing file is not an error, as with
+    hand_names."""
+    zips, others, folders = {}, {}, {}
+    if not os.path.exists(path):
+        return zips, others, folders
+    with io.open(path, encoding="utf-8") as f:
+        for line in f:
+            line = line.strip()
+            if not line or line.startswith("#"):
+                continue
+            m = ID_LINE.match(line)
+            if not m:
+                print("store-ids.txt: can't read \"%s\"" % line)
+                continue
+            name, tid, title = m.group(1), int(m.group(2), 16), m.group(3)
+            if title and any(name.startswith(item + "/") for item in OTHER_ITEMS):
+                others[name] = (tid, title)
+            elif title and any(name.startswith(item + "/") for item in FOLDER_ITEMS):
+                folders[name] = (tid, title)
+            else:
+                zips[name] = tid
+    return zips, others, folders
+
+
 def rename_games(store_games, names):
     """Applies the hand-kept names, in place: a game keeps the slot its discs
     put it in. The list isn't sorted by the names it ends up with anyway - a
@@ -683,11 +731,13 @@ def main():
                 retail.setdefault(key, []).append((title, regions, disc_no, entry[0], entry[1]))
 
     title_names = {} if xbox else load_title_names()  # 360 titles only
+    hand_zips, hand_others, hand_folders = ({}, {}, {}) if xbox else hand_ids(IDS)
+    hand_used = set()
 
     rows = []
     have = {}      # match key -> the regions the Redump collection has it in
     have_tid = {}  # title ID -> likewise
-    how = {"exact": 0, "same title": 0, "region": 0, "TitleNames.h": 0, "none": 0}
+    how = {"exact": 0, "same title": 0, "region": 0, "TitleNames.h": 0, "by hand": 0, "none": 0}
     unmatched = []
     not_compatible = 0
     for index, item in enumerate(items):
@@ -702,7 +752,11 @@ def main():
             title, regions, disc, groups = parse_name(stem)
 
             tid, category = 0, ""
-            if stem in games and games[stem][0]:
+            if stem in hand_zips:
+                tid, method = hand_zips[stem], "by hand"
+                category = games[stem][1] if stem in games else "Games"
+                hand_used.add(stem)
+            elif stem in games and games[stem][0]:
                 (tid, category), method = games[stem], "exact"
             else:
                 cands = by_title.get((title.lower(), disc), [])
@@ -743,10 +797,14 @@ def main():
             display = display_title(title)
             rows.append((sort_key(display), 0 if regions & {"USA", "World"} else 1, stem,
                          index, disc_no, region_bits, flags, cat, tid, int(f.get("size", 0)), zn, None, display))
-            for key in match_keys(title):
-                have.setdefault(key, set()).update(regions)
-            if tid:
-                have_tid.setdefault(tid, set()).update(regions)
+            # What the other set is checked against. A demo or a beta of a
+            # game isn't the game: the collection has only a demo of MX vs.
+            # ATV Untamed, and that used to keep the real disc out.
+            if not flags & 0x03 and category in ("", "Games"):
+                for key in match_keys(title):
+                    have.setdefault(key, set()).update(regions)
+                if tid:
+                    have_tid.setdefault(tid, set()).update(regions)
 
     total = sum(how.values())
     print("%d zips: %s" % (total, ", ".join("%s %d" % kv for kv in how.items())))
@@ -772,7 +830,13 @@ def main():
                 continue  # the small ones are fan translations, not games
             title, regions, disc_no, other = parse_other_name(zn)
             key = match_key(title)
-            versions = retail.get(key)
+            by_hand = hand_others.get("%s/%s" % (ident, zn))
+            if by_hand:
+                hand_used.add("%s/%s" % (ident, zn))
+                key = match_key(by_hand[1])
+                versions = [(by_hand[1], regions, disc_no, by_hand[0], "Games")]
+            else:
+                versions = retail.get(key)
             if not versions:
                 stripped = EDITION_WORDS.sub(" ", title)
                 if stripped != title:
@@ -782,7 +846,7 @@ def main():
                 continue  # not a retail game Redump knows, or no region to go on
             # A one-disc game's "DVD1" is the game; a "DVD2" of it is
             # something else - a bonus disc - and isn't a disc of the game.
-            if disc_no and all(v[2] == 0 for v in versions):
+            if disc_no and not by_hand and all(v[2] == 0 for v in versions):
                 if disc_no > 1:
                     continue
                 disc_no = 0
@@ -791,7 +855,7 @@ def main():
             held = set(have.get(key, set()))
             for v in versions:
                 held |= have_tid.get(v[3], set()) if v[3] else set()
-            if held and (held & {"USA", "World"} or not regions & {"USA", "World"}):
+            if not by_hand and held and (held & {"USA", "World"} or not regions & {"USA", "World"}):
                 continue  # the Redump collection has it already
             if (key, disc_no) in taken and is_rar:
                 continue  # a zip of it was taken already
@@ -849,6 +913,35 @@ def main():
             added.append((name, ident, zn))
             taken.add((key, disc_no))
     print("%d added from the other set (%d RARs)" % (len(added), sum(1 for a in added if a[2].lower().endswith(".rar"))))
+
+    # Folder games, from store-ids.txt. Each one's a compressed RAR, so it's
+    # flagged STORE_FLAG_UNPACKS: the page warns, and Install asks first.
+    folder_added = 0
+    folder_index = len(items) + len(other_items)
+    for index, ident in enumerate(FOLDER_ITEMS, folder_index):
+        wanted = {k.split("/", 1)[1]: v for k, v in hand_folders.items() if k.startswith(ident + "/")}
+        if not wanted:
+            continue
+        print("listing %s..." % ident)
+        files = {f["name"]: f for f in json.loads(fetch(FILES_URL % ident))["result"]}
+        for zn, (tid, title) in sorted(wanted.items()):
+            if zn not in files:
+                continue  # reported as unused below
+            hand_used.add("%s/%s" % (ident, zn))
+            tag = next((t for t in zn.split(".") if t in FOLDER_REGIONS), "USA")
+            regions = {FOLDER_REGIONS[tag]}
+            region_bits = 0
+            for r in regions:
+                region_bits |= 1 << REGIONS.index(r)
+            name = "%s (%s)" % (title, FOLDER_REGIONS[tag])
+            display = display_title(title)
+            rows.append((sort_key(display), 0 if regions & {"USA", "World"} else 1, name, index, 0, region_bits,
+                         0x08, CATEGORIES.index("Games") + 1, tid, int(files[zn].get("size", 0)), zn, name, display))
+            folder_added += 1
+    print("%d folder games added" % folder_added)
+
+    for name in sorted((set(hand_zips) | set(hand_others) | set(hand_folders)) - hand_used):
+        print("store-ids.txt: nothing is named \"%s\" any more" % name)
     if rar_skipped:
         print("%d RARs of games the Store lacks left out:" % len(rar_skipped))
         for zn, why in rar_skipped:
@@ -897,6 +990,8 @@ def main():
     L.append("// %d zips; title IDs matched: %s." % (total, ", ".join("%s %d" % kv for kv in how.items())))
     L.append("// Then %d from XBOX_360_1 to _6, for games the Redump collection lacks -" % len(added))
     L.append("// zips, and RARs that hold their disc image uncompressed.")
+    L.append("// Then %d folder games from the ZTM sets, named in tools/data/store-ids.txt -" % folder_added)
+    L.append("// RARs of a game's files, unpacked into <drive>:\\Games on the console.")
     if renamed:
         L.append("//")
         L.append("// %d game%s named by hand, where the discs sharing a title ID are not all" %
@@ -972,7 +1067,7 @@ def main():
     L.append("{")
     for item in ITEMS:
         L.append('    "microsoft_xbox360_%s",' % item)
-    for item in OTHER_ITEMS:
+    for item in OTHER_ITEMS + FOLDER_ITEMS:
         L.append('    "%s",' % item)
     L.append("};")
     L.append("")

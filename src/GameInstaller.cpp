@@ -30,6 +30,16 @@ DESCRIPTION : Downloads a Redump game's zip from archive.org and installs it as
 #include <string>
 
 #define PIECE_SIZE        (32ULL * 1024 * 1024)
+// archive.org's storage servers give a connection its own share - about
+// 1.3 MB/s each on a slow one, the same to a PC as to this console, and the
+// 255 KB receive buffer caps a fast one near 4 - and the shares add up: a PC
+// with this console's buffer got 2.6 MB/s on two, 5.4 on four and 8.2 on
+// six, from the server a download here was getting 2.8 from. So the number
+// of connections looks like the one lever on speed there is - from a PC.
+// On the console it isn't: four were tried, and each got half what two do
+// (0.5-1.0 MB/s against 1.3-1.7), the total stayed where it was, a
+// connection went silent every 40 seconds instead of every few minutes, and
+// archive.org answered some of the extra ones with 502s.
 #define CONNECTIONS       2
 #define CONNECTION_STAGGER_MS 1500 // four opened at the same instant all stalled once
 // Tries in a row that gain no ground before a piece is given up on. A try
@@ -893,8 +903,9 @@ static bool IsDiscImage(const RarEntry &entry)
 // The archive's disc image: its size, CRC, and where its data starts.
 static RarMemberResult ReadRarMember(const std::string &url, const char *auth, RarFormat format,
                                      unsigned long signatureLen, ZipMember *out, unsigned long long *outDataStart,
-                                     bool *outHasCrc, bool *outCompressed)
+                                     bool *outHasCrc, bool *outCompressed, bool *outFolder)
 {
+    *outFolder = false;
     const unsigned long HEAD = 65536;
     unsigned char *head = (unsigned char *)malloc(HEAD + 1);
     if (head == NULL)
@@ -923,6 +934,34 @@ static RarMemberResult ReadRarMember(const std::string &url, const char *auth, R
         }
         if (r != RAR_HEADER_OK)
             break;
+        // A folder game's first file is one of its own - default.xex, or
+        // whatever sorts first - rather than an image or the .dvd note
+        // that can come before one. Its files are all unpacked; see
+        // RarUnpackAll.
+        const size_t nameLen = strlen(entry.name);
+        if (entry.isFile && !IsDiscImage(entry) &&
+            !(nameLen > 4 && _stricmp(entry.name + nameLen - 4, ".dvd") == 0))
+        {
+            dprintf("[game] RAR%d starts with \"%s\" - a folder game%s%s\n", format == RAR_FORMAT_5 ? 5 : 4,
+                    entry.name, entry.encrypted ? ", encrypted" : "", entry.split ? ", split" : "");
+            if (entry.encrypted)
+                result = RAR_MEMBER_ENCRYPTED;
+            else if (entry.split)
+                result = RAR_MEMBER_SPLIT;
+            else
+            {
+                *outFolder = true;
+                *outCompressed = true;
+                out->name[0] = '\0';
+                out->method = 0;
+                out->crc = 0;
+                out->localHeader = 0;
+                *outDataStart = 0;
+                *outHasCrc = false;
+                result = RAR_MEMBER_OK;
+            }
+            break;
+        }
         if (entry.isFile && IsDiscImage(entry))
         {
             dprintf("[game] RAR%d member \"%s\": %I64u packed, %I64u unpacked, %s%s%s\n",
@@ -1010,7 +1049,13 @@ static std::string HostOf(const std::string &url); // with the server ranking, b
 // minute; at the TLS layer's usual two minutes, five of those cost ten
 // minutes of a Naruto download, and at 20 seconds thirty cost eleven of its
 // 32. A range of a zip starts in a second or two, so this can be short.
-#define STALL_TIMEOUT_MS   10000
+// 3 seconds since 2026-11-10 (was 10). The stalls are on the console's side -
+// a PC on the same router fetched the same file through four of them without
+// a pause - and they end sooner when the connections are dropped sooner: at
+// 10 seconds a resumed range crawled at 0.01 MB/s for ten more, at 3 it
+// restarts at about 0.5 MB/s, and a minute with a stall in it went from
+// 1.0-2.3 MB/s to about 2.5. Measured over four stalls in five minutes.
+#define STALL_TIMEOUT_MS   3000
 
 // Slow drops and failed retries on one server before moving to the next.
 // Cut-offs that resume don't count: every server cuts both connections every
@@ -1044,6 +1089,19 @@ struct Download
     unsigned long long windowRate[CONNECTIONS]; // bytes a second over the last full window, 0 if none yet
     bool tooSlow[CONNECTIONS];                  // dropped by the slow check
     bool trickled[CONNECTIONS];                 // and it was the server, not the connection
+    // Where the connections' time went besides receiving, summed over every
+    // request - see HttpTransferStats. For the line at the end of a download.
+    unsigned long long setupMs;   // opening connections
+    unsigned long long waitedMs;  // standing still for the drive
+    unsigned long long driveMs;   // the drive's own time writing pieces
+    unsigned long requests;
+    unsigned long silences;       // connections dropped for going silent
+    // The log's once-a-minute line: what the download is really averaging,
+    // stalls and all, so one run can be set against another.
+    DWORD startTick;
+    DWORD minuteTick;
+    unsigned long long minuteBytes; // movedBytes at minuteTick
+    unsigned long minuteSilences;   // silences at minuteTick
     bool failed;
     int failStatus;
     const bool *cancel;
@@ -1138,7 +1196,34 @@ static bool PieceProgress(unsigned long long done, unsigned long long, unsigned 
         if (report || slow)
             host = HostOf(d->servers[d->serverAt]);
     }
+
+    // Once a minute, whichever connection gets here first.
+    bool minute = false;
+    double minuteRate = 0.0, runRate = 0.0;
+    unsigned long minuteSilences = 0, runSilences = 0, runSeconds = 0;
+    if (now - d->minuteTick >= 60000)
+    {
+        minute = true;
+        minuteRate = (d->movedBytes - d->minuteBytes) / 1048576.0 / ((now - d->minuteTick) / 1000.0);
+        runSeconds = (now - d->startTick) / 1000;
+        runRate = runSeconds > 0 ? d->movedBytes / 1048576.0 / runSeconds : 0.0;
+        minuteSilences = d->silences - d->minuteSilences;
+        runSilences = d->silences;
+        d->minuteTick = now;
+        d->minuteBytes = d->movedBytes;
+        d->minuteSilences = d->silences;
+    }
     LeaveCriticalSection(&g_lock);
+
+    if (minute)
+    {
+        SYSTEMTIME utc;
+        GetSystemTime(&utc);
+        dprintf("[game] %02d:%02d:%02d UTC, %d connections: %.2f MB/s over the last minute (%lu went silent), "
+                "%.2f MB/s over %lu:%02lu so far (%lu went silent)\n",
+                utc.wHour, utc.wMinute, utc.wSecond, CONNECTIONS, minuteRate, minuteSilences, runRate,
+                runSeconds / 60, runSeconds % 60, runSilences);
+    }
 
     // One connection's honest throughput over a full window, for the check
     // that works out whether a slow download is archive.org or this line.
@@ -1146,7 +1231,7 @@ static bool PieceProgress(unsigned long long done, unsigned long long, unsigned 
         ReportConnectionRate(windowClosed);
 
     if (slow && peerRate > 0.0)
-        dprintf("[game] piece %lu on connection %d: %.2f MB/s from %s for %ds, against %.2f on the other "
+        dprintf("[game] piece %lu on connection %d: %.2f MB/s from %s for %ds, against %.2f on the best other "
                 "connection - dropping it to resume\n",
                 piece, slot + 1, rate, host.c_str(), SLOW_WINDOW_MS / 1000, peerRate);
     else if (slow)
@@ -1224,6 +1309,10 @@ static DWORD WINAPI ConnectionEntry(LPVOID param)
     const int slot = args->slot;
 
     XboxTLS_SetThreadIoTimeout(STALL_TIMEOUT_MS);
+
+    HttpTransferStats stats;
+    memset(&stats, 0, sizeof(stats));
+    HttpTrackThisThread(&stats);
 
     for (;;)
     {
@@ -1308,8 +1397,27 @@ static DWORD WINAPI ConnectionEntry(LPVOID param)
             status = httpRequestHTTPS(url, HTTP_GET, NULL, headers, target, NULL, &size, true, NULL, 0,
                                       QuietPrint, length - resumeFrom, PieceProgress);
 
+            // Gone silent, rather than closed or dropped by the slow check:
+            // ask another host for a megabyte while the silence lasts, to see
+            // whose it is. The log's answer, nothing more.
+            if (XboxTLS_LastReadTimedOutForThisThread() && !Stopping(d))
+            {
+                EnterCriticalSection(&g_lock);
+                const unsigned long nth = ++d->silences;
+                LeaveCriticalSection(&g_lock);
+                SYSTEMTIME utc;
+                GetSystemTime(&utc);
+                dprintf("[game] %02d:%02d:%02d UTC: connection %d went silent (%lu this download)\n", utc.wHour,
+                        utc.wMinute, utc.wSecond, slot + 1, nth);
+                ReportStall(HostOf(url).c_str(), STALL_TIMEOUT_MS);
+            }
+
             // Dropped by the slow check: what came is good, as if cut off.
             EnterCriticalSection(&g_lock);
+            d->setupMs += stats.setupMs;
+            d->waitedMs += stats.waitedMs;
+            d->driveMs += stats.driveMs;
+            d->requests++;
             const bool dropped = d->tooSlow[slot] && !Stopping(d);
             const bool trickled = d->trickled[slot];
             d->tooSlow[slot] = false;
@@ -1341,8 +1449,14 @@ static DWORD WINAPI ConnectionEntry(LPVOID param)
                 got = true;
                 DWORD ms = GetTickCount() - started;
                 double mb = (length - resumeFrom) / 1048576.0;
-                dprintf("[game] piece %lu on connection %d: %.1f MB in %.1fs, %.2f MB/s (%s)\n", index, slot + 1,
-                        mb, ms / 1000.0, ms > 0 ? mb / (ms / 1000.0) : 0.0, HostOf(url).c_str());
+                // The last request's own costs: opening the connection, the
+                // wait for the first byte, and any time it stood still for
+                // the drive - what a slow piece is slow from.
+                dprintf("[game] piece %lu on connection %d: %.1f MB in %.1fs, %.2f MB/s (%s) - connecting %.1fs, "
+                        "first byte %.1fs, waited on the drive %.1fs, drive writing %.1fs\n",
+                        index, slot + 1, mb, ms / 1000.0, ms > 0 ? mb / (ms / 1000.0) : 0.0, HostOf(url).c_str(),
+                        stats.setupMs / 1000.0, stats.firstByteMs / 1000.0, stats.waitedMs / 1000.0,
+                        stats.driveMs / 1000.0);
             }
             else if (!spoilt && status == 206 && onDisk > 0 && onDisk < length)
             {
@@ -1392,6 +1506,7 @@ static DWORD WINAPI ConnectionEntry(LPVOID param)
         SetEvent(d->pieceReady);
     }
 
+    HttpTrackThisThread(NULL);
     SetEvent(d->pieceReady);
     return 0;
 }
@@ -1684,12 +1799,20 @@ static int RankServers(GameJob *job, const std::string &redirected, const char *
 // drive holds the image and whatever download is still waiting, never both
 // whole.
 
-class DownloadingRar : public RarUnpackInput
+//
+// A folder game (RarUnpackAll) reads the whole archive for its headers before
+// it unpacks a byte, then reads it again: its pieces are kept until the
+// headers are read, then go as the unpacking passes them (Behind). Its bar is
+// the download and the unpacking together - the unpacking's size a guess
+// until the headers give it.
+class DownloadingRar : public RarUnpackAllInput
 {
 public:
-    DownloadingRar(Download *d_, ZipPieces *pieces_, GameJob *job_)
+    DownloadingRar(Download *d_, ZipPieces *pieces_, GameJob *job_, bool folder_ = false,
+                   unsigned long long unpackGuess_ = 0)
         : d(d_), pieces(pieces_), job(job_), failed(false), consumed(0), dropped(0), lastReport(0),
-          started(GetTickCount()), cache(NULL), cacheStart(0), cacheLen(0)
+          started(GetTickCount()), cache(NULL), cacheStart(0), cacheLen(0), folder(folder_), opened(false),
+          unpackTotal(unpackGuess_), unpackDone(0), unpackStarted(0)
     {
         cache = (unsigned char *)malloc(CACHE_SIZE);
     }
@@ -1732,6 +1855,33 @@ public:
         return done;
     }
 
+    void HeadersRead(unsigned long long unpacked)
+    {
+        opened = true;
+        unpackTotal = unpacked;
+        unpackStarted = GetTickCount();
+    }
+
+    void Behind(unsigned long long offset)
+    {
+        for (; (unsigned long long)(dropped + 1) * PIECE_SIZE <= offset; ++dropped)
+        {
+            char path[300];
+            pieces->PiecePath(dropped, path, sizeof(path));
+            DeleteFileA(path);
+        }
+    }
+
+    bool Unpacked(unsigned long long done, unsigned long long)
+    {
+        unpackDone = done;
+        Report(false);
+        EnterCriticalSection(&g_lock);
+        bool stop = Stopping(d);
+        LeaveCriticalSection(&g_lock);
+        return !stop;
+    }
+
     // Once more at the end, so the bar isn't left short.
     void Report(bool force)
     {
@@ -1742,9 +1892,29 @@ public:
 
         EnterCriticalSection(&g_lock);
         bool downloaded = (d->doneBytes >= d->total);
+        unsigned long long fetched = d->doneBytes;
+        for (int i = 0; i < CONNECTIONS; ++i)
+            fetched += d->inFlight[i];
         LeaveCriticalSection(&g_lock);
 
         const DWORD ms = now - started;
+        if (folder)
+        {
+            if (fetched > d->total)
+                fetched = d->total;
+            const unsigned long long whole = d->total + unpackTotal;
+            if (!opened)
+                SetPhase(job, GAME_STEP_DOWNLOADING, downloaded ? "Reading the archive" : "Downloading", fetched,
+                         whole, ms > 3000 ? fetched * 1000 / ms : 0);
+            else
+            {
+                const DWORD unpackMs = now - unpackStarted;
+                SetPhase(job, GAME_STEP_DOWNLOADING, "Unpacking", d->total + unpackDone, whole,
+                         unpackMs > 3000 ? unpackDone * 1000 / unpackMs : 0);
+            }
+            return;
+        }
+
         SetPhase(job, GAME_STEP_DOWNLOADING, downloaded ? "Unpacking" : "Downloading and unpacking", consumed,
                  d->total, ms > 3000 ? consumed * 1000 / ms : 0);
     }
@@ -1775,7 +1945,8 @@ private:
         cacheLen = len;
 
         // Keep the one before, in case a header sits across the boundary.
-        for (; dropped + 1 < index; ++dropped)
+        // A folder game's go by Behind instead.
+        for (; !folder && dropped + 1 < index; ++dropped)
         {
             char path[300];
             pieces->PiecePath(dropped, path, sizeof(path));
@@ -1813,6 +1984,11 @@ private:
     unsigned char *cache;
     unsigned long long cacheStart;
     unsigned long cacheLen;
+    bool folder;
+    bool opened;                      // a folder game's headers are read
+    unsigned long long unpackTotal;   // what it unpacks to
+    unsigned long long unpackDone;
+    DWORD unpackStarted;
 };
 
 // The unpacked image, written as pieces the size of the download's, for a
@@ -1887,6 +2063,101 @@ private:
     void *buffer;
 };
 
+// ---------------------------------------------------------------------------
+// A folder game, unpacked: moved into the Games folder
+// ---------------------------------------------------------------------------
+
+void FolderGamesRoot(const char *gamesPath, char *out, size_t outSize)
+{
+    char drive[16];
+    DriveOf(gamesPath, drive, sizeof(drive));
+    _snprintf(out, outSize, "%s\\" FOLDER_GAMES_FOLDER, drive[0] != '\0' ? drive : "Hdd1:");
+    out[outSize - 1] = '\0';
+}
+
+// The game's name as a FATX folder name: the characters it can hold, at most
+// 42 of them, no trailing dots or spaces. A name with nothing left is "Game".
+static void FolderNameFor(const char *name, char *out, size_t outSize)
+{
+    const size_t limit = (outSize - 1 < 42) ? outSize - 1 : 42;
+    size_t at = 0;
+    for (const unsigned char *p = (const unsigned char *)name; *p != '\0' && at < limit; ++p)
+    {
+        const unsigned char c = *p;
+        if (c < 0x20 || c >= 0x7F || strchr("<>:\"/\\|?*", c) != NULL)
+        {
+            if (c == ':' && at > 0 && out[at - 1] != ' ')
+                out[at++] = ' '; // "Combat Wings: The Great..." -> "Combat Wings The Great..."
+            continue;
+        }
+        if (c == ' ' && (at == 0 || out[at - 1] == ' '))
+            continue;
+        out[at++] = (char)c;
+    }
+    while (at > 0 && (out[at - 1] == ' ' || out[at - 1] == '.'))
+        at--;
+    out[at] = '\0';
+    if (at == 0)
+        _snprintf(out, outSize, "%s", "Game");
+}
+
+static bool PathExists(const char *path)
+{
+    return GetFileAttributesA(path) != (DWORD)-1;
+}
+
+// imageDir holds the game's files; they become <drive>:\Games\<name>, beside
+// any game of the same name already there rather than over it.
+static void FinishFolderGame(GameJob *job, const char *gamesPath, const char *dir, const char *imageDir)
+{
+    const GameRequest &req = job->request;
+
+    char xex[400];
+    _snprintf(xex, sizeof(xex), "%s\\default.xex", imageDir);
+    xex[sizeof(xex) - 1] = '\0';
+    if (!PathExists(xex))
+    {
+        dprintf("[game] %s unpacked, but there's no default.xex at its top\n", req.zipName);
+        EndStaging(dir, false);
+        FinishLocked(job, QUEUE_OUTCOME_FAILED, "Couldn't install", "The archive doesn't hold a game to launch.", true);
+        return;
+    }
+
+    char root[64], name[48], target[160];
+    FolderGamesRoot(gamesPath, root, sizeof(root));
+    CreateDirectoryA(root, NULL);
+    FolderNameFor(req.name, name, sizeof(name));
+    _snprintf(target, sizeof(target), "%s\\%s", root, name);
+    target[sizeof(target) - 1] = '\0';
+    for (int n = 2; PathExists(target) && n < 100; ++n)
+    {
+        char suffix[8];
+        _snprintf(suffix, sizeof(suffix), " (%d)", n);
+        suffix[sizeof(suffix) - 1] = '\0';
+        char shortName[48];
+        _snprintf(shortName, sizeof(shortName), "%.*s", (int)(42 - strlen(suffix)), name);
+        shortName[sizeof(shortName) - 1] = '\0';
+        _snprintf(target, sizeof(target), "%s\\%s%s", root, shortName, suffix);
+        target[sizeof(target) - 1] = '\0';
+    }
+
+    // The staging folder is on the same drive, so this is a rename.
+    if (!MoveFileA(imageDir, target))
+    {
+        dprintf("[game] couldn't move %s to %s (error %lu)\n", imageDir, target, GetLastError());
+        EndStaging(dir, false);
+        FinishLocked(job, QUEUE_OUTCOME_FAILED, "Couldn't write the game",
+                     "Check the drive the games folder is on, then try again.", true);
+        return;
+    }
+    dprintf("[game] installed as a folder game: %s\n", target);
+    EndStaging(dir, false);
+
+    // Not in Installed.txt: the library finds it by its title ID, and its
+    // folder is what an uninstall removes - see ProgressOfDisc in main.cpp.
+    FinishLocked(job, QUEUE_OUTCOME_INSTALLED, "Installed", "Play it from Omni360 or Aurora.", true);
+}
+
 static void RunJob(GameJob *job, const char *gamesPath)
 {
     const GameRequest &req = job->request;
@@ -1940,10 +2211,11 @@ static void RunJob(GameJob *job, const char *gamesPath)
     const bool isRar = (rarFormat != RAR_FORMAT_UNKNOWN);
     bool hasCrc = true;
     bool compressedRar = false;
+    bool folderGame = false; // a game's files rather than its disc - see RarUnpackAll
     if (isRar)
     {
         const RarMemberResult rar = ReadRarMember(url, auth, rarFormat, signatureLen, &member, &dataStart, &hasCrc,
-                                                  &compressedRar);
+                                                  &compressedRar, &folderGame);
         if (rar != RAR_MEMBER_OK)
         {
             FinishLocked(job, QUEUE_OUTCOME_FAILED, "Couldn't install",
@@ -1952,6 +2224,23 @@ static void RunJob(GameJob *job, const char *gamesPath)
                                                        : "The RAR's headers couldn't be read.",
                          true);
             return;
+        }
+
+        // The whole RAR is downloaded and every file in it unpacked, as a
+        // compressed RAR's image is. What it unpacks to isn't known until
+        // its headers are all read, at the end of the download; until then
+        // it's taken as half as big again, which the ZTM games mostly are
+        // well under (Crysis: 3.85GB packed, 4.35GB unpacked).
+        if (folderGame)
+        {
+            if (req.zipSize == 0)
+            {
+                FinishLocked(job, QUEUE_OUTCOME_FAILED, "Couldn't install", "The RAR's size isn't known.", true);
+                return;
+            }
+            _snprintf(member.name, sizeof(member.name), "%s", "(every file)");
+            member.packed = req.zipSize;
+            member.unpacked = req.zipSize + req.zipSize / 2;
         }
     }
     else
@@ -2115,6 +2404,15 @@ static void RunJob(GameJob *job, const char *gamesPath)
     d.done = done;
     d.doneBytes = stagedBytes;
     d.movedBytes = 0;
+    d.setupMs = 0;
+    d.waitedMs = 0;
+    d.driveMs = 0;
+    d.requests = 0;
+    d.silences = 0;
+    d.startTick = GetTickCount();
+    d.minuteTick = d.startTick;
+    d.minuteBytes = 0;
+    d.minuteSilences = 0;
     d.failed = false;
     d.failStatus = 0;
     d.cancel = &job->cancel;
@@ -2174,7 +2472,9 @@ static void RunJob(GameJob *job, const char *gamesPath)
         // of its own: hardware thread 1 (core 0, beside the UI; the disc
         // worker there mostly waits) and 4 (core 2, beside the cover worker).
         // Core 1 is this thread's, inflating the pieces as they arrive.
-        XSetThreadProcessor(threads[i], i == 0 ? 1 : 4);
+        // Past two they share those two: at a megabyte or two a second each,
+        // decryption is a small part of a hardware thread.
+        XSetThreadProcessor(threads[i], (i % 2 == 0) ? 1 : 4);
 #endif
         ResumeThread(threads[i]);
         started++;
@@ -2186,7 +2486,18 @@ static void RunJob(GameJob *job, const char *gamesPath)
     bool indexOk = haveIndex || (started > 0);
     RarUnpackResult unpacked = RAR_UNPACK_OK;
 
-    if (compressedRar && indexOk)
+    if (folderGame && indexOk)
+    {
+        DownloadingRar rar(&d, &pieces, job, true, member.unpacked);
+        unpacked = RarUnpackAll(&rar, imageDir, dprintf);
+        rar.Report(true);
+        indexOk = !rar.Failed();
+        DWORD unpackSeconds = (GetTickCount() - downloadStart) / 1000;
+        dprintf("[game] unpacking every file %s after %lu:%02lu (result %d)\n",
+                unpacked == RAR_UNPACK_OK ? "finished" : "stopped", (unsigned long)(unpackSeconds / 60),
+                (unsigned long)(unpackSeconds % 60), (int)unpacked);
+    }
+    else if (compressedRar && indexOk)
     {
         DownloadingRar rar(&d, &pieces, job);
         ImagePieceWriter writer(&imagePieces);
@@ -2316,6 +2627,13 @@ static void RunJob(GameJob *job, const char *gamesPath)
     DWORD downloadSeconds = (GetTickCount() - downloadStart) / 1000;
     dprintf("[game] downloaded %I64u MB in %lu:%02lu (%I64u MB of pieces finished)\n", d.movedBytes / (1024 * 1024),
             (unsigned long)(downloadSeconds / 60), (unsigned long)(downloadSeconds % 60), d.doneBytes / (1024 * 1024));
+    // Summed over the connections, so against CONNECTIONS times the minutes
+    // above: what of the download wasn't spent receiving.
+    if (d.requests > 0)
+        dprintf("[game] of that, over %d connections and %lu requests: %.2f MB/s overall, %lu connections went "
+                "silent, %.0fs opening connections, %.0fs waiting on the drive (%.0fs of drive writing)\n",
+                CONNECTIONS, d.requests, downloadSeconds > 0 ? d.movedBytes / 1048576.0 / downloadSeconds : 0.0,
+                d.silences, d.setupMs / 1000.0, d.waitedMs / 1000.0, d.driveMs / 1000.0);
 
     const bool imageOk = indexOk && (haveIndex ? true
                                      : compressedRar ? unpacked == RAR_UNPACK_OK
@@ -2358,6 +2676,12 @@ static void RunJob(GameJob *job, const char *gamesPath)
         else
             FinishLocked(job, QUEUE_OUTCOME_FAILED, "Download failed",
                          "archive.org stopped answering. Try again later.", true);
+        return;
+    }
+
+    if (folderGame)
+    {
+        FinishFolderGame(job, gamesPath, dir, imageDir);
         return;
     }
 

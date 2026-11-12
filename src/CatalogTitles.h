@@ -5,10 +5,10 @@
 // archive.org. Sorted the way the Store sorts, so a letter page can merge
 // them into its grid behind a filter.
 // Of the catalog's 3369 media-type-1 items, 1868 are games, not apps or avatar
-// items; the Store, the Original Xbox list and XBLA have 1556 of those,
-// leaving 32 here.
+// items; the Store, the Original Xbox list and XBLA have 1580 of those,
+// leaving 7 here.
 //
-// 280 more were marked by hand as not games anyone could own - duplicates
+// 281 more were marked by hand as not games anyone could own - duplicates
 // under a shortened name, title update discs, test products - and left out.
 // See tools/data/missing-games.txt.
 //
@@ -32,45 +32,20 @@ struct CatalogTitle
     char letter;            // its A-Z tile: 'A' to 'Z', or '#'
 };
 
-#define CATALOG_TITLE_COUNT       32
-#define CATALOG_MAX_LETTER_TITLES 5 // the most under one letter
+#define CATALOG_TITLE_COUNT       7
+#define CATALOG_MAX_LETTER_TITLES 1 // the most under one letter
 
 #ifdef CATALOG_TITLES_DATA
 
 static const CatalogTitle kCatalogTitles[CATALOG_TITLE_COUNT] =
 {
     { "All Round Hunter", 0x464F07DC, 0, 0, 0, 10, 0x00, 'A' },
-    { "Baja 1000", 0x41560823, 96, 2008, 32, 6, 0x00, 'B' },
-    { "Big Bumpin", 0x4D538801, 153, 2008, 32, 1, 0x00, 'B' },
     { "Big Game Hunter", 0x41560800, 12990, 2007, 38, 9, 0x00, 'B' },
-    { "The Book of Unwritten Tales 2", 0x354807DE, 113, 2015, 38, 1, 0x00, 'B' },
-    { "College Hoops 2K7", 0x545407F1, 4091, 2008, 35, 9, 0x00, 'C' },
-    { "College Hoops 2K8", 0x54540818, 5688, 2008, 38, 9, 0x00, 'C' },
-    { "Combat Wings: The Great Battles Of World War II", 0x435907D2, 11, 2013, 42, 6, 0x00, 'C' },
-    { "Crysis", 0x45410968, 32093, 2011, 42, 8, 0x00, 'C' },
-    { "CSI-Hard Evidence", 0x55530809, 4097, 2007, 38, 1, 0x00, 'C' },
     { "Dreamkiller", 0x415907D8, 1981, 2009, 38, 8, 0x00, 'D' },
-    { "The Escapists", 0x464A07D1, 14848, 2015, 42, 10, 0x00, 'E' },
-    { "Forza Horizon 2 Presents Fast & Furious", 0x4D530AB5, 42102, 2015, 45, 6, 0x00, 'F' },
     { "John Daly's ProStroke Golf", 0x4F4707D2, 0, 2010, 0, 9, 0x00, 'J' },
-    { "THE KING OF FIGHTERS XIII", 0x534E07DC, 4470, 2011, 42, 2, 0x00, 'K' },
-    { "Legend of Kay Anniversary", 0x354807DD, 971, 2015, 40, 7, 0x00, 'L' },
-    { "Lips: Number One Hits", 0x4D5308AF, 584, 2009, 30, 3, 0x00, 'L' },
-    { "METAL GEAR SOLID PEACE WALKER HD EDITION", 0x4B4E083C, 19827, 2011, 42, 1, 0x00, 'M' },
-    { "MLB 2K13", 0x545408AB, 7454, 2013, 42, 9, 0x00, 'M' },
-    { "Monkey Island Special Edition Collection", 0x4C4107F8, 1, 2011, 50, 5, 0x00, 'M' },
-    { "MX vs. ATV: Untamed", 0x545107DE, 28045, 2010, 40, 6, 0x00, 'M' },
-    { "NCAA March Madness08", 0x45410837, 209, 2008, 40, 9, 0x00, 'N' },
-    { "NHL 2K10", 0x54540853, 5925, 2009, 38, 9, 0x00, 'N' },
-    { "Pocketbike Racer", 0x4D538803, 235, 2008, 38, 6, 0x00, 'P' },
     { "Pro Evolution Soccer 6", 0x4B4E07DA, 28, 2008, 42, 9, 0x00, 'P' },
-    { "Quake 2", 0x415607D6, 38, 2008, 48, 8, 0x00, 'Q' },
-    { "Resident Evil 0", 0x43430842, 2885, 2016, 40, 1, 0x00, 'R' },
-    { "Resident Evil 4", 0x4343081C, 105031, 2011, 45, 1, 0x00, 'R' },
     { "Sledge Hammer", 0x565107D1, 10, 2012, 38, 6, 0x00, 'S' },
     { "Tinker", 0x584109EB, 0, 0, 0, 5, 0x00, 'T' },
-    { "\xE3\x81\x8A\xE5\xA7\x89\xE3\x83\x81\xE3\x83\xA3\xE3\x83\xB3\xE3\x83\x90\xE3\x83\xA9vorteX", 0x445007D2, 0, 2006, 0, 1, 0x00, 'V' },
-    { "Warface", 0x4D530AA5, 19295, 2799, 38, 8, 0x00, 'W' },
 };
 
 #endif // CATALOG_TITLES_DATA
