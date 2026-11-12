@@ -88,6 +88,9 @@ ENTRY = re.compile(r"<entry .*?</entry>", re.S)
 # won't do for both: an Original Xbox row carries a seventh field for its
 # system, so it stops short of the closing brace.
 GAME_ROW = re.compile(r'^\s*\{ "((?:[^"\\]|\\.)*)", 0x[0-9A-F]{8}, 0x[0-9A-F]+, \d+, \d+, \'.\'')
+# A StoreDisc row: every disc's own title ID, which a game's row doesn't
+# carry for the special editions and regional discs grouped under it.
+DISC_ROW = re.compile(r'^\s*\{ \d+, \d+, 0x[0-9A-F]+, 0x[0-9A-F]+, \d+, 0x([0-9A-F]{8}), \d+ULL, "')
 XBLA_ROW = re.compile(r'^\s*\{ "((?:[^"\\]|\\.)*)", "(?:[^"\\]|\\.)*", \d+ULL, 0x([0-9A-F]{8}),')
 
 # Apps and TV shows that claim a real genre, so nothing else here catches
@@ -259,6 +262,18 @@ def game_names(path):
     return out
 
 
+def disc_title_ids(path):
+    """Every title ID a disc in StoreTitles.h has - an edition grouped under
+    its game keeps its own there."""
+    out = set()
+    with open(path, encoding="latin-1") as f:
+        for line in f:
+            m = DISC_ROW.match(line)
+            if m and m.group(1) != "00000000":
+                out.add(int(m.group(1), 16))
+    return out
+
+
 def xbla_games():
     """{title ID: name} of the XBLA games."""
     out = {}
@@ -328,7 +343,7 @@ def main():
           % (len(games), len(entries) - len(games)))
 
     store, xbla = store_games(), xbla_games()
-    have_ids = set(store) | set(xbla)
+    have_ids = set(store) | set(xbla) | disc_title_ids(STORE_TITLES)
     # Redump joins two titles on one disc with " ~ " - "Resident Evil:
     # Revelations ~ Biohazard - Revelations" - so index each side as well.
     # Original Xbox games count as had too. The catalog carries the Xbox

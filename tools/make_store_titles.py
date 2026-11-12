@@ -81,6 +81,7 @@ XBOX_BACKCOMPAT = os.path.join(ROOT, "tools", "data", "xbox_backcompat.txt")
 NAMES = os.path.join(ROOT, "tools", "data", "store-names.txt")
 # Discs whose title ID no rule here finds - see hand_ids.
 IDS = os.path.join(ROOT, "tools", "data", "store-ids.txt")
+GROUPS = os.path.join(ROOT, "tools", "data", "store-groups.txt")
 # From https://r-roms.github.io/Microsoft/microsoft-xbox.
 XBOX_ITEMS = ["numberssymbols", "a", "b", "c_part1", "c_part2", "d_part1", "d_part2", "e", "f", "g", "h",
               "i", "j", "k", "l", "m_part1", "m_part2", "n_part1", "n_part2", "o_part1", "o_part2", "p", "q",
@@ -220,7 +221,20 @@ def base_name(display):
     return EDITION.sub("", display) or display
 
 
-def group_games(rows):
+def hand_groups(path):
+    """store-groups.txt: {disc's zip without its extension: title ID of the
+    game it belongs to}."""
+    out = {}
+    with open(path, encoding="utf-8") as f:
+        for line in f:
+            line = line.strip()
+            if line and not line.startswith("#"):
+                zip_stem, _, tid = line.rpartition(" = ")
+                out[zip_stem.strip()] = int(tid, 16)
+    return out
+
+
+def group_games(rows, joins=None):
     """The Store's games: the discs of each letter, in the table's order,
     gathered into games. A disc is a version of a game listed before it with
     the same name shown, or with a title ID one of its versions has -
@@ -234,9 +248,14 @@ def group_games(rows):
     games_cat = CATEGORIES.index("Games") + 1
     out = []
     letter_start = 0
+    joined = []  # (disc index, title ID of its game) - see store-groups.txt
     for i, row in enumerate(rows):
         display, flags, cat, tid, regions = row[12], row[6], row[7], row[8], row[5]
         if flags & 0x03 or cat not in (0, games_cat):
+            continue
+        stem = re.sub(r"\.(zip|rar)$", "", row[10].split("/")[-1])
+        if joins and stem in joins:
+            joined.append((i, joins.pop(stem)))
             continue
         if cat == 0 and NOT_GAMES.search(row[10]):
             continue
@@ -274,6 +293,16 @@ def group_games(rows):
             versions.insert(at, i)
         else:
             versions.append(i)
+
+    for i, target in joined:
+        game = next((g for g in out if g[2] == target or any(rows[v][8] == target for v in g[4])), None)
+        if game is None:
+            print("store-groups.txt: no game has title ID %08X for %s" % (target, rows[i][10]))
+            continue
+        game[4].append(i)
+        game[3] |= rows[i][5]
+    for stem in joins or {}:
+        print("store-groups.txt: no disc is named \"%s\"" % stem)
     return out
 
 
@@ -973,7 +1002,7 @@ def main():
             print("    %s: %s" % (zn, why))
 
     rows.sort()
-    store_games = group_games(rows)
+    store_games = group_games(rows, None if xbox else hand_groups(GROUPS))
 
     # Before the releases are built, so a disc whose title is no longer the
     # game's name shows as an edition on its own version - which is how the

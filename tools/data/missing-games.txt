@@ -12,7 +12,7 @@ catalog=312
 
 # Keep - it's a real game (32)
 445007D2=keep  # お姉チャンバラvorteX
-584109EB=keep  # Tinker
+584109EB=arcade  # Tinker - the catalog files it under Xbox LIVE Arcade; a free XBLA game, not a disc
 565107D1=keep  # Sledge Hammer
 43430842=keep  # Resident Evil 0
 4343081C=keep  # Resident Evil 4
@@ -20,6 +20,7 @@ catalog=312
 45410837=keep  # NCAA March Madness08
 54540853=keep  # NHL 2K10
 4B4E083C=duplicate  # METAL GEAR SOLID PEACE WALKER HD EDITION - a version of Metal Gear Solid HD Collection in the Store (ZTM folder game)
+54540880=duplicate  # Bully: Scholarship Edition - a second ID for the Scholarship Edition, grouped under Bully in the Store
 545107DE=keep  # MX vs. ATV: Untamed
 415907D8=keep  # Dreamkiller
 464A07D1=keep  # The Escapists

@@ -1,0 +1,22 @@
+# Omni360 - Store discs grouped by hand
+#
+# make_store_titles.py groups a disc with a game of the same letter by name or
+# title ID. These are regional releases under another name that neither
+# catches, often under another letter. Each line:
+#
+#   <disc's zip, without .zip> = <title ID of the game it's a version of>
+#
+# The disc keeps its own name, shown as the edition on its version.
+
+# "Matt Hazard no Gyakushuu" is the Japanese Eat Lead: The Return of Matt Hazard.
+Eat Lead - Matt Hazard no Gyakushuu (Japan) = 445007EB
+# Scene It? Bright Lights! Big Screen! in Italian, Spanish and German.
+Scene It Ciak! Si Gira! (Italy) = 575207F5
+Scene It Estrellas en la Pantalla Gigante (Spain) = 575207F5
+Scene It Ganz grosses Kino! (Germany) = 575207F5
+# Shin Sangoku Musou 7 is Dynasty Warriors 8 - Japan's count runs one behind.
+Shin Sangoku Musou 7 (Asia) (En,Zh) = 4B5607E5
+# The Taiwanese disc of the World release, under its own title ID.
+Carnival Games - Monkey See, Monkey Do (Taiwan) (En,Zh) = 54540890
+# Japan has the two halves of the name the other way round.
+Champion Jockey - Gallop Racer & GI Jockey (Japan) = 4B5607D5

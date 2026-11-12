@@ -5,10 +5,10 @@
 // archive.org. Sorted the way the Store sorts, so a letter page can merge
 // them into its grid behind a filter.
 // Of the catalog's 3369 media-type-1 items, 1868 are games, not apps or avatar
-// items; the Store, the Original Xbox list and XBLA have 1580 of those,
-// leaving 7 here.
+// items; the Store, the Original Xbox list and XBLA have 1631 of those,
+// leaving 6 here.
 //
-// 281 more were marked by hand as not games anyone could own - duplicates
+// 231 more were marked by hand as not games anyone could own - duplicates
 // under a shortened name, title update discs, test products - and left out.
 // See tools/data/missing-games.txt.
 //
@@ -32,7 +32,7 @@ struct CatalogTitle
     char letter;            // its A-Z tile: 'A' to 'Z', or '#'
 };
 
-#define CATALOG_TITLE_COUNT       7
+#define CATALOG_TITLE_COUNT       6
 #define CATALOG_MAX_LETTER_TITLES 1 // the most under one letter
 
 #ifdef CATALOG_TITLES_DATA
@@ -45,7 +45,6 @@ static const CatalogTitle kCatalogTitles[CATALOG_TITLE_COUNT] =
     { "John Daly's ProStroke Golf", 0x4F4707D2, 0, 2010, 0, 9, 0x00, 'J' },
     { "Pro Evolution Soccer 6", 0x4B4E07DA, 28, 2008, 42, 9, 0x00, 'P' },
     { "Sledge Hammer", 0x565107D1, 10, 2012, 38, 6, 0x00, 'S' },
-    { "Tinker", 0x584109EB, 0, 0, 0, 5, 0x00, 'T' },
 };
 
 #endif // CATALOG_TITLES_DATA

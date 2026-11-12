@@ -94,3 +94,4 @@ Virtua Fighter 5 Online ~ Virtua Fighter 5 (USA, Europe) (En,Ja,Fr,De,Es,It) = 5
 Wipeout 2 (USA) = 415608CC
 Wipeout - Create & Crash (USA) = 415608FF
 Wipeout - In the Zone (USA) = 415608AE
+Viva Pinata - Trouble in Paradise ~ Atsumare! Pinata 2 - Garden no Dai-Pinch (USA, Asia) = 4D53085F

@@ -20,3 +20,18 @@
 # this one on disc. Without this the entry reads Episodes from Liberty City,
 # because "Episodes" sorts before "IV".
 545407F2=Grand Theft Auto IV
+
+# Its disc carries the Japanese title too, after a "~".
+4D53085F=Viva Pinata: Trouble in Paradise
+
+# Its World disc carries the European name too, after a "~".
+54540890=Carnival Games: Monkey See, Monkey Do
+
+# World discs whose names carry the other regions' titles after a "~".
+5345083F=Anarchy Reigns
+4D5307DC=Crackdown
+4D5308BC=Crackdown 2
+555307FB=Pure Futbol
+434307D4=Resident Evil 5
+43430833=Resident Evil: Revelations
+534507EE=Virtua Fighter 5
