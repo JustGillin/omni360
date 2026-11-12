@@ -2877,7 +2877,7 @@ static void BuildStoreRows()
         for (int i = 0; i < n; ++i)
         {
             StoreTileView &tile = g_rowTiles[g_rowCount][i];
-            tile.titleId = g_rowGames[g_rowCount][i].titleId;
+            tile.titleId = StoreCoverKey(g_rowGames[g_rowCount][i].titleId, g_rowGames[g_rowCount][i].name);
             tile.name = g_rowGames[g_rowCount][i].name;
             tile.letter = g_rowGames[g_rowCount][i].letter;
             tile.indie = false;
@@ -3598,7 +3598,7 @@ static void OpenStoreLetter(Shell &shell, char letter, int section)
         shell.storeGameCount = ArcadeGamesForLetter((ArcadeSet)section, letter, g_arcadeGames, MAX_STORE_GAMES);
         for (int i = 0; i < shell.storeGameCount; ++i)
         {
-            g_storeTiles[i].titleId = indie ? 0 : g_arcadeGames[i]->titleId;
+            g_storeTiles[i].titleId = indie ? IndieCoverKey(g_arcadeGames[i]->name) : g_arcadeGames[i]->titleId;
             g_storeTiles[i].name = g_arcadeGames[i]->name;
             g_storeTiles[i].letter = g_arcadeGames[i]->letter;
             g_storeTiles[i].indie = indie;
@@ -3610,7 +3610,7 @@ static void OpenStoreLetter(Shell &shell, char letter, int section)
         shell.storeGameCount = FilteredGamesForLetter(letter, section);
         for (int i = 0; i < shell.storeGameCount; ++i)
         {
-            g_storeTiles[i].titleId = g_storeGames[i].titleId;
+            g_storeTiles[i].titleId = StoreCoverKey(g_storeGames[i].titleId, g_storeGames[i].name);
             g_storeTiles[i].name = g_storeGames[i].name;
             g_storeTiles[i].letter = g_storeGames[i].letter;
             g_storeTiles[i].indie = false;
@@ -3635,7 +3635,7 @@ static void OpenStoreCollection(Shell &shell, int collection)
     shell.storeGameCount = StoreCollectionGames(collection, g_storeGames, MAX_STORE_GAMES);
     for (int i = 0; i < shell.storeGameCount; ++i)
     {
-        g_storeTiles[i].titleId = g_storeGames[i].titleId;
+        g_storeTiles[i].titleId = StoreCoverKey(g_storeGames[i].titleId, g_storeGames[i].name);
         g_storeTiles[i].name = g_storeGames[i].name;
         g_storeTiles[i].letter = g_storeGames[i].letter;
         g_storeTiles[i].indie = false;
@@ -3881,7 +3881,7 @@ static bool OpenStoreSearch(Shell &shell)
         tile.unavailable = false; // a search looks through what the Store has
         if (hit.game != NULL)
         {
-            tile.titleId = hit.game->titleId;
+            tile.titleId = StoreCoverKey(hit.game->titleId, hit.game->name);
             tile.name = hit.game->name;
             tile.letter = hit.game->letter;
             tile.indie = false;
@@ -3889,7 +3889,7 @@ static bool OpenStoreSearch(Shell &shell)
         else
         {
             tile.indie = (hit.kind == STORE_HIT_XBLIG);
-            tile.titleId = tile.indie ? 0 : hit.arcade->titleId;
+            tile.titleId = tile.indie ? IndieCoverKey(hit.arcade->name) : hit.arcade->titleId;
             tile.name = hit.arcade->name;
             tile.letter = hit.arcade->letter;
         }
@@ -4203,7 +4203,7 @@ static void OpenStoreGame(Shell &shell, const StoreGame &game)
     g_similarCount = StoreSimilarGames(g_storeGame.titleId, g_similarGames, STORE_SIMILAR_MAX);
     for (int i = 0; i < g_similarCount; ++i)
     {
-        g_similarTiles[i].titleId = g_similarGames[i].titleId;
+        g_similarTiles[i].titleId = StoreCoverKey(g_similarGames[i].titleId, g_similarGames[i].name);
         g_similarTiles[i].name = g_similarGames[i].name;
         g_similarTiles[i].letter = g_similarGames[i].letter;
         g_similarTiles[i].indie = false;
@@ -4788,6 +4788,7 @@ static StoreGameView MakeStoreGameView(Shell &shell, const Library &lib)
     memset(&view, 0, sizeof(view));
     view.titleId = g_storeGame.titleId;
     view.indie = StoreGameIsIndie();
+    view.coverKey = view.indie ? IndieCoverKey(g_storeGame.name) : StoreCoverKey(g_storeGame.titleId, g_storeGame.name);
     view.name = g_storeGame.name;
 
     const StoreDetailsState state = GetStoreDetails(g_storeGame.titleId, &g_storeDetails);

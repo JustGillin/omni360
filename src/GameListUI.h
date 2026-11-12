@@ -625,7 +625,8 @@ enum StoreInstallState
 
 struct StoreGameView
 {
-    unsigned long titleId;  // for the wallpaper, box and screenshots
+    unsigned long titleId;  // for the wallpaper and screenshots
+    unsigned long coverKey; // for the box - StoreCoverKey
     bool indie;             // an indie game: its box is the indie banner beside its name
     const char *name;
     const char *meta;       // "Bungie Studios  ·  Microsoft  ·  Shooter"; NULL while loading or for none

@@ -22,7 +22,10 @@ DESCRIPTION : JPEGs and PNGs to ARGB pixels through stb_image, and the scaling
 #define STBI_NO_HDR
 #define STBI_NO_SIMD
 #define STBI_NO_THREAD_LOCALS
-#define STBI_MAX_DIMENSIONS 2048
+// The largest side decoded. 2560 rather than 2048 for LaunchBox's scan of the
+// Xbox Live Arcade Compilation Disc, 1519x2156 - about 13 MB decoded, on a
+// cover worker. Larger is refused rather than risk running out of memory.
+#define STBI_MAX_DIMENSIONS 2560
 #pragma warning(push, 0)
 #include "stb_image.h"
 #pragma warning(pop)

@@ -75,6 +75,17 @@ void RequestCoverArt(const unsigned long *titleIds, int count);
 unsigned long HomebrewCoverKey(const char *name);
 bool IsHomebrewCoverKey(unsigned long key);
 
+// What a Store game's cover is asked for by: its title ID, or for one with
+// none, a key made from its name - in a range no title ID uses - which the
+// worker looks for in LaunchBoxCovers.h alone.
+unsigned long StoreCoverKey(unsigned long titleId, const char *name);
+
+// An indie game's: every indie game shares XNA's title ID, so each is asked
+// for by a key made from its name, which LaunchBoxCovers.h is looked up by.
+// 0 when LaunchBox has no cover for that name - the tile is then the indie
+// banner with its name on it.
+unsigned long IndieCoverKey(const char *name);
+
 // The names behind the homebrew keys in the next RequestCoverArt list.
 // Replaces any earlier names.
 void SetHomebrewCoverNames(const char *const *names, int count);

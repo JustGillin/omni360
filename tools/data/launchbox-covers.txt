@@ -1,0 +1,72 @@
+# Omni360 - covers from LaunchBox, for games Xbox Live and xboxunity have none for
+#
+# make_launchbox_covers.py turns this into src/LaunchBoxCovers.h. The cover
+# worker asks images.launchbox-app.com/<file> when Xbox Live sends nothing or
+# its placeholder and xboxunity has no cover. Each line:
+#
+#   <title ID> = <LaunchBox image file>
+#   name:<the Store's name for it> = <LaunchBox image file>
+#
+# The name form is for a game with no title ID - the Store asks for its cover
+# by name. Files are the "Box - Front" images in LaunchBox's Metadata.xml
+# (gamesdb.launchbox-app.com/Metadata.zip), matched by hand on 2026-11-12,
+# North America or World first; the comment is LaunchBox's name and region.
+
+# All Round Hunter (United Kingdom, Wii)
+464F07DC = ec471f5e-dad8-418d-abe8-eeb631aca7c8.png
+# Hasbro Family Game Night (no region)
+454108DD = da358dfe-2fb5-4cf2-a710-97ab438d6fed.jpg
+# Hasbro Family Game Night 4: The Game Show (no region)
+name:Hasbro Family Game Night 4: The Game Show = ae22c110-d9be-40b0-84da-14aacaa54aab.jpg
+# Hasbro Family Game Night Fun Pack (no region)
+4541096F = 50518905-8af5-4077-81f1-4874f90e9480.jpg
+# Konami Classics Vol. 1 (no region)
+4B4E0812 = 40569fde-32ba-483c-970d-d20bdec17d5e.png
+# Konami Classics Vol. 2 (North America)
+4B4E0813 = 0aebd207-6d5e-435e-b418-3f3bd3877aa8.jpg
+# Love Football: Aoki Senshi-tachi no Kiseki (Japan)
+name:Love Football: Aoki Senshi-tachi no Kiseki = 5ca404f7-cf98-4509-a51d-08215ccbbc8b.jpg
+# Moe Moe 2-Ji Daisenryaku Ultra Deluxe (Japan)
+name:Moe Moe 2-Ji Daisenryaku Ultra Deluxe = 4feec8e5-7fd8-44ce-8809-2a8fdcfe1c3c.jpg
+# Momotarou Dentetsu 16 Gold (Japan)
+485507D3 = b8013b92-7577-485f-83fc-297c5e6b562d.jpg
+# Namco Museum: Virtual Arcade (Germany) - the North America scan is 2.2 MB
+4E4D07F3 = r2_40d2f3aa-b911-4352-a5e3-100287ae10dd.jpg
+# Nobunaga no Yabou: Tendou (Japan)
+4B4F07F9 = 28ca2fd3-e8b3-4a89-a7c8-f184a2b04349.jpg
+# PopCap Arcade Vol 1 (North America)
+504707D1 = 84895077-4027-4a9d-9530-36b485644960.jpg
+# PopCap Arcade Vol 2 (North America)
+504707D4 = r2_ad39f47e-0b7c-4297-92ea-00c247ad3368.jpg
+# Qubed (North America)
+494707FE = 206b3988-21f5-4937-8f99-a6c46f115ada.jpg
+# Sengoku hime 2: Senran no Yo Gunyuu Arashi no Gotoku (Japan)
+name:Sengoku-hime 2: Senran no Yo, Gunyuu Arashi no Gotoku = 9e887262-51fd-449c-bad0-445b8e07f3ed.jpg
+# Sharin no Kuni, Himawari no Shoujo (no region)
+465607E1 = c39cf299-b078-46f5-aaa3-d02cc4b93bd7.jpg
+# Steins;Gate: Senkei Kousoku no Phenogram (Japan)
+465607F3 = e3efb6dc-22f4-4c1c-988d-6c38372943cf.jpg
+# Summer Athletics: The Ultimate Challenge (North America)
+435607D4 = dc20a84c-0ccb-46a2-b802-9cb037e3e888.png
+# Super Star Karaoke (Korea)
+name:SuperStar Karaoke = 8af4e752-7f88-4802-9fbc-57cbd3bbeb7f.jpg
+# The Conveni 200X (Japan)
+484D07D1 = 38440f1a-b743-4cd4-921b-67d0002f5e46.jpg
+# The iDOLM@STER: Live for You! (Japan)
+name:The Idolmaster: Live for You! = 589b25d9-09fd-4108-af85-1e6cbb064f72.jpg
+# Tinker (no region, Windows)
+584109EB = a3982921-2c79-4514-97fa-da7c2b5784fe.jpg
+# Tom Clancy's Ghost Recon: Advanced Warfighter 2 (North America)
+5553081B = 560f6236-392f-4d7c-af6b-c7197592a95c.jpg
+# Triple Pack: Outland / From Dust / Beyond Good & Evil HD (Europe)
+name:Triple Pack: Outland + From Dust + Beyond Good & Evil HD = 3e59954a-d0fc-49d3-b17e-f7e8b6582342.png
+# Watchmen: The End Is Nigh: Parts 1 and 2 (North America)
+575207EA = r2_ada2f659-2d2c-422d-87b0-f4a795e2ae33.jpg
+# Winning Post World 2010 (Japan)
+4B4F07F7 = d5fbd18b-797f-4e33-bbdb-be5be9ba53f4.jpg
+# XBOX Live Arcade Compilation Disc (North America)
+4D530837 = 5d9718d2-3ec8-476c-b3d7-57142eca8e33.jpg
+# Xbox Live Arcade Game Pack (North America)
+4D5308DC = 1078ee2b-75f0-4ed1-a188-7d1a60c97ded.jpg
+# Xbox Live Arcade Unplugged: Volume 1 (North America)
+4D5307FC = a483f20d-b883-40d6-8c7d-aded512f3775.jpg

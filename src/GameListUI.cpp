@@ -7123,8 +7123,12 @@ void RenderStoreLetterFrame(StoreLetterView &view, const UiHint *hints, int hint
                 continue;
             }
 
-            const bool indie = view.tiles[item].indie;
-            D3DTexture *cover = indie ? IndieTile() : StoreCoverFor(view.tiles[item].titleId);
+            // An indie game with a LaunchBox cover is drawn as any other;
+            // without, it's the indie banner with its name on it.
+            D3DTexture *cover = (view.tiles[item].titleId != 0) ? StoreCoverFor(view.tiles[item].titleId) : NULL;
+            const bool indie = view.tiles[item].indie && cover == NULL;
+            if (indie)
+                cover = IndieTile();
             DrawTileArt(cover, NULL, x, y, L.tile, h);
             if (view.tiles[item].unavailable)
                 FillRound(x, y, L.tile, h, r, COL_TILE_UNAVAILABLE);
@@ -7158,10 +7162,12 @@ void RenderStoreLetterFrame(StoreLetterView &view, const UiHint *hints, int hint
     const float focusOY = focusY - (focusS - L.tile) * 0.5f;
     bool focusHasArt = false;
 
-    const bool focusIndie = (focusItem >= 0 && view.tiles[focusItem].indie);
+    const unsigned long focusKey = (focusItem >= 0) ? view.tiles[focusItem].titleId : 0;
+    D3DTexture *focusCover = (focusKey != 0) ? StoreCoverFor(focusKey) : NULL;
+    const bool focusIndie = (focusItem >= 0 && view.tiles[focusItem].indie && focusCover == NULL);
     if (focusItem >= 0)
     {
-        D3DTexture *cover = focusIndie ? IndieTile() : StoreCoverFor(view.tiles[focusItem].titleId);
+        D3DTexture *cover = focusIndie ? IndieTile() : focusCover;
         focusHasArt = (cover != NULL) && !focusIndie; // an indie tile's name is on its front, not under it
 
         ShadowRound(focusOX, focusOY + S(10.0f), focusS, focusS, r, S(26.0f), COL_SHADOW);
@@ -7610,8 +7616,8 @@ void RenderStoreGameFrame(StoreGameView &view, const UiHint *hints, int hintCoun
     // Its own cover, and those of the games across the row.
     unsigned long wantCovers[MAX_STORE_COVERS];
     int wantCount = 0;
-    if (!view.indie && view.titleId != 0 && StoreCoverFor(view.titleId) == NULL)
-        wantCovers[wantCount++] = view.titleId;
+    if (view.coverKey != 0 && StoreCoverFor(view.coverKey) == NULL)
+        wantCovers[wantCount++] = view.coverKey;
     for (int i = similarFirst; i < similarCount && i <= similarFirst + L.similarAcross + 1; ++i)
     {
         const unsigned long tid = view.similar[i].titleId;
@@ -7643,7 +7649,9 @@ void RenderStoreGameFrame(StoreGameView &view, const UiHint *hints, int hintCoun
     }
 
     ShadowRound(g_M.contentX, L.top + S(8.0f), L.boxS, L.boxS, r, S(22.0f), COL_SHADOW);
-    DrawTileArt(view.indie ? IndieTile() : StoreCoverFor(view.titleId), NULL, g_M.contentX, L.top, L.boxS, L.boxS);
+    D3DTexture *pageCover = (view.coverKey != 0) ? StoreCoverFor(view.coverKey) : NULL;
+    const bool indieBanner = view.indie && pageCover == NULL; // the indie banner, its name on it
+    DrawTileArt(indieBanner ? IndieTile() : pageCover, NULL, g_M.contentX, L.top, L.boxS, L.boxS);
 
     // The rating, as five dots.
     if (view.rating > 0.0f)
@@ -7751,7 +7759,7 @@ void RenderStoreGameFrame(StoreGameView &view, const UiHint *hints, int hintCoun
     const float textW = (L.textX + L.textW < textRight) ? L.textW : textRight - L.textX;
     if (TextInClip(L.titleY, LineHeight(1.9f) * 1.2f))
         TextFit(L.textX, L.titleY, 1.9f, WithAlpha(COL_TEXT, see), view.name, textW, true);
-    if (view.indie && TextInClip(L.top, L.boxS))
+    if (view.indie && view.coverKey == 0 && TextInClip(L.top, L.boxS))
         DrawIndieTileName(g_M.contentX, L.top, L.boxS, L.boxS, WithAlpha(COL_TEXT, see), view.name);
 
     if (TextInClip(L.metaY, LineHeight(0.86f) * 1.2f))
