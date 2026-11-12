@@ -58,3 +58,39 @@ mx360gcpt5-x360-ztm/PocketBike.Racer.USA.X360-ZTM.rar = 4D538803 Pocketbike Race
 mx360gcpt5-x360-ztm/Quake.2.USA.X360-ZTM.rar = 415607D6 Quake II
 mx360gcpt5-x360-ztm/Resident.Evil.0.HD.Remaster.EUR.X360-ZTM.rar = 43430842 Resident Evil 0
 mx360gcpt6-x360-ztm/Warface.USA.X360-ZTM.rar = 4D530AA5 Warface
+
+# Left at title ID 0 by every rule: Redump has since renamed or merged these
+# entries (or dropped their serial), so neither the name nor the title
+# matches. IDs from Redump's serial for another version of the same game, or
+# the Xbox Live catalog / TitleNames.h by name (2026-11-12).
+Army of Two - The 40th Day (USA, Australia) (En,Fr,De,Es,It) = 454108D8
+Carnival Games - Monkey See, Monkey Do ~ Carnival Games in Action! (World) (En,Fr,De,Es,It) = 54540890
+Civil War - A Nation Divided (USA) = 415607E4
+Def Jam Rapstar (France) = 4B4E0820
+Elder Scrolls IV, The - Oblivion - Edition Jeu de L'Annee (France) (Disc 1) = 425307D1
+Elder Scrolls IV, The - Oblivion - Edition Jeu de L'Annee (France) (Disc 2) = 425307D1
+Elder Scrolls IV, The - Oblivion - Game of the Year Edition (USA) (Disc 1) = 425307D1
+Elder Scrolls IV, The - Oblivion - Game of the Year Edition (USA) (Disc 1) (Rev 1) = 425307D1
+Elder Scrolls IV, The - Oblivion - Jubilaeumsausgabe (Germany) (Disc 1) = 425307D1
+Fable II - Game of the Year Edition (USA, Europe) (En,Zh,Ko,Pl,Cs,Hu) = 4D5307F1
+Fable II - Game of the Year Edition (Germany) = 4D5307F1
+Fable II - Game of the Year Edition (Spain) = 4D5307F1
+Fable II - Gioco dell'Anno (Italy) = 4D5307F1
+Hole in the Wall - Deluxe Edition (USA) = 55530885
+Idolmaster, The (Japan) = 4E4D07DB
+Idolmaster 2, The (Japan) = 4E4D0817
+John Woo Presents Stranglehold (World) (Beta) (2007-03-17) = 4D5707D2
+Jonah Lomu Rugby Challenge 2 (Europe) = 484507D7
+Marvel - Ultimate Alliance - Special Edition (USA) = 415607DA
+My SelfDefence Coach (USA, Europe) = 55530889
+No More Heroes - Eiyuu-tachi no Rakuen (Japan) = 4D5607D2
+Parrain 2, Le (France) = 45410866
+Pure Futbol - Authentic Soccer ~ Pure Football (USA, Europe) (En,Fr,De,Es,It,Nl) = 555307FB
+Resident Evil - Revelations ~ Biohazard - Revelations - Unveiled Edition (World) (En,Ja,Fr,De,Es,It,Nl,Pt,Pl,Ru) = 43430833
+Scene It Lights, Camera, Action! (Italy) = 4D530832
+Turning Point - Fall of Liberty (World) (Beta) (2008-01-26) = 434D07E0
+Turning Point - Fall of Liberty (Germany) = 434D0801
+Virtua Fighter 5 Online ~ Virtua Fighter 5 (USA, Europe) (En,Ja,Fr,De,Es,It) = 534507EE
+Wipeout 2 (USA) = 415608CC
+Wipeout - Create & Crash (USA) = 415608FF
+Wipeout - In the Zone (USA) = 415608AE

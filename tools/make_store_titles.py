@@ -202,6 +202,13 @@ def letter_of(display):
     return c.upper() if "a" <= c <= "z" else "#"
 
 
+# Discs Redump gives no category that still aren't games - set-up and
+# software discs, magazine coverdiscs, add-on content discs and the Xbox Live
+# Arcade compilation discs - by file name, which keeps the bracketed parts
+# ("Mafia II (Russia) (Add-On Content Disc)"). Tagged ones are left out by category.
+NOT_GAMES = re.compile(r"Experience Disc|HD DVD Player|Software Disc|Magazine|Add-On|^Xbox Live Arcade \(")
+
+
 def group_games(rows):
     """The Store's games: the discs of each letter, in the table's order,
     gathered into games. A disc is a version of a game listed before it with
@@ -219,6 +226,8 @@ def group_games(rows):
     for i, row in enumerate(rows):
         display, flags, cat, tid, regions = row[12], row[6], row[7], row[8], row[5]
         if flags & 0x03 or cat not in (0, games_cat):
+            continue
+        if cat == 0 and NOT_GAMES.search(row[10]):
             continue
         letter = letter_of(display)
         if not out or out[-1][0] != letter:
