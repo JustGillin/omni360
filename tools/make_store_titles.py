@@ -209,6 +209,17 @@ def letter_of(display):
 NOT_GAMES = re.compile(r"Experience Disc|HD DVD Player|Software Disc|Magazine|Add-On|^Xbox Live Arcade \(")
 
 
+# A special edition of a game: Game of the Year, Ultimate, Scholarship and
+# the like. It's grouped under the game itself when the Store has it, and
+# shown as the edition on its own versions.
+EDITION = re.compile(r"(?: - |: )(?!.*(?: - |: ))[^-:]*(?:Edition|Director's Cut|Edizione|Edicion|Jubilaeumsausgabe|Gioco dell'Anno)[^-:]*$")
+
+
+def base_name(display):
+    """The game a special edition is of - itself when it isn't one."""
+    return EDITION.sub("", display) or display
+
+
 def group_games(rows):
     """The Store's games: the discs of each letter, in the table's order,
     gathered into games. A disc is a version of a game listed before it with
@@ -234,9 +245,14 @@ def group_games(rows):
             letter_start = len(out)
 
         game = None
+        edition = False  # joining the game as a special edition of it
         for g in reversed(out[letter_start:]):
             if g[1] == display or (tid and any(rows[v][8] == tid for v in g[4])):
                 game = g
+                break
+            if base_name(g[1]) == base_name(display):
+                game = g
+                edition = True
                 break
         if game is None:
             game = [letter, display, tid, 0, []]
@@ -244,7 +260,7 @@ def group_games(rows):
 
         usa = bool(regions & usa_or_world)
         versions = game[4]
-        if usa and versions and not rows[versions[0]][5] & usa_or_world:
+        if usa and versions and not rows[versions[0]][5] & usa_or_world and not edition:
             game[1] = display
             if tid:
                 game[2] = tid
