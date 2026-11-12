@@ -11,6 +11,8 @@ struct StoreCollection
 };
 
 #define STORE_COLLECTION_COUNT 24
+// With the spotlight, when there is one: kStoreCollections' last entry.
+#define STORE_COLLECTION_ENTRIES 25
 
 #ifdef STORE_COLLECTIONS_DATA
 
@@ -40,6 +42,7 @@ static const StoreCollection kStoreCollections[] =
     { "Sonic", 0x53450848, 180, 10 },
     { "Dragon Ball", 0x4E4D0862, 190, 8 },
     { "Naruto", 0x4E4D085C, 198, 6 },
+    { "Only on Xbox 360", 0x4156089C, 204, 24 },
 };
 
 // Title IDs, a collection after another, oldest first - each a game
@@ -95,7 +98,7 @@ static const unsigned long kStoreCollectionGames[] =
     // Grand Theft Auto
     0x5454000E, // Grand Theft Auto III
     0x5454000F, // Grand Theft Auto: Vice City
-    0x545407F2, // Grand Theft Auto: Episodes from Liberty City
+    0x545407F2, // Grand Theft Auto IV
     0x545408A7, // Grand Theft Auto V
     0x545408B8, // Grand Theft Auto: San Andreas
     // Forza
@@ -213,7 +216,7 @@ static const unsigned long kStoreCollectionGames[] =
     0x4B4D07F6, // Saints Row IV
     0x4B4D0800, // Saints Row: Gat out of Hell
     // Resident Evil
-    0x434307D4, // Resident Evil 5 ~ Biohazard 5
+    0x434307D4, // Resident Evil 5
     0x43430819, // Resident Evil 6
     0x43430840, // Resident Evil: Revelations 2
     // Guitar Hero
@@ -274,6 +277,31 @@ static const unsigned long kStoreCollectionGames[] =
     0x4E4D0842, // Naruto Shippuden: Ultimate Ninja Storm Generations
     0x4E4D085C, // Naruto Shippuden: Ultimate Ninja Storm 3
     0x4E4D0868, // Naruto Shippuden: Ultimate Ninja Storm Revolution
+    // Only on Xbox 360
+    0x4156084C, // Transformers: War for Cybertron
+    0x4156089C, // Transformers: Fall of Cybertron
+    0x415608A4, // Transformers: Dark of the Moon
+    0x41560834, // Transformers: Revenge of the Fallen
+    0x415607F1, // Transformers: The Game
+    0x41560881, // Spider-Man: Shattered Dimensions
+    0x41560815, // Spider-Man: Web of Shadows
+    0x415608B2, // Spider-Man: Edge of Time
+    0x415607FA, // Spider-Man: Friend or Foe
+    0x415607E2, // Spider-Man 3
+    0x555307E5, // Naruto: Rise of a Ninja
+    0x55530825, // Naruto: The Broken Bond
+    0x4E4D0842, // Naruto Shippuden: Ultimate Ninja Storm Generations
+    0x415608AF, // GoldenEye 007: Reloaded
+    0x45410809, // The Simpsons Game
+    0x41560845, // Blur
+    0x53450858, // Captain America: Super Soldier
+    0x53450845, // Thor: God of Thunder
+    0x534507F2, // Iron Man
+    0x415608AA, // X-Men: Destiny
+    0x41560816, // X-Men Origins: Wolverine - Uncaged Edition
+    0x4156081F, // 007: Blood Stone
+    0x4E4D0826, // Dragon Ball: Raging Blast 2
+    0x415607DD, // Tony Hawk's Project 8
 };
 
 #endif // STORE_COLLECTIONS_DATA

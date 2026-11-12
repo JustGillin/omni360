@@ -4,6 +4,10 @@ series each, its games oldest first - from tools/data/collections.json.
     python tools/make_collections.py          check the file and write the header
     python tools/make_collections.py --art    ...and that each card's game has a wallpaper (asks Xbox Live)
 
+"spotlight", beside "collections", is one more the same way - "Only on Xbox
+360" - drawn as a banner over them, and left out of a game page's "More like
+this". It's optional.
+
 A collection is a name, a game whose wallpaper is its card ("art": a 360
 game - Xbox Live has none for Original Xbox ones), and its games' title IDs
 in release order. Title IDs are as tools/featured.py search finds them, so
@@ -43,13 +47,16 @@ def c_string(s):
 def main():
     shown = featured.by_id(featured.load_games())
     with open(SOURCE, encoding="utf-8") as f:
-        collections = json.load(f)["collections"]
+        data = json.load(f)
+    collections = data["collections"]
+    spotlight = data.get("spotlight")
+    entries = collections + ([spotlight] if spotlight else [])
 
     errors = []
     if not 1 <= len(collections) <= MAX_COLLECTIONS:
         errors.append("needs 1 to %d collections" % MAX_COLLECTIONS)
     names = set()
-    for c in collections:
+    for c in entries:
         name, art, games = c.get("name", ""), c.get("art", ""), c.get("games", [])
         where = '"%s"' % name
         if not name or name in names:
@@ -68,7 +75,7 @@ def main():
             errors.append("%s: its art, %s, isn't one of its games" % (where, art))
 
     if "--art" in sys.argv:
-        for c in collections:
+        for c in entries:
             try:
                 with urllib.request.urlopen(featured.ART_URL % c["art"].lower(), timeout=10) as r:
                     ok = r.status == 200
@@ -95,13 +102,15 @@ def main():
          "};",
          "",
          "#define STORE_COLLECTION_COUNT %d" % len(collections),
+         "// With the spotlight, when there is one: kStoreCollections' last entry.",
+         "#define STORE_COLLECTION_ENTRIES %d" % len(entries),
          "",
          "#ifdef STORE_COLLECTIONS_DATA",
          "",
          "static const StoreCollection kStoreCollections[] =",
          "{"]
     first = 0
-    for c in collections:
+    for c in entries:
         L.append('    { "%s", 0x%s, %d, %d },' % (c_string(c["name"]), c["art"], first, len(c["games"])))
         first += len(c["games"])
     L += ["};", "",
@@ -109,7 +118,7 @@ def main():
           "// StoreGameByTitleId finds.",
           "static const unsigned long kStoreCollectionGames[] =",
           "{"]
-    for c in collections:
+    for c in entries:
         L.append("    // " + c["name"])
         for tid in c["games"]:
             # The compiler reads comments in the system's code page: ASCII only.
@@ -118,7 +127,7 @@ def main():
 
     with open(OUT_HEADER, "w", encoding="utf-8", newline="\r\n") as f:
         f.write("\n".join(L))
-    print("%d collections, %d games -> %s" % (len(collections), first, os.path.relpath(OUT_HEADER, ROOT)))
+    print("%d collections%s, %d games -> %s" % (len(collections), " and the spotlight" if spotlight else "", first, os.path.relpath(OUT_HEADER, ROOT)))
     return 0
 
 

@@ -58,6 +58,10 @@ const char *StoreCollectionName(int collection);
 unsigned long StoreCollectionArt(int collection);
 int StoreCollectionGames(int collection, StoreGame *out, int maxGames);
 
+// The spotlight over the Collections - "Only on Xbox 360" - as a collection
+// the calls above take, though not one of StoreCollectionCount's; -1 for none.
+int StoreSpotlightCollection();
+
 // A game page's "More like this": the rest of its series, oldest first, then
 // the most rated games of its genre - Kinect ones for a Kinect game and only
 // for one, family ones for a family game - with its publisher's few ahead.

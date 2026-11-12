@@ -5210,6 +5210,8 @@ struct StoreLayout
     int perRow;
     float bottom;          // the foot of the last row of letters
 
+    float spotY, spotW, spotH; // the spotlight's banner; spotH 0 for none
+
     float collLabelY;      // "Collections"
     float collY;           // its cards, wide
     float collW, collH, collGap;
@@ -5224,17 +5226,16 @@ struct StoreLayout
 
 static void RequestMissingStoreCovers(const unsigned long *want, int wantCount); // with the letter pages', below
 
-static StoreLayout LayOutStore()
+static StoreLayout LayOutStore(bool spotlight = false)
 {
     StoreLayout L;
     L.gap = S(18.0f);
     L.labelY = g_M.listYTitleOnly;
     L.top = g_M.listYTitleOnly + LineHeight(1.05f) * 1.3f + S(10.0f);
 
-    // The A to Z letters are always below the fold, so this page always
-    // scrolls and the scrollbar's room is always kept: everything across it
-    // is laid out inside this rather than the full contentW.
-    const float width = g_M.contentW - ScrollGutter();
+    // No scrollbar here: the page centres what has focus, so there's always
+    // something showing above and below, and it gets the full width.
+    const float width = g_M.contentW;
 
     // Room beside it for two landscape tiles across, wide enough for a name.
     L.heroW = floorf(width * 0.58f);
@@ -5265,7 +5266,13 @@ static StoreLayout LayOutStore()
     L.collGap = L.rowGap;
     L.collW = floorf((width - (L.collAcross - 1) * L.collGap) / L.collAcross);
     L.collH = floorf(L.collW * 9.0f / 16.0f); // a wallpaper's shape
-    L.collLabelY = L.bottom + S(34.0f);
+    // The spotlight, across the page: lower than a featured tile, taller
+    // than a Collections card, so it reads as neither.
+    L.spotY = L.bottom + S(34.0f);
+    L.spotW = width;
+    L.spotH = spotlight ? floorf(L.collH * 1.3f) : 0.0f;
+
+    L.collLabelY = spotlight ? L.spotY + L.spotH + S(34.0f) : L.bottom + S(34.0f);
     L.collY = L.collLabelY + L.rowLabelH;
 
     L.rowsY = L.collY + L.collH + S(34.0f);
@@ -6028,10 +6035,19 @@ static bool StoreFocusRect(const StoreLayout &L, const StorePageView &view, int 
         *w = L.btnW;
         *h = L.btnH;
     }
-    else if (i < STORE_FOCUS_COLLECTIONS)
+    else if (i < STORE_FOCUS_SPOTLIGHT)
     {
         StoreLetterRect(L, i - STORE_FOCUS_LETTERS, x, y);
         *w = *h = L.cell;
+    }
+    else if (i == STORE_FOCUS_SPOTLIGHT)
+    {
+        if (view.spotlight.count == 0)
+            return false;
+        *x = g_M.contentX;
+        *y = L.spotY;
+        *w = L.spotW;
+        *h = L.spotH;
     }
     else if (i < STORE_FOCUS_ROWS)
     {
@@ -6094,6 +6110,18 @@ static void DrawCollectionCard(const StoreCollectionView &c, float x, float y, f
     FillRoundGradient(x, y + h * 0.4f, w, h * 0.6f, g_M.radius, 0x00000000, STORE_SHADE, true);
 }
 
+// The spotlight's banner: its game's wallpaper, dark at the left where its
+// name sits and clear to the right.
+static void DrawSpotlightBanner(const StoreCollectionView &c, float x, float y, float w, float h)
+{
+    const StoreArtTexture *art = StoreArtFor(c.art, STORE_ART_BACKGROUND);
+    if (art != NULL)
+        DrawStoreArt(art, x, y, w, h);
+    else
+        FillRoundGradient(x, y, w, h, g_M.radius, COL_SURFACE_HI, COL_SURFACE, true);
+    FillRoundGradient(x, y, w * 0.65f, h, g_M.radius, 0xE6000000, 0x00000000, false);
+}
+
 void RenderStoreFrame(StorePageView &view, const UiHint *hints, int hintCount)
 {
     if (!g_Initialized)
@@ -6104,7 +6132,8 @@ void RenderStoreFrame(StorePageView &view, const UiHint *hints, int hintCount)
     if (view.focus < 0) view.focus = 0;
     if (view.focus >= STORE_FOCUS_COUNT) view.focus = STORE_FOCUS_COUNT - 1;
 
-    const StoreLayout L = LayOutStore();
+    const bool hasSpot = view.spotlight.count > 0;
+    const StoreLayout L = LayOutStore(hasSpot);
 
     // The page between the header and the footer, which it scrolls inside.
     const float clipTop = g_M.listYTitleOnly - S(6.0f);
@@ -6129,6 +6158,8 @@ void RenderStoreFrame(StorePageView &view, const UiHint *hints, int hintCount)
     // The page's real foot. L.bottom is only the letters': the Collections
     // and the rows of games are below them.
     float contentBottom = L.bottom;
+    if (hasSpot)
+        contentBottom = L.spotY + L.spotH;
     if (collCount > 0)
         contentBottom = L.collY + L.collH;
     if (rowCount > 0)
@@ -6143,7 +6174,12 @@ void RenderStoreFrame(StorePageView &view, const UiHint *hints, int hintCount)
     // says it goes on without having to be told. The clamps keep the top
     // and the foot flush, so the ends don't drift into empty space.
     float bandTop = L.labelY, bandBottom = L.top + L.heroH;
-    if (focusColl >= 0)
+    if (view.focus == STORE_FOCUS_SPOTLIGHT && hasSpot)
+    {
+        bandTop = L.spotY;
+        bandBottom = L.spotY + L.spotH;
+    }
+    else if (focusColl >= 0)
     {
         bandTop = L.collLabelY;
         bandBottom = L.collY + L.collH;
@@ -6257,7 +6293,7 @@ void RenderStoreFrame(StorePageView &view, const UiHint *hints, int hintCount)
         StoreLetterRect(L, i, &x, &y);
         FillRound(x, y + sy, L.cell, L.cell, r, COL_SURFACE);
     }
-    if (hasFocus && view.focus < STORE_FOCUS_COLLECTIONS)
+    if (hasFocus && view.focus < STORE_FOCUS_SPOTLIGHT)
     {
         ShadowRound(gx, gy + S(10.0f), gw, gh, r, S(26.0f), COL_SHADOW);
         if (view.focus < STORE_FOCUS_BUTTONS)
@@ -6283,8 +6319,15 @@ void RenderStoreFrame(StorePageView &view, const UiHint *hints, int hintCount)
             wantArt[wantArtCount++] = view.featured[i].titleId;
     }
     ClearClip();
-    SetClip(g_M.contentX - S(12.0f), clipTop, g_M.contentW - ScrollGutter() + S(12.0f), clipBottom - clipTop);
+    SetClip(g_M.contentX - S(12.0f), clipTop, g_M.contentW + S(24.0f), clipBottom - clipTop);
 
+    if (hasSpot && L.spotY + sy + L.spotH >= clipTop && L.spotY + sy <= clipBottom)
+    {
+        if (StoreArtFor(view.spotlight.art, STORE_ART_BACKGROUND) == NULL && wantArtCount < MAX_PAGE_ART)
+            wantArt[wantArtCount++] = view.spotlight.art;
+        if (!(hasFocus && view.focus == STORE_FOCUS_SPOTLIGHT))
+            DrawSpotlightBanner(view.spotlight, g_M.contentX, L.spotY + sy, L.spotW, L.spotH);
+    }
     if (L.collY + sy + L.collH >= clipTop && L.collY + sy <= clipBottom)
     {
         const int first = (int)floorf(collShown);
@@ -6324,10 +6367,12 @@ void RenderStoreFrame(StorePageView &view, const UiHint *hints, int hintCount)
     }
     RequestMissingStoreCovers(wantCovers, wantCount);
 
-    if (hasFocus && view.focus >= STORE_FOCUS_COLLECTIONS)
+    if (hasFocus && view.focus >= STORE_FOCUS_SPOTLIGHT)
     {
         ShadowRound(gx, gy + S(10.0f), gw, gh, r, S(26.0f), COL_SHADOW);
-        if (focusColl >= 0)
+        if (view.focus == STORE_FOCUS_SPOTLIGHT)
+            DrawSpotlightBanner(view.spotlight, gx, gy, gw, gh);
+        else if (focusColl >= 0)
             DrawCollectionCard(view.collections[focusColl], gx, gy, gw, gh);
         else
         {
@@ -6340,14 +6385,6 @@ void RenderStoreFrame(StorePageView &view, const UiHint *hints, int hintCount)
     }
 
     ClearClip();
-
-    // Outside the clip, so the bar itself is never cut off. `most` is the
-    // one the scroll above is clamped to, so the two can't disagree about
-    // where the page ends.
-    {
-        const float viewH = clipBottom - clipTop;
-        DrawScrollbarRange(clipTop, viewH, viewH, most, view.scroll);
-    }
 
     DrawButtonHintShapes(footer, footerCount, g_M.footerY);
     DrawHeaderQuads(showToast);
@@ -6441,6 +6478,21 @@ void RenderStoreFrame(StorePageView &view, const UiHint *hints, int hintCount)
     // Text on a card or tile only once it's whole on the page - while a row
     // glides, those at its ends are part off it.
     const float textLeft = g_M.contentX - S(2.0f), textRight = g_M.contentX + g_M.contentW + S(2.0f);
+
+    if (hasSpot)
+    {
+        float x = g_M.contentX, y = L.spotY + sy, w = L.spotW, h = L.spotH;
+        if (hasFocus && view.focus == STORE_FOCUS_SPOTLIGHT)
+            x = gx, y = gy, w = gw, h = gh;
+        const float spad = S(28.0f);
+        const float nameH = LineHeight(1.4f) * 1.2f, detailH = LineHeight(0.8f) * 1.2f;
+        const float textH = nameH + (view.spotlightDetail != NULL ? S(4.0f) + detailH : 0.0f);
+        const float nameY = y + (h - textH) * 0.5f;
+        if (TextInClip(nameY, nameH))
+            TextFit(x + spad, nameY, 1.4f, COL_TEXT, view.spotlight.name, w * 0.6f, true);
+        if (view.spotlightDetail != NULL && TextInClip(nameY + nameH + S(4.0f), detailH))
+            TextFit(x + spad, nameY + nameH + S(4.0f), 0.8f, COL_TEXT2, view.spotlightDetail, w * 0.6f);
+    }
 
     if (collCount > 0 && TextInClip(L.collLabelY + sy, LineHeight(0.95f) * 1.2f))
         Text(g_M.contentX, L.collLabelY + sy, 0.95f, COL_TEXT, "Collections", 0, 0.0f, true);
@@ -6602,7 +6654,7 @@ void RenderStoreRowsFrame(StoreRowsView &view, const UiHint *hints, int hintCoun
 
     // --- Pass 1: quads ---
     DrawFrameBase(g_sidebar.focused);
-    SetClip(g_M.contentX - S(12.0f), clipTop, g_M.contentW - ScrollGutter() + S(12.0f), clipBottom - clipTop);
+    SetClip(g_M.contentX - S(12.0f), clipTop, g_M.contentW + S(24.0f), clipBottom - clipTop);
 
     // Each row's tiles across, and the next cut off at the edge to show
     // there's more - two more while they glide. Covers are asked for as they
@@ -6652,17 +6704,6 @@ void RenderStoreRowsFrame(StoreRowsView &view, const UiHint *hints, int hintCoun
     }
 
     ClearClip();
-
-    // Outside the clip, so the bar itself is never cut off. The page can
-    // scroll until the last row clears the foot.
-    if (rowCount > 0)
-    {
-        const float viewH = clipBottom - clipTop;
-        const float contentBottom = L.rowsY + (rowCount - 1) * L.rowPitch + L.rowLabelH + L.rowTile;
-        float most = contentBottom - (clipBottom - S(16.0f));
-        if (most < 0.0f) most = 0.0f;
-        DrawScrollbarRange(clipTop, viewH, viewH, most, view.scroll);
-    }
 
     DrawButtonHintShapes(footer, footerCount, g_M.footerY);
     DrawHeaderQuads(showToast);
@@ -6891,10 +6932,8 @@ static StoreGridLayout LayOutStoreGrid()
     StoreGridLayout L;
     L.cols = g_M.storeCols;
     L.gap = S(18.0f);
-    // The scrollbar's room is always kept, whether or not the grid scrolls
-    // right now: taking it only when it does would resize every tile the
-    // moment a page grew past one screen.
-    L.tile = (g_M.contentW - ScrollGutter() - (L.cols - 1) * L.gap) / (float)L.cols;
+    // No scrollbar: the grid takes the full width, as the front page does.
+    L.tile = (g_M.contentW - (L.cols - 1) * L.gap) / (float)L.cols;
     L.pitch = L.tile + L.gap;
     L.top = g_M.listY;
     L.bottom = g_M.footerY - S(30.0f);
@@ -7178,9 +7217,6 @@ void RenderStoreLetterFrame(StoreLetterView &view, const UiHint *hints, int hint
         if (focusHasArt)
             FillRoundGradient(focusOX, focusOY + focusS - bandH, focusS, bandH, r, 0x00000000, 0xD9000000, true);
     }
-
-    if (rowCount > L.fullRows)
-        DrawScrollbar(L.top, L.bottom - L.top, rowCount, L.fullRows, view.scroll);
 
     if (view.panel != NULL)
         DrawFilterPanelQuads(*view.panel);

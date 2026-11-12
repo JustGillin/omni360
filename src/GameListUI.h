@@ -407,10 +407,13 @@ void RenderSettingsFrame(SettingsPageView &view, const UiHint *hints, int hintCo
 #define STORE_FOCUS_FEATURED 0
 #define STORE_FOCUS_BUTTONS  (STORE_FOCUS_FEATURED + STORE_FEATURED_MAX) // some featured slots may be unused
 #define STORE_FOCUS_LETTERS  (STORE_FOCUS_BUTTONS + STORE_BUTTON_COUNT)
-// Under the A to Z, the Collections: a row of wide cards, a series each,
-// that scrolls sideways. Focus on one is STORE_FOCUS_COLLECTIONS + its place.
+// Under the A to Z, the spotlight - "Only on Xbox 360" - a banner across the
+// page, when there is one; under it the Collections: a row of wide cards, a
+// series each, that scrolls sideways. Focus on one is
+// STORE_FOCUS_COLLECTIONS + its place.
 #define STORE_COLLECTIONS_MAX   32
-#define STORE_FOCUS_COLLECTIONS (STORE_FOCUS_LETTERS + STORE_LETTER_COUNT)
+#define STORE_FOCUS_SPOTLIGHT   (STORE_FOCUS_LETTERS + STORE_LETTER_COUNT)
+#define STORE_FOCUS_COLLECTIONS (STORE_FOCUS_SPOTLIGHT + 1)
 // Under them, rows of games that scroll sideways - Popular, Top rated,
 // a genre each. Focus on a row's game is STORE_FOCUS_ROWS + row *
 // STORE_ROW_TILES_MAX + its place in the row.
@@ -454,6 +457,8 @@ struct StorePageView
     const char *featuredLabel; // over the featured tiles - "Featured", or an event's name
     StoreFeaturedView featured[STORE_FEATURED_MAX];
     int featuredCount;         // 1 to STORE_FEATURED_MAX
+    StoreCollectionView spotlight; // the banner over the Collections; count 0 for none
+    const char *spotlightDetail;   // under its name; may be NULL
     StoreCollectionView collections[STORE_COLLECTIONS_MAX];
     int collectionCount;
     int collectionScroll; // the first card shown; the caller's to keep, the Render call moves it

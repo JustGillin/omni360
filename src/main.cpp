@@ -2850,8 +2850,23 @@ static StoreCollectionView g_collections[STORE_COLLECTIONS_MAX];
 static int g_collectionIds[STORE_COLLECTIONS_MAX]; // each card's, for StoreCollectionGames
 static int g_collectionCount = 0;
 
+// The spotlight - "Only on Xbox 360" - over them, a collection of its own;
+// count 0 when there's none.
+static StoreCollectionView g_spotlight;
+static int g_spotlightId = -1;
+
 static void BuildStoreRows()
 {
+    memset(&g_spotlight, 0, sizeof(g_spotlight));
+    g_spotlightId = StoreSpotlightCollection();
+    if (g_spotlightId >= 0)
+    {
+        StoreGame games[STORE_ROW_TILES_MAX];
+        g_spotlight.count = StoreCollectionGames(g_spotlightId, games, STORE_ROW_TILES_MAX);
+        g_spotlight.name = StoreCollectionName(g_spotlightId);
+        g_spotlight.art = StoreCollectionArt(g_spotlightId);
+    }
+
     g_collectionCount = 0;
     const int collections = StoreCollectionCount() < STORE_COLLECTIONS_MAX ? StoreCollectionCount()
                                                                           : STORE_COLLECTIONS_MAX;
@@ -2902,6 +2917,8 @@ static StorePageView MakeStoreView(const Shell &shell)
     memset(&view, 0, sizeof(view));
     view.featuredLabel = g_featured.label;
     view.featuredCount = g_featuredCount;
+    view.spotlight = g_spotlight;
+    view.spotlightDetail = "Games no newer console can play";
     view.collectionCount = g_collectionCount;
     for (int c = 0; c < g_collectionCount; ++c)
         view.collections[c] = g_collections[c];
@@ -3065,7 +3082,7 @@ static void StepStoreFocus(WORD nav, Shell &shell)
         else if (nav == XINPUT_GAMEPAD_DPAD_DOWN)
             i = STORE_FOCUS_LETTERS + (b * perRow * 2 + STORE_BUTTON_COUNT) / (STORE_BUTTON_COUNT * 2);
     }
-    else if (i < STORE_FOCUS_COLLECTIONS)
+    else if (i < STORE_FOCUS_SPOTLIGHT)
     {
         const int l = i - STORE_FOCUS_LETTERS;
         const int col = l % perRow;
@@ -3090,6 +3107,8 @@ static void StepStoreFocus(WORD nav, Shell &shell)
             // Down onto a shorter last row lands on its last letter.
             i = (l + perRow < STORE_LETTER_COUNT) ? i + perRow : STORE_FOCUS_LETTERS + STORE_LETTER_COUNT - 1;
         }
+        else if (nav == XINPUT_GAMEPAD_DPAD_DOWN && g_spotlight.count > 0)
+            i = STORE_FOCUS_SPOTLIGHT;
         else if (nav == XINPUT_GAMEPAD_DPAD_DOWN && g_collectionCount > 0)
         {
             // Onto the Collections, under about the same place.
@@ -3100,6 +3119,19 @@ static void StepStoreFocus(WORD nav, Shell &shell)
             // Into the first row of games, under about the same place.
             i = StoreRowFocus(0, shell.storeRowScroll[0] + col * StoreRowTilesAcross() / perRow);
         }
+    }
+    else if (i == STORE_FOCUS_SPOTLIGHT)
+    {
+        // The spotlight, across the page: up to the letters' last row, down
+        // to the Collections or the games.
+        if (nav == XINPUT_GAMEPAD_DPAD_LEFT)
+            FocusSidebar(shell);
+        else if (nav == XINPUT_GAMEPAD_DPAD_UP)
+            i = LastLetterRowFocus(0, 1);
+        else if (nav == XINPUT_GAMEPAD_DPAD_DOWN && g_collectionCount > 0)
+            i = StoreCollectionFocus(shell.storeCollectionScroll);
+        else if (nav == XINPUT_GAMEPAD_DPAD_DOWN && g_rowCount > 0)
+            i = StoreRowFocus(0, shell.storeRowScroll[0]);
     }
     else if (i < STORE_FOCUS_ROWS)
     {
@@ -3115,6 +3147,8 @@ static void StepStoreFocus(WORD nav, Shell &shell)
             else
                 i--;
         }
+        else if (nav == XINPUT_GAMEPAD_DPAD_UP && g_spotlight.count > 0)
+            i = STORE_FOCUS_SPOTLIGHT;
         else if (nav == XINPUT_GAMEPAD_DPAD_UP)
             i = LastLetterRowFocus(onScreen, StoreCollectionsAcross());
         else if (nav == XINPUT_GAMEPAD_DPAD_DOWN && g_rowCount > 0)
@@ -3146,6 +3180,8 @@ static void StepStoreFocus(WORD nav, Shell &shell)
             i = StoreCollectionFocus(shell.storeCollectionScroll +
                                      onScreen * StoreCollectionsAcross() / StoreRowTilesAcross());
         }
+        else if (nav == XINPUT_GAMEPAD_DPAD_UP && g_spotlight.count > 0)
+            i = STORE_FOCUS_SPOTLIGHT;
         else if (nav == XINPUT_GAMEPAD_DPAD_UP)
         {
             // Back up to the letters' last row, under about the same place.
@@ -5373,9 +5409,14 @@ static bool ActOnStoreFocus(Shell &shell)
         else
             ShowShellToast("Coming soon", kStoreButtonsSoon[i - STORE_FOCUS_BUTTONS], UI_TOAST_INFO);
     }
-    else if (i < STORE_FOCUS_COLLECTIONS)
+    else if (i < STORE_FOCUS_SPOTLIGHT)
     {
         OpenStoreLetter(shell, kStoreLetters[i - STORE_FOCUS_LETTERS], -1);
+    }
+    else if (i == STORE_FOCUS_SPOTLIGHT)
+    {
+        if (g_spotlight.count > 0)
+            OpenStoreCollection(shell, g_spotlightId);
     }
     else if (i < STORE_FOCUS_ROWS)
     {
@@ -7972,7 +8013,7 @@ int main()
                 StepStoreFocus(input.nav, shell);
 
             if (!shell.storeInLetter && shell.storeFocus != focusBefore && shell.storeFocus >= STORE_FOCUS_LETTERS &&
-                shell.storeFocus < STORE_FOCUS_COLLECTIONS)
+                shell.storeFocus < STORE_FOCUS_SPOTLIGHT)
                 PrefetchLetterCovers(kStoreLetters[shell.storeFocus - STORE_FOCUS_LETTERS], -1);
         }
         else if (shell.page == SHELL_PAGE_QUEUE)
@@ -8493,7 +8534,7 @@ int main()
                         if (!kStoreButtons[i - STORE_FOCUS_BUTTONS].disabled)
                             hintCount = AddHint(hints, hintCount, UI_BUTTON_A, L"Browse", L"Browse");
                     }
-                    else if (i < STORE_FOCUS_COLLECTIONS)
+                    else if (i < STORE_FOCUS_SPOTLIGHT)
                     {
                         BrowseHint(browse, 32, kStoreLetters[i - STORE_FOCUS_LETTERS]);
                         hintCount = AddHint(hints, hintCount, UI_BUTTON_A, browse, L"Browse");

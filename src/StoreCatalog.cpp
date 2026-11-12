@@ -682,19 +682,26 @@ int StoreCollectionCount()
     return STORE_COLLECTION_COUNT;
 }
 
+// The spotlight is kStoreCollections' entry after the Collections, when
+// there is one: STORE_COLLECTION_ENTRIES counts it.
+int StoreSpotlightCollection()
+{
+    return STORE_COLLECTION_ENTRIES > STORE_COLLECTION_COUNT ? STORE_COLLECTION_COUNT : -1;
+}
+
 const char *StoreCollectionName(int collection)
 {
-    return (collection >= 0 && collection < STORE_COLLECTION_COUNT) ? kStoreCollections[collection].name : "";
+    return (collection >= 0 && collection < STORE_COLLECTION_ENTRIES) ? kStoreCollections[collection].name : "";
 }
 
 unsigned long StoreCollectionArt(int collection)
 {
-    return (collection >= 0 && collection < STORE_COLLECTION_COUNT) ? kStoreCollections[collection].art : 0;
+    return (collection >= 0 && collection < STORE_COLLECTION_ENTRIES) ? kStoreCollections[collection].art : 0;
 }
 
 int StoreCollectionGames(int collection, StoreGame *out, int maxGames)
 {
-    if (collection < 0 || collection >= STORE_COLLECTION_COUNT || out == NULL)
+    if (collection < 0 || collection >= STORE_COLLECTION_ENTRIES || out == NULL)
         return 0;
     const StoreCollection &c = kStoreCollections[collection];
     int n = 0;
@@ -768,7 +775,8 @@ int StoreSimilarGames(unsigned long titleId, StoreGame *out, int maxGames)
     if (out == NULL || titleId == 0)
         return 0;
 
-    // The rest of its series - of each collection it's in.
+    // The rest of its series - of each collection it's in. Not the
+    // spotlight's: those games have nothing else in common.
     int n = 0;
     for (int c = 0; c < STORE_COLLECTION_COUNT; ++c)
     {
