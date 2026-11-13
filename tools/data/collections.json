@@ -8,6 +8,35 @@
               "415608AF", "45410809", "41560845", "53450858", "53450845", "534507F2", "415608AA",
               "41560816", "4156081F", "4E4D0826", "415607DD"]
   },
+  "logo_sources": {
+    "activision": "Activision",
+    "ea": "Electronic Arts",
+    "microsoft": "Xbox Game Studios",
+    "rockstar": "Rockstar Games",
+    "2k": "2K (company)",
+    "ubisoft": "Ubisoft",
+    "thq": "THQ",
+    "bethesda": "Bethesda Softworks",
+    "wb": "Warner Bros. Games",
+    "sega": "Sega",
+    "capcom": "Capcom",
+    "bandainamco": "Bandai Namco Entertainment",
+    "squareenix": "Square Enix"
+  },
+  "publishers": [
+    { "name": "Activision", "prefixes": ["4156"], "tint": "3D3D3D", "shade": "0B0B0B", "logos": ["activision"] },
+    { "name": "EA", "prefixes": ["4541"], "tint": "2F63F7", "shade": "0D2470", "logos": ["ea"] },
+    { "name": "Microsoft", "prefixes": ["4D53"], "tint": "1F9A1F", "shade": "0A3F0A", "logos": ["microsoft"] },
+    { "name": "Rockstar & 2K", "prefixes": ["5454"], "tint": "F2A900", "shade": "8A3C00", "logos": ["rockstar", "2k"] },
+    { "name": "Ubisoft", "prefixes": ["5553"], "tint": "3D5CFF", "shade": "2A1170", "logos": ["ubisoft"] },
+    { "name": "THQ", "prefixes": ["5451"], "tint": "E3342F", "shade": "6B0D0B", "logos": ["thq"] },
+    { "name": "Bethesda", "prefixes": ["4253"], "tint": "6D6F73", "shade": "1C1D1F", "logos": ["bethesda"] },
+    { "name": "Warner Bros.", "prefixes": ["5752", "4D57"], "include": ["534307F6"], "tint": "1D5BC4", "shade": "071F4D", "logos": ["wb"] },
+    { "name": "SEGA", "prefixes": ["5345"], "tint": "1A7FD1", "shade": "062F5E", "logos": ["sega"] },
+    { "name": "Capcom", "prefixes": ["4343"], "tint": "F6B800", "shade": "0C3F8A", "logos": ["capcom"] },
+    { "name": "Bandai Namco", "prefixes": ["4E4D"], "tint": "F0263A", "shade": "5C000A", "logos": ["bandainamco"] },
+    { "name": "Square Enix", "prefixes": ["5351", "5343"], "tint": "3A3A3A", "shade": "5A0A0D", "logos": ["squareenix"] }
+  ],
   "collections": [
     {
       "name": "Call of Duty",

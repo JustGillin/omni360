@@ -4,6 +4,17 @@ series each, its games oldest first - from tools/data/collections.json.
     python tools/make_collections.py          check the file and write the header
     python tools/make_collections.py --art    ...and that each card's game has a wallpaper (asks Xbox Live)
 
+"publishers" are a row of their own under them: a name and the title ID
+prefixes that are its - a title ID's first half is its publisher's - and
+its games are picked here, its most rated on Xbox Live first, as
+src/StoreRows.h has them (so build that first). "art" is optional: its most
+rated game's, when not given. "include" names games of its own by title ID
+that another's prefix has - Batman: Arkham Asylum is Eidos's, but Warner
+Bros.' - and takes them out of every other publisher's. A publisher's card is
+"tint", its colour washed over off-white, and "shade" for its name, both
+RRGGBB, with its "logos" - one or two of tools/make_publisher_logos.py's,
+numbered as that atlas has them.
+
 "spotlight", beside "collections", is one more the same way - "Only on Xbox
 360" - drawn as a banner over them, and left out of a game page's "More like
 this". It's optional.
@@ -21,12 +32,14 @@ import urllib.request
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import featured  # the Store's own lists, as its title IDs resolve
+import make_publisher_logos
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 SOURCE = os.path.join(ROOT, "tools", "data", "collections.json")
 OUT_HEADER = os.path.join(ROOT, "src", "StoreCollections.h")
+ROWS_HEADER = os.path.join(ROOT, "src", "StoreRows.h")
 
-MAX_COLLECTIONS = 32  # STORE_COLLECTIONS_MAX in GameListUI.h
+MAX_COLLECTIONS = 32  # STORE_COLLECTIONS_MAX in GameListUI.h - and the publishers' most
 MAX_GAMES = 24        # a collection's page holds this many at most
 
 
@@ -44,17 +57,61 @@ def c_string(s):
     return re.sub(r'(\\x[0-9A-F]{2})(?=[0-9A-Fa-f])', r'\1""', "".join(out))
 
 
+def ratings():
+    """Each title ID's count of ratings on Xbox Live, as StoreRows.h has them."""
+    with open(ROWS_HEADER, encoding="utf-8") as f:
+        text = f.read()
+    return {m.group(1): int(m.group(2)) for m in re.finditer(r"\{\s*0x([0-9A-F]{8}),\s*(\d+)", text)}
+
+
+def publisher_games(p, shown, rated, claimed):
+    """A publisher's 360 games the Store has, most rated first - none unrated.
+    Those it includes by title ID are its; those another includes aren't."""
+    prefixes = [x.upper() for x in p.get("prefixes", [])]
+    own = set(x.upper() for x in p.get("include", []))
+    games = [tid for tid, g in shown.items()
+             if g[1] == "360" and rated.get(tid, 0) > 0
+             and (tid in own or (tid[:4] in prefixes and tid not in claimed))]
+    games.sort(key=lambda tid: (-rated[tid], tid))
+    return games[:MAX_GAMES]
+
+
 def main():
     shown = featured.by_id(featured.load_games())
     with open(SOURCE, encoding="utf-8") as f:
         data = json.load(f)
     collections = data["collections"]
     spotlight = data.get("spotlight")
-    entries = collections + ([spotlight] if spotlight else [])
 
     errors = []
+    rated = ratings()
+    publishers = []
+    claimed = set()
+    for p in data.get("publishers", []):
+        for tid in p.get("include", []):
+            if tid.upper() not in shown:
+                errors.append('"%s": includes %s, not a game the Store has' % (p.get("name", ""), tid))
+            claimed.add(tid.upper())
+    for p in data.get("publishers", []):
+        games = publisher_games(p, shown, rated, claimed)
+        if not games:
+            errors.append('"%s": no rated 360 games under %s' % (p.get("name", ""), p.get("prefixes")))
+            continue
+        publishers.append({"name": p.get("name", ""), "art": p.get("art", games[0]), "games": games,
+                           "tint": p.get("tint", ""), "shade": p.get("shade", ""), "logos": p.get("logos", [])})
+    entries = collections + publishers + ([spotlight] if spotlight else [])
+
     if not 1 <= len(collections) <= MAX_COLLECTIONS:
         errors.append("needs 1 to %d collections" % MAX_COLLECTIONS)
+    if len(publishers) > MAX_COLLECTIONS:
+        errors.append("needs at most %d publishers" % MAX_COLLECTIONS)
+    logo_keys = make_publisher_logos.logo_keys(data)
+    for p in publishers:
+        for field in ("tint", "shade"):
+            if not re.fullmatch(r"[0-9A-Fa-f]{6}", p[field]):
+                errors.append('"%s": needs a %s, RRGGBB' % (p["name"], field))
+        if not 1 <= len(p["logos"]) <= 2:
+            errors.append('"%s": needs one or two logos' % p["name"])
     names = set()
     for c in entries:
         name, art, games = c.get("name", ""), c.get("art", ""), c.get("games", [])
@@ -101,7 +158,18 @@ def main():
          "    unsigned short count;",
          "};",
          "",
+         "// A publisher's card: its colour washed over off-white, its name in its",
+         "// shade, and one or two logos from PublisherLogos.h; -1 for none.",
+         "struct StorePublisherStyle",
+         "{",
+         "    unsigned long tint;  // 0xRRGGBB",
+         "    unsigned long shade; // 0xRRGGBB",
+         "    signed char logos[2];",
+         "};",
+         "",
          "#define STORE_COLLECTION_COUNT %d" % len(collections),
+         "// Then the publishers, a row of their own, each its most rated games first.",
+         "#define STORE_PUBLISHER_COUNT %d" % len(publishers),
          "// With the spotlight, when there is one: kStoreCollections' last entry.",
          "#define STORE_COLLECTION_ENTRIES %d" % len(entries),
          "",
@@ -123,11 +191,18 @@ def main():
         for tid in c["games"]:
             # The compiler reads comments in the system's code page: ASCII only.
             L.append("    0x%s, // %s" % (tid, shown[tid][0].encode("ascii", "replace").decode()))
-    L += ["};", "", "#endif // STORE_COLLECTIONS_DATA", "", "#endif", ""]
+    L += ["};", "", "static const StorePublisherStyle kStorePublisherStyles[STORE_PUBLISHER_COUNT + 1] =", "{"]
+    for p in publishers:
+        logos = [logo_keys.index(k) for k in p["logos"]] + [-1, -1]
+        L.append("    { 0x%s, 0x%s, { %d, %d } }, // %s" % (p["tint"].upper(), p["shade"].upper(), logos[0], logos[1],
+                                                         p["name"].encode("ascii", "replace").decode()))
+    L += ["    { 0, 0, { -1, -1 } }, // so the table is never empty",
+          "};", "", "#endif // STORE_COLLECTIONS_DATA", "", "#endif", ""]
 
     with open(OUT_HEADER, "w", encoding="utf-8", newline="\r\n") as f:
         f.write("\n".join(L))
-    print("%d collections%s, %d games -> %s" % (len(collections), " and the spotlight" if spotlight else "", first, os.path.relpath(OUT_HEADER, ROOT)))
+    print("%d collections, %d publishers%s, %d games -> %s" % (len(collections), len(publishers),
+                                                           " and the spotlight" if spotlight else "", first, os.path.relpath(OUT_HEADER, ROOT)))
     return 0
 
 

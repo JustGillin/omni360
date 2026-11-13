@@ -408,10 +408,11 @@ void RenderSettingsFrame(SettingsPageView &view, const UiHint *hints, int hintCo
 #define STORE_FOCUS_BUTTONS  (STORE_FOCUS_FEATURED + STORE_FEATURED_MAX) // some featured slots may be unused
 #define STORE_FOCUS_LETTERS  (STORE_FOCUS_BUTTONS + STORE_BUTTON_COUNT)
 // Under the A to Z, the spotlight - "Only on Xbox 360" - a banner across the
-// page, when there is one; under it the Collections: a row of wide cards, a
-// series each, that scrolls sideways. Focus on one is
-// STORE_FOCUS_COLLECTIONS + its place.
+// page, when there is one; under it rows of wide cards that scroll sideways:
+// the Collections, a series each, then the Publishers. Focus on a card is
+// STORE_FOCUS_COLLECTIONS + its row * STORE_COLLECTIONS_MAX + its place.
 #define STORE_COLLECTIONS_MAX   32
+#define STORE_CARD_ROWS         2
 #define STORE_FOCUS_SPOTLIGHT   (STORE_FOCUS_LETTERS + STORE_LETTER_COUNT)
 #define STORE_FOCUS_COLLECTIONS (STORE_FOCUS_SPOTLIGHT + 1)
 // Under them, rows of games that scroll sideways - Popular, Top rated,
@@ -419,7 +420,7 @@ void RenderSettingsFrame(SettingsPageView &view, const UiHint *hints, int hintCo
 // STORE_ROW_TILES_MAX + its place in the row.
 #define STORE_ROWS_MAX       16
 #define STORE_ROW_TILES_MAX  24
-#define STORE_FOCUS_ROWS     (STORE_FOCUS_COLLECTIONS + STORE_COLLECTIONS_MAX)
+#define STORE_FOCUS_ROWS     (STORE_FOCUS_COLLECTIONS + STORE_CARD_ROWS * STORE_COLLECTIONS_MAX)
 #define STORE_FOCUS_COUNT    (STORE_FOCUS_ROWS + STORE_ROWS_MAX * STORE_ROW_TILES_MAX)
 
 struct StoreTileView;
@@ -435,8 +436,22 @@ struct StoreRowView
 struct StoreCollectionView
 {
     const char *name;
-    unsigned long art; // the game whose wallpaper is its card
+    unsigned long art; // the game whose wallpaper is its card; 0 for a publisher's
     int count;         // its games
+    // A publisher's card instead: its colour washed over off-white, its name
+    // in its shade (0xRRGGBB both), and its logos from PublisherLogos.h.
+    bool publisher;
+    unsigned long tint, shade;
+    int logos[2];      // -1 for none
+};
+
+// A row of them: the Collections, or the Publishers.
+struct StoreCardRowView
+{
+    const char *name;
+    StoreCollectionView cards[STORE_COLLECTIONS_MAX];
+    int count;
+    int scroll; // the first card shown; the caller's to keep, the Render call moves it
 };
 
 struct StoreFeaturedView
@@ -459,9 +474,8 @@ struct StorePageView
     int featuredCount;         // 1 to STORE_FEATURED_MAX
     StoreCollectionView spotlight; // the banner over the Collections; count 0 for none
     const char *spotlightDetail;   // under its name; may be NULL
-    StoreCollectionView collections[STORE_COLLECTIONS_MAX];
-    int collectionCount;
-    int collectionScroll; // the first card shown; the caller's to keep, the Render call moves it
+    StoreCardRowView cardRows[STORE_CARD_ROWS];
+    int cardRowCount;      // those with cards, from the top
     StoreRowView rows[STORE_ROWS_MAX];
     int rowCount;
     StoreButtonView buttons[STORE_BUTTON_COUNT];

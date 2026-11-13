@@ -1,0 +1,14 @@
+# key	Wikipedia page	Commons file	licence on Commons
+2k	2K (company)	File:2K 2021 Logo.svg	Public domain
+activision	Activision	File:Activision.svg	Public domain
+bandainamco	Bandai Namco Entertainment	File:Bandai Namco logo (2022).svg	Public domain
+bethesda	Bethesda Softworks	File:Bethesda Softworks Logo.svg	Public domain
+capcom	Capcom	File:Capcom logo.svg	Public domain
+ea	Electronic Arts	File:Electronic Arts Logo Blue.svg	Public domain
+microsoft	Xbox Game Studios	File:Xbox Game Studios.svg	Public domain
+rockstar	Rockstar Games	File:Rockstar Games Logo.svg	Public domain
+sega	Sega	File:SEGA logo.svg	Public domain
+squareenix	Square Enix	File:Square Enix logo.svg	Public domain
+thq	THQ	File:THQ logo 2011.svg	Public domain
+ubisoft	Ubisoft	File:Ubisoft logo.svg	Public domain
+wb	Warner Bros. Games	File:Warner Bros. Games Dec-2023 (without wordmark).svg	Public domain

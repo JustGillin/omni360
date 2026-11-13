@@ -58,6 +58,14 @@ const char *StoreCollectionName(int collection);
 unsigned long StoreCollectionArt(int collection);
 int StoreCollectionGames(int collection, StoreGame *out, int maxGames);
 
+// The publishers, a row of cards under the Collections: publisher's
+// collection, for the calls above; -1 out of range.
+int StorePublisherCount();
+int StorePublisherCollection(int publisher);
+// A publisher's card: its colour and its name's, 0xRRGGBB, and the logos of
+// PublisherLogos.h on it, -1 for none. False out of range.
+bool StorePublisherStyleOf(int publisher, unsigned long *tint, unsigned long *shade, int logos[2]);
+
 // The spotlight over the Collections - "Only on Xbox 360" - as a collection
 // the calls above take, though not one of StoreCollectionCount's; -1 for none.
 int StoreSpotlightCollection();

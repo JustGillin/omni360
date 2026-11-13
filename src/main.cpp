@@ -2604,7 +2604,7 @@ struct Shell
     int storeFocus;
     float storeScroll;
     int storeRowScroll[STORE_ROWS_MAX]; // each row of games' first shown
-    int storeCollectionScroll;          // the Collections' first card shown
+    int storeCardScroll[STORE_CARD_ROWS]; // each row of cards' first shown
     bool storeArtRequested;
 
     // A section's A-Z page - Xbox Live Arcade's, the Indie Games' or the
@@ -2845,10 +2845,40 @@ static StoreTileView g_rowTiles[STORE_ROWS_MAX][STORE_ROW_TILES_MAX];
 static int g_rowCounts[STORE_ROWS_MAX];
 static int g_rowCount = 0;
 
-// The Collections, a card each, as StoreCollections.h has them.
-static StoreCollectionView g_collections[STORE_COLLECTIONS_MAX];
-static int g_collectionIds[STORE_COLLECTIONS_MAX]; // each card's, for StoreCollectionGames
-static int g_collectionCount = 0;
+// The rows of cards - the Collections, then the Publishers - a card each, as
+// StoreCollections.h has them. Only rows with cards, from the top.
+struct StoreCardRow
+{
+    const char *name;
+    StoreCollectionView cards[STORE_COLLECTIONS_MAX];
+    int ids[STORE_COLLECTIONS_MAX]; // each card's, for StoreCollectionGames
+    int count;
+};
+static StoreCardRow g_cardRows[STORE_CARD_ROWS];
+static int g_cardRowCount = 0;
+
+// Adds a card for collection `id` to a row, if the Store has any of its
+// games - publisher `publisher`'s, drawn with its logos, or -1.
+static void AddStoreCard(StoreCardRow &row, int id, int publisher)
+{
+    if (id < 0 || row.count >= STORE_COLLECTIONS_MAX)
+        return;
+    StoreGame games[STORE_ROW_TILES_MAX];
+    StoreCollectionView &card = row.cards[row.count];
+    memset(&card, 0, sizeof(card));
+    card.count = StoreCollectionGames(id, games, STORE_ROW_TILES_MAX);
+    if (card.count == 0)
+        return;
+    card.name = StoreCollectionName(id);
+    card.art = StoreCollectionArt(id);
+    card.logos[0] = card.logos[1] = -1;
+    if (publisher >= 0 && StorePublisherStyleOf(publisher, &card.tint, &card.shade, card.logos))
+    {
+        card.publisher = true;
+        card.art = 0; // no wallpaper to fetch
+    }
+    row.ids[row.count++] = id;
+}
 
 // The spotlight - "Only on Xbox 360" - over them, a collection of its own;
 // count 0 when there's none.
@@ -2867,19 +2897,24 @@ static void BuildStoreRows()
         g_spotlight.art = StoreCollectionArt(g_spotlightId);
     }
 
-    g_collectionCount = 0;
-    const int collections = StoreCollectionCount() < STORE_COLLECTIONS_MAX ? StoreCollectionCount()
-                                                                          : STORE_COLLECTIONS_MAX;
-    for (int c = 0; c < collections; ++c)
+    g_cardRowCount = 0;
     {
-        StoreGame games[STORE_ROW_TILES_MAX];
-        StoreCollectionView &card = g_collections[g_collectionCount];
-        card.count = StoreCollectionGames(c, games, STORE_ROW_TILES_MAX);
-        if (card.count == 0)
-            continue;
-        card.name = StoreCollectionName(c);
-        card.art = StoreCollectionArt(c);
-        g_collectionIds[g_collectionCount++] = c;
+        StoreCardRow &row = g_cardRows[g_cardRowCount];
+        row.name = "Collections";
+        row.count = 0;
+        for (int c = 0; c < StoreCollectionCount(); ++c)
+            AddStoreCard(row, c, -1);
+        if (row.count > 0)
+            g_cardRowCount++;
+    }
+    {
+        StoreCardRow &row = g_cardRows[g_cardRowCount];
+        row.name = "Publishers";
+        row.count = 0;
+        for (int p = 0; p < StorePublisherCount(); ++p)
+            AddStoreCard(row, StorePublisherCollection(p), p);
+        if (row.count > 0)
+            g_cardRowCount++;
     }
 
     g_rowCount = 0;
@@ -2919,10 +2954,16 @@ static StorePageView MakeStoreView(const Shell &shell)
     view.featuredCount = g_featuredCount;
     view.spotlight = g_spotlight;
     view.spotlightDetail = "Games no newer console can play";
-    view.collectionCount = g_collectionCount;
-    for (int c = 0; c < g_collectionCount; ++c)
-        view.collections[c] = g_collections[c];
-    view.collectionScroll = shell.storeCollectionScroll;
+    view.cardRowCount = g_cardRowCount;
+    for (int cr = 0; cr < g_cardRowCount; ++cr)
+    {
+        StoreCardRowView &cards = view.cardRows[cr];
+        cards.name = g_cardRows[cr].name;
+        cards.count = g_cardRows[cr].count;
+        for (int c = 0; c < cards.count; ++c)
+            cards.cards[c] = g_cardRows[cr].cards[c];
+        cards.scroll = shell.storeCardScroll[cr];
+    }
     view.rowCount = g_rowCount;
     for (int r = 0; r < g_rowCount; ++r)
     {
@@ -2990,14 +3031,14 @@ static int NextFeaturedTile(int f, WORD nav)
     return best;
 }
 
-// Where focus is on the Collections: card `place`, kept to the row.
-static int StoreCollectionFocus(int place)
+// Where focus is on a row of cards: card `place`, kept to the row.
+static int StoreCardFocus(int cardRow, int place)
 {
-    if (place >= g_collectionCount)
-        place = g_collectionCount - 1;
+    if (place >= g_cardRows[cardRow].count)
+        place = g_cardRows[cardRow].count - 1;
     if (place < 0)
         place = 0;
-    return STORE_FOCUS_COLLECTIONS + place;
+    return STORE_FOCUS_COLLECTIONS + cardRow * STORE_COLLECTIONS_MAX + place;
 }
 
 // The letter in the A to Z's last row under about the same place as one of
@@ -3109,10 +3150,10 @@ static void StepStoreFocus(WORD nav, Shell &shell)
         }
         else if (nav == XINPUT_GAMEPAD_DPAD_DOWN && g_spotlight.count > 0)
             i = STORE_FOCUS_SPOTLIGHT;
-        else if (nav == XINPUT_GAMEPAD_DPAD_DOWN && g_collectionCount > 0)
+        else if (nav == XINPUT_GAMEPAD_DPAD_DOWN && g_cardRowCount > 0)
         {
             // Onto the Collections, under about the same place.
-            i = StoreCollectionFocus(shell.storeCollectionScroll + col * StoreCollectionsAcross() / perRow);
+            i = StoreCardFocus(0, shell.storeCardScroll[0] + col * StoreCollectionsAcross() / perRow);
         }
         else if (nav == XINPUT_GAMEPAD_DPAD_DOWN && g_rowCount > 0)
         {
@@ -3128,17 +3169,19 @@ static void StepStoreFocus(WORD nav, Shell &shell)
             FocusSidebar(shell);
         else if (nav == XINPUT_GAMEPAD_DPAD_UP)
             i = LastLetterRowFocus(0, 1);
-        else if (nav == XINPUT_GAMEPAD_DPAD_DOWN && g_collectionCount > 0)
-            i = StoreCollectionFocus(shell.storeCollectionScroll);
+        else if (nav == XINPUT_GAMEPAD_DPAD_DOWN && g_cardRowCount > 0)
+            i = StoreCardFocus(0, shell.storeCardScroll[0]);
         else if (nav == XINPUT_GAMEPAD_DPAD_DOWN && g_rowCount > 0)
             i = StoreRowFocus(0, shell.storeRowScroll[0]);
     }
     else if (i < STORE_FOCUS_ROWS)
     {
-        // The Collections: along them, up to the letters, down to the games.
-        const int place = i - STORE_FOCUS_COLLECTIONS;
-        const int onScreen = place - shell.storeCollectionScroll;
-        if (nav == XINPUT_GAMEPAD_DPAD_RIGHT && place + 1 < g_collectionCount)
+        // A row of cards: along it, up to the row of cards above or the
+        // spotlight or the letters, down to the next or the games.
+        const int cr = (i - STORE_FOCUS_COLLECTIONS) / STORE_COLLECTIONS_MAX;
+        const int place = (i - STORE_FOCUS_COLLECTIONS) % STORE_COLLECTIONS_MAX;
+        const int onScreen = place - shell.storeCardScroll[cr];
+        if (nav == XINPUT_GAMEPAD_DPAD_RIGHT && place + 1 < g_cardRows[cr].count)
             i++;
         else if (nav == XINPUT_GAMEPAD_DPAD_LEFT)
         {
@@ -3147,10 +3190,14 @@ static void StepStoreFocus(WORD nav, Shell &shell)
             else
                 i--;
         }
+        else if (nav == XINPUT_GAMEPAD_DPAD_UP && cr > 0)
+            i = StoreCardFocus(cr - 1, shell.storeCardScroll[cr - 1] + onScreen);
         else if (nav == XINPUT_GAMEPAD_DPAD_UP && g_spotlight.count > 0)
             i = STORE_FOCUS_SPOTLIGHT;
         else if (nav == XINPUT_GAMEPAD_DPAD_UP)
             i = LastLetterRowFocus(onScreen, StoreCollectionsAcross());
+        else if (nav == XINPUT_GAMEPAD_DPAD_DOWN && cr + 1 < g_cardRowCount)
+            i = StoreCardFocus(cr + 1, shell.storeCardScroll[cr + 1] + onScreen);
         else if (nav == XINPUT_GAMEPAD_DPAD_DOWN && g_rowCount > 0)
             i = StoreRowFocus(0, shell.storeRowScroll[0] + onScreen * StoreRowTilesAcross() / StoreCollectionsAcross());
     }
@@ -3174,11 +3221,12 @@ static void StepStoreFocus(WORD nav, Shell &shell)
             i = StoreRowFocus(r + 1, shell.storeRowScroll[r + 1] + onScreen);
         else if (nav == XINPUT_GAMEPAD_DPAD_UP && r > 0)
             i = StoreRowFocus(r - 1, shell.storeRowScroll[r - 1] + onScreen);
-        else if (nav == XINPUT_GAMEPAD_DPAD_UP && g_collectionCount > 0)
+        else if (nav == XINPUT_GAMEPAD_DPAD_UP && g_cardRowCount > 0)
         {
-            // Back up to the Collections, under about the same place.
-            i = StoreCollectionFocus(shell.storeCollectionScroll +
-                                     onScreen * StoreCollectionsAcross() / StoreRowTilesAcross());
+            // Back up to the last row of cards, under about the same place.
+            const int last = g_cardRowCount - 1;
+            i = StoreCardFocus(last, shell.storeCardScroll[last] +
+                                         onScreen * StoreCollectionsAcross() / StoreRowTilesAcross());
         }
         else if (nav == XINPUT_GAMEPAD_DPAD_UP && g_spotlight.count > 0)
             i = STORE_FOCUS_SPOTLIGHT;
@@ -3971,7 +4019,8 @@ static StoreLetterView MakeStoreLetterView(const Shell &shell)
     else if (shell.storeInCollection)
     {
         view.title = StoreCollectionName(shell.storeCollection);
-        view.section = "Collection";
+        view.section = (shell.storeCollection >= StoreCollectionCount() &&
+                        shell.storeCollection != StoreSpotlightCollection()) ? "Publisher" : "Collection";
     }
     const bool filtered = LetterFilterable(shell);
     view.filter = filtered ? FilterSummary(shell.storeLetterSection, false) : NULL;
@@ -5420,9 +5469,10 @@ static bool ActOnStoreFocus(Shell &shell)
     }
     else if (i < STORE_FOCUS_ROWS)
     {
-        const int place = i - STORE_FOCUS_COLLECTIONS;
-        if (place < g_collectionCount)
-            OpenStoreCollection(shell, g_collectionIds[place]);
+        const int cr = (i - STORE_FOCUS_COLLECTIONS) / STORE_COLLECTIONS_MAX;
+        const int place = (i - STORE_FOCUS_COLLECTIONS) % STORE_COLLECTIONS_MAX;
+        if (cr < g_cardRowCount && place < g_cardRows[cr].count)
+            OpenStoreCollection(shell, g_cardRows[cr].ids[place]);
     }
     else
     {
@@ -8556,7 +8606,8 @@ int main()
                 shell.storeScroll = view.scroll;
                 for (int r = 0; r < view.rowCount; ++r)
                     shell.storeRowScroll[r] = view.rows[r].scroll;
-                shell.storeCollectionScroll = view.collectionScroll;
+                for (int cr = 0; cr < view.cardRowCount; ++cr)
+                    shell.storeCardScroll[cr] = view.cardRows[cr].scroll;
             }
             break;
 

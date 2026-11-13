@@ -10,9 +10,20 @@ struct StoreCollection
     unsigned short count;
 };
 
+// A publisher's card: its colour washed over off-white, its name in its
+// shade, and one or two logos from PublisherLogos.h; -1 for none.
+struct StorePublisherStyle
+{
+    unsigned long tint;  // 0xRRGGBB
+    unsigned long shade; // 0xRRGGBB
+    signed char logos[2];
+};
+
 #define STORE_COLLECTION_COUNT 24
+// Then the publishers, a row of their own, each its most rated games first.
+#define STORE_PUBLISHER_COUNT 12
 // With the spotlight, when there is one: kStoreCollections' last entry.
-#define STORE_COLLECTION_ENTRIES 25
+#define STORE_COLLECTION_ENTRIES 37
 
 #ifdef STORE_COLLECTIONS_DATA
 
@@ -42,7 +53,19 @@ static const StoreCollection kStoreCollections[] =
     { "Sonic", 0x53450848, 180, 10 },
     { "Dragon Ball", 0x4E4D0862, 190, 8 },
     { "Naruto", 0x4E4D085C, 198, 6 },
-    { "Only on Xbox 360", 0x4156089C, 204, 24 },
+    { "Activision", 0x41560817, 204, 24 },
+    { "EA", 0x45410950, 228, 24 },
+    { "Microsoft", 0x4D53085B, 252, 24 },
+    { "Rockstar & 2K", 0x545408A7, 276, 24 },
+    { "Ubisoft", 0x5553085D, 300, 24 },
+    { "THQ", 0x5451086D, 324, 24 },
+    { "Bethesda", 0x425307E6, 348, 14 },
+    { "Warner Bros.", 0x57520802, 362, 24 },
+    { "SEGA", 0x5345082A, 386, 24 },
+    { "Capcom", 0x434307D4, 410, 24 },
+    { "Bandai Namco", 0x4E4D083A, 434, 24 },
+    { "Square Enix", 0x534307E7, 458, 24 },
+    { "Only on Xbox 360", 0x4156089C, 482, 24 },
 };
 
 // Title IDs, a collection after another, oldest first - each a game
@@ -277,6 +300,296 @@ static const unsigned long kStoreCollectionGames[] =
     0x4E4D0842, // Naruto Shippuden: Ultimate Ninja Storm Generations
     0x4E4D085C, // Naruto Shippuden: Ultimate Ninja Storm 3
     0x4E4D0868, // Naruto Shippuden: Ultimate Ninja Storm Revolution
+    // Activision
+    0x41560817, // Call of Duty: Modern Warfare 2
+    0x415608CB, // Call of Duty: Modern Warfare 3
+    0x41560855, // Call of Duty: Black Ops
+    0x415608C3, // Call of Duty: Black Ops II
+    0x4156081C, // Call of Duty: World at War
+    0x415607E6, // Call of Duty 4: Modern Warfare
+    0x41560914, // Call of Duty: Advanced Warfare
+    0x415608FC, // Call of Duty: Ghosts
+    0x415608F8, // Destiny
+    0x415607E2, // Spider-Man 3
+    0x41560881, // Spider-Man: Shattered Dimensions
+    0x415608B5, // The Amazing Spider-Man
+    0x4156084E, // Prototype
+    0x4156082F, // Marvel: Ultimate Alliance 2
+    0x415607DA, // Marvel: Ultimate Alliance
+    0x415608A4, // Transformers: Dark of the Moon
+    0x415607E1, // Call of Duty 3
+    0x415607D1, // Call of Duty 2
+    0x415608A7, // Prototype 2
+    0x4156084C, // Transformers: War for Cybertron
+    0x4156089C, // Transformers: Fall of Cybertron
+    0x41560845, // Blur
+    0x41560893, // NASCAR 2011: The Game
+    0x41560815, // Spider-Man: Web of Shadows
+    // EA
+    0x45410950, // Battlefield 3
+    0x454108D4, // Left 4 Dead 2
+    0x45410830, // Left 4 Dead
+    0x454108A8, // Battlefield: Bad Company 2
+    0x45410903, // Need for Speed: Hot Pursuit
+    0x454108E2, // The Sims 3
+    0x454108CE, // Mass Effect 2
+    0x45410937, // Madden NFL 12
+    0x454108C0, // Dragon Age: Origins
+    0x454108DF, // Dead Space 2
+    0x454108E6, // Skate 3
+    0x4541095D, // Mass Effect 3
+    0x454108E3, // Crysis 2
+    0x454109C9, // Plants vs. Zombies: Garden Warfare
+    0x454109BA, // Battlefield 4
+    0x454108C6, // Madden NFL 10
+    0x45410912, // Portal 2
+    0x45410857, // Dead Space
+    0x454107F9, // Battlefield: Bad Company
+    0x454108F7, // Medal of Honor
+    0x45410998, // FIFA Soccer 13
+    0x4541080F, // The Orange Box
+    0x454109D0, // Titanfall
+    0x454109DB, // FIFA 15
+    // Microsoft
+    0x4D53085B, // Halo: Reach
+    0x4D5307E6, // Halo 3
+    0x4D530919, // Halo 4
+    0x4D5308AB, // Gears of War 3
+    0x4D53082D, // Gears of War 2
+    0x4D530877, // Halo 3: ODST
+    0x4D5308D6, // Fable III
+    0x4D5307E8, // Mass Effect
+    0x4D5307F1, // Fable II
+    0x4D530910, // Forza Motorsport 4
+    0x4D530808, // Halo Wars
+    0x4D5309B1, // Halo: Combat Evolved Anniversary
+    0x4D5307D5, // Gears of War
+    0x4D53084D, // Forza Motorsport 3
+    0x4D5309C9, // Forza Horizon
+    0x4D530A26, // Gears of War: Judgment
+    0x4D5308BC, // Crackdown 2
+    0x4D5308B3, // Kinectimals
+    0x4D5308ED, // Kinect Adventures!
+    0x4D530A8C, // World of Tanks: Xbox 360 Edition
+    0x4D5307DC, // Crackdown
+    0x4D530805, // Alan Wake
+    0x4D530AA4, // Forza Horizon 2
+    0x4D5308C9, // Kinect Sports
+    // Rockstar & 2K
+    0x545408A7, // Grand Theft Auto V
+    0x545407F2, // Grand Theft Auto IV
+    0x5454082B, // Red Dead Redemption
+    0x545407E7, // Borderlands
+    0x5454087C, // Borderlands 2
+    0x545407D8, // BioShock
+    0x545407F8, // Midnight Club: Los Angeles
+    0x5454085D, // BioShock Infinite
+    0x5454086C, // L.A. Noire
+    0x545407E6, // Mafia II
+    0x545408B8, // Grand Theft Auto: San Andreas
+    0x54540894, // NBA 2K12: Game of the Year Edition
+    0x54540861, // BioShock 2
+    0x5454084E, // Duke Nukem Forever
+    0x5454086B, // Max Payne 3
+    0x5454087A, // NBA 2K11
+    0x545407E5, // Sid Meier's Civilization Revolution
+    0x545408B2, // WWE 2K14
+    0x54540852, // NBA 2K10
+    0x545408B0, // NBA 2K14
+    0x545408B6, // WWE 2K15
+    0x545408B5, // NBA 2K15
+    0x54540883, // Nickelodeon Nicktoons MLB
+    0x5454088D, // The Darkness II
+    // Ubisoft
+    0x5553085D, // Assassin's Creed: Brotherhood
+    0x5553083B, // Assassin's Creed II
+    0x555308AE, // Assassin's Creed III
+    0x55530879, // Assassin's Creed: Revelations
+    0x555307D4, // Assassin's Creed
+    0x5553088C, // Far Cry 3
+    0x5553084E, // Fighters Uncaged
+    0x55530833, // Tom Clancy's Ghost Recon: Future Soldier
+    0x555308C2, // Assassin's Creed IV: Black Flag
+    0x555308B7, // Watch_Dogs
+    0x5553080B, // Tom Clancy's Splinter Cell: Conviction
+    0x55530807, // Tom Clancy's Rainbow Six: Vegas 2
+    0x55530851, // Michael Jackson: The Experience
+    0x55530825, // Naruto: The Broken Bond
+    0x55530850, // Motionsports: Play for Real
+    0x55530836, // Cloudy with a Chance of Meatballs
+    0x555307D6, // Tom Clancy's Rainbow Six: Vegas
+    0x5553083C, // James Cameron's Avatar: The Game
+    0x5553087E, // Driver: San Francisco
+    0x555308CA, // Far Cry 4
+    0x55530888, // Just Dance 3
+    0x555308B6, // Tom Clancy's Splinter Cell: Blacklist
+    0x55530810, // Far Cry 2
+    0x5553081C, // Call of Juarez: Bound in Blood
+    // THQ
+    0x5451086D, // Saints Row: The Third
+    0x545107FC, // Saints Row 2
+    0x5451085D, // WWE SmackDown vs. Raw 2011
+    0x54510846, // Homefront
+    0x54510890, // WWE '12
+    0x545107D1, // Saints Row
+    0x54510844, // WWE SmackDown vs. Raw 2010
+    0x545108B4, // WWE '13
+    0x545107E1, // Nickelodeon Avatar: The Last Airbender - The Burning Earth
+    0x5451087B, // MX vs. ATV Alive
+    0x5451083B, // 50 Cent: Blood on the Sand
+    0x5451082A, // UFC 2009 Undisputed
+    0x54510866, // WWE All Stars
+    0x54510875, // Rio
+    0x54510826, // WWE SmackDown vs. Raw 2009
+    0x54510874, // DreamWorks Kung Fu Panda 2
+    0x54510829, // MX vs. ATV Reflex
+    0x5451080D, // Red Faction: Guerrilla
+    0x54510842, // Metro 2033
+    0x54510851, // UFC Undisputed 2010
+    0x545107E6, // Darksiders
+    0x545107FE, // Destroy All Humans! Path of the Furon
+    0x5451085B, // UFC Personal Trainer: The Ultimate Fitness System
+    0x54510896, // Darksiders II
+    // Bethesda
+    0x425307E6, // The Elder Scrolls V: Skyrim
+    0x425307D5, // Fallout 3: Game of the Year Edition
+    0x425307E0, // Fallout: New Vegas
+    0x425307D1, // The Elder Scrolls IV: Oblivion
+    0x425307D9, // Brink
+    0x425307E3, // Dishonored
+    0x425307EC, // Rage
+    0x425307DB, // WET
+    0x425307F4, // The Evil Within
+    0x425307F1, // Doom 3: BFG Edition
+    0x425307D7, // Hunted: The Demon's Forge
+    0x425307F5, // Wolfenstein: The New Order
+    0x425307D2, // Star Trek: Legacy
+    0x425307D3, // Rogue Warrior
+    // Warner Bros.
+    0x57520802, // Batman: Arkham City
+    0x575207FD, // Mortal Kombat
+    0x534307F6, // Batman: Arkham Asylum
+    0x57520817, // LEGO Batman 2: DC Super Heroes
+    0x4D5707E9, // Mortal Kombat vs. DC Universe
+    0x575207F0, // LEGO Rock Band
+    0x57520835, // LEGO Marvel Super Heroes
+    0x57520828, // Batman: Arkham Origins
+    0x575207D7, // LEGO Batman: The Videogame
+    0x57520829, // Injustice: Gods Among Us
+    0x57520841, // The LEGO Movie: Videogame
+    0x57520845, // LEGO Batman 3: Beyond Gotham
+    0x57520801, // Game Party: In Motion
+    0x4D5707E8, // Blitz: The League II
+    0x575207E6, // LEGO Harry Potter: Years 1-4
+    0x5752084D, // LEGO Jurassic World
+    0x57520824, // The Witcher 2: Assassins of Kings - Enhanced Edition
+    0x575207D3, // F.E.A.R. 2: Project Origin
+    0x4D5707D6, // Wheelman
+    0x575207E9, // Green Lantern: Rise of the Manhunters
+    0x57520800, // F.E.A.R. 3
+    0x4D5707DF, // TNA Impact! Total Nonstop Action Wrestling
+    0x5752080C, // Sesame Street: Once Upon a Monster
+    0x4D5707DA, // NBA Ballers: Chosen One
+    // SEGA
+    0x5345082A, // Aliens vs. Predator
+    0x534507D6, // Sonic the Hedgehog
+    0x53450846, // Rise of Nightmares
+    0x5345084D, // Sonic Free Riders
+    0x534507F1, // The Incredible Hulk
+    0x53450848, // Sonic Generations
+    0x53450858, // Captain America: Super Soldier
+    0x534507E3, // Phantasy Star Universe
+    0x53450813, // Bayonetta
+    0x53450812, // Sonic Unleashed
+    0x53450815, // Sonic & Sega All-Stars Racing with Banjo-Kazooie
+    0x5345080C, // Aliens: Colonial Marines
+    0x53450836, // Iron Man 2
+    0x53450841, // Vanquish
+    0x53450810, // Sonic's Ultimate Genesis Collection
+    0x534507F2, // Iron Man
+    0x534507D2, // Condemned
+    0x5345085A, // Dreamcast Collection
+    0x53450845, // Thor: God of Thunder
+    0x5345085D, // Sonic & All-Stars Racing Transformed
+    0x5345085E, // Alien: Isolation
+    0x534507E0, // Viking: Battle for Asgard
+    0x534507D5, // Full Auto
+    0x534507D4, // Chromehounds
+    // Capcom
+    0x434307D4, // Resident Evil 5
+    0x434307EC, // Dead Rising 2
+    0x4343081D, // Biohazard: Operation Raccoon City
+    0x434307D2, // Dead Rising
+    0x43430819, // Resident Evil 6
+    0x434307ED, // Lost Planet 2
+    0x43430806, // Marvel vs. Capcom 3: Fate of Two Worlds
+    0x434307FC, // Super Street Fighter IV
+    0x43430816, // Steel Battalion: Heavy Armor
+    0x4343081F, // Dead Rising 2: Off the Record
+    0x434307E1, // Street Fighter IV
+    0x4343080F, // Street Fighter X Tekken
+    0x434307DF, // Devil May Cry 4
+    0x43430814, // Dragon's Dogma
+    0x43430821, // Ultimate Marvel vs. Capcom 3
+    0x43430822, // Biohazard: Revival Selection
+    0x434307D3, // Lost Planet: Extreme Condition
+    0x43430824, // DmC: Devil May Cry
+    0x434307E0, // Dark Void
+    0x43430817, // Asura's Wrath
+    0x434307DD, // Bionic Commando
+    0x4343081E, // Devil May Cry: HD Collection
+    0x43430830, // Lost Planet 3
+    0x434307F0, // MotoGP 09-10
+    // Bandai Namco
+    0x4E4D083A, // Dark Souls
+    0x4E4D0803, // Dragon Ball: Raging Blast
+    0x4E4D0826, // Dragon Ball: Raging Blast 2
+    0x4E4D0819, // Naruto Shippuden: Ultimate Ninja Storm 2
+    0x4E4D0862, // Dragon Ball Xenoverse
+    0x4E4D07E0, // Soulcalibur IV
+    0x4E4D07FC, // Tekken 6
+    0x4E4D083D, // Soulcalibur V
+    0x4E4D07E9, // Tales of Vesperia
+    0x4E4D0860, // Dragon Ball Z: Battle of Z
+    0x4E4D0842, // Naruto Shippuden: Ultimate Ninja Storm Generations
+    0x4E4D07D1, // Ace Combat 6: Fires of Liberation
+    0x4E4D0868, // Naruto Shippuden: Ultimate Ninja Storm Revolution
+    0x4E4D081C, // Ace Combat: Assault Horizon
+    0x4E4D07F1, // Enslaved: Odyssey to the West
+    0x4E4D085C, // Naruto Shippuden: Ultimate Ninja Storm 3
+    0x4E4D07D8, // Afro Samurai
+    0x4E4D07F0, // Splatterhouse
+    0x4E4D080B, // MagnaCarta 2
+    0x4E4D0846, // Dragon Ball Z: Ultimate Tenkaichi
+    0x4E4D0856, // Dragon Ball Z: Budokai HD Collection
+    0x4E4D0859, // Tekken Tag Tournament 2
+    0x4E4D07E4, // Eternal Sonata
+    0x4E4D0834, // Dynasty Warriors: Gundam 3
+    // Square Enix
+    0x534307E7, // Just Cause 2
+    0x535107E4, // Final Fantasy XIII
+    0x53510802, // Tomb Raider
+    0x53510811, // Sleeping Dogs
+    0x53510804, // Hitman: Absolution
+    0x535107FA, // Deus Ex: Human Revolution
+    0x53510806, // Final Fantasy XIII-2
+    0x534307DB, // Hitman: Blood Money
+    0x535107D5, // Final Fantasy XI
+    0x53510803, // Thief
+    0x534307F8, // Kane & Lynch 2: Dog Days
+    0x534307E4, // Mini Ninjas
+    0x534307E9, // Battlestations: Pacific
+    0x534307E0, // Kane & Lynch: Dead Men
+    0x535107DA, // The Last Remnant
+    0x534307EC, // Tomb Raider: Underworld
+    0x535107E3, // Supreme Commander 2
+    0x534307D5, // Just Cause
+    0x535107F5, // Dungeon Siege III
+    0x534307EA, // Lara Croft Tomb Raider: Anniversary
+    0x535107DB, // Infinite Undiscovery
+    0x535107DD, // Star Ocean: The Last Hope
+    0x534307D4, // Lara Croft Tomb Raider: Legend
+    0x534307D9, // Battlestations: Midway
     // Only on Xbox 360
     0x4156084C, // Transformers: War for Cybertron
     0x4156089C, // Transformers: Fall of Cybertron
@@ -302,6 +615,23 @@ static const unsigned long kStoreCollectionGames[] =
     0x4156081F, // 007: Blood Stone
     0x4E4D0826, // Dragon Ball: Raging Blast 2
     0x415607DD, // Tony Hawk's Project 8
+};
+
+static const StorePublisherStyle kStorePublisherStyles[STORE_PUBLISHER_COUNT + 1] =
+{
+    { 0x3D3D3D, 0x0B0B0B, { 0, -1 } }, // Activision
+    { 0x2F63F7, 0x0D2470, { 1, -1 } }, // EA
+    { 0x1F9A1F, 0x0A3F0A, { 2, -1 } }, // Microsoft
+    { 0xF2A900, 0x8A3C00, { 3, 4 } }, // Rockstar & 2K
+    { 0x3D5CFF, 0x2A1170, { 5, -1 } }, // Ubisoft
+    { 0xE3342F, 0x6B0D0B, { 6, -1 } }, // THQ
+    { 0x6D6F73, 0x1C1D1F, { 7, -1 } }, // Bethesda
+    { 0x1D5BC4, 0x071F4D, { 8, -1 } }, // Warner Bros.
+    { 0x1A7FD1, 0x062F5E, { 9, -1 } }, // SEGA
+    { 0xF6B800, 0x0C3F8A, { 10, -1 } }, // Capcom
+    { 0xF0263A, 0x5C000A, { 11, -1 } }, // Bandai Namco
+    { 0x3A3A3A, 0x5A0A0D, { 12, -1 } }, // Square Enix
+    { 0, 0, { -1, -1 } }, // so the table is never empty
 };
 
 #endif // STORE_COLLECTIONS_DATA
