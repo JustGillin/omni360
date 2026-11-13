@@ -7041,12 +7041,11 @@ int main()
     remove(LOG_FILE_PATH);
 
     MakeConsole("embed:\\font", CONSOLE_COLOR_BLACK, CONSOLE_COLOR_WHITE);
-    StartupStep("console");
-
     // The log goes to the file but not the screen: a flash of white log text
     // before the loading screen is just noise. The console is only shown if
     // the UI fails to start, below.
     SetConsoleQuiet(true);
+    StartupStep("console");
 
     if (!CheckGameMounted())
         dprintf("Warning: Some paths may not be mounted\n");
