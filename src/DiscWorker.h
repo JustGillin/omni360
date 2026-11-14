@@ -70,6 +70,11 @@ void SetDiscWorkerGamesPath(const char *gamesPath);
 #define DISC_SPEED_FULL    4
 void SetDiscReadSpeed(int speed);
 
+// Whether the tray opens once a disc has installed - set from Settings. Off
+// unless turned on. Only after one that finished; a stopped or failed
+// install leaves the disc in.
+void SetEjectAfterInstall(bool eject);
+
 void GetDiscInfo(DiscInfo *out);
 
 // Whether this disc is installed in the games folder already - its header is

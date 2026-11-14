@@ -71,6 +71,7 @@ extern "C" NTSTATUS XexGetModuleHandle(PSZ moduleName, PHANDLE outHandle);
 #define UPDATE_CHECK_KEY "check-updates: " // "off" stops the check at start
 #define SOUNDS_KEY "nav-sounds: "         // "off" silences the interface
 #define INSTALL_TYPE_KEY "install-type: "   // "folder" copies a game's files out rather than making a GOD package - Store and disc installs
+#define EJECT_KEY "eject-after-install: " // "yes" opens the tray once a disc has installed
 #define DISC_SPEED_KEY "disc-speed: "       // 1 to 4, DiscWorker's spindle speed for installs
 #define STORE_FILTER_KEY "store-filter: "   // the Store letters' filters and order: "sort=a-z;regions=usa,eur;..."
 #define HOMEBREW_MIRROR_KEY "homebrew-mirror: " // for testing: homebrew from "http://PC:8000", a folder of the repo's .7z files
@@ -331,6 +332,14 @@ static bool InstallAsFolderSetting()
     char value[16];
     GetSettingsPath(INSTALL_TYPE_KEY, "god", value, sizeof(value));
     return _stricmp(value, "folder") == 0;
+}
+
+// Whether the tray opens once a disc has installed. Off unless turned on.
+static bool EjectAfterInstallSetting()
+{
+    char value[16];
+    GetSettingsPath(EJECT_KEY, "off", value, sizeof(value));
+    return _stricmp(value, "yes") == 0;
 }
 
 // Whether to ask GitHub for a newer version at start. On unless turned off.
@@ -1628,6 +1637,7 @@ enum SettingsRow
     SETTINGS_ROW_ADD_FOLDER,   // another library folder, typed
     SETTINGS_ROW_SOUNDS,       // the interface's sounds, on or off
     SETTINGS_ROW_SPEED_TEST,   // where a download's speed goes - SpeedTest.h
+    SETTINGS_ROW_EJECT,        // opening the tray after a disc install, on or off
     SETTINGS_ROW_INSTALL_TYPE, // Games on Demand or folder games, for Store installs
     SETTINGS_ROW_RESYNC_LIBRARY // re-read the library from disk and re-fetch missing icons
 };
@@ -2007,6 +2017,14 @@ static void ToggleInstallType()
     dprintf("Game installs set to %s\n", asFolder ? "folder games" : "Games on Demand");
 }
 
+static void ToggleEjectAfterInstall()
+{
+    const bool on = !EjectAfterInstallSetting();
+    if (!SetSettingsValue(EJECT_KEY, on ? "yes" : "off"))
+        ShowMessageUI("Not saved", "settings.txt could not be written.", NULL);
+    SetEjectAfterInstall(on);
+}
+
 static void ToggleUiSounds()
 {
     const bool on = !UiSoundsSetting();
@@ -2277,6 +2295,11 @@ static void BuildSettingsPage(SettingsPage &page, const Library &lib, const char
             c.valueCount = DISC_SPEED_FULL;
         }
 
+        AddSettingsRow(page, SETTINGS_VIEW_LINE, "Eject disc after install");
+        AddSettingsControl(page, SETTINGS_CONTROL_CHECK, NULL, SETTINGS_ROW_EJECT,
+                           "Opens the tray once a disc has installed, ready for the next one.");
+        page.rows[page.count - 1].controls[0].on = EjectAfterInstallSetting();
+
         // How a Store game installs: left and right change it.
         const bool asFolder = InstallAsFolderSetting();
         AddSettingsRow(page, SETTINGS_VIEW_LINE, "Install games as");
@@ -2419,6 +2442,7 @@ static SettingsOutcome RunSettingsRow(SettingsRow row, int arg, Library &lib, ch
     case SETTINGS_ROW_ADD_FOLDER:   AddLibraryFolder(lib, gamesPath, outcome); break;
     case SETTINGS_ROW_SOUNDS:       ToggleUiSounds(); break;
     case SETTINGS_ROW_INSTALL_TYPE: ToggleInstallType(); break;
+    case SETTINGS_ROW_EJECT:        ToggleEjectAfterInstall(); break;
     case SETTINGS_ROW_SPEED_TEST:   RunSpeedTest(gamesPath); break;
     case SETTINGS_ROW_RESYNC_LIBRARY:
         ScanLibrary(lib, gamesPath);
@@ -7275,6 +7299,7 @@ int main()
     LogNetworkStatus();
     StartupStep("network");
     SetDiscReadSpeed(DiscSpeedSetting());
+    SetEjectAfterInstall(EjectAfterInstallSetting());
     if (StartUiSounds())
         SetUiSoundsOn(UiSoundsSetting());
     StartupStep("disc speed + sounds");

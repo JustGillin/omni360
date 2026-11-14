@@ -161,6 +161,31 @@ bool IsDiscInstalled(const char *gamesPath, unsigned long titleId, unsigned long
 // Watching the drive
 // ---------------------------------------------------------------------------
 
+// Opening the tray: the SMC message libxenon's xenon_smc_open_tray sends,
+// on the same call as the tray state below and NightMode's power-off.
+#define SMC_TRAY       0x8B
+#define SMC_TRAY_OPEN  0x60
+
+static volatile LONG g_ejectAfterInstall = 0;
+
+void SetEjectAfterInstall(bool eject)
+{
+    InterlockedExchange(&g_ejectAfterInstall, eject ? 1 : 0);
+}
+
+static void OpenTray()
+{
+    unsigned char request[16];
+    unsigned char reply[16];
+    memset(request, 0, sizeof(request));
+    memset(reply, 0, sizeof(reply));
+    request[0] = SMC_TRAY;
+    request[1] = SMC_TRAY_OPEN;
+    dprintf("[disc] opening the tray - the install is done\n");
+    HalSendSMCMessage(request, reply);
+    dprintf("[disc] the SMC answered the tray: %02X %02X\n", reply[0], reply[1]);
+}
+
 static int ReadTrayState()
 {
     unsigned char request[16];
@@ -597,6 +622,13 @@ static void RunInstall(DiscJob *job, const char *gamesPath)
         break;
     }
     LeaveCriticalSection(&g_lock);
+
+    // Out it comes, if Settings says so - only a finished one, so a disc that
+    // failed stays in to try again. Last, once the job is settled: opened
+    // before it, the tray came out but the job sat at 100% and never
+    // finished (2026-11-14).
+    if (result == GOD_OK && g_ejectAfterInstall != 0)
+        OpenTray();
 }
 
 // ---------------------------------------------------------------------------
