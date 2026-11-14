@@ -1876,6 +1876,13 @@ static float NavItemY(int page)
     return g_M.listY + before * S(shown > 6 ? 58.0f : 62.0f);
 }
 
+// A section's, when the sidebar lists a page's sections: spaced as the pages
+// are when there are few of them.
+static float SectionItemY(int section)
+{
+    return g_M.listY + section * S(62.0f);
+}
+
 static float NavRight()
 {
     return g_M.navX + g_M.navW - S(18.0f);
@@ -2011,7 +2018,19 @@ static void DrawSidebarQuads(bool focused)
 
     const float itemH = NavItemHeight();
 
-    for (int page = 0; page < SHELL_PAGE_COUNT; ++page)
+    // A page's sections, in the pages' place: the same plate and bar.
+    for (int s = 0; s < g_sidebar.sectionCount; ++s)
+    {
+        if (s != g_sidebar.section)
+            continue;
+        const float y = SectionItemY(s);
+        FillRound(g_M.navX, y, g_M.navW, itemH, g_M.radius, COL_SURFACE_HI);
+        FillRound(g_M.navX + S(8.0f), y + S(14.0f), S(4.0f), itemH - S(28.0f), R(2.0f), COL_GREEN);
+        if (focused)
+            FocusRing(g_M.navX, y, g_M.navW, itemH, g_M.radius);
+    }
+
+    for (int page = 0; page < SHELL_PAGE_COUNT && g_sidebar.sectionCount == 0; ++page)
     {
         if (!NavShown(page))
             continue;
@@ -2059,7 +2078,15 @@ static void DrawSidebarText(bool focused)
 
     const float itemH = NavItemHeight();
 
-    for (int page = 0; page < SHELL_PAGE_COUNT; ++page)
+    for (int s = 0; s < g_sidebar.sectionCount; ++s)
+    {
+        const bool current = (s == g_sidebar.section);
+        const float textX = g_M.navX + S(26.0f);
+        TextMid(textX, SectionItemY(s) + itemH * 0.5f, 0.95f, current ? COL_TEXT : COL_TEXT2,
+                g_sidebar.sections[s], ATGFONT_TRUNCATED, NavRight() - textX, current);
+    }
+
+    for (int page = 0; page < SHELL_PAGE_COUNT && g_sidebar.sectionCount == 0; ++page)
     {
         if (!NavShown(page))
             continue;

@@ -2040,6 +2040,7 @@ struct SettingsPage
     char updatesStatus[96];
     char updatesHelp[96];
 
+    int section;  // a SettingsSection: which one the rows are
     int focusRow;
     int focusCol;
     float scroll;
@@ -2079,188 +2080,239 @@ static bool SettingsRowFocusable(const SettingsRowView &row)
     return row.kind != SETTINGS_VIEW_HEADING || row.controlCount > 0;
 }
 
+// Settings' sections, down its sidebar. Each one's rows are built on their own.
+enum SettingsSection
+{
+    SETTINGS_SECTION_GENERAL,
+    SETTINGS_SECTION_ASSETS,
+    SETTINGS_SECTION_STORAGE,
+    SETTINGS_SECTION_LANGUAGE,
+    SETTINGS_SECTION_ABOUT,
+    SETTINGS_SECTION_COUNT
+};
+
+static const char *const kSettingsSectionNames[SETTINGS_SECTION_COUNT] =
+{
+    "General",
+    "Assets",
+    "Storage",
+    "Language",
+    "About"
+};
+
+// Something not built yet: its name, "Coming soon", and nothing to press.
+static void AddComingSoonRow(SettingsPage &page, const char *label, const char *help)
+{
+    SettingsRowView &row = AddSettingsRow(page, SETTINGS_VIEW_LINE, label);
+    row.status = "Coming soon";
+    row.help = help;
+}
+
 static void BuildSettingsPage(SettingsPage &page, const Library &lib, const char *gamesPath)
 {
     std::string accessKey, secretKey;
     const bool haveKeys = LoadSavedKeys(accessKey, secretKey);
     page.count = 0;
+    if (page.section < 0 || page.section >= SETTINGS_SECTION_COUNT)
+        page.section = SETTINGS_SECTION_GENERAL;
 
-    // --- The library's folders ---
-    // Names the content folder as well when it isn't the games folder
-    // itself, so it's clear where DLC, updates and arcade games land - they
-    // follow this drive, but always in its Content folder.
-    if (_stricmp(g_contentBase, gamesPath) == 0)
-        _snprintf(page.installHelp, sizeof(page.installHelp), "Where Store and disc installs go - now %s",
-                  gamesPath);
-    else
-        _snprintf(page.installHelp, sizeof(page.installHelp),
-                  "Where Store and disc installs go - now %s, with DLC and arcade games in %s",
-                  gamesPath, g_contentBase);
-    page.installHelp[sizeof(page.installHelp) - 1] = '\0';
-    AddSettingsRow(page, SETTINGS_VIEW_HEADING, "Folders");
-    AddSettingsControl(page, SETTINGS_CONTROL_BUTTON, "Add folder", SETTINGS_ROW_ADD_FOLDER,
-                       "Type the path of another folder of games, homebrew or apps, like Usb0:\\Games");
-    AddSettingsControl(page, SETTINGS_CONTROL_BUTTON, "Change install folder", SETTINGS_ROW_GAMES_FOLDER,
-                       page.installHelp);
+    // On every rebuild, as before the sections: the folder list stays current
+    // whichever section is showing.
+    FindLibraryFolders(gamesPath, lib.folderFound + 1);
 
-    // Where games install: always scanned.
-    _snprintf(page.installStatus, sizeof(page.installStatus), "Installs here" SETTINGS_MIDDOT "%d game%s",
-              lib.folderFound[0], lib.folderFound[0] == 1 ? "" : "s");
-    page.installStatus[sizeof(page.installStatus) - 1] = '\0';
+    if (page.section == SETTINGS_SECTION_STORAGE)
     {
-        SettingsRowView &row = AddSettingsRow(page, SETTINGS_VIEW_FOLDER, gamesPath);
-        row.status = page.installStatus;
-        row.statusGreen = true;
-        row.checked = true;
-        row.locked = true;
-        row.help = "Games install here, so it's always scanned. Change install folder, above, moves it.";
+        // --- Manage paths ---
+        // Names the content folder as well when it isn't the games folder
+        // itself, so it's clear where DLC, updates and arcade games land - they
+        // follow this drive, but always in its Content folder.
+        if (_stricmp(g_contentBase, gamesPath) == 0)
+            _snprintf(page.installHelp, sizeof(page.installHelp),
+                      "Store downloads and disc installs go here. A picks another path.");
+        else
+            _snprintf(page.installHelp, sizeof(page.installHelp),
+                      "Store downloads and disc installs go here, DLC and arcade games to %s. A picks another path.",
+                      g_contentBase);
+        page.installHelp[sizeof(page.installHelp) - 1] = '\0';
+        // One heading, one button: adding a path. Moving where downloads go is
+        // A on that path's own row, rather than a second button up here whose
+        // target you had to find.
+        AddSettingsRow(page, SETTINGS_VIEW_HEADING, "Manage paths");
+        AddSettingsControl(page, SETTINGS_CONTROL_BUTTON, "Add path", SETTINGS_ROW_ADD_FOLDER,
+                           "Type the path of another folder of games, homebrew or apps, like Usb0:\\Games");
+
+        // Where downloads and disc installs go: always scanned, always first.
+        _snprintf(page.installStatus, sizeof(page.installStatus), "Downloads go here" SETTINGS_MIDDOT "%d game%s",
+                  lib.folderFound[0], lib.folderFound[0] == 1 ? "" : "s");
+        page.installStatus[sizeof(page.installStatus) - 1] = '\0';
+        {
+            SettingsRowView &row = AddSettingsRow(page, SETTINGS_VIEW_FOLDER, gamesPath);
+            row.status = page.installStatus;
+            row.statusGreen = true;
+            row.checked = true;
+            row.locked = true;
+            row.help = page.installHelp;
+            page.actions[page.count - 1][0] = SETTINGS_ROW_GAMES_FOLDER;
+        }
+
+        // The other paths looked in - games, homebrew and apps - and the likely
+        // ones that could be. Each says what it holds on its right, which left
+        // and right change.
+        for (int i = 0; i < g_folderRowCount; ++i)
+        {
+            const LibraryFolderRow &folder = g_folderRows[i];
+            char *status = page.folderStatus[i];
+            const size_t statusSize = sizeof(page.folderStatus[i]);
+            char *help = page.folderHelp[i];
+            const size_t helpSize = sizeof(page.folderHelp[i]);
+            const char *kindName = kFolderKindNames[folder.kind];
+            SettingsRowView &row = AddSettingsRow(page, SETTINGS_VIEW_FOLDER, folder.path);
+            page.args[page.count - 1] = i;
+            page.actions[page.count - 1][0] = SETTINGS_ROW_LIBRARY_FOLDER;
+            row.checked = folder.scanned;
+            if (!folder.scanned)
+            {
+                _snprintf(status, statusSize, "Not scanned");
+                _snprintf(help, helpSize, "Not scanned. A adds it to %s - left and right change what it holds.",
+                          kFolderKindPages[folder.kind]);
+            }
+            else if (!folder.exists)
+            {
+                _snprintf(status, statusSize, "Not found");
+                row.missing = true;
+                _snprintf(help, helpSize, "This folder isn't there any more. A stops looking for it.");
+            }
+            else
+            {
+                if (folder.games < 0)
+                    _snprintf(status, statusSize, "Scanning\xE2\x80\xA6");
+                else if (folder.kind == FOLDER_GAMES)
+                    _snprintf(status, statusSize, "%d game%s", folder.games, folder.games == 1 ? "" : "s");
+                else if (folder.kind == FOLDER_APPS)
+                    _snprintf(status, statusSize, "%d app%s", folder.games, folder.games == 1 ? "" : "s");
+                else if (folder.kind == FOLDER_EMULATORS)
+                    _snprintf(status, statusSize, "%d emulator%s", folder.games, folder.games == 1 ? "" : "s");
+                else
+                    _snprintf(status, statusSize, "%d found", folder.games);
+                _snprintf(help, helpSize, "Shown in %s. A %s - left and right change what it holds.",
+                          kFolderKindPages[folder.kind], folder.suggested ? "stops scanning it" : "removes it");
+            }
+            status[statusSize - 1] = '\0';
+            help[helpSize - 1] = '\0';
+            row.status = status;
+            row.help = help;
+
+            // What it holds, beside it, as Disc read speed's value is.
+            SettingsControlView &c = row.controls[0];
+            memset(&c, 0, sizeof(c));
+            c.kind = SETTINGS_CONTROL_VALUE;
+            c.label = kindName;
+            c.valueIndex = folder.kind;
+            c.valueCount = FOLDER_KIND_COUNT;
+            c.compact = true;
+            row.controlCount = 1;
+        }
     }
 
-    // The other folders looked in - games, homebrew and apps - and the likely
-    // ones that could be. Each says what it holds on its right, which left
-    // and right change.
-    FindLibraryFolders(gamesPath, lib.folderFound + 1);
-    for (int i = 0; i < g_folderRowCount; ++i)
+    if (page.section == SETTINGS_SECTION_GENERAL)
     {
-        const LibraryFolderRow &folder = g_folderRows[i];
-        char *status = page.folderStatus[i];
-        const size_t statusSize = sizeof(page.folderStatus[i]);
-        char *help = page.folderHelp[i];
-        const size_t helpSize = sizeof(page.folderHelp[i]);
-        const char *kindName = kFolderKindNames[folder.kind];
-        SettingsRowView &row = AddSettingsRow(page, SETTINGS_VIEW_FOLDER, folder.path);
-        page.args[page.count - 1] = i;
-        page.actions[page.count - 1][0] = SETTINGS_ROW_LIBRARY_FOLDER;
-        row.checked = folder.scanned;
-        if (!folder.scanned)
+        AddSettingsRow(page, SETTINGS_VIEW_LINE, "Navigation sounds");
+        AddSettingsControl(page, SETTINGS_CONTROL_CHECK, NULL, SETTINGS_ROW_SOUNDS,
+                           "A soft tick as you move around, and a sound for A and B.");
+        page.rows[page.count - 1].controls[0].on = UiSoundsSetting();
+
+        // Only the start of the access key is shown - enough to tell which keys
+        // are saved. The secret key is never shown anywhere.
+        if (haveKeys)
         {
-            _snprintf(status, statusSize, "Not scanned");
-            _snprintf(help, helpSize, "Not scanned. A adds it to %s - left and right change what it holds.",
-                      kFolderKindPages[folder.kind]);
-        }
-        else if (!folder.exists)
-        {
-            _snprintf(status, statusSize, "Not found");
-            row.missing = true;
-            _snprintf(help, helpSize, "This folder isn't there any more. A stops looking for it.");
+            char shown[5] = "";
+            strncpy(shown, accessKey.c_str(), 4);
+            shown[4] = '\0';
+            _snprintf(page.keysStatus, sizeof(page.keysStatus), "Saved" SETTINGS_MIDDOT "access key %s\xE2\x80\xA6", shown);
         }
         else
         {
-            if (folder.games < 0)
-                _snprintf(status, statusSize, "Scanning\xE2\x80\xA6");
-            else if (folder.kind == FOLDER_GAMES)
-                _snprintf(status, statusSize, "%d game%s", folder.games, folder.games == 1 ? "" : "s");
-            else if (folder.kind == FOLDER_APPS)
-                _snprintf(status, statusSize, "%d app%s", folder.games, folder.games == 1 ? "" : "s");
-            else if (folder.kind == FOLDER_EMULATORS)
-                _snprintf(status, statusSize, "%d emulator%s", folder.games, folder.games == 1 ? "" : "s");
-            else
-                _snprintf(status, statusSize, "%d found", folder.games);
-            _snprintf(help, helpSize, "Shown in %s. A %s - left and right change what it holds.",
-                      kFolderKindPages[folder.kind], folder.suggested ? "stops scanning it" : "removes it");
+            _snprintf(page.keysStatus, sizeof(page.keysStatus), "Not set" SETTINGS_MIDDOT "needed to download");
         }
-        status[statusSize - 1] = '\0';
-        help[helpSize - 1] = '\0';
-        row.status = status;
-        row.help = help;
+        page.keysStatus[sizeof(page.keysStatus) - 1] = '\0';
+        AddSettingsRow(page, SETTINGS_VIEW_LINE, "archive.org keys").status = page.keysStatus;
+        AddSettingsControl(page, SETTINGS_CONTROL_BUTTON, haveKeys ? "Change" : "Add keys", SETTINGS_ROW_KEYS,
+                           "Type your access key and secret key, from archive.org/account/s3.php");
+        if (haveKeys)
+            AddSettingsControl(page, SETTINGS_CONTROL_BUTTON, "Remove", SETTINGS_ROW_REMOVE_KEYS,
+                               "Deletes the saved keys from this console. Store installs stop until new ones are added.");
 
-        // What it holds, beside it, as Disc read speed's value is.
-        SettingsControlView &c = row.controls[0];
-        memset(&c, 0, sizeof(c));
-        c.kind = SETTINGS_CONTROL_VALUE;
-        c.label = kindName;
-        c.valueIndex = folder.kind;
-        c.valueCount = FOLDER_KIND_COUNT;
-        c.compact = true;
-        row.controlCount = 1;
+        // How fast a disc install reads: left and right change it.
+        static const char *const speedNames[DISC_SPEED_FULL] = { "Slowest", "Slow", "Fast", "Full" };
+        const int speed = DiscSpeedSetting();
+        AddSettingsRow(page, SETTINGS_VIEW_LINE, "Disc read speed");
+        AddSettingsControl(page, SETTINGS_CONTROL_VALUE, speedNames[speed - 1], SETTINGS_ROW_NONE,
+                           speed == DISC_SPEED_FULL
+                               ? "The fastest. If a disc fails partway through, try a slower speed - left and right change it."
+                               : "Slower, and gentler on a scratched disc. Full is the fastest - left and right change it.");
+        {
+            SettingsControlView &c = page.rows[page.count - 1].controls[0];
+            c.valueIndex = speed - 1;
+            c.valueCount = DISC_SPEED_FULL;
+        }
+
+        AddComingSoonRow(page, "Auto sign in", "Signing a profile in when Omni360 starts. Not built yet.");
     }
 
-    // --- One line a setting ---
-    AddSettingsRow(page, SETTINGS_VIEW_HEADING, "General");
-
-    // Only the start of the access key is shown - enough to tell which keys
-    // are saved. The secret key is never shown anywhere.
-    if (haveKeys)
+    if (page.section == SETTINGS_SECTION_ASSETS)
     {
-        char shown[5] = "";
-        strncpy(shown, accessKey.c_str(), 4);
-        shown[4] = '\0';
-        _snprintf(page.keysStatus, sizeof(page.keysStatus), "Saved" SETTINGS_MIDDOT "access key %s\xE2\x80\xA6", shown);
+        AddSettingsRow(page, SETTINGS_VIEW_LINE, "Re-sync library");
+        AddSettingsControl(page, SETTINGS_CONTROL_BUTTON, "Re-sync", SETTINGS_ROW_RESYNC_LIBRARY,
+                           "Re-reads your installed games from disk and fills in any missing icons from Xbox Live.");
     }
-    else
+
+    if (page.section == SETTINGS_SECTION_LANGUAGE)
+        AddComingSoonRow(page, "English", "Other languages are on the way.");
+
+    if (page.section == SETTINGS_SECTION_ABOUT)
     {
-        _snprintf(page.keysStatus, sizeof(page.keysStatus), "Not set" SETTINGS_MIDDOT "needed to download");
+        // The version, and whether there's a newer one.
+        UpdateInfo update;
+        const UpdateState state = GetUpdateState(&update, NULL);
+        switch (state)
+        {
+        case UPDATE_AVAILABLE:
+            _snprintf(page.updatesStatus, sizeof(page.updatesStatus), "%s" SETTINGS_MIDDOT "%s is available", CURRENT_VERSION,
+                      update.version);
+            _snprintf(page.updatesHelp, sizeof(page.updatesHelp), "What's new in %s - and updating to it.", update.version);
+            break;
+        case UPDATE_CHECKING:
+            _snprintf(page.updatesStatus, sizeof(page.updatesStatus), "%s" SETTINGS_MIDDOT "checking\xE2\x80\xA6", CURRENT_VERSION);
+            break;
+        case UPDATE_CURRENT:
+            _snprintf(page.updatesStatus, sizeof(page.updatesStatus), "%s" SETTINGS_MIDDOT "up to date", CURRENT_VERSION);
+            break;
+        case UPDATE_FAILED:
+            _snprintf(page.updatesStatus, sizeof(page.updatesStatus), "%s" SETTINGS_MIDDOT "couldn't reach GitHub", CURRENT_VERSION);
+            break;
+        default:
+            _snprintf(page.updatesStatus, sizeof(page.updatesStatus), "%s", CURRENT_VERSION);
+            break;
+        }
+        page.updatesStatus[sizeof(page.updatesStatus) - 1] = '\0';
+        page.updatesHelp[sizeof(page.updatesHelp) - 1] = '\0';
+        AddSettingsRow(page, SETTINGS_VIEW_LINE, "Updates").status = page.updatesStatus;
+        if (state == UPDATE_AVAILABLE)
+            AddSettingsControl(page, SETTINGS_CONTROL_BUTTON, "What's new", SETTINGS_ROW_UPDATES, page.updatesHelp);
+        else
+            AddSettingsControl(page, SETTINGS_CONTROL_BUTTON, "Check now", SETTINGS_ROW_UPDATES,
+                               "Asks GitHub for the latest version now.");
+        AddSettingsControl(page, SETTINGS_CONTROL_CHECK, "At start", SETTINGS_ROW_UPDATE_CHECKS,
+                           "Asks GitHub for the latest version each time Omni360 starts.");
+        page.rows[page.count - 1].controls[1].on = UpdateChecksOn();
+
+        AddComingSoonRow(page, "Version info", "Omni360's build, and the console's dashboard and kernel versions. Not built yet.");
+
+        AddSettingsRow(page, SETTINGS_VIEW_LINE, "Speed test");
+        AddSettingsControl(page, SETTINGS_CONTROL_BUTTON, "Run test", SETTINGS_ROW_SPEED_TEST,
+                           "Checks how fast your internet, your console and archive.org are, to see what slows "
+                           "downloads down. About a minute.");
     }
-    page.keysStatus[sizeof(page.keysStatus) - 1] = '\0';
-    AddSettingsRow(page, SETTINGS_VIEW_LINE, "archive.org keys").status = page.keysStatus;
-    AddSettingsControl(page, SETTINGS_CONTROL_BUTTON, haveKeys ? "Change" : "Add keys", SETTINGS_ROW_KEYS,
-                       "Type your access key and secret key, from archive.org/account/s3.php");
-    if (haveKeys)
-        AddSettingsControl(page, SETTINGS_CONTROL_BUTTON, "Remove", SETTINGS_ROW_REMOVE_KEYS,
-                           "Deletes the saved keys from this console. Store installs stop until new ones are added.");
-
-    // How fast a disc install reads: left and right change it.
-    static const char *const speedNames[DISC_SPEED_FULL] = { "Slowest", "Slow", "Fast", "Full" };
-    const int speed = DiscSpeedSetting();
-    AddSettingsRow(page, SETTINGS_VIEW_LINE, "Disc read speed");
-    AddSettingsControl(page, SETTINGS_CONTROL_VALUE, speedNames[speed - 1], SETTINGS_ROW_NONE,
-                       speed == DISC_SPEED_FULL
-                           ? "The fastest. If a disc fails partway through, try a slower speed - left and right change it."
-                           : "Slower, and gentler on a scratched disc. Full is the fastest - left and right change it.");
-    {
-        SettingsControlView &c = page.rows[page.count - 1].controls[0];
-        c.valueIndex = speed - 1;
-        c.valueCount = DISC_SPEED_FULL;
-    }
-
-    AddSettingsRow(page, SETTINGS_VIEW_LINE, "Download speed");
-    AddSettingsControl(page, SETTINGS_CONTROL_BUTTON, "Run test", SETTINGS_ROW_SPEED_TEST,
-                       "Checks how fast your internet, your console and archive.org are, to see what slows "
-                       "downloads down. About a minute.");
-
-    AddSettingsRow(page, SETTINGS_VIEW_LINE, "Library");
-    AddSettingsControl(page, SETTINGS_CONTROL_BUTTON, "Resync", SETTINGS_ROW_RESYNC_LIBRARY,
-                       "Re-reads your installed games from disk and fills in any missing icons from Xbox Live.");
-
-    // The version, and whether there's a newer one.
-    UpdateInfo update;
-    const UpdateState state = GetUpdateState(&update, NULL);
-    switch (state)
-    {
-    case UPDATE_AVAILABLE:
-        _snprintf(page.updatesStatus, sizeof(page.updatesStatus), "%s" SETTINGS_MIDDOT "%s is available", CURRENT_VERSION,
-                  update.version);
-        _snprintf(page.updatesHelp, sizeof(page.updatesHelp), "What's new in %s - and updating to it.", update.version);
-        break;
-    case UPDATE_CHECKING:
-        _snprintf(page.updatesStatus, sizeof(page.updatesStatus), "%s" SETTINGS_MIDDOT "checking\xE2\x80\xA6", CURRENT_VERSION);
-        break;
-    case UPDATE_CURRENT:
-        _snprintf(page.updatesStatus, sizeof(page.updatesStatus), "%s" SETTINGS_MIDDOT "up to date", CURRENT_VERSION);
-        break;
-    case UPDATE_FAILED:
-        _snprintf(page.updatesStatus, sizeof(page.updatesStatus), "%s" SETTINGS_MIDDOT "couldn't reach GitHub", CURRENT_VERSION);
-        break;
-    default:
-        _snprintf(page.updatesStatus, sizeof(page.updatesStatus), "%s", CURRENT_VERSION);
-        break;
-    }
-    page.updatesStatus[sizeof(page.updatesStatus) - 1] = '\0';
-    page.updatesHelp[sizeof(page.updatesHelp) - 1] = '\0';
-    AddSettingsRow(page, SETTINGS_VIEW_LINE, "Updates").status = page.updatesStatus;
-    if (state == UPDATE_AVAILABLE)
-        AddSettingsControl(page, SETTINGS_CONTROL_BUTTON, "What's new", SETTINGS_ROW_UPDATES, page.updatesHelp);
-    else
-        AddSettingsControl(page, SETTINGS_CONTROL_BUTTON, "Check now", SETTINGS_ROW_UPDATES,
-                           "Asks GitHub for the latest version now.");
-    AddSettingsControl(page, SETTINGS_CONTROL_CHECK, "At start", SETTINGS_ROW_UPDATE_CHECKS,
-                       "Asks GitHub for the latest version each time Omni360 starts.");
-    page.rows[page.count - 1].controls[1].on = UpdateChecksOn();
-
-    AddSettingsRow(page, SETTINGS_VIEW_LINE, "Navigation sounds");
-    AddSettingsControl(page, SETTINGS_CONTROL_CHECK, NULL, SETTINGS_ROW_SOUNDS,
-                       "A soft tick as you move around, and a sound for A and B.");
-    page.rows[page.count - 1].controls[0].on = UiSoundsSetting();
 
     // The focus where it was, on a row that's still there.
     if (page.focusRow > page.count - 1)
@@ -2286,6 +2338,21 @@ static void StepSettingsRow(SettingsPage &page, int direction)
             return;
         }
     }
+}
+
+// LB and RB, or up and down its sidebar: the next section, built now so the
+// rows under the highlight are that section's this frame. Stays put at
+// either end, as the pages' sidebar does.
+static void StepSettingsSection(SettingsPage &page, int direction, const Library &lib, const char *gamesPath)
+{
+    const int next = page.section + direction;
+    if (next < 0 || next >= SETTINGS_SECTION_COUNT)
+        return;
+    page.section = next;
+    page.focusRow = 0;
+    page.focusCol = 0;
+    page.scroll = 0.0f;
+    BuildSettingsPage(page, lib, gamesPath);
 }
 
 // Settings' speed test, with the saved keys if there are any - without them
@@ -2704,13 +2771,15 @@ static bool PageTakesFocus(const Shell &shell, ShellPage page)
 }
 
 // The sidebar is this group's own navigation, not the app's: Games and the
-// three shelves share it, and it lists only them. Home, the Store, the Queue
-// and Settings draw full width and are reached from Home's nav row instead,
-// so shell.sidebarFocused means nothing on them and is held false.
+// three shelves share it, and it lists only them. Settings draws the same
+// sidebar listing its own sections instead. Home, the Store and the Queue
+// draw full width and are reached from Home's nav row, so
+// shell.sidebarFocused means nothing on them and is held false.
 static bool SidebarShown(const Shell &shell)
 {
     ShelfKind shelf;
-    return shell.page == SHELL_PAGE_LIBRARY || ShelfForPage(shell.page, &shelf);
+    return shell.page == SHELL_PAGE_LIBRARY || shell.page == SHELL_PAGE_SETTINGS ||
+           ShelfForPage(shell.page, &shelf);
 }
 
 // Left out of a page's first column goes to the sidebar - where the page has
@@ -5491,7 +5560,7 @@ static unsigned long FocusSignature(const Shell &shell)
     const int parts[] = {
         shell.page, shell.sidebarFocused, shell.librarySelected, shell.libraryInGame,
         shell.homeFocus, shell.homeNavFocus, shell.homeSelected,
-        shell.settings.focusRow, shell.settings.focusCol, DiscSpeedSetting(),
+        shell.settings.section, shell.settings.focusRow, shell.settings.focusCol, DiscSpeedSetting(),
         shell.picker.kind, shell.picker.selected, shell.queueSelected,
         shell.storeFocus, shell.storeInSection, shell.storeSection, shell.sectionFocus[shell.storeSection],
         shell.storeInLetter, shell.storeSelected, shell.storeInGame, shell.storeGameFocus, shell.storeVersionChosen,
@@ -5565,6 +5634,11 @@ static void PublishSidebar(const Shell &shell, const Library &lib)
     sidebar.storageDetail[sizeof(sidebar.storageDetail) - 1] = '\0';
     strncpy(sidebar.storageTotal, shell.storage.total, sizeof(sidebar.storageTotal) - 1);
     sidebar.storageTotal[sizeof(sidebar.storageTotal) - 1] = '\0';
+
+    // Settings lists its sections in the pages' place.
+    sidebar.sections = kSettingsSectionNames;
+    sidebar.sectionCount = shell.page == SHELL_PAGE_SETTINGS ? SETTINGS_SECTION_COUNT : 0;
+    sidebar.section = shell.settings.section;
 
     SetShellSidebar(sidebar);
 }
@@ -7654,6 +7728,18 @@ int main()
                 }
             }
         }
+        else if (shell.sidebarFocused && shell.page == SHELL_PAGE_SETTINGS)
+        {
+            // Settings' own sections, shown as the highlight moves.
+            if (input.nav == XINPUT_GAMEPAD_DPAD_UP || input.nav == XINPUT_GAMEPAD_DPAD_DOWN)
+                StepSettingsSection(shell.settings, input.nav == XINPUT_GAMEPAD_DPAD_UP ? -1 : 1, lib, gamesPath);
+            else if (pressed & (XINPUT_GAMEPAD_LEFT_SHOULDER | XINPUT_GAMEPAD_RIGHT_SHOULDER))
+                StepSettingsSection(shell.settings, (pressed & XINPUT_GAMEPAD_LEFT_SHOULDER) ? -1 : 1, lib, gamesPath);
+            else if (input.nav == XINPUT_GAMEPAD_DPAD_RIGHT || (pressed & XINPUT_GAMEPAD_A))
+                shell.sidebarFocused = false;
+            else if (pressed & XINPUT_GAMEPAD_B)
+                EnterPage(shell, SHELL_PAGE_HOME, false);
+        }
         else if (shell.sidebarFocused)
         {
             if (input.nav == XINPUT_GAMEPAD_DPAD_UP)
@@ -7763,8 +7849,15 @@ int main()
             else if (pressed & XINPUT_GAMEPAD_Y)
             {
                 // A shortcut, for the keys banner and the empty library, which
-                // both send you to Settings with a Y badge.
+                // both send you to Settings with a Y badge: to the keys, or
+                // to the paths the library is read from.
                 shell.page = SHELL_PAGE_SETTINGS;
+                shell.sidebarFocused = false;
+                shell.settings.section = lib.count == 0 ? SETTINGS_SECTION_STORAGE : SETTINGS_SECTION_GENERAL;
+                shell.settings.focusRow = 0;
+                shell.settings.focusCol = 0;
+                shell.settings.scroll = 0.0f;
+                BuildSettingsPage(shell.settings, lib, gamesPath);
             }
         }
         else if (shell.page == SHELL_PAGE_APPS || shell.page == SHELL_PAGE_HOMEBREW ||
@@ -8215,6 +8308,10 @@ int main()
             if (pressed & XINPUT_GAMEPAD_B)
             {
                 EnterPage(shell, SHELL_PAGE_HOME, false);
+            }
+            else if (pressed & (XINPUT_GAMEPAD_LEFT_SHOULDER | XINPUT_GAMEPAD_RIGHT_SHOULDER))
+            {
+                StepSettingsSection(settings, (pressed & XINPUT_GAMEPAD_LEFT_SHOULDER) ? -1 : 1, lib, gamesPath);
             }
             else if (row == NULL)
             {

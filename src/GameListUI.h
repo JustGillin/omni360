@@ -72,6 +72,13 @@ struct ShellSidebar
     char storageLabel[16];  // "Hdd1"
     char storageDetail[32]; // "402 GB free"
     char storageTotal[32];  // "of 931 GB"
+
+    // In place of the pages: a page's own sections, drawn the same way -
+    // Settings' General, Assets, Storage... sectionCount 0 lists the pages.
+    // The names are the caller's, and must outlive the frames that draw them.
+    const char *const *sections;
+    int sectionCount;
+    int section;            // the highlighted one
 };
 
 // What every following frame draws in the sidebar, until it is called again.
