@@ -1184,7 +1184,10 @@ static unsigned long *LoadFront(unsigned long titleId, bool forStore, int worker
     if (front != NULL)
         return front;
 
-    if (RecentlyMissing(titleId))
+    // A cover picked by hand into LaunchBoxCovers.h is asked for past the
+    // marker: the marker may be from before it was added - Ubisoft's Triple
+    // Pack's disc was marked by an install the same day its cover went in.
+    if (RecentlyMissing(titleId) && LaunchBoxCoverFile(titleId) == NULL)
     {
         // Once a session each, so the log says why a tile has no cover.
         if (!forStore)
