@@ -1728,10 +1728,21 @@ static float DrawButtonSprite(int sprite, float boxX, float centerY)
 }
 
 // Something slow running behind the page - a library being read again after
-// an install. It sits at the right of the footer, opposite the button
-// hints, so it turns up on every page without any of them knowing about it.
-// Empty when there's nothing going on.
+// an install. It sits under the clock, right-aligned with it: in the footer
+// it ran into a page's button hints. It's drawn with the hints all the same,
+// so it turns up on every page without any of them knowing about it, and the
+// clock - the page header's, or Home's top bar's - says where it is with
+// NoteClockBox, a frame behind. Empty when there's nothing going on.
 static char g_busyLabel[48] = "";
+static float g_busyRight = -1.0f; // the clock's right edge; < 0 until one is drawn
+static float g_busyCenterY = 0.0f;
+
+// Where the clock was drawn: its right edge and the bottom of its text.
+static void NoteClockBox(float right, float bottom)
+{
+    g_busyRight = right;
+    g_busyCenterY = bottom + S(14.0f);
+}
 
 void SetShellBusy(const char *label)
 {
@@ -1754,13 +1765,25 @@ static float BusyWidth()
     return TextWidth(g_busyLabel, 0.7f) + S(34.0f);
 }
 
-static void DrawBusyShapes(float centerY)
+// Under the clock, or where the header's clock would be before one is drawn.
+static float BusyRight()
+{
+    return g_busyRight >= 0.0f ? g_busyRight : g_M.contentX + g_M.contentW;
+}
+
+static float BusyCenterY()
+{
+    return g_busyRight >= 0.0f ? g_busyCenterY : g_M.headerY + S(4.0f) + LineHeight(0.95f) + S(14.0f);
+}
+
+static void DrawBusyShapes()
 {
     if (g_busyLabel[0] == '\0')
         return;
 
     const float w = BusyWidth();
-    const float x = g_M.contentX + g_M.contentW - w;
+    const float x = BusyRight() - w;
+    const float centerY = BusyCenterY();
     const int lit = ((int)(TimerMs() / BUSY_DOT_MS)) % 4;
 
     for (int i = 0; i < 3; ++i)
@@ -1774,7 +1797,7 @@ static void DrawButtonHintShapes(const ButtonHint *hints, int count, float cente
 {
     for (int i = 0; i < count; ++i)
         DrawButtonSprite(hints[i].sprite, hints[i].badgeX, centerY);
-    DrawBusyShapes(centerY);
+    DrawBusyShapes();
 }
 
 // Must be called inside an open Font Begin/End.
@@ -1791,7 +1814,7 @@ static void DrawButtonHintText(const ButtonHint *hints, int count, float centerY
     }
 
     if (g_busyLabel[0] != '\0')
-        TextMid(g_M.contentX + g_M.contentW - BusyWidth() + S(34.0f), centerY, 0.7f, COL_TEXT2, g_busyLabel);
+        TextMid(BusyRight() - BusyWidth() + S(34.0f), BusyCenterY(), 0.7f, COL_TEXT2, g_busyLabel);
 }
 
 // Full-screen wash, drawn first every frame: lightest at the top, settling to
@@ -2318,6 +2341,7 @@ static void DrawHeaderText(const char *title, const char *subtitle, bool showToa
     _snprintf(clock, sizeof(clock), "%d:%02d %s", hour, (int)now.wMinute, now.wHour < 12 ? "AM" : "PM");
     clock[sizeof(clock) - 1] = '\0';
     Text(right, g_M.headerY + S(4.0f), 0.95f, COL_TEXT, clock, ATGFONT_RIGHT);
+    NoteClockBox(right, g_M.headerY + S(4.0f) + LineHeight(0.95f));
 }
 
 bool InitGameListUI()
@@ -5994,6 +6018,7 @@ void RenderHomeFrame(HomePageView &view, const UiHint *hints, int hintCount)
         {
             x -= TextWidth(view.clock, 1.0f, true);
             TextMid(x, centerY, 1.0f, COL_TEXT, view.clock, 0, 0.0f, true);
+            NoteClockBox(right, centerY + LineHeight(1.0f) * 0.5f);
         }
         if (view.storage != NULL)
         {
