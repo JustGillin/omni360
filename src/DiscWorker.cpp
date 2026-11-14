@@ -42,7 +42,12 @@ extern "C" VOID HalSendSMCMessage(LPVOID input, LPVOID output);
 // game disc, and a third of Aurora's Disc to GOD.
 extern "C" DWORD XamSetDvdSpindleSpeed(DWORD speed);
 
-#define SPINDLE_SPEED_NORMAL   0 // measured the same as never setting it
+// The quiet speed an install and a disc going in put the drive back to.
+// Not 0: the drive refuses it, 0xC000000D (STATUS_INVALID_PARAMETER), so
+// every reset to 0 went nowhere and the drive stayed at full speed after an
+// install, or after a disc went in. 0 had measured the same as never setting
+// a speed - because it never was set. 1 measured that quiet range too.
+#define SPINDLE_SPEED_NORMAL   DISC_SPEED_SLOWEST
 
 // The speed for installs, from Settings - full unless lowered for a disc that
 // won't read at it.
@@ -203,6 +208,14 @@ static bool ProbeDisc(bool lastChance)
 
     GodImageInfo info;
     GodResult result = GodInspect(&disc, &info);
+
+    // And again now it's been read, before the close - the drive only takes
+    // a speed while it's open. A disc going in spun the drive right up and
+    // left it there with Omni360 open (2026-11-14), the reset above
+    // notwithstanding: the console checking the disc, or these reads, may
+    // raise it after. (Those resets were to 0, which the drive refuses -
+    // see SPINDLE_SPEED_NORMAL.)
+    ResetSpindleSpeed("after reading the disc", true);
     disc.Close();
 
     if (result != GOD_OK && !lastChance)
