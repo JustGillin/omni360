@@ -11,6 +11,7 @@ and were checked against the original Iso2God and iso2god-rs.
 */
 
 #include "GodConvert.h"
+#include "OutputConsole.h" // dprintf
 
 #ifdef _XBOX
 #include <xtl.h>
@@ -1259,6 +1260,21 @@ GodResult GodExtract(GodSource *source, const GodImageInfo &info, const char *de
     if (result != GOD_OK)
         return result;
 
+    // FATX refuses some characters a disc allows - '+' in "pegi_portugal_4+.png"
+    // gave error 123 - so they become '_'. Only menu art on compilation discs
+    // has them, and that's dropped after the extract.
+    for (size_t i = 0; i < entries.size(); ++i)
+    {
+        std::string &path = entries[i].path;
+        for (size_t c = 0; c < path.size(); ++c)
+        {
+            const unsigned char ch = (unsigned char)path[c];
+            if (ch == '\\' || isalnum(ch) || (ch < 0x80 && strchr(" !#$%&'()-.@[]^_`{}~", ch) != NULL))
+                continue;
+            path[c] = '_';
+        }
+    }
+
     // Folders first, in walk order; then the files, front of the disc first.
     unsigned long long total = 0;
     std::vector<ExtractEntry> files;
@@ -1267,11 +1283,17 @@ GodResult GodExtract(GodSource *source, const GodImageInfo &info, const char *de
         const ExtractEntry &entry = entries[i];
         const std::string full = std::string(destDir) + "\\" + entry.path;
         if (!NameFitsFatx(entry.path) || full.size() >= 240)
-            return GOD_WRITE_FAILED; // too long a name for FATX
+        {
+            dprintf("[extract] too long a name for FATX: %s\n", entry.path.c_str());
+            return GOD_WRITE_FAILED;
+        }
         if (entry.isDirectory)
         {
             if (!CreateDirectoryA(full.c_str(), NULL) && GetLastError() != ERROR_ALREADY_EXISTS)
+            {
+                dprintf("[extract] couldn't make the folder %s (error %lu)\n", full.c_str(), GetLastError());
                 return GOD_WRITE_FAILED;
+            }
         }
         else
         {
@@ -1314,6 +1336,7 @@ GodResult GodExtract(GodSource *source, const GodImageInfo &info, const char *de
         HANDLE h = CreateFileA(full.c_str(), GENERIC_WRITE, 0, NULL, CREATE_ALWAYS, FILE_ATTRIBUTE_NORMAL, NULL);
         if (h == INVALID_HANDLE_VALUE)
         {
+            dprintf("[extract] couldn't create %s (error %lu)\n", full.c_str(), GetLastError());
             result = GOD_WRITE_FAILED;
             break;
         }
@@ -1340,7 +1363,13 @@ GodResult GodExtract(GodSource *source, const GodImageInfo &info, const char *de
             const BOOL wrote = WriteFile(h, buffer, n, &written, NULL);
             QueryPerformanceCounter(&t1);
             timings.writeMs += (double)(t1.QuadPart - t0.QuadPart) * msPerTick;
-            if (!wrote || written != n) { result = GOD_WRITE_FAILED; break; }
+            if (!wrote || written != n)
+            {
+                dprintf("[extract] couldn't write %s (error %lu, %lu of %lu bytes)\n",
+                        full.c_str(), GetLastError(), written, n);
+                result = GOD_WRITE_FAILED;
+                break;
+            }
 
             at += readLen;
             cursor = at;
