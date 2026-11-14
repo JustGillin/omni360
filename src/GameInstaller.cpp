@@ -20,6 +20,7 @@ DESCRIPTION : Downloads a Redump game's zip from archive.org and installs it as
 #include "RarHeaders.h"     // a game kept in a RAR
 #include "RarUnpack.h"      // ...and unpacked here, if compressed
 #include "QueueState.h"     // the jobs, kept between runs
+#include "StfsParser.h"     // a compilation disc's packages
 #include "zlib/zlib.h"      // crc32, for checking one
 
 #include <xtl.h>
@@ -2036,6 +2037,142 @@ static bool PathExists(const char *path)
     return GetFileAttributesA(path) != (DWORD)-1;
 }
 
+bool MoveIntoFolderGames(const char *gamesPath, const char *gameName, const char *fromDir,
+                         char *target, size_t targetSize)
+{
+    char root[64], name[48];
+    FolderGamesRoot(gamesPath, root, sizeof(root));
+    CreateDirectoryA(root, NULL);
+    FolderNameFor(gameName, name, sizeof(name));
+    _snprintf(target, targetSize, "%s\\%s", root, name);
+    target[targetSize - 1] = '\0';
+    for (int n = 2; PathExists(target) && n < 100; ++n)
+    {
+        char suffix[8];
+        _snprintf(suffix, sizeof(suffix), " (%d)", n);
+        suffix[sizeof(suffix) - 1] = '\0';
+        char shortName[48];
+        _snprintf(shortName, sizeof(shortName), "%.*s", (int)(42 - strlen(suffix)), name);
+        shortName[sizeof(shortName) - 1] = '\0';
+        _snprintf(target, targetSize, "%s\\%s%s", root, shortName, suffix);
+        target[targetSize - 1] = '\0';
+    }
+
+    // Both are on the games drive, so this is a rename.
+    if (!MoveFileA(fromDir, target))
+    {
+        dprintf("[game] couldn't move %s to %s (error %lu)\n", fromDir, target, GetLastError());
+        return false;
+    }
+    return true;
+}
+
+void RemoveFolderTree(const char *dir)
+{
+    RemoveFolder(dir);
+}
+
+// One folder of InstallCompilationPackages' walk, and the ones in it.
+static int MovePackagesIn(const char *dir, const char *gamesPath, int depth)
+{
+    if (depth > 12)
+        return 0;
+    char pattern[600];
+    _snprintf(pattern, sizeof(pattern), "%s\\*", dir);
+    pattern[sizeof(pattern) - 1] = '\0';
+
+    WIN32_FIND_DATAA fd;
+    HANDLE h = FindFirstFileA(pattern, &fd);
+    if (h == INVALID_HANDLE_VALUE)
+        return 0;
+
+    int moved = 0;
+    do
+    {
+        if (strcmp(fd.cFileName, ".") == 0 || strcmp(fd.cFileName, "..") == 0)
+            continue;
+        char path[600];
+        _snprintf(path, sizeof(path), "%s\\%s", dir, fd.cFileName);
+        path[sizeof(path) - 1] = '\0';
+
+        if (fd.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY)
+        {
+            const int more = MovePackagesIn(path, gamesPath, depth + 1);
+            if (more < 0) { moved = -1; break; }
+            moved += more;
+            continue;
+        }
+
+        // A package's header is 0xA000 bytes at least - anything smaller
+        // isn't one, and isn't worth opening.
+        if (fd.nFileSizeHigh == 0 && fd.nFileSizeLow < 0xA000)
+            continue;
+        StfsTitleInfo info;
+        if (!StfsReadTitleInfo(path, &info))
+            continue;
+        const unsigned long titleId = info.titleId, contentType = info.contentType;
+        dprintf("[game] compilation package %s: title %08lX, type %08lX, \"%s\"\n", fd.cFileName, titleId,
+                contentType, info.displayName);
+        StfsFreeTitleInfo(&info);
+        // The Arcade games only. The discs carry extras too - retail
+        // demos (Viva Pinata, Surf's Up) and videos - left behind.
+        if (titleId == 0 || contentType != 0x000D0000UL)
+            continue;
+
+        char titleDir[600], typeDir[600], target[600];
+        _snprintf(titleDir, sizeof(titleDir), "%s\\%08lX", gamesPath, titleId);
+        titleDir[sizeof(titleDir) - 1] = '\0';
+        _snprintf(typeDir, sizeof(typeDir), "%s\\%08lX", titleDir, contentType);
+        typeDir[sizeof(typeDir) - 1] = '\0';
+        _snprintf(target, sizeof(target), "%s\\%s", typeDir, fd.cFileName);
+        target[sizeof(target) - 1] = '\0';
+        CreateDirectoryA(titleDir, NULL);
+        CreateDirectoryA(typeDir, NULL);
+        if (PathExists(target))
+        {
+            dprintf("[game] %s is installed already - leaving it\n", target);
+            moved++; // there all the same
+            continue;
+        }
+        // The games folder and the staging folder are on the same drive, so
+        // this is a rename.
+        if (!MoveFileA(path, target))
+        {
+            dprintf("[game] couldn't move %s to %s (error %lu)\n", path, target, GetLastError());
+            moved = -1;
+            break;
+        }
+        // An SVOD package keeps its data in a folder beside it.
+        char dataFrom[620], dataTo[620];
+        _snprintf(dataFrom, sizeof(dataFrom), "%s.data", path);
+        dataFrom[sizeof(dataFrom) - 1] = '\0';
+        _snprintf(dataTo, sizeof(dataTo), "%s.data", target);
+        dataTo[sizeof(dataTo) - 1] = '\0';
+        if (PathExists(dataFrom))
+            MoveFileA(dataFrom, dataTo);
+        moved++;
+    } while (FindNextFileA(h, &fd));
+    FindClose(h);
+    return moved;
+}
+
+int InstallCompilationPackages(const char *extractedDir, const char *gamesPath)
+{
+    CreateDirectoryA(gamesPath, NULL);
+    const int moved = MovePackagesIn(extractedDir, gamesPath, 0);
+    dprintf("[game] compilation: %d package%s moved into %s\n", moved, moved == 1 ? "" : "s", gamesPath);
+    return moved;
+}
+
+void DiscExtractDir(const char *gamesPath, char *out, size_t outSize)
+{
+    char root[64];
+    StagingRoot(gamesPath, root, sizeof(root));
+    CreateDirectoryA(root, NULL);
+    _snprintf(out, outSize, "%s\\disc", root);
+    out[outSize - 1] = '\0';
+}
+
 // imageDir holds the game's files; they become <drive>:\Games\<name>, beside
 // any game of the same name already there rather than over it.
 static void FinishFolderGame(GameJob *job, const char *gamesPath, const char *dir, const char *imageDir)
@@ -2053,28 +2190,9 @@ static void FinishFolderGame(GameJob *job, const char *gamesPath, const char *di
         return;
     }
 
-    char root[64], name[48], target[160];
-    FolderGamesRoot(gamesPath, root, sizeof(root));
-    CreateDirectoryA(root, NULL);
-    FolderNameFor(req.name, name, sizeof(name));
-    _snprintf(target, sizeof(target), "%s\\%s", root, name);
-    target[sizeof(target) - 1] = '\0';
-    for (int n = 2; PathExists(target) && n < 100; ++n)
+    char target[160];
+    if (!MoveIntoFolderGames(gamesPath, req.name, imageDir, target, sizeof(target)))
     {
-        char suffix[8];
-        _snprintf(suffix, sizeof(suffix), " (%d)", n);
-        suffix[sizeof(suffix) - 1] = '\0';
-        char shortName[48];
-        _snprintf(shortName, sizeof(shortName), "%.*s", (int)(42 - strlen(suffix)), name);
-        shortName[sizeof(shortName) - 1] = '\0';
-        _snprintf(target, sizeof(target), "%s\\%s%s", root, shortName, suffix);
-        target[sizeof(target) - 1] = '\0';
-    }
-
-    // The staging folder is on the same drive, so this is a rename.
-    if (!MoveFileA(imageDir, target))
-    {
-        dprintf("[game] couldn't move %s to %s (error %lu)\n", imageDir, target, GetLastError());
         EndStaging(dir, false);
         FinishLocked(job, QUEUE_OUTCOME_FAILED, "Couldn't write the game",
                      "Check the drive the games folder is on, then try again.", true);
@@ -2086,6 +2204,120 @@ static void FinishFolderGame(GameJob *job, const char *gamesPath, const char *di
     // Not in Installed.txt: the library finds it by its title ID, and its
     // folder is what an uninstall removes - see ProgressOfDisc in main.cpp.
     FinishLocked(job, QUEUE_OUTCOME_INSTALLED, "Installed", "Play it from Omni360 or Aurora.", true);
+}
+
+static volatile bool g_installAsFolder = false;
+
+void SetGameInstallAsFolder(bool asFolder)
+{
+    g_installAsFolder = asFolder;
+}
+
+bool IsCompilationDisc(unsigned long titleId)
+{
+    // A compilation's own default.xex can carry its serial's ID with 0x8000
+    // set - the Arcade Compilation Disc is 4D538837 where Redump's MS-2103
+    // gives 4D530837. Only that one is confirmed on a disc (PopCap Hits 1
+    // and 2 are confirmed without it), so either form is taken for all.
+    switch (titleId & ~0x8000UL)
+    {
+    case 0x4D530837: // Xbox Live Arcade Compilation Disc (the disc says 4D538837)
+    case 0x4D5308DC: // Xbox Live Arcade Game Pack
+    case 0x4D5307FC: // Xbox Live Arcade Unplugged Volume 1
+    case 0x504707D1: // PopCap Arcade Vol 1
+    case 0x504707D4: // PopCap Arcade Vol 2
+    case 0x4D4B07D0: // PopCap Hits!
+    case 0x4D4B07D3: // PopCap Hits! Vol. 2
+    case 0x4D5309C5: // Triple Pack: Trials HD, LIMBO, 'Splosion Man (2011)
+    case 0x555308AC: // Ubisoft's Triple Pack: Outland, From Dust, Beyond Good & Evil HD - read off the disc
+        return true;
+    default:
+        return false;
+    }
+}
+
+bool InstallDiscAsFolderGame(const GodTitleInfo &title)
+{
+    if (title.contentType == GOD_CONTENT_XBOX_ORIGINAL)
+        return false;
+    return g_installAsFolder || IsCompilationDisc(title.titleId);
+}
+
+// A disc image as a folder game: its files copied out into the staging
+// folder, then moved into the Games folder as a RAR's folder game is.
+static void InstallDiscAsFolder(GameJob *job, GodSource *image, const GodImageInfo &info, const char *gamesPath,
+                                const char *dir, bool keepOnStop)
+{
+    char filesDir[340];
+    _snprintf(filesDir, sizeof(filesDir), "%s\\files", dir);
+    filesDir[sizeof(filesDir) - 1] = '\0';
+    RemoveFolder(filesDir); // what a stopped extract left
+    if (!CreateDirectoryA(filesDir, NULL))
+    {
+        EndStaging(dir, keepOnStop);
+        FinishLocked(job, QUEUE_OUTCOME_FAILED, "Couldn't write the game",
+                     "Check the drive the games folder is on, then try again.", true);
+        return;
+    }
+
+    ConvertProgress progress;
+    progress.job = job;
+    progress.started = GetTickCount();
+    SetPhase(job, GAME_STEP_INSTALLING, "Installing", 0, info.usedSize, 0);
+
+    GodTimings timings;
+    memset(&timings, 0, sizeof(timings));
+    GodResult result;
+    {
+        ReadAheadSource ahead(image, 1024 * 1024, 8);
+        result = GodExtract(&ahead, info, filesDir, ConvertProgressFn, &progress, &timings);
+    }
+    DWORD seconds = (GetTickCount() - progress.started) / 1000;
+    dprintf("[game] extract %s after %lu:%02lu - waiting for data %.0fs, writing %.0fs\n", GodResultText(result),
+            (unsigned long)(seconds / 60), (unsigned long)(seconds % 60), timings.readMs / 1000.0,
+            timings.writeMs / 1000.0);
+
+    if (result == GOD_OK && IsCompilationDisc(info.title.titleId))
+    {
+        // Each Arcade game on its own; the disc's menu, which can't launch
+        // them from here, goes with the rest of what was copied out.
+        const int packages = InstallCompilationPackages(filesDir, gamesPath);
+        if (packages != 0)
+        {
+            RemoveFolder(filesDir);
+            EndStaging(dir, false);
+            if (packages < 0)
+            {
+                FinishLocked(job, QUEUE_OUTCOME_FAILED, "Couldn't write the game",
+                             "Check the drive the games folder is on, then try again.", true);
+                return;
+            }
+            char detail[96];
+            _snprintf(detail, sizeof(detail), "%d Arcade game%s, each in the library on its own.", packages,
+                      packages == 1 ? "" : "s");
+            detail[sizeof(detail) - 1] = '\0';
+            FinishLocked(job, QUEUE_OUTCOME_INSTALLED, "Installed", detail, true);
+            return;
+        }
+        dprintf("[game] the compilation disc held no packages - installing it as a folder game\n");
+    }
+
+    if (result == GOD_OK)
+    {
+        FinishFolderGame(job, gamesPath, dir, filesDir);
+        return;
+    }
+
+    RemoveFolder(filesDir);
+    EndStaging(dir, keepOnStop && (result == GOD_WRITE_FAILED ||
+                                   (result == GOD_CANCELLED && (ClosingDown() || Paused(job)))));
+    if (result == GOD_CANCELLED)
+        FinishLocked(job, QUEUE_OUTCOME_CANCELLED, "Stopped", "Nothing was installed.", false);
+    else if (result == GOD_WRITE_FAILED)
+        FinishLocked(job, QUEUE_OUTCOME_FAILED, "Couldn't write the game",
+                     "Check the drive the games folder is on, then try again.", true);
+    else
+        FinishLocked(job, QUEUE_OUTCOME_FAILED, "Couldn't install", GodResultText(result), true);
 }
 
 static void RunJob(GameJob *job, const char *gamesPath)
@@ -2636,10 +2868,18 @@ static void RunJob(GameJob *job, const char *gamesPath)
     job->snap.titleId = info.title.titleId;
     LeaveCriticalSection(&g_lock);
 
-    if (DriveFreeSpace(gamesPath, &freeSpace) && freeSpace < info.outputSize + SPACE_MARGIN)
+    // A folder game, by choice or because it's a compilation disc - never an
+    // Original Xbox disc, which only runs as a package.
+    const bool compilation = IsCompilationDisc(info.title.titleId);
+    const bool asFolder = InstallDiscAsFolderGame(info.title);
+    const unsigned long long installSize = asFolder ? info.usedSize : info.outputSize;
+    if (asFolder)
+        dprintf("[game] installing as a folder game%s\n", compilation ? " - a compilation disc" : "");
+
+    if (DriveFreeSpace(gamesPath, &freeSpace) && freeSpace < installSize + SPACE_MARGIN)
     {
         char needText[64] = "", freeText[64] = "", detail[160];
-        FormatBytes(info.outputSize, needText, sizeof(needText));
+        FormatBytes(installSize, needText, sizeof(needText));
         FormatBytes(freeSpace, freeText, sizeof(freeText));
         _snprintf(detail, sizeof(detail), "It needs %s, and %s is free.", needText, freeText);
         detail[sizeof(detail) - 1] = '\0';
@@ -2649,6 +2889,13 @@ static void RunJob(GameJob *job, const char *gamesPath)
         free(points);
         EndStaging(dir, !compressedRar);
         FinishLocked(job, QUEUE_OUTCOME_NO_SPACE, "Not enough space", detail, true);
+        return;
+    }
+
+    if (asFolder)
+    {
+        InstallDiscAsFolder(job, image, info, gamesPath, dir, !compressedRar);
+        free(points);
         return;
     }
 

@@ -94,6 +94,43 @@ bool GameZipInstalledAs(const char *zipName, unsigned long *outTitleId, unsigned
 #define FOLDER_GAMES_FOLDER "Games"
 void FolderGamesRoot(const char *gamesPath, char *out, size_t outSize);
 
+// How a disc image installs: as a Games on Demand package (the default), or
+// its files copied out to a folder game, launched from default.xex. Original
+// Xbox discs are always GOD - the 360 runs them no other way - and the XBLA
+// compilation discs are always a folder game, as their GOD packages crash
+// (issue #11). Set from Settings; takes effect from the next install.
+void SetGameInstallAsFolder(bool asFolder);
+
+// Whether this title ID is one of the XBLA compilation discs.
+bool IsCompilationDisc(unsigned long titleId);
+
+// Whether a disc of this title - from the Store or the drive - installs as a
+// folder game, by the rules above.
+struct GodTitleInfo;
+bool InstallDiscAsFolderGame(const GodTitleInfo &title);
+
+// Where a disc install's files are copied before they become a folder game:
+// in the staging folder on the games drive, so moving them is a rename. A
+// leftover one is cleared out at the next start.
+void DiscExtractDir(const char *gamesPath, char *out, size_t outSize);
+
+// For a compilation disc's copied-out files: moves every Arcade game package
+// on it (content type 000D0000; its demos and videos are left) to
+// <gamesPath>\<TitleID>\<ContentType>\,
+// so each is a game of its own, as the disc's menu can't launch them from the
+// hard drive (issue #11). A package already installed is left as it is.
+// Returns how many are now in place, those included, or -1 if one couldn't
+// be moved. 0 means the disc held none - install it as a folder game then.
+int InstallCompilationPackages(const char *extractedDir, const char *gamesPath);
+
+// Removes a folder and everything in it.
+void RemoveFolderTree(const char *dir);
+
+// Moves fromDir to <drive>:\Games\<name>, beside any folder of that name
+// rather than over it. outTarget gets where it went.
+bool MoveIntoFolderGames(const char *gamesPath, const char *name, const char *fromDir,
+                         char *outTarget, size_t outTargetSize);
+
 // After an uninstall: the zip's note is dropped, here and in Installed.txt.
 void ForgetInstalledZip(const char *zipName);
 int PendingGameJobCount();

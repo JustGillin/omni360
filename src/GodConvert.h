@@ -162,6 +162,16 @@ GodResult GodConvert(GodSource *source, const GodImageInfo &info, const char *co
                      char *outPackagePath, unsigned long outPackagePathSize,
                      GodTimings *outTimings = 0);
 
+// Copies the disc's files out to destDir as a folder game - default.xex at
+// its top, launched as it is rather than through a package. destDir must
+// already exist. Files are written in the order they sit on the disc, so the
+// source is read front to back. progress gets bytes of file data written of
+// the total. On failure what was written is left for the caller to remove.
+// FATX holds names of at most 42 characters; a longer one fails as
+// GOD_WRITE_FAILED.
+GodResult GodExtract(GodSource *source, const GodImageInfo &info, const char *destDir,
+                     GodProgressFn progress, void *progressContext, GodTimings *outTimings = 0);
+
 // Patches an already-written package header to add an icon if it has none.
 // Reads the header, writes the icon into both thumbnail slots, recomputes the
 // SHA-1, and writes the header back. Returns true only when the icon was

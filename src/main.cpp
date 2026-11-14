@@ -70,6 +70,7 @@ extern "C" NTSTATUS XexGetModuleHandle(PSZ moduleName, PHANDLE outHandle);
 #define GAMES_PATH_KEY "games-path: "
 #define UPDATE_CHECK_KEY "check-updates: " // "off" stops the check at start
 #define SOUNDS_KEY "nav-sounds: "         // "off" silences the interface
+#define INSTALL_TYPE_KEY "install-type: "   // "folder" copies a game's files out rather than making a GOD package - Store and disc installs
 #define DISC_SPEED_KEY "disc-speed: "       // 1 to 4, DiscWorker's spindle speed for installs
 #define STORE_FILTER_KEY "store-filter: "   // the Store letters' filters and order: "sort=a-z;regions=usa,eur;..."
 #define HOMEBREW_MIRROR_KEY "homebrew-mirror: " // for testing: homebrew from "http://PC:8000", a folder of the repo's .7z files
@@ -321,6 +322,15 @@ static bool UiSoundsSetting()
     char value[16];
     GetSettingsPath(SOUNDS_KEY, "yes", value, sizeof(value));
     return _stricmp(value, "off") != 0;
+}
+
+// Whether Store games install as folder games (default.xex) rather than as
+// Games on Demand. GOD unless set.
+static bool InstallAsFolderSetting()
+{
+    char value[16];
+    GetSettingsPath(INSTALL_TYPE_KEY, "god", value, sizeof(value));
+    return _stricmp(value, "folder") == 0;
 }
 
 // Whether to ask GitHub for a newer version at start. On unless turned off.
@@ -1618,6 +1628,7 @@ enum SettingsRow
     SETTINGS_ROW_ADD_FOLDER,   // another library folder, typed
     SETTINGS_ROW_SOUNDS,       // the interface's sounds, on or off
     SETTINGS_ROW_SPEED_TEST,   // where a download's speed goes - SpeedTest.h
+    SETTINGS_ROW_INSTALL_TYPE, // Games on Demand or folder games, for Store installs
     SETTINGS_ROW_RESYNC_LIBRARY // re-read the library from disk and re-fetch missing icons
 };
 
@@ -1986,6 +1997,16 @@ static void StepDiscSpeed(int step)
     dprintf("Disc read speed set to %d (%s)\n", speed, DiscSpeedName(speed));
 }
 
+// Left, right or A on the install type's row: the other one, saved.
+static void ToggleInstallType()
+{
+    const bool asFolder = !InstallAsFolderSetting();
+    if (!SetSettingsValue(INSTALL_TYPE_KEY, asFolder ? "folder" : "god"))
+        ShowMessageUI("Not saved", "settings.txt could not be written.", NULL);
+    SetGameInstallAsFolder(asFolder);
+    dprintf("Game installs set to %s\n", asFolder ? "folder games" : "Games on Demand");
+}
+
 static void ToggleUiSounds()
 {
     const bool on = !UiSoundsSetting();
@@ -2256,6 +2277,21 @@ static void BuildSettingsPage(SettingsPage &page, const Library &lib, const char
             c.valueCount = DISC_SPEED_FULL;
         }
 
+        // How a Store game installs: left and right change it.
+        const bool asFolder = InstallAsFolderSetting();
+        AddSettingsRow(page, SETTINGS_VIEW_LINE, "Install games as");
+        AddSettingsControl(page, SETTINGS_CONTROL_VALUE, asFolder ? "Folder (default.xex)" : "Games on Demand",
+                           SETTINGS_ROW_INSTALL_TYPE,
+                           asFolder
+                               ? "The disc's files, copied to the Games folder. Original Xbox games still install as GOD."
+                               : "A GOD package, like the dashboard's own. XBLA compilation discs always install as "
+                                 "folders - left and right change it.");
+        {
+            SettingsControlView &c = page.rows[page.count - 1].controls[0];
+            c.valueIndex = asFolder ? 1 : 0;
+            c.valueCount = 2;
+        }
+
         AddComingSoonRow(page, "Auto sign in", "Signing a profile in when Omni360 starts. Not built yet.");
     }
 
@@ -2382,6 +2418,7 @@ static SettingsOutcome RunSettingsRow(SettingsRow row, int arg, Library &lib, ch
     case SETTINGS_ROW_LIBRARY_FOLDER: ToggleLibraryFolder(arg, lib, gamesPath, outcome); break;
     case SETTINGS_ROW_ADD_FOLDER:   AddLibraryFolder(lib, gamesPath, outcome); break;
     case SETTINGS_ROW_SOUNDS:       ToggleUiSounds(); break;
+    case SETTINGS_ROW_INSTALL_TYPE: ToggleInstallType(); break;
     case SETTINGS_ROW_SPEED_TEST:   RunSpeedTest(gamesPath); break;
     case SETTINGS_ROW_RESYNC_LIBRARY:
         ScanLibrary(lib, gamesPath);
@@ -4339,6 +4376,15 @@ static void OpenStoreGame(Shell &shell, const StoreGame &game)
             g_storeVersionDetail[v][sizeof(g_storeVersionDetail[v]) - 1] = '\0';
             g_storeVersions[v].detail = g_storeVersionDetail[v];
         }
+        else if (release != NULL && release->discCount > 0 && StoreReleaseDisc(release, 0) != NULL &&
+                 IsCompilationDisc(StoreReleaseDisc(release, 0)->titleId))
+        {
+            const char *detail = g_storeVersions[v].detail;
+            _snprintf(g_storeVersionDetail[v], sizeof(g_storeVersionDetail[v]), "%s%sInstalls each game separately",
+                      detail, detail[0] != '\0' ? "  \xC2\xB7  " : "");
+            g_storeVersionDetail[v][sizeof(g_storeVersionDetail[v]) - 1] = '\0';
+            g_storeVersions[v].detail = g_storeVersionDetail[v];
+        }
     }
 
     if (shell.page == SHELL_PAGE_LIBRARY)
@@ -5180,6 +5226,18 @@ static void InstallArcadeGame(const char *authHeader)
     }
 }
 
+// Before an Arcade compilation disc installs, from the Store or the drive:
+// it goes in as the games on it, not the disc's menu - see
+// InstallCompilationPackages. False if the user backed out.
+static bool ConfirmCompilationInstall()
+{
+    return ShowConfirmUI("Installs as separate games",
+                         "Each Arcade game on this disc is installed as a game of its own.",
+                         "The disc's own menu isn't installed - it only works from the disc in the drive. "
+                         "Demos and videos on the disc are left out.",
+                         "Install");
+}
+
 // Install on a game page: every disc of the chosen version that isn't
 // installed or on its way, in disc order, queued for GameInstaller. One that's
 // unpacked on the console asks first, as it takes a lot longer. True if that
@@ -5195,6 +5253,17 @@ static bool InstallStoreVersion(const Shell &shell, const Library &lib, const ch
     const StoreRelease *release = StoreReleaseOf(&g_storeGame, shell.storeVersionChosen);
     if (release == NULL)
         return false;
+
+    // An Arcade compilation disc installs as the games on it, not the disc's
+    // menu - see InstallCompilationPackages - so it says so first.
+    bool compilation = false;
+    for (int d = 0; d < release->discCount && !compilation; ++d)
+    {
+        const StoreDisc *disc = StoreReleaseDisc(release, d);
+        compilation = disc != NULL && IsCompilationDisc(disc->titleId);
+    }
+    if (compilation && !ConfirmCompilationInstall())
+        return true;
 
     const bool unpacks = ReleaseUnpacks(release);
     if (unpacks)
@@ -5259,7 +5328,7 @@ static bool InstallStoreVersion(const Shell &shell, const Library &lib, const ch
         ShowShellToast("Added to the queue", g_storeGame.name, UI_TOAST_INFO);
     else
         ShowShellToast("Already in the queue", g_storeGame.name, UI_TOAST_INFO);
-    return unpacks;
+    return unpacks || compilation;
 }
 
 // ---------------------------------------------------------------------------
@@ -5561,6 +5630,7 @@ static unsigned long FocusSignature(const Shell &shell)
         shell.page, shell.sidebarFocused, shell.librarySelected, shell.libraryInGame,
         shell.homeFocus, shell.homeNavFocus, shell.homeSelected,
         shell.settings.section, shell.settings.focusRow, shell.settings.focusCol, DiscSpeedSetting(),
+        InstallAsFolderSetting() ? 1 : 0,
         shell.picker.kind, shell.picker.selected, shell.queueSelected,
         shell.storeFocus, shell.storeInSection, shell.storeSection, shell.sectionFocus[shell.storeSection],
         shell.storeInLetter, shell.storeSelected, shell.storeInGame, shell.storeGameFocus, shell.storeVersionChosen,
@@ -5909,6 +5979,11 @@ static const char *KnownDiscName(const DiscInfo &disc)
     static StoreGame game;
     if (StoreGameByTitleId(disc.titleId, &game) && game.name != NULL && game.name[0] != '\0')
         return game.name;
+    // A compilation disc whose default.xex has 0x8000 set where the Store's
+    // ID, from Redump's serial, doesn't - see IsCompilationDisc.
+    if (IsCompilationDisc(disc.titleId) && StoreGameByTitleId(disc.titleId ^ 0x8000UL, &game) &&
+        game.name != NULL && game.name[0] != '\0')
+        return game.name;
     return disc.name[0] != '\0' ? disc.name : NULL;
 }
 
@@ -5981,6 +6056,11 @@ static bool StartDiscInstall(Shell &shell, const char *gamesPath)
                        "Installing it again replaces the copy on the drive.", "Reinstall"))
         return true;
 
+    // A compilation disc says what it installs as, as the Store does.
+    const bool compilation = IsCompilationDisc(disc.titleId);
+    if (compilation && !ConfirmCompilationInstall())
+        return true;
+
     unsigned long long freeSpace = 0;
     if (DriveFreeSpace(gamesPath, &freeSpace) && freeSpace < disc.outputSize + 4ULL * 1024 * 1024)
     {
@@ -5991,7 +6071,7 @@ static bool StartDiscInstall(Shell &shell, const char *gamesPath)
     // A name from a list or the disc is used as it is; without one, the
     // keyboard asks rather than installing it as "Title XXXXXXXX".
     std::string name = shell.discName;
-    bool tookScreen = shell.discInstalled; // the confirm above
+    bool tookScreen = shell.discInstalled || compilation; // the confirms above
     if (KnownDiscName(disc) == NULL)
     {
         tookScreen = true;
@@ -7260,6 +7340,7 @@ int main()
 
     // An install interrupted last time keeps its pieces: choosing that game
     // again carries on from them.
+    SetGameInstallAsFolder(InstallAsFolderSetting());
     if (!StartGameInstaller(gamesPath))
         dprintf("ERROR: the game installer didn't start - games can't be installed\n");
     StartupStep("art, disc and installer workers");
@@ -8347,6 +8428,13 @@ int main()
                         else
                             shell.settingsStale = true;
                     }
+                }
+                else if (onValue && settings.actions[settings.focusRow][settings.focusCol] == SETTINGS_ROW_INSTALL_TYPE)
+                {
+                    // Right is Folder, left GOD; past either end does nothing.
+                    if (InstallAsFolderSetting() != right)
+                        ToggleInstallType();
+                    shell.stale = true;
                 }
                 else if (onValue)
                 {

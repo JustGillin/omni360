@@ -13,6 +13,7 @@ DESCRIPTION : Watches the disc drive and installs discs as Games on Demand, on
 #include "downloadFile.h"  // FormatBytes
 #include "StoreArt.h"      // FetchTitleIcon
 #include "QueueState.h"
+#include "GameInstaller.h" // folder games
 #include "OutputConsole.h"
 
 #include <xtl.h>
@@ -398,13 +399,21 @@ static void RunInstall(DiscJob *job, const char *gamesPath)
         return;
     }
 
+    // A folder game, by the setting or because it's an XBLA compilation disc
+    // - see GameInstaller.h. Its files take about what the disc's used part does.
+    const bool asFolder = InstallDiscAsFolderGame(info.title);
+    const unsigned long long installSize = asFolder ? info.usedSize : info.outputSize;
+    if (asFolder)
+        dprintf("[disc] installing as a folder game%s\n",
+                IsCompilationDisc(info.title.titleId) ? " - a compilation disc" : "");
+
     unsigned long long freeSpace = 0;
-    if (DriveFreeSpace(gamesPath, &freeSpace) && freeSpace < info.outputSize + INSTALL_SPACE_MARGIN)
+    if (DriveFreeSpace(gamesPath, &freeSpace) && freeSpace < installSize + INSTALL_SPACE_MARGIN)
     {
         disc.Close();
 
         char needText[64] = "", freeText[64] = "", detail[160];
-        FormatBytes(info.outputSize, needText, sizeof(needText));
+        FormatBytes(installSize, needText, sizeof(needText));
         FormatBytes(freeSpace, freeText, sizeof(freeText));
         _snprintf(detail, sizeof(detail), "It needs %s, and %s is free.", needText, freeText);
         detail[sizeof(detail) - 1] = '\0';
@@ -441,15 +450,47 @@ static void RunInstall(DiscJob *job, const char *gamesPath)
     // had, offline say, and the dashboard shows its placeholder.
     static unsigned char icon[GOD_ICON_MAX];
     unsigned long iconSize = 0;
-    if (!FetchTitleIcon(info.title.titleId, icon, sizeof(icon), &iconSize))
+    if (!asFolder && !FetchTitleIcon(info.title.titleId, icon, sizeof(icon), &iconSize))
         iconSize = 0;
-
-    WriteInstallMarker(gamesPath, info, job->snap.gameName);
 
     char packagePath[600] = "";
     GodTimings timings;
     memset(&timings, 0, sizeof(timings));
+    int compilationPackages = 0;
+    if (asFolder)
     {
+        // Copied into the staging folder, then moved into Games whole, so a
+        // half-copied game never shows in the library.
+        char extractDir[340];
+        DiscExtractDir(gamesPath, extractDir, sizeof(extractDir));
+        RemoveFolderTree(extractDir); // what a stopped one left
+        if (!CreateDirectoryA(extractDir, NULL))
+            result = GOD_WRITE_FAILED;
+        else
+        {
+            ReadAheadSource ahead(&disc, 1024 * 1024, 8);
+            result = GodExtract(&ahead, info, extractDir, InstallProgressCallback, &progress, &timings);
+        }
+        // A compilation disc: each Arcade game on it as a package of its own
+        // - its menu can't launch them from the hard drive - and the rest of
+        // what was copied goes. One with no packages is a folder game.
+        if (result == GOD_OK && IsCompilationDisc(info.title.titleId))
+        {
+            compilationPackages = InstallCompilationPackages(extractDir, gamesPath);
+            if (compilationPackages < 0)
+                result = GOD_WRITE_FAILED;
+            else if (compilationPackages > 0)
+                RemoveFolderTree(extractDir);
+        }
+        if (result == GOD_OK && compilationPackages == 0 &&
+            !MoveIntoFolderGames(gamesPath, job->snap.gameName, extractDir, packagePath, sizeof(packagePath)))
+            result = GOD_WRITE_FAILED;
+        if (result != GOD_OK)
+            RemoveFolderTree(extractDir);
+    }
+    else
+    {
+        WriteInstallMarker(gamesPath, info, job->snap.gameName);
         // The drive keeps reading while each group is hashed and written -
         // see ReadAhead.h. 8MB ahead, in 1MB reads. Scoped so its thread has
         // finished with the drive before the drive is closed.
@@ -477,9 +518,8 @@ static void RunInstall(DiscJob *job, const char *gamesPath)
         ReadAheadSource ahead(source, 1024 * 1024, 8);
         result = GodConvert(&ahead, info, gamesPath, job->snap.gameName, iconSize > 0 ? icon : NULL, iconSize,
                             InstallProgressCallback, &progress, packagePath, sizeof(packagePath), &timings);
+        ClearInstallMarker();
     }
-
-    ClearInstallMarker();
 
     // Back to the quiet speed BEFORE the drive is closed. The drive only
     // takes a spindle speed while it is open - raising it above works
@@ -510,12 +550,16 @@ static void RunInstall(DiscJob *job, const char *gamesPath)
     switch (result)
     {
     case GOD_OK:
-        if (info.title.discCount > 1 && info.title.discNumber < info.title.discCount)
+        if (compilationPackages > 0)
+            _snprintf(detail, sizeof(detail), "%d Arcade game%s, each in the library on its own.",
+                      compilationPackages, compilationPackages == 1 ? "" : "s");
+        else if (info.title.discCount > 1 && info.title.discNumber < info.title.discCount)
             _snprintf(detail, sizeof(detail), "That was disc %u of %u - put in disc %u to install it.",
                       (unsigned)info.title.discNumber, (unsigned)info.title.discCount,
                       (unsigned)info.title.discNumber + 1);
         else
-            _snprintf(detail, sizeof(detail), "Play it from the dashboard or Aurora - the disc isn't needed.");
+            _snprintf(detail, sizeof(detail), asFolder ? "Play it from Omni360 or Aurora - the disc isn't needed."
+                                                       : "Play it from the dashboard or Aurora - the disc isn't needed.");
         detail[sizeof(detail) - 1] = '\0';
         FinishJob(job, QUEUE_OUTCOME_INSTALLED, "Installed", detail, true);
         break;

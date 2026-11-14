@@ -163,8 +163,45 @@ void LaunchApp(const char *path)
     }
 }
 
+// Ends this title and boots another from a device mounted as its root - as
+// a dashboard boots a disc. Not in the XDK; xam's export 0x1A5 by Xenia's
+// table, with the arguments xkelib gives it. Its sibling 0x1A4,
+// XamLoaderLaunchTitle(path, flags), took "\Device\Cdrom0\default.xex" and
+// booted the stock dashboard instead.
+typedef VOID (*XamLoaderLaunchTitleFn)(LPCSTR launchPath, LPCSTR mountPath, LPCSTR commandLine, DWORD flags);
+#define XAM_LOADER_LAUNCH_TITLE 0x1A5
+
+static XamLoaderLaunchTitleFn FindLoaderLaunchTitle()
+{
+    HANDLE xam = NULL;
+    PVOID address = NULL;
+    if (XexGetModuleHandle("xam.xex", &xam) < 0 || xam == NULL ||
+        XexGetProcedureAddress(xam, XAM_LOADER_LAUNCH_TITLE, &address) < 0)
+        return NULL;
+    return (XamLoaderLaunchTitleFn)address;
+}
+
 void LaunchDisc(bool original)
 {
+    // A 360 disc, booted as the dashboard boots one. XLaunchNewImage below
+    // starts its default.xex, but as an executable run by path: the Arcade
+    // compilation discs' menus came up that way and crashed starting any of
+    // their games, where Aurora launching the same disc worked (issue #11).
+    if (!original)
+    {
+        const XamLoaderLaunchTitleFn launchTitle = FindLoaderLaunchTitle();
+        if (launchTitle != NULL)
+        {
+            dprintf("[launch] the disc, through XamLoaderLaunchTitleEx\n");
+            // "game:\default.xex" here got "The game couldn't start" - looked
+            // for in Omni360's own folder, it seems - so by the device.
+            launchTitle("\\Device\\Cdrom0\\default.xex", "\\Device\\Cdrom0", NULL, 0);
+            dprintf("[launch] XamLoaderLaunchTitleEx returned - trying dvd:\\default.xex\n");
+        }
+        else
+            dprintf("[launch] xam.xex has no export %X - trying dvd:\\default.xex\n", XAM_LOADER_LAUNCH_TITLE);
+    }
+
     // By a drive named for it, as FreeStyle Dash starts discs. Neither the
     // device's own path ("\Device\Cdrom0\default.xex" - back to the
     // dashboard) nor one from the root as the XDK documents ("default.xex" -

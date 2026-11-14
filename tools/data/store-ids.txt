@@ -25,8 +25,15 @@ Oneechanbara VorteX - Imichi o Tsugu Mono-tachi (Japan) = 445007D2
 # Number One Hits is its own.
 Lips - Number One Hits (Europe) = 4D5308AF
 
+# The datfile has no serial for Ubisoft's Triple Pack; this is what its
+# default.xex says, read off the disc by an install (2026-11-14).
+Triple Pack - Outland + From Dust + Beyond Good & Evil HD (Europe) = 555308AC
+
 # "13" for "XIII" (SN-2012).
 XBOX_360_3/King of Fighters 13 [RF].zip = 534E07DC King of Fighters XIII, The
+# Redump's serial MS-2103 makes 4D530837, but the disc's default.xex says
+# 4D538837 - what the drive reports, and what it installs as.
+XBOX_360_4/Xbox Live Arcade Compilation Disc [RF].zip = 4D538837 Xbox Live Arcade Compilation Disc
 # "Especial" (LA-2040).
 XBOX_360_4/Monkey Island Especial Edition Collection [PAL][NTSCU].zip = 4C4107F8 Monkey Island - Special Edition Collection
 # Redump knows only the Japanese disc, "Biohazard - Revival Selection

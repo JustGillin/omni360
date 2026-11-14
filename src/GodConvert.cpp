@@ -22,6 +22,10 @@ and were checked against the original Iso2God and iso2god-rs.
 #include <stdlib.h>
 #include <string.h>
 
+#include <algorithm>
+#include <string>
+#include <vector>
+
 #include "inc\bearssl_hash.h"
 
 #define SECTOR_SIZE       0x800ULL
@@ -1121,4 +1125,242 @@ bool GodPatchIcon(const char *headerPath, const unsigned char *iconPng, unsigned
     if (fclose(f) != 0) ok = false;
     free(h);
     return ok;
+}
+
+// ---------------------------------------------------------------------------
+// Extracting the disc's files: a folder game
+// ---------------------------------------------------------------------------
+
+#define FATX_NAME_MAX 42
+#define EXTRACT_CHUNK (1024UL * 1024)
+#define EXTRACT_SKIP_MAX (16ULL * 1024 * 1024) // a gap up to this is read through, to keep the read-ahead going
+
+struct ExtractEntry
+{
+    std::string path;       // relative to the destination, '\' separated
+    unsigned long sector;
+    unsigned long size;
+    bool isDirectory;
+};
+
+static bool EntrySectorLess(const ExtractEntry &a, const ExtractEntry &b)
+{
+    return a.sector < b.sector;
+}
+
+// The same tables WalkTable reads, collecting every entry with its path.
+// A directory is added before what's in it, so creating them in order always
+// finds the parent there.
+static GodResult CollectTable(GodSource *source, unsigned long long rootOffset, unsigned long long partitionSize,
+                              unsigned long sector, unsigned long size, const std::string &prefix, int depth,
+                              std::vector<ExtractEntry> &out)
+{
+    if (size == 0)
+        return GOD_OK;
+    if (depth > MAX_DIR_DEPTH || size > MAX_TABLE_SIZE)
+        return GOD_BAD_FILESYSTEM;
+
+    const unsigned long long tableStart = (unsigned long long)sector * SECTOR_SIZE;
+    const unsigned long sectors = (unsigned long)((size + SECTOR_SIZE - 1) / SECTOR_SIZE);
+    const unsigned long long tableBytes = (unsigned long long)sectors * SECTOR_SIZE;
+    if (tableStart + tableBytes > partitionSize)
+        return GOD_BAD_FILESYSTEM;
+
+    unsigned char *table = (unsigned char *)malloc((size_t)tableBytes);
+    if (table == NULL)
+        return GOD_OUT_OF_MEMORY;
+    if (!source->ReadAt(rootOffset + tableStart, table, (unsigned long)tableBytes))
+    {
+        free(table);
+        return GOD_READ_FAILED;
+    }
+
+    GodResult result = GOD_OK;
+    for (unsigned long s = 0; s < sectors && result == GOD_OK; ++s)
+    {
+        const unsigned char *sec = table + s * SECTOR_SIZE;
+        unsigned long pos = 0;
+        while (pos + 14 <= SECTOR_SIZE)
+        {
+            const unsigned char *e = sec + pos;
+            if (ReadLE16(e) == 0xFFFF || ReadLE16(e + 2) == 0xFFFF)
+                break;
+            const unsigned long nameLen = e[13];
+            if (nameLen == 0 || pos + 14 + nameLen > SECTOR_SIZE)
+                break;
+            if (out.size() > MAX_DIR_ENTRIES)
+            {
+                result = GOD_BAD_FILESYSTEM;
+                break;
+            }
+
+            ExtractEntry entry;
+            entry.sector = ReadLE32(e + 4);
+            entry.size = ReadLE32(e + 8);
+            entry.isDirectory = (e[12] & 0x10) != 0;
+            const std::string name((const char *)e + 14, nameLen);
+            entry.path = prefix.empty() ? name : prefix + "\\" + name;
+
+            if (!entry.isDirectory && (unsigned long long)entry.sector * SECTOR_SIZE + entry.size > partitionSize)
+            {
+                result = GOD_BAD_FILESYSTEM;
+                break;
+            }
+
+            out.push_back(entry);
+            if (entry.isDirectory)
+            {
+                result = CollectTable(source, rootOffset, partitionSize, entry.sector, entry.size, entry.path,
+                                      depth + 1, out);
+                if (result != GOD_OK)
+                    break;
+            }
+            pos = (pos + 14 + nameLen + 3) & ~3UL;
+        }
+    }
+    free(table);
+    return result;
+}
+
+static bool NameFitsFatx(const std::string &path)
+{
+    size_t start = 0;
+    for (;;)
+    {
+        const size_t end = path.find('\\', start);
+        const size_t len = (end == std::string::npos ? path.size() : end) - start;
+        if (len == 0 || len > FATX_NAME_MAX)
+            return false;
+        if (end == std::string::npos)
+            return true;
+        start = end + 1;
+    }
+}
+
+GodResult GodExtract(GodSource *source, const GodImageInfo &info, const char *destDir,
+                     GodProgressFn progress, void *progressContext, GodTimings *outTimings)
+{
+    GodTimings timings;
+    memset(&timings, 0, sizeof(timings));
+    LARGE_INTEGER freq, t0, t1;
+    QueryPerformanceFrequency(&freq);
+    const double msPerTick = 1000.0 / (double)freq.QuadPart;
+
+    const unsigned long long partitionSize = source->Size() - info.rootOffset;
+    unsigned char descriptor[28];
+    if (!source->ReadAt(info.rootOffset + 0x20 * SECTOR_SIZE, descriptor, sizeof(descriptor)))
+        return GOD_READ_FAILED;
+    if (memcmp(descriptor, kVolumeMagic, 20) != 0)
+        return GOD_NOT_A_DISC_IMAGE;
+
+    std::vector<ExtractEntry> entries;
+    GodResult result = CollectTable(source, info.rootOffset, partitionSize, ReadLE32(descriptor + 20),
+                                    ReadLE32(descriptor + 24), std::string(), 0, entries);
+    if (result != GOD_OK)
+        return result;
+
+    // Folders first, in walk order; then the files, front of the disc first.
+    unsigned long long total = 0;
+    std::vector<ExtractEntry> files;
+    for (size_t i = 0; i < entries.size(); ++i)
+    {
+        const ExtractEntry &entry = entries[i];
+        const std::string full = std::string(destDir) + "\\" + entry.path;
+        if (!NameFitsFatx(entry.path) || full.size() >= 240)
+            return GOD_WRITE_FAILED; // too long a name for FATX
+        if (entry.isDirectory)
+        {
+            if (!CreateDirectoryA(full.c_str(), NULL) && GetLastError() != ERROR_ALREADY_EXISTS)
+                return GOD_WRITE_FAILED;
+        }
+        else
+        {
+            files.push_back(entry);
+            total += entry.size;
+        }
+    }
+    std::sort(files.begin(), files.end(), EntrySectorLess);
+
+    unsigned char *buffer = (unsigned char *)malloc(EXTRACT_CHUNK);
+    if (buffer == NULL)
+        return GOD_OUT_OF_MEMORY;
+
+    unsigned long long done = 0;
+    unsigned long long cursor = 0; // where the last read ended, partition-relative; 0 before any
+    for (size_t i = 0; i < files.size() && result == GOD_OK; ++i)
+    {
+        const ExtractEntry &file = files[i];
+        unsigned long long at = (unsigned long long)file.sector * SECTOR_SIZE;
+
+        // A short gap since the last file is read through and dropped, so the
+        // reads stay one run and the read-ahead keeps going.
+        if (cursor > 0 && at > cursor && at - cursor <= EXTRACT_SKIP_MAX)
+        {
+            while (cursor < at && result == GOD_OK)
+            {
+                const unsigned long n = (unsigned long)((at - cursor < EXTRACT_CHUNK) ? at - cursor : EXTRACT_CHUNK);
+                QueryPerformanceCounter(&t0);
+                if (!source->ReadAt(info.rootOffset + cursor, buffer, n))
+                    result = GOD_READ_FAILED;
+                QueryPerformanceCounter(&t1);
+                timings.readMs += (double)(t1.QuadPart - t0.QuadPart) * msPerTick;
+                cursor += n;
+            }
+            if (result != GOD_OK)
+                break;
+        }
+
+        const std::string full = std::string(destDir) + "\\" + file.path;
+        HANDLE h = CreateFileA(full.c_str(), GENERIC_WRITE, 0, NULL, CREATE_ALWAYS, FILE_ATTRIBUTE_NORMAL, NULL);
+        if (h == INVALID_HANDLE_VALUE)
+        {
+            result = GOD_WRITE_FAILED;
+            break;
+        }
+
+        unsigned long left = file.size;
+        while (left > 0)
+        {
+            const unsigned long n = left < EXTRACT_CHUNK ? left : EXTRACT_CHUNK;
+            // Whole sectors from the source where the partition has them, so
+            // the next file's read carries straight on; only the file's own
+            // bytes are written.
+            unsigned long readLen = (unsigned long)((n + SECTOR_SIZE - 1) / SECTOR_SIZE * SECTOR_SIZE);
+            if (at + readLen > partitionSize)
+                readLen = n;
+
+            QueryPerformanceCounter(&t0);
+            const bool ok = source->ReadAt(info.rootOffset + at, buffer, readLen);
+            QueryPerformanceCounter(&t1);
+            timings.readMs += (double)(t1.QuadPart - t0.QuadPart) * msPerTick;
+            if (!ok) { result = GOD_READ_FAILED; break; }
+
+            DWORD written = 0;
+            QueryPerformanceCounter(&t0);
+            const BOOL wrote = WriteFile(h, buffer, n, &written, NULL);
+            QueryPerformanceCounter(&t1);
+            timings.writeMs += (double)(t1.QuadPart - t0.QuadPart) * msPerTick;
+            if (!wrote || written != n) { result = GOD_WRITE_FAILED; break; }
+
+            at += readLen;
+            cursor = at;
+            left -= n;
+            done += n;
+
+            if (progress != NULL)
+            {
+                QueryPerformanceCounter(&t0);
+                const bool keepGoing = progress(done, total, progressContext);
+                QueryPerformanceCounter(&t1);
+                timings.progressMs += (double)(t1.QuadPart - t0.QuadPart) * msPerTick;
+                if (!keepGoing) { result = GOD_CANCELLED; break; }
+            }
+        }
+        CloseHandle(h);
+    }
+
+    free(buffer);
+    if (outTimings != NULL)
+        *outTimings = timings;
+    return result;
 }
