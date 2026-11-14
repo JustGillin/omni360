@@ -48,8 +48,10 @@ DESCRIPTION : Box art from Xbox Live, else xboxunity.net, looked up, cut to a ti
 // wouldn't decode also left, without xboxunity being asked: an Original
 // Xbox game's, as Halo's was. Then from "none3", from before LaunchBox was
 // asked, and "none4", left when a LaunchBox scan over 2048 pixels tall
-// wouldn't decode. Each old marker is asked about again, once.
-#define NONE_EXTENSION     "none5"
+// wouldn't decode, and "none5", from before the compilation discs' own title
+// IDs (the Arcade Compilation Disc's 4D538837) had LaunchBox covers. Each
+// old marker is asked about again, once.
+#define NONE_EXTENSION     "none6"
 
 // The cache file: a small header, then the front of the case as pixels.
 // Older files read as unusable and are fetched again, once: "OMC1" held the
@@ -215,6 +217,8 @@ static void WriteCoverFile(unsigned long titleId, const unsigned long *pixels)
     CoverPath(titleId, "none", oldMarker, sizeof(oldMarker));
     DeleteFileA(oldMarker); // superseded either way
     CoverPath(titleId, "none2", oldMarker, sizeof(oldMarker));
+    DeleteFileA(oldMarker);
+    CoverPath(titleId, "none5", oldMarker, sizeof(oldMarker));
     DeleteFileA(oldMarker);
 
     FILE *f = fopen(path, "wb");

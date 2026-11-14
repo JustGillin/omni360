@@ -31,10 +31,16 @@ static const LaunchBoxCover kLaunchBoxCovers[] =
     { 0x4D5307FC, "a483f20d-b883-40d6-8c7d-aded512f3775.jpg" }, // Xbox Live Arcade Unplugged: Volume 1 (North America)
     { 0x4D530837, "5d9718d2-3ec8-476c-b3d7-57142eca8e33.jpg" }, // XBOX Live Arcade Compilation Disc (North America)
     { 0x4D5308DC, "1078ee2b-75f0-4ed1-a188-7d1a60c97ded.jpg" }, // Xbox Live Arcade Game Pack (North America)
+    { 0x4D5387FC, "a483f20d-b883-40d6-8c7d-aded512f3775.jpg" }, // Xbox Live Arcade Unplugged: Volume 1 (North America)
+    { 0x4D538837, "5d9718d2-3ec8-476c-b3d7-57142eca8e33.jpg" }, // XBOX Live Arcade Compilation Disc (North America)
+    { 0x4D5388DC, "1078ee2b-75f0-4ed1-a188-7d1a60c97ded.jpg" }, // Xbox Live Arcade Game Pack (North America)
     { 0x4E4D07F3, "r2_40d2f3aa-b911-4352-a5e3-100287ae10dd.jpg" }, // Namco Museum: Virtual Arcade (Germany) - the North America scan is 2.2 MB
     { 0x504707D1, "84895077-4027-4a9d-9530-36b485644960.jpg" }, // PopCap Arcade Vol 1 (North America)
     { 0x504707D4, "r2_ad39f47e-0b7c-4297-92ea-00c247ad3368.jpg" }, // PopCap Arcade Vol 2 (North America)
+    { 0x504787D1, "84895077-4027-4a9d-9530-36b485644960.jpg" }, // PopCap Arcade Vol 1 (North America)
+    { 0x504787D4, "r2_ad39f47e-0b7c-4297-92ea-00c247ad3368.jpg" }, // PopCap Arcade Vol 2 (North America)
     { 0x5553081B, "560f6236-392f-4d7c-af6b-c7197592a95c.jpg" }, // Tom Clancy's Ghost Recon: Advanced Warfighter 2 (North America)
+    { 0x555308AC, "3e59954a-d0fc-49d3-b17e-f7e8b6582342.png" }, // Triple Pack: Outland / From Dust / Beyond Good & Evil HD (Europe)
     { 0x575207EA, "r2_ada2f659-2d2c-422d-87b0-f4a795e2ae33.jpg" }, // Watchmen: The End Is Nigh: Parts 1 and 2 (North America)
     { 0x584109EB, "a3982921-2c79-4514-97fa-da7c2b5784fe.jpg" }, // Tinker (no region, Windows)
     { 0xEC4A788E, "4feec8e5-7fd8-44ce-8809-2a8fdcfe1c3c.jpg" }, // name:Moe Moe 2-Ji Daisenryaku Ultra Deluxe

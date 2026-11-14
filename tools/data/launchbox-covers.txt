@@ -60,13 +60,31 @@ name:The Idolmaster: Live for You! = 589b25d9-09fd-4108-af85-1e6cbb064f72.jpg
 5553081B = 560f6236-392f-4d7c-af6b-c7197592a95c.jpg
 # Triple Pack: Outland / From Dust / Beyond Good & Evil HD (Europe)
 name:Triple Pack: Outland + From Dust + Beyond Good & Evil HD = 3e59954a-d0fc-49d3-b17e-f7e8b6582342.png
+# The same, by the title ID its disc reports (555308AC) - for the disc in the drive.
+# Triple Pack: Outland / From Dust / Beyond Good & Evil HD (Europe)
+555308AC = 3e59954a-d0fc-49d3-b17e-f7e8b6582342.png
 # Watchmen: The End Is Nigh: Parts 1 and 2 (North America)
 575207EA = r2_ada2f659-2d2c-422d-87b0-f4a795e2ae33.jpg
 # Winning Post World 2010 (Japan)
 4B4F07F7 = d5fbd18b-797f-4e33-bbdb-be5be9ba53f4.jpg
 # XBOX Live Arcade Compilation Disc (North America)
 4D530837 = 5d9718d2-3ec8-476c-b3d7-57142eca8e33.jpg
+# The same disc by the title ID its default.xex carries - Redump's serial
+# (MS-2103) gives 4D530837, which the disc itself never reports.
+# XBOX Live Arcade Compilation Disc (North America)
+4D538837 = 5d9718d2-3ec8-476c-b3d7-57142eca8e33.jpg
 # Xbox Live Arcade Game Pack (North America)
 4D5308DC = 1078ee2b-75f0-4ed1-a188-7d1a60c97ded.jpg
 # Xbox Live Arcade Unplugged: Volume 1 (North America)
 4D5307FC = a483f20d-b883-40d6-8c7d-aded512f3775.jpg
+# The compilations again, with 0x8000 set, as the Arcade Compilation Disc's
+# default.xex has it (4D538837). Not confirmed for these four - no one has
+# checked a disc - but an ID no disc reports is never looked up.
+# PopCap Arcade Vol 1 (North America)
+504787D1 = 84895077-4027-4a9d-9530-36b485644960.jpg
+# PopCap Arcade Vol 2 (North America)
+504787D4 = r2_ad39f47e-0b7c-4297-92ea-00c247ad3368.jpg
+# Xbox Live Arcade Game Pack (North America)
+4D5388DC = 1078ee2b-75f0-4ed1-a188-7d1a60c97ded.jpg
+# Xbox Live Arcade Unplugged: Volume 1 (North America)
+4D5387FC = a483f20d-b883-40d6-8c7d-aded512f3775.jpg
