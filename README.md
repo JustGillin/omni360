@@ -121,6 +121,9 @@ How much faster depends on your internet and on archive.org that day. The consol
     <td width="55%"><img src="docs/screenshots/helper-pair.png" alt="The helper asking whether to let the Xbox at 192.168.68.72 download through this PC, with the code 0274"><br><sub><b>Pairing</b>: allow the Xbox once, after checking the code matches your TV.</sub></td>
     <td width="45%"><img src="docs/screenshots/helper-tray.png" alt="The helper's tray menu: connected to the Xbox, downloading 007 - Nightfire at 11.0 MB/s"><br><sub><b>The tray menu</b>: whether your Xbox is connected, and what's downloading.</sub></td>
   </tr>
+  <tr>
+    <td colspan="2"><img src="docs/screenshots/helper-queue.png" alt="The Queue: 007 - Nightfire downloading through the PC at 10.1 MB/s, its numbers in green with + PC, and a green monitor beside the clock"><br><sub><b>On the console</b>: a download coming through your PC shows its speed in green with <b>+ PC</b>, and the monitor beside the clock says the helper is connected.</sub></td>
+  </tr>
 </table>
 
 That's it. While the helper is running:
