@@ -554,6 +554,10 @@ func separateConnections() *http.Transport {
 	t := http.DefaultTransport.(*http.Transport).Clone()
 	t.ForceAttemptHTTP2 = false
 	t.TLSNextProto = map[string]func(string, *tls.Conn) http.RoundTripper{} // no HTTP/2
+	// Offer only HTTP/1.1 in the TLS handshake as well: the cloned config
+	// still offered "h2", archive.org took it, and an HTTP/1.1 request on an
+	// HTTP/2 connection came back as a "malformed HTTP response".
+	t.TLSClientConfig = &tls.Config{NextProtos: []string{"http/1.1"}}
 	t.MaxIdleConnsPerHost = 32
 	t.MaxConnsPerHost = 0
 	return t
