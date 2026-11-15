@@ -14,6 +14,7 @@ import (
 	"path/filepath"
 	"sort"
 	"sync"
+	"sync/atomic"
 	"time"
 )
 
@@ -66,6 +67,7 @@ func (d *download) noteServed() {
 }
 
 type store struct {
+	received atomic.Int64 // bytes from archive.org, all downloads - for the tray's speed
 	dir      string
 	conns    int
 	slots    chan struct{} // one per connection to archive.org, shared by every download
@@ -305,7 +307,7 @@ func (s *store) fetchChunk(d *download, f *os.File, c int) error {
 	if resp.StatusCode != http.StatusPartialContent {
 		return &statusError{resp.StatusCode, resp.Status}
 	}
-	_, err = io.Copy(io.NewOffsetWriter(f, from), io.LimitReader(resp.Body, to-from))
+	_, err = io.Copy(io.NewOffsetWriter(f, from), countingReader{io.LimitReader(resp.Body, to-from), &s.received})
 	return err
 }
 
@@ -561,4 +563,16 @@ func separateConnections() *http.Transport {
 	t.MaxIdleConnsPerHost = 32
 	t.MaxConnsPerHost = 0
 	return t
+}
+
+// countingReader adds what it reads to a running total.
+type countingReader struct {
+	r     io.Reader
+	total *atomic.Int64
+}
+
+func (c countingReader) Read(p []byte) (int, error) {
+	n, err := c.r.Read(p)
+	c.total.Add(int64(n))
+	return n, err
 }

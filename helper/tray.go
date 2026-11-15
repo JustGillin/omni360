@@ -5,6 +5,7 @@ import (
 	"omni360helper/icon"
 	"os/exec"
 	"runtime"
+	"sync"
 	"time"
 
 	"fyne.io/systray"
@@ -86,11 +87,16 @@ func (s *store) summary() string {
 	}
 	s.mu.Unlock()
 
+	speed := s.speed()
 	for _, d := range all {
 		if d.busy() {
 			size, have := d.progress()
 			if size > 0 {
-				return fmt.Sprintf("Downloading %s - %d%%", shorten(d.file, 40), have*100/size)
+				line := fmt.Sprintf("Downloading %s - %d%%", shorten(d.file, 40), have*100/size)
+				if speed > 0 {
+					line += fmt.Sprintf(" \u00b7 %.1f MB/s", speed)
+				}
+				return line
 			}
 		}
 	}
@@ -167,4 +173,36 @@ func (s *store) anyBusy() bool {
 		}
 	}
 	return false
+}
+
+// The speed from archive.org, over the last few seconds: the tray asks every
+// two seconds, and each answer is the bytes since the last over the time
+// since. Smoothed a little, so it doesn't jump with each 8 MB chunk's bursts.
+var (
+	speedMu    sync.Mutex
+	speedAt    time.Time
+	speedBytes int64
+	speedMBps  float64
+)
+
+func (s *store) speed() float64 {
+	speedMu.Lock()
+	defer speedMu.Unlock()
+	now := time.Now()
+	total := s.received.Load()
+	if !speedAt.IsZero() {
+		if secs := now.Sub(speedAt).Seconds(); secs > 0.5 {
+			current := float64(total-speedBytes) / secs / (1 << 20)
+			if speedMBps == 0 {
+				speedMBps = current
+			} else {
+				speedMBps = speedMBps*0.6 + current*0.4
+			}
+			if speedMBps < 0.05 {
+				speedMBps = 0
+			}
+		}
+	}
+	speedAt, speedBytes = now, total
+	return speedMBps
 }
