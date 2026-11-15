@@ -1,0 +1,32 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+	<key>CFBundleName</key>
+	<string>Omni360 Helper</string>
+	<key>CFBundleDisplayName</key>
+	<string>Omni360 Helper</string>
+	<key>CFBundleIdentifier</key>
+	<string>io.github.justgillin.omni360helper</string>
+	<key>CFBundleExecutable</key>
+	<string>Omni360Helper</string>
+	<key>CFBundleIconFile</key>
+	<string>icon</string>
+	<key>CFBundlePackageType</key>
+	<string>APPL</string>
+	<key>CFBundleVersion</key>
+	<string>1.0.0</string>
+	<key>CFBundleShortVersionString</key>
+	<string>1.0.0</string>
+	<key>LSMinimumSystemVersion</key>
+	<string>11.0</string>
+	<!-- In the menu bar only: no Dock icon, no app menu. -->
+	<key>LSUIElement</key>
+	<true/>
+	<key>NSHighResolutionCapable</key>
+	<true/>
+	<!-- It listens for the console on the local network. -->
+	<key>NSLocalNetworkUsageDescription</key>
+	<string>Omni360 Helper serves downloads to your Xbox 360 on your local network.</string>
+</dict>
+</plist>

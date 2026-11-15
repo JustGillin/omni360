@@ -1,0 +1,89 @@
+# Builds Omni360 Helper for macOS - the tray library needs cgo on a Mac, so it
+# can't be cross-compiled from Windows like the Windows and Linux builds
+# (tools/build_helper.sh). Makes one universal app (Apple Silicon and Intel),
+# tray-only, zipped.
+#
+# Every run keeps the zip as a downloadable artifact. Run it by hand with a
+# release tag (Actions > Helper for macOS > Run workflow) to attach the zip to
+# that release - a draft is fine.
+name: Helper for macOS
+
+on:
+  workflow_dispatch:
+    inputs:
+      release_tag:
+        description: "Release tag to attach the zip to (e.g. v0.17.0-beta); empty for just the artifact"
+        required: false
+        default: ""
+  push:
+    paths:
+      - "helper/**"
+      - ".github/workflows/helper-macos.yml"
+
+permissions:
+  contents: write # to attach the zip to a release
+
+jobs:
+  build:
+    runs-on: macos-14
+    timeout-minutes: 20
+    defaults:
+      run:
+        working-directory: helper
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: helper/go.mod
+          cache-dependency-path: helper/go.sum
+
+      - name: Build for Apple Silicon and Intel
+        env:
+          CGO_ENABLED: "1"
+        run: |
+          GOARCH=arm64 CC="clang -arch arm64" go build -trimpath -ldflags "-s -w" -o build/Omni360Helper-arm64 .
+          GOARCH=amd64 CC="clang -arch x86_64" go build -trimpath -ldflags "-s -w" -o build/Omni360Helper-amd64 .
+          lipo -create -output build/Omni360Helper build/Omni360Helper-arm64 build/Omni360Helper-amd64
+          lipo -info build/Omni360Helper
+
+      - name: Draw the icon
+        run: |
+          go run ./cmd/preview build/png
+          set=build/icon.iconset
+          mkdir -p "$set"
+          for s in 16 32 128 256 512; do
+            sips -z $s $s build/png/icon-256.png --out "$set/icon_${s}x${s}.png" >/dev/null
+            d=$((s * 2))
+            sips -z $d $d build/png/icon-256.png --out "$set/icon_${s}x${s}@2x.png" >/dev/null
+          done
+          # The drawn 16 and 32 are sharper than scaled-down 256s.
+          cp build/png/icon-16.png "$set/icon_16x16.png"
+          cp build/png/icon-32.png "$set/icon_16x16@2x.png"
+          cp build/png/icon-32.png "$set/icon_32x32.png"
+          iconutil -c icns "$set" -o build/icon.icns
+
+      - name: Make the app
+        run: |
+          app="build/Omni360 Helper.app"
+          mkdir -p "$app/Contents/MacOS" "$app/Contents/Resources"
+          cp build/Omni360Helper "$app/Contents/MacOS/Omni360Helper"
+          cp macos/Info.plist "$app/Contents/Info.plist"
+          cp build/icon.icns "$app/Contents/Resources/icon.icns"
+          # Ad-hoc signed: Apple Silicon won't run unsigned code at all. It
+          # isn't notarised, so the first open still needs right-click > Open.
+          codesign --force --deep --sign - "$app"
+          codesign --verify --verbose "$app"
+          cd build && ditto -c -k --keepParent "Omni360 Helper.app" Omni360Helper-macos.zip
+          ls -la Omni360Helper-macos.zip
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: Omni360Helper-macos
+          path: helper/build/Omni360Helper-macos.zip
+
+      - name: Attach to the release
+        if: ${{ github.event_name == 'workflow_dispatch' && inputs.release_tag != '' }}
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh release upload "${{ inputs.release_tag }}" build/Omni360Helper-macos.zip --clobber
