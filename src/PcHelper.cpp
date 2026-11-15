@@ -1,7 +1,7 @@
 #include "PcHelper.h"
 #include "HttpPlain.h"
 #include "OutputConsole.h"
-#include "parsing.h" // LogEscapePercent
+#include "parsing.h" // LogEscapePercent, UrlEncodeFormValue
 
 #include <xtl.h>
 #include <stdio.h>
@@ -369,6 +369,61 @@ bool PcHelperWouldRoute(const char *archiveUrl)
     const bool backedOff = g_routeFailed && GetTickCount() - g_routeFailedAt < 60000;
     LeaveCriticalSection(&g_helperLock);
     return !backedOff;
+}
+
+struct PrefetchJob
+{
+    char url[1400];
+    char auth[400];
+    char name[200];
+};
+
+static DWORD WINAPI PrefetchEntry(LPVOID param)
+{
+    PrefetchJob *job = (PrefetchJob *)param;
+    char reply[64];
+    unsigned long long len = 0;
+    const int status = HttpGetPlain(job->url, job->auth[0] != '\0' ? job->auth : NULL, reply, sizeof(reply) - 1, &len);
+    char safe[400];
+    LogEscapePercent(job->name, safe, sizeof(safe));
+    if (status == 200)
+        dprintf("[helper] the PC is fetching %s ahead\n", safe);
+    else
+        dprintf("[helper] couldn't ask the PC to fetch %s ahead (HTTP %d)\n", safe, status);
+    free(job);
+    return 0;
+}
+
+void PcHelperPrefetch(const char *item, const char *file, const char *authHeader)
+{
+    if (item == NULL || file == NULL || item[0] == '\0' || file[0] == '\0')
+        return;
+    char base[64], token[64];
+    if (!PcHelperUrl(base, sizeof(base), token, sizeof(token), NULL, 0))
+        return;
+
+    char encItem[200], encFile[800];
+    if (!UrlEncodeFormValue(item, encItem, sizeof(encItem)) || !UrlEncodeFormValue(file, encFile, sizeof(encFile)))
+        return;
+
+    PrefetchJob *job = (PrefetchJob *)malloc(sizeof(PrefetchJob));
+    if (job == NULL)
+        return;
+    const int n = _snprintf(job->url, sizeof(job->url), "%s/fetch?item=%s&file=%s&t=%s", base, encItem, encFile, token);
+    if (n < 0 || n >= (int)sizeof(job->url))
+    {
+        free(job);
+        return;
+    }
+    CopyOut(job->auth, sizeof(job->auth), authHeader != NULL ? authHeader : "");
+    _snprintf(job->name, sizeof(job->name), "%s/%s", item, file);
+    job->name[sizeof(job->name) - 1] = '\0';
+
+    HANDLE h = CreateThread(NULL, 0, PrefetchEntry, job, 0, NULL);
+    if (h == NULL)
+        free(job);
+    else
+        CloseHandle(h);
 }
 
 void PcHelperRouteFailed(int status)

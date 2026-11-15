@@ -7,6 +7,7 @@ DESCRIPTION : the download queue - DLC packs and title updates, installed one
 */
 
 #include "DownloadQueue.h"
+#include "PcHelper.h" // fetching queued games ahead on the PC
 #include "downloadFile.h" // FormatBytes, DownloadProgressFn
 #include "HttpPlain.h"    // HttpDownloadPlain, for a homebrew mirror
 #include "SevenZip.h"
@@ -1202,7 +1203,12 @@ static EnqueueResult Enqueue(QueueJobKind kind, const DlcRarMatch *pack, const T
 EnqueueResult EnqueueDlcPack(const DlcRarMatch &pack, const char *gameName, unsigned long titleId,
                              const char *authHeader)
 {
-    return Enqueue(QUEUE_JOB_DLC_PACK, &pack, NULL, gameName, titleId, authHeader);
+    const EnqueueResult result = Enqueue(QUEUE_JOB_DLC_PACK, &pack, NULL, gameName, titleId, authHeader);
+    // An Arcade game, or a DLC pack that's its archive's whole - not one file
+    // out of a shared collection RAR, which would fetch the lot.
+    if (result == ENQUEUE_ADDED && pack.only[0] == '\0')
+        PcHelperPrefetch(pack.item[0] != '\0' ? pack.item : "msx360gcdlc", pack.filename, authHeader);
+    return result;
 }
 
 EnqueueResult EnqueueTitleUpdate(const TitleUpdateMatch &update, const char *gameName, unsigned long titleId,

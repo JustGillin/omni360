@@ -44,6 +44,24 @@ type download struct {
 	inFlight int    // chunks being fetched now
 	failed   error
 	started  bool
+
+	// When the console last read from it. A download the console is reading
+	// comes first; one only asked for ahead (/fetch, a game queued behind
+	// it) waits while one is.
+	lastServed time.Time
+}
+
+// foreground is whether the console has read from it in the last 30 seconds.
+func (d *download) foreground() bool {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	return time.Since(d.lastServed) < 30*time.Second
+}
+
+func (d *download) noteServed() {
+	d.mu.Lock()
+	d.lastServed = time.Now()
+	d.mu.Unlock()
 }
 
 type store struct {
@@ -183,8 +201,34 @@ func (s *store) remoteSize(d *download) (int64, error) {
 	return total, nil
 }
 
+// foregroundBusy is whether a download the console is reading has anything
+// left to fetch, other than except.
+func (s *store) foregroundBusy(except *download) bool {
+	s.mu.Lock()
+	all := make([]*download, 0, len(s.all))
+	for _, d := range s.all {
+		if d != except {
+			all = append(all, d)
+		}
+	}
+	s.mu.Unlock()
+	for _, d := range all {
+		if d.foreground() && d.busy() {
+			return true
+		}
+	}
+	return false
+}
+
 func (s *store) worker(d *download, f *os.File) {
 	for {
+		// A game queued behind the one the console is downloading waits its
+		// turn, so it doesn't share archive.org's limit with it.
+		if !d.foreground() && s.foregroundBusy(d) {
+			time.Sleep(time.Second)
+			continue
+		}
+
 		d.mu.Lock()
 		for len(d.pending) == 0 && d.failed == nil {
 			d.cond.Wait() // nothing asked for yet

@@ -72,6 +72,7 @@ func registerHandlers(mux *http.ServeMux, s *store, p *pairing) {
 }
 
 func serveRange(w http.ResponseWriter, r *http.Request, d *download) {
+	d.noteServed()
 	from, to := int64(0), d.size // [from, to)
 	status := http.StatusOK
 	if h := r.Header.Get("Range"); h != "" {

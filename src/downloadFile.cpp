@@ -582,6 +582,13 @@ bool FileWriterWrite(FileWriter *w, const char *data, size_t len)
 }
 bool FileWriterFinish(FileWriter *w) { return AsyncWriterFinish((AsyncWriter *)w); }
 
+// A transfer being handed to the PC helper (HandoffProgress, below): its
+// stop is on purpose, so DumpResponse doesn't call it cancelled or failed.
+static __declspec(thread) DownloadProgressFn t_handoffInner = NULL;
+static __declspec(thread) const char *t_handoffUrl = NULL;
+static __declspec(thread) DWORD t_handoffChecked = 0;
+static __declspec(thread) bool t_handedOff = false;
+
 int DumpResponse(XboxTLSContext *ctx,
                  const std::string filename,
                  char *outputBuffer,
@@ -979,7 +986,7 @@ int DumpResponse(XboxTLSContext *ctx,
 
             if (!progressFn(totalWritten, totalContentLength, speed, remaining))
             {
-                printFunction("Download cancelled\n");
+                if (!t_handedOff) printFunction("Download cancelled\n");
                 responseCode = HTTP_STATUS_CANCELLED;
                 goto failure;
             }
@@ -1091,7 +1098,7 @@ int DumpResponse(XboxTLSContext *ctx,
 
                 if (!progressFn(totalWritten, totalContentLength, speed, remaining))
                 {
-                    printFunction("Download cancelled\n");
+                    if (!t_handedOff) printFunction("Download cancelled\n");
                     responseCode = HTTP_STATUS_CANCELLED;
                     goto failure;
                 }
@@ -1203,7 +1210,8 @@ failure:
     if (file != NULL)
         fclose(file);
 
-    printFunction("Download Failed\n");
+    if (!t_handedOff)
+        printFunction("Download Failed\n");
 
     if (splitFilename != NULL)
         free(splitFilename);
@@ -1311,10 +1319,6 @@ static int HelperGetToBuffer(const char *helperUrl, const char *extraHeaderLines
 // progress goes through here, which checks every few seconds whether the
 // helper is back and, if it is, stops the transfer. What came stays in the
 // file, and the caller's resume picks up from there - through the helper.
-static __declspec(thread) DownloadProgressFn t_handoffInner = NULL;
-static __declspec(thread) const char *t_handoffUrl = NULL;
-static __declspec(thread) DWORD t_handoffChecked = 0;
-static __declspec(thread) bool t_handedOff = false;
 
 static bool HandoffProgress(unsigned long long done, unsigned long long total, unsigned long long perSec,
                             unsigned long long left)

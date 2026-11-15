@@ -3219,7 +3219,10 @@ static GameEnqueueResult EnqueueGame(const GameRequest &request, const char *aut
 
 GameEnqueueResult EnqueueGameInstall(const GameRequest &request, const char *authHeader)
 {
-    return EnqueueGame(request, authHeader, false);
+    const GameEnqueueResult result = EnqueueGame(request, authHeader, false);
+    if (result == GAME_QUEUED)
+        PcHelperPrefetch(request.item, request.zipName, authHeader); // waiting on the PC by its turn
+    return result;
 }
 
 // Queues again whatever install was still to do when the app last closed.

@@ -76,6 +76,14 @@ void PcHelperRouteFailed(int status);
 // archive.org to stop and resume through it once the helper is back.
 bool PcHelperWouldRoute(const char *archiveUrl);
 
+// A game was queued: the paired helper, if it's running and in use, starts
+// fetching the archive.org file (item, file - not URL-encoded) now, so it's
+// waiting on the PC by the time the console gets to it. authHeader is the
+// download's own ("Authorization: LOW ...\r\n"). The helper fetches it only
+// while the console isn't reading another, so it never slows the one in
+// progress. Returns at once; a helper that isn't there is no matter.
+void PcHelperPrefetch(const char *item, const char *file, const char *authHeader);
+
 // For the calling thread only: never route. The game installer's threads set
 // it - a disc game picks the helper or archive.org itself, and its archive.org
 // fallback has to reach archive.org.
