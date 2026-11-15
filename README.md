@@ -111,7 +111,7 @@ How much faster depends on your internet and on archive.org that day. The consol
 
 1. Download the helper for your computer from the [latest release](https://github.com/JustGillin/omni360/releases) and run it:
    - **Windows:** `Omni360Helper.exe`. Allow it through Windows Firewall when asked (private networks are enough). It sits in the system tray.
-   - **Mac:** `Omni360Helper-macos.zip`, which unzips to *Omni360 Helper*. The first time, right-click it and choose **Open**, since it isn't from the App Store. It sits in the menu bar.
+   - **Mac:** `Omni360Helper-macos.zip`, which unzips to *Omni360 Helper*. The first time, right-click it and choose **Open**, since it isn't from the App Store. Allow incoming network connections when macOS asks. It sits in the menu bar.
    - **Linux:** `Omni360Helper-linux`, untested so far. Its icon needs a desktop that shows tray icons.
 2. On the console: **Settings → General → PC helper → Pair**.
 3. Your computer asks whether to allow the Xbox. Check it shows the same code as your TV, and allow it.
@@ -125,6 +125,21 @@ How much faster depends on your internet and on archive.org that day. The consol
     <td colspan="2"><img src="docs/screenshots/helper-queue.png" alt="The Queue: 007 - Nightfire downloading through the PC at 10.1 MB/s, its numbers in green with + PC, and a green monitor beside the clock"><br><sub><b>On the console</b>: a download coming through your PC shows its speed in green with <b>+ PC</b>, and the monitor beside the clock says the helper is connected.</sub></td>
   </tr>
 </table>
+
+<details>
+<summary><b>On a Mac</b></summary>
+
+<table>
+  <tr>
+    <td width="60%"><img src="docs/screenshots/helper-mac-pair.png" alt="The Mac helper asking whether to let the Xbox at 192.168.68.72 download through this Mac, with the code 1811"><br><sub><b>Pairing</b>: the same check, as a Mac dialog.</sub></td>
+    <td width="40%"><img src="docs/screenshots/helper-mac-firewall.png" alt="macOS asking whether Omni360 Helper may accept incoming network connections"><br><sub><b>The firewall</b>: choose Allow, or the Xbox can't reach it.</sub></td>
+  </tr>
+  <tr>
+    <td colspan="2"><img src="docs/screenshots/helper-mac-menu.png" alt="The helper's menu bar menu: connected to the Xbox, downloading 007 - Blood Stone at 7.8 MB/s"><br><sub><b>The menu bar</b>: whether your Xbox is connected, and what's downloading.</sub></td>
+  </tr>
+</table>
+
+</details>
 
 That's it. While the helper is running:
 
