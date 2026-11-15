@@ -68,6 +68,10 @@ enum GameEnqueueResult
 // authHeader is copied into the job.
 GameEnqueueResult EnqueueGameInstall(const GameRequest &request, const char *authHeader);
 
+// Asks the PC helper to fetch every game still to install ahead - the one
+// downloading and those waiting or paused (PcHelper.h).
+void PrefetchQueuedGames();
+
 // Queues again whatever install was still to do when the app last closed -
 // see QueueState.h. Its download is still on the drive, so it carries on
 // rather than starting over. Call it once, after StartGameInstaller.

@@ -338,6 +338,15 @@ static bool InstallAsFolderSetting()
     return _stricmp(value, "folder") == 0;
 }
 
+// The paired helper became usable: it starts on everything already queued,
+// so the PC keeps working through the queue even with Omni360 closed.
+static void PrefetchQueue()
+{
+    dprintf("[helper] handing the queue to the PC\n");
+    PrefetchQueuedGames();
+    PrefetchQueuedPacks();
+}
+
 // The PC helper's pairing, from settings.txt into PcHelper.
 static bool PcHelperUseSetting()
 {
@@ -7478,6 +7487,7 @@ int main()
 
     // Listens for the PC helper on the LAN, which Store downloads use once paired.
     ApplyPcHelperSettings();
+    SetPcHelperOnConnect(PrefetchQueue);
     StartPcHelperListener();
 
     // Reads what's in the drive straight away, for the library's first tile.

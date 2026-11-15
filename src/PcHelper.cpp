@@ -22,6 +22,8 @@ static char g_heardName[64];
 static DWORD g_heardAt = 0;
 static bool g_heardEver = false;
 static bool g_reportedGone = false; // said in the log that it went quiet
+static void (*g_onConnect)() = NULL;
+static bool g_wasConnected = false; // usable at the last announcement
 
 // The one paired with.
 static char g_pairedId[32];
@@ -101,6 +103,8 @@ static DWORD WINAPI ListenEntry(LPVOID)
             const bool gone = g_heardEver && !g_reportedGone && !FreshLocked();
             if (gone)
                 g_reportedGone = true;
+            if (!FreshLocked())
+                g_wasConnected = false; // so its return hands it the queue again
             const bool paired = strcmp(g_heardId, g_pairedId) == 0;
             char name[64];
             CopyOut(name, sizeof(name), g_heardName);
@@ -156,8 +160,16 @@ static DWORD WINAPI ListenEntry(LPVOID)
         if (changed)
             dprintf("[helper] PC helper \"%s\" at %s (%s)\n", pcName != NULL ? pcName : "", url,
                     paired ? "paired" : "not paired");
+
+        // Usable now and not at the last announcement: hand it the queue.
+        const bool connected = PcHelperUrl(NULL, 0, NULL, 0, NULL, 0);
+        if (connected && !g_wasConnected && g_onConnect != NULL)
+            g_onConnect();
+        g_wasConnected = connected;
     }
 }
+
+void SetPcHelperOnConnect(void (*onConnect)()) { g_onConnect = onConnect; }
 
 void StartPcHelperListener()
 {

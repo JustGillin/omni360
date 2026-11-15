@@ -3226,6 +3226,37 @@ GameEnqueueResult EnqueueGameInstall(const GameRequest &request, const char *aut
     return result;
 }
 
+void PrefetchQueuedGames()
+{
+    if (!g_running)
+        return;
+    struct Ahead
+    {
+        char item[96];
+        char zip[256];
+        char auth[AUTH_MAX];
+    };
+    static Ahead ahead[MAX_GAME_JOBS]; // only the listening thread calls this
+    int n = 0;
+    EnterCriticalSection(&g_lock);
+    for (int i = 0; i < MAX_GAME_JOBS; ++i)
+    {
+        const GameJob &job = g_jobs[i];
+        if (!job.used || job.snap.state == QUEUE_FINISHED || job.cancel)
+            continue;
+        strncpy(ahead[n].item, job.request.item, sizeof(ahead[n].item) - 1);
+        ahead[n].item[sizeof(ahead[n].item) - 1] = '\0';
+        strncpy(ahead[n].zip, job.request.zipName, sizeof(ahead[n].zip) - 1);
+        ahead[n].zip[sizeof(ahead[n].zip) - 1] = '\0';
+        strncpy(ahead[n].auth, job.auth, sizeof(ahead[n].auth) - 1);
+        ahead[n].auth[sizeof(ahead[n].auth) - 1] = '\0';
+        n++;
+    }
+    LeaveCriticalSection(&g_lock);
+    for (int i = 0; i < n; ++i)
+        PcHelperPrefetch(ahead[i].item, ahead[i].zip, ahead[i].auth);
+}
+
 // Queues again whatever install was still to do when the app last closed.
 // Its pieces are already on the drive - see the staging notes above - so this
 // is what points at them again.

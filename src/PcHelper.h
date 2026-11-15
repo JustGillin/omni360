@@ -84,6 +84,11 @@ bool PcHelperWouldRoute(const char *archiveUrl);
 // progress. Returns at once; a helper that isn't there is no matter.
 void PcHelperPrefetch(const char *item, const char *file, const char *authHeader);
 
+// Called on the listening thread each time the paired helper becomes usable -
+// heard after being away, just paired with, or turned back on - so everything
+// already queued can be fetched ahead (main.cpp sets it).
+void SetPcHelperOnConnect(void (*onConnect)());
+
 // A queued game was cancelled: the helper stops fetching item/file and drops
 // what it had. Returns at once.
 void PcHelperForget(const char *item, const char *file);
