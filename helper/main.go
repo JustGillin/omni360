@@ -31,7 +31,6 @@ package main
 import (
 	"flag"
 	"fmt"
-	"io"
 	"log"
 	"net"
 	"net/http"
@@ -72,12 +71,23 @@ func main() {
 	// there's no console window.
 	logPath := filepath.Join(*cacheDir, "helper.log")
 	if f, err := os.OpenFile(logPath, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0o644); err == nil {
-		log.SetOutput(io.MultiWriter(os.Stderr, f))
+		log.SetOutput(fileFirst{f})
 	}
 
 	log.Printf("Omni360 Helper on port %d, cache in %s", httpPort, *cacheDir)
 	go func() { log.Fatal(srv.ListenAndServe()) }()
 	runTray(store, pair, *cacheDir, logPath)
+}
+
+// fileFirst writes the log to the file, and to the console too when there is
+// one. io.MultiWriter stopped at the first error, and a release build has no
+// console, so nothing reached the file at all.
+type fileFirst struct{ f *os.File }
+
+func (w fileFirst) Write(p []byte) (int, error) {
+	n, err := w.f.Write(p)
+	os.Stderr.Write(p) // no console: fails, and that's fine
+	return n, err
 }
 
 func defaultCacheDir() string {

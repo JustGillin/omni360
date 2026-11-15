@@ -67,14 +67,15 @@ func (d *download) noteServed() {
 type store struct {
 	dir      string
 	conns    int
-	maxBytes int64 // the cache's limit; the oldest downloads go to make room
+	slots    chan struct{} // one per connection to archive.org, shared by every download
+	maxBytes int64         // the cache's limit; the oldest downloads go to make room
 	mu       sync.Mutex
 	all      map[string]*download
 	http     *http.Client
 }
 
 func newStore(dir string, conns int, maxBytes int64) *store {
-	return &store{dir: dir, conns: conns, maxBytes: maxBytes, all: map[string]*download{},
+	return &store{dir: dir, conns: conns, slots: make(chan struct{}, conns), maxBytes: maxBytes, all: map[string]*download{},
 		http: &http.Client{Timeout: 0}}
 }
 
@@ -242,14 +243,37 @@ func (s *store) worker(d *download, f *os.File) {
 		d.inFlight++
 		d.mu.Unlock()
 
+		// A connection from the shared pool: five downloads of sixteen
+		// connections each was eighty at once, and archive.org answered that
+		// with refusals and stalls.
+		s.slots <- struct{}{}
 		var err error
-		for attempt := 0; attempt < 8; attempt++ {
+		for attempt := 1; ; attempt++ {
 			if err = s.fetchChunk(d, f, c); err == nil {
 				break
 			}
-			log.Printf("chunk %d of %s: %v (try %d)", c, d.file, err, attempt+1)
-			time.Sleep(time.Duration(attempt+1) * 2 * time.Second)
+			// Only a real refusal ends the download; anything else - a stall,
+			// a 503, a dropped connection - is tried again, a little later
+			// each time. One bad chunk failing the whole download made the
+			// console's next request start it over, and time out waiting.
+			var refused *statusError
+			if errors.As(err, &refused) && (refused.code == 401 || refused.code == 403 || refused.code == 404) {
+				break
+			}
+			d.mu.Lock()
+			dropped := d.failed == errForgotten
+			d.mu.Unlock()
+			if dropped {
+				break
+			}
+			log.Printf("chunk %d of %s: %v (try %d)", c, d.file, err, attempt)
+			wait := time.Duration(attempt) * 2 * time.Second
+			if wait > 30*time.Second {
+				wait = 30 * time.Second
+			}
+			time.Sleep(wait)
 		}
+		<-s.slots
 
 		d.mu.Lock()
 		d.inFlight--
@@ -278,11 +302,19 @@ func (s *store) fetchChunk(d *download, f *os.File, c int) error {
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode != http.StatusPartialContent {
-		return fmt.Errorf("archive.org answered %s", resp.Status)
+		return &statusError{resp.StatusCode, resp.Status}
 	}
 	_, err = io.Copy(io.NewOffsetWriter(f, from), io.LimitReader(resp.Body, to-from))
 	return err
 }
+
+// statusError is archive.org answering with something other than the range.
+type statusError struct {
+	code   int
+	status string
+}
+
+func (e *statusError) Error() string { return "archive.org answered " + e.status }
 
 // waitFor blocks until bytes [from, to) are on disk or the download fails.
 func (d *download) waitFor(from, to int64) error {
