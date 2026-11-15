@@ -20,6 +20,7 @@ static char g_heardId[32];
 static char g_heardName[64];
 static DWORD g_heardAt = 0;
 static bool g_heardEver = false;
+static bool g_reportedGone = false; // said in the log that it went quiet
 
 // The one paired with.
 static char g_pairedId[32];
@@ -87,6 +88,28 @@ static DWORD WINAPI ListenEntry(LPVOID)
             }
         }
 
+        // Wakes every few seconds even when nothing comes, to notice the
+        // helper going quiet - closed, or the PC switched off.
+        fd_set readable;
+        FD_ZERO(&readable);
+        FD_SET(s, &readable);
+        timeval wait = {5, 0};
+        if (select(0, &readable, NULL, NULL, &wait) == 0)
+        {
+            EnterCriticalSection(&g_helperLock);
+            const bool gone = g_heardEver && !g_reportedGone && !FreshLocked();
+            if (gone)
+                g_reportedGone = true;
+            const bool paired = strcmp(g_heardId, g_pairedId) == 0;
+            char name[64];
+            CopyOut(name, sizeof(name), g_heardName);
+            LeaveCriticalSection(&g_helperLock);
+            if (gone)
+                dprintf("[helper] PC helper \"%s\" stopped answering (%s) - downloads go to archive.org\n", name,
+                        paired ? "paired" : "not paired");
+            continue;
+        }
+
         char buf[256];
         sockaddr_in from;
         int fromLen = sizeof(from);
@@ -126,6 +149,7 @@ static DWORD WINAPI ListenEntry(LPVOID)
         CopyOut(g_heardName, sizeof(g_heardName), pcName != NULL ? pcName : "");
         g_heardAt = GetTickCount();
         g_heardEver = true;
+        g_reportedGone = false;
         const bool paired = strcmp(id, g_pairedId) == 0;
         LeaveCriticalSection(&g_helperLock);
         if (changed)
