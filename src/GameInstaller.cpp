@@ -2393,7 +2393,23 @@ static void RunJob(GameJob *job, const char *gamesPath)
     std::string servers[MAX_SERVERS];
     int serverCount = 1;
     if (viaHelper)
-        servers[0] = url; // one place to read from; the helper picks archive.org's servers itself
+    {
+        // The helper first; it picks archive.org's servers itself. archive.org
+        // second, so a PC switched off part way through is struck off like any
+        // failing server and the download carries on without it. Its storage
+        // server, not /download/: pieces don't follow redirects.
+        servers[0] = url;
+        std::string backup = archiveUrl;
+        char probe[2048];
+        unsigned long long probeLen = 0;
+        if (Get(backup, auth, "Range: bytes=0-0\r\n", probe, sizeof(probe) - 1, &probeLen) == 206 &&
+            _strnicmp(backup.c_str(), "https://", 8) == 0)
+        {
+            servers[1] = backup;
+            serverCount = 2;
+            dprintf("[game] archive.org (%s) stands in if the PC stops answering\n", HostOf(backup).c_str());
+        }
+    }
     else
         serverCount = RankServers(job, url, req.item, encodedZip, auth, req.zipSize, servers, MAX_SERVERS);
     url = servers[0];
@@ -2744,7 +2760,7 @@ static void RunJob(GameJob *job, const char *gamesPath)
             }
             SetPhase(job, GAME_STEP_DOWNLOADING,
                      wasStaged[index] ? "Checking what's already downloaded"
-                     : viaHelper      ? "Downloading through your PC"
+                     : (viaHelper && d.serverAt == 0) ? "Downloading through your PC"
                                       : "Downloading",
                      shown, needed, rate);
 
