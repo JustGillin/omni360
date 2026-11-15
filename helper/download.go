@@ -509,3 +509,37 @@ func (s *store) removeSoon(path string) {
 		}
 	}()
 }
+
+// have is whether bytes [from, to) are all on disk.
+func (d *download) have(from, to int64) bool {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	for c := from / chunkSize; c*chunkSize < to && int(c) < len(d.done); c++ {
+		if !d.done[c] {
+			return false
+		}
+	}
+	return true
+}
+
+// fetchRange reads bytes [from, to) straight from archive.org, outside the
+// chunk queue and its connection pool - for a small read the console is
+// waiting on.
+func (s *store) fetchRange(d *download, from, to int64) ([]byte, error) {
+	resp, err := s.request(d, "GET", fmt.Sprintf("bytes=%d-%d", from, to-1))
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusPartialContent {
+		return nil, &statusError{resp.StatusCode, resp.Status}
+	}
+	body, err := io.ReadAll(io.LimitReader(resp.Body, to-from))
+	if err != nil {
+		return nil, err
+	}
+	if int64(len(body)) != to-from {
+		return nil, fmt.Errorf("got %d of %d bytes", len(body), to-from)
+	}
+	return body, nil
+}

@@ -71,11 +71,14 @@ func registerHandlers(mux *http.ServeMux, s *store, p *pairing) {
 			http.Error(w, err.Error(), http.StatusBadGateway)
 			return
 		}
-		serveRange(w, r, d)
+		serveRange(w, r, s, d)
 	}))
 }
 
-func serveRange(w http.ResponseWriter, r *http.Request, d *download) {
+// smallRead is the most a read can be to skip the chunk queue.
+const smallRead = 1 << 20
+
+func serveRange(w http.ResponseWriter, r *http.Request, s *store, d *download) {
 	d.noteServed()
 	from, to := int64(0), d.size // [from, to)
 	status := http.StatusOK
@@ -104,6 +107,20 @@ func serveRange(w http.ResponseWriter, r *http.Request, d *download) {
 	}
 	w.Header().Set("Content-Length", fmt.Sprint(to-from))
 	w.Header().Set("Accept-Ranges", "bytes")
+
+	// A small read - a zip's header or directory, a RAR's headers - that
+	// isn't here yet goes straight to archive.org for just those bytes. In
+	// the chunk queue it waited behind whole 8 MB chunks, which on a slow
+	// line took longer than the console waits.
+	if status == http.StatusPartialContent && to-from <= smallRead && !d.have(from, to) {
+		if body, err := s.fetchRange(d, from, to); err == nil {
+			w.WriteHeader(status)
+			w.Write(body)
+			return
+		} else {
+			log.Printf("small read of %s straight from archive.org failed: %v - waiting for its chunk", d.file, err)
+		}
+	}
 
 	f, err := os.Open(d.path)
 	if err != nil {
