@@ -1156,8 +1156,20 @@ static bool PieceProgress(unsigned long long done, unsigned long long, unsigned 
         piece = d->piece[slot];
         total = d->inFlight[slot];
 
+        // The PC helper is left out of the slow check: when it's slow, the
+        // PC is waiting on archive.org just as the console would be, and its
+        // 8 MB chunks arrive in bursts with quiet between. Dropping it for
+        // that sent the download to archive.org and back over and over. A
+        // helper that's really gone fails to connect, or goes past
+        // HELPER_STALL_MS.
+        const bool fromHelper = d->helperServer >= 0 && d->serverAt == d->helperServer;
         const DWORD elapsed = now - d->windowStart[slot];
-        if (elapsed >= SLOW_WINDOW_MS)
+        if (elapsed >= SLOW_WINDOW_MS && fromHelper)
+        {
+            d->windowStart[slot] = now;
+            d->windowFrom[slot] = done;
+        }
+        else if (elapsed >= SLOW_WINDOW_MS)
         {
             const unsigned long long got = done - d->windowFrom[slot];
             const unsigned long long mine = got * 1000 / elapsed;
