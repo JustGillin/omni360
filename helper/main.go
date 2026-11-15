@@ -46,7 +46,7 @@ var httpPort = 36061
 func main() {
 	beDpiAware() // before the tray makes any window
 	cacheDir := flag.String("cache", defaultCacheDir(), "where downloads are kept")
-	conns := flag.Int("connections", 16, "connections per download")
+	conns := flag.Int("connections", 8, "connections to archive.org, shared by every download")
 	cacheGB := flag.Int64("cache-gb", 50, "how much the downloads folder may hold, in GB")
 	flag.IntVar(&httpPort, "port", httpPort, "HTTP port the console reads from")
 	flag.Parse()

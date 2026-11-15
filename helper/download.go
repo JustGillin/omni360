@@ -2,6 +2,7 @@ package main
 
 import (
 	"crypto/sha1"
+	"crypto/tls"
 	"encoding/hex"
 	"errors"
 	"fmt"
@@ -76,7 +77,7 @@ type store struct {
 
 func newStore(dir string, conns int, maxBytes int64) *store {
 	return &store{dir: dir, conns: conns, slots: make(chan struct{}, conns), maxBytes: maxBytes, all: map[string]*download{},
-		http: &http.Client{Timeout: 0}}
+		http: &http.Client{Transport: separateConnections()}}
 }
 
 func key(item, file string) string { return item + "\x00" + file }
@@ -542,4 +543,18 @@ func (s *store) fetchRange(d *download, from, to int64) ([]byte, error) {
 		return nil, fmt.Errorf("got %d of %d bytes", len(body), to-from)
 	}
 	return body, nil
+}
+
+// separateConnections is an HTTP client transport that gives every request
+// its own TCP connection. Go's default speaks HTTP/2 to archive.org, which
+// puts every request on one connection - so sixteen "connections" ran at one
+// connection's speed (~1 MB/s, where four real ones measured 9 MB/s and
+// eight 12, 2026-11-15).
+func separateConnections() *http.Transport {
+	t := http.DefaultTransport.(*http.Transport).Clone()
+	t.ForceAttemptHTTP2 = false
+	t.TLSNextProto = map[string]func(string, *tls.Conn) http.RoundTripper{} // no HTTP/2
+	t.MaxIdleConnsPerHost = 32
+	t.MaxConnsPerHost = 0
+	return t
 }
