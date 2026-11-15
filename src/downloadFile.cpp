@@ -1310,7 +1310,7 @@ int httpRequestHTTPS(const std::string URL, HttpMethod method, const char *reque
             else if (dataBuffer != NULL && outputBufferSize != NULL && *outputBufferSize > 0)
             {
                 unsigned long long got = 0;
-                st = HttpGetPlain(helperUrl, extraHeaderLines, dataBuffer, *outputBufferSize - 1, &got);
+                st = HttpGetPlain(helperUrl, extraHeaderLines, dataBuffer, *outputBufferSize, &got); // the caller left room for the NUL, as for DumpResponse
                 if (st == 200 || st == 206)
                     *outputBufferSize = got;
             }
@@ -1704,7 +1704,7 @@ int HttpsSessionGet(HttpsSession *session, const std::string &url, const char *e
         if (*dataBufferSize > 0 && PcHelperRoute(url.c_str(), helperUrl, sizeof(helperUrl)))
         {
             unsigned long long got = 0;
-            const int st = HttpGetPlain(helperUrl, extraHeaderLines, dataBuffer, *dataBufferSize - 1, &got);
+            const int st = HttpGetPlain(helperUrl, extraHeaderLines, dataBuffer, *dataBufferSize, &got); // as ReadHttpResponse below
             if (st == 200 || st == 206)
             {
                 *dataBufferSize = got;
