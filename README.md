@@ -105,21 +105,32 @@ Your library is read straight off the hard drive, covers and all, and games star
 
 ## Faster downloads with the PC helper (optional)
 
-Omni360 works on its own, but if you have a PC on the same network, **Omni360 Helper** can roughly double how fast Store games download. It does even more for people far from archive.org's servers. The PC does the downloading and hands the game to the console over your network; the console still checks, installs and manages everything.
+Omni360 works on its own, but if you have a computer on the same network, **Omni360 Helper** can make Store downloads a lot faster. The computer downloads from archive.org and hands the game straight to the console over your network, while the console still checks, installs and manages everything. It works for disc games, Arcade games, DLC and title updates.
 
-1. Download `Omni360Helper.exe` from the [latest release](https://github.com/JustGillin/omni360/releases) and run it. Allow it through Windows Firewall when asked (private networks are enough). It sits in the system tray.
+1. Download the helper for your computer from the [latest release](https://github.com/JustGillin/omni360/releases) and run it:
+   - **Windows:** `Omni360Helper.exe`. Allow it through Windows Firewall when asked (private networks are enough). It sits in the system tray.
+   - **Mac:** `Omni360Helper-macos.zip`, which unzips to *Omni360 Helper*. The first time, right-click it and choose **Open**, since it isn't from the App Store. It sits in the menu bar.
+   - **Linux:** `Omni360Helper-linux`, untested so far. Its icon needs a desktop that shows tray icons.
 2. On the console: **Settings → General → PC helper → Pair**.
-3. Your PC asks whether to allow the Xbox. Check it shows the same code as your TV, and choose **Yes**.
+3. Your computer asks whether to allow the Xbox. Check it shows the same code as your TV, and allow it.
 
-That's it. While the helper is running, Store downloads go through your PC, a small green monitor sits beside the clock, and the Queue says *Downloading through your PC*. When it isn't running, the console downloads by itself as before. Pairing keeps other devices on your network from using it, since the console passes your archive.org keys along with each download.
+That's it. While the helper is running:
+
+- A small green monitor sits beside the clock on the console.
+- On the Queue, a download coming through your computer shows its speed in green with **+ PC**.
+- The helper's icon is a green disc that spins while it downloads, and its menu shows the game and the speed. It turns grey when no Xbox is connected, such as when Omni360 is closed.
+
+If you switch the computer off or close the helper partway through, the download carries on from archive.org by itself, and moves back to the computer when the helper returns. Pairing keeps other devices on your network out, since the console passes your archive.org keys along with each download.
 
 <details>
 <summary><b>Why it's faster</b></summary>
 <br>
 
-The 360 gives each connection a fixed 255 KB receive buffer (see *Known limitations*), so from archive.org's servers, tens of milliseconds away, each connection tops out around 3.5 MB/s. On your home network the round trip is about a millisecond, so the console can take data as fast as its 100 Mbit port allows: measured at **10.1 MB/s**, against 6.9 MB/s straight from archive.org on the same day. Your PC has no such limit when it downloads from archive.org.
+The 360 gives each connection a fixed 255 KB receive buffer (see *Known limitations*), so from archive.org's servers, tens of milliseconds away, each connection tops out around 3.5 MB/s. On your home network the round trip is about a millisecond, so the console can take data almost as fast as its 100 Mbit port allows, around 10 MB/s.
 
-The helper keeps recent downloads in its cache (50 GB by default, oldest removed first), so installing the same game on a second console is just the copy over your network. archive.org can throttle a household after a lot of downloading in one day, and that applies to the PC too.
+Your computer has no such limit: it downloads with several connections at once, measured at 9 MB/s with four and 12 MB/s with eight. It stays ahead of the console, so the console's network port ends up being the limit, not archive.org.
+
+The helper keeps recent downloads (50 GB by default, oldest removed first), so installing the same game on a second console is just the copy over your network. archive.org can still slow a household down after a lot of downloading in one day, and that applies to the computer too.
 
 </details>
 
@@ -127,7 +138,7 @@ The helper keeps recent downloads in its cache (50 GB by default, oldest removed
 
 ## Known limitations
 
-- **Downloads are slower than on a PC** — usually 2-4 MB/s from archive.org, so a game takes half an hour or more, where a PC on the same internet gets 5-8 MB/s. It's the 360's own networking, not your internet or Omni360. **Settings → Download speed** checks your console in about a minute, and the optional [PC helper](#faster-downloads-with-the-pc-helper-optional) gets around it.
+- **Downloads are slower than on a PC** — usually 2-4 MB/s from archive.org, so a game takes half an hour or more, where a PC on the same internet gets 5-8 MB/s. It's the 360's own networking, not your internet or Omni360. **Settings → Download speed** checks your console in about a minute, and the optional [PC helper](#faster-downloads-with-the-pc-helper-optional) gets around it, at around 10 MB/s.
 
   <details>
   <summary><b>Why the 360 is slower over distance</b></summary>

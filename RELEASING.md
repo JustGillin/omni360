@@ -61,7 +61,13 @@ A rebuild changes the XEX's bytes even when the source hasn't changed, and the s
 sh tools/build_helper.sh
 ```
 
-It writes `Omni360Helper.exe` (Windows, no console window) and `Omni360Helper-linux` to `Release/dist/helper/`. Attach both to the release with the XEX. They aren't signed: the console never runs them, and people download them from the release page themselves. Go is needed (`winget install GoLang.Go`); a macOS build has to be made on a Mac.
+It writes `Omni360Helper.exe` (Windows, no console window) and `Omni360Helper-linux` to `Release/dist/helper/`. Attach both to the release with the XEX. They aren't signed: the console never runs them, and people download them from the release page themselves. Go is needed (`winget install GoLang.Go`).
+
+The macOS helper is built by GitHub Actions, since it has to be built on a Mac. Once the release exists (a draft is fine), run **Actions → Helper for macOS → Run workflow** with the release's tag, and it attaches `Omni360Helper-macos.zip` itself:
+
+```bash
+gh workflow run helper-macos.yml -f release_tag=v0.2.4-beta
+```
 
 ### 3. Commit, tag and push
 
