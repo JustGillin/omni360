@@ -2302,13 +2302,9 @@ static void BuildSettingsPage(SettingsPage &page, const Library &lib, const char
 
         // How a Store game installs: left and right change it.
         const bool asFolder = InstallAsFolderSetting();
-        AddSettingsRow(page, SETTINGS_VIEW_LINE, "Install games as");
+        AddSettingsRow(page, SETTINGS_VIEW_LINE, "Install disc games as");
         AddSettingsControl(page, SETTINGS_CONTROL_VALUE, asFolder ? "Folder (default.xex)" : "Games on Demand",
-                           SETTINGS_ROW_INSTALL_TYPE,
-                           asFolder
-                               ? "The disc's files, copied to the Games folder. Original Xbox games still install as GOD."
-                               : "A GOD package, like the dashboard's own. XBLA compilation discs always install as "
-                                 "folders - left and right change it.");
+                           SETTINGS_ROW_INSTALL_TYPE, "Only affects retail Xbox 360 games.");
         {
             SettingsControlView &c = page.rows[page.count - 1].controls[0];
             c.valueIndex = asFolder ? 1 : 0;
