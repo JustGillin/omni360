@@ -72,6 +72,9 @@ extern "C" NTSTATUS XexGetModuleHandle(PSZ moduleName, PHANDLE outHandle);
 #define UPDATE_CHECK_KEY "check-updates: " // "off" stops the check at start
 #define SOUNDS_KEY "nav-sounds: "         // "off" silences the interface
 #define INSTALL_TYPE_KEY "install-type: "   // "folder" copies a game's files out rather than making a GOD package - Store and disc installs
+#define HELPER_ID_KEY "helper-id: "       // the paired PC helper (PcHelper.h); empty when not paired
+#define HELPER_TOKEN_KEY "helper-token: " // what it gave this console when it paired
+#define HELPER_USE_KEY "helper-use: "     // "off" leaves it out of downloads; on otherwise
 #define EJECT_KEY "eject-after-install: " // "yes" opens the tray once a disc has installed
 #define DISC_SPEED_KEY "disc-speed: "       // 1 to 4, DiscWorker's spindle speed for installs
 #define STORE_FILTER_KEY "store-filter: "   // the Store letters' filters and order: "sort=a-z;regions=usa,eur;..."
@@ -333,6 +336,22 @@ static bool InstallAsFolderSetting()
     char value[16];
     GetSettingsPath(INSTALL_TYPE_KEY, "god", value, sizeof(value));
     return _stricmp(value, "folder") == 0;
+}
+
+// The PC helper's pairing, from settings.txt into PcHelper.
+static bool PcHelperUseSetting()
+{
+    char value[16];
+    GetSettingsPath(HELPER_USE_KEY, "yes", value, sizeof(value));
+    return _stricmp(value, "off") != 0;
+}
+
+static void ApplyPcHelperSettings()
+{
+    char id[32], token[64];
+    GetSettingsPath(HELPER_ID_KEY, "", id, sizeof(id));
+    GetSettingsPath(HELPER_TOKEN_KEY, "", token, sizeof(token));
+    SetPcHelperPairing(id, token, PcHelperUseSetting());
 }
 
 // Whether the tray opens once a disc has installed. Off unless turned on.
@@ -1639,6 +1658,9 @@ enum SettingsRow
     SETTINGS_ROW_SOUNDS,       // the interface's sounds, on or off
     SETTINGS_ROW_SPEED_TEST,   // where a download's speed goes - SpeedTest.h
     SETTINGS_ROW_EJECT,        // opening the tray after a disc install, on or off
+    SETTINGS_ROW_HELPER_PAIR,  // the PC helper: pair with the one running
+    SETTINGS_ROW_HELPER_UNPAIR,
+    SETTINGS_ROW_HELPER_USE,   // whether downloads go through it
     SETTINGS_ROW_INSTALL_TYPE, // Games on Demand or folder games, for Store installs
     SETTINGS_ROW_RESYNC_LIBRARY // re-read the library from disk and re-fetch missing icons
 };
@@ -2018,6 +2040,47 @@ static void ToggleInstallType()
     dprintf("Game installs set to %s\n", asFolder ? "folder games" : "Games on Demand");
 }
 
+// Asks for the code the helper shows, and pairs with it.
+static void PairPcHelper()
+{
+    std::string code;
+    if (OpenKeyboardToString(XUSER_INDEX_ANY, &code, L"Pair with your PC",
+                             L"Enter the 4-digit code shown in the Omni360 Helper window", L"") != ERROR_SUCCESS)
+        return;
+    TrimInPlace(code);
+    if (code.empty())
+        return;
+
+    RenderStatusFrame("Pairing", "Talking to your PC", NULL);
+    char token[64], id[32], message[128];
+    if (!PcHelperPair(code.c_str(), token, sizeof(token), id, sizeof(id), message, sizeof(message)))
+    {
+        ShowMessageUI("Not paired", message, NULL);
+        return;
+    }
+    if (!SetSettingsValue(HELPER_ID_KEY, id) || !SetSettingsValue(HELPER_TOKEN_KEY, token))
+    {
+        ShowMessageUI("Not saved", "settings.txt could not be written.", NULL);
+        return;
+    }
+    ApplyPcHelperSettings();
+    ShowMessageUI("Paired", "Store downloads go through your PC while the helper is running.", NULL);
+}
+
+static void UnpairPcHelper()
+{
+    if (!SetSettingsValue(HELPER_ID_KEY, "") || !SetSettingsValue(HELPER_TOKEN_KEY, ""))
+        ShowMessageUI("Not saved", "settings.txt could not be written.", NULL);
+    ApplyPcHelperSettings();
+}
+
+static void TogglePcHelperUse()
+{
+    if (!SetSettingsValue(HELPER_USE_KEY, PcHelperUseSetting() ? "off" : "yes"))
+        ShowMessageUI("Not saved", "settings.txt could not be written.", NULL);
+    ApplyPcHelperSettings();
+}
+
 static void ToggleEjectAfterInstall()
 {
     const bool on = !EjectAfterInstallSetting();
@@ -2077,6 +2140,7 @@ struct SettingsPage
     char folderStatus[MAX_FOLDER_ROWS][48];
     char folderHelp[MAX_FOLDER_ROWS][128];
     char keysStatus[64];
+    char helperStatus[96];
     char updatesStatus[96];
     char updatesHelp[96];
 
@@ -2282,6 +2346,43 @@ static void BuildSettingsPage(SettingsPage &page, const Library &lib, const char
             AddSettingsControl(page, SETTINGS_CONTROL_BUTTON, "Remove", SETTINGS_ROW_REMOVE_KEYS,
                                "Deletes the saved keys from this console. Store installs stop until new ones are added.");
 
+        // The PC helper: what's running, and pairing with it.
+        {
+            char pcName[64];
+            const PcHelperStatus helper = GetPcHelperStatus(pcName, sizeof(pcName));
+            switch (helper)
+            {
+            case PC_HELPER_PAIRED_ONLINE:
+                _snprintf(page.helperStatus, sizeof(page.helperStatus), "Paired" SETTINGS_MIDDOT "%s", pcName);
+                break;
+            case PC_HELPER_PAIRED_OFFLINE:
+                _snprintf(page.helperStatus, sizeof(page.helperStatus), "Paired" SETTINGS_MIDDOT "not running");
+                break;
+            case PC_HELPER_FOUND:
+                _snprintf(page.helperStatus, sizeof(page.helperStatus), "Found %s" SETTINGS_MIDDOT "not paired", pcName);
+                break;
+            default:
+                _snprintf(page.helperStatus, sizeof(page.helperStatus), "Not found");
+                break;
+            }
+            page.helperStatus[sizeof(page.helperStatus) - 1] = '\0';
+            const bool paired = helper == PC_HELPER_PAIRED_ONLINE || helper == PC_HELPER_PAIRED_OFFLINE;
+            AddSettingsRow(page, SETTINGS_VIEW_LINE, "PC helper").status = page.helperStatus;
+            if (paired)
+            {
+                AddSettingsControl(page, SETTINGS_CONTROL_CHECK, "Use", SETTINGS_ROW_HELPER_USE,
+                                   "Store downloads go through your PC while the helper runs on it - up to twice as fast.");
+                page.rows[page.count - 1].controls[0].on = PcHelperUseSetting();
+                AddSettingsControl(page, SETTINGS_CONTROL_BUTTON, "Unpair", SETTINGS_ROW_HELPER_UNPAIR,
+                                   "Stops using this PC. Pair again with a new code from the helper.");
+            }
+            else
+            {
+                AddSettingsControl(page, SETTINGS_CONTROL_BUTTON, "Pair", SETTINGS_ROW_HELPER_PAIR,
+                                   "Run Omni360 Helper on your PC, then enter the code it shows. Downloads get faster.");
+            }
+        }
+
         // How fast a disc install reads: left and right change it.
         static const char *const speedNames[DISC_SPEED_FULL] = { "Slowest", "Slow", "Fast", "Full" };
         const int speed = DiscSpeedSetting();
@@ -2440,6 +2541,9 @@ static SettingsOutcome RunSettingsRow(SettingsRow row, int arg, Library &lib, ch
     case SETTINGS_ROW_SOUNDS:       ToggleUiSounds(); break;
     case SETTINGS_ROW_INSTALL_TYPE: ToggleInstallType(); break;
     case SETTINGS_ROW_EJECT:        ToggleEjectAfterInstall(); break;
+    case SETTINGS_ROW_HELPER_PAIR:  PairPcHelper(); break;
+    case SETTINGS_ROW_HELPER_UNPAIR: UnpairPcHelper(); break;
+    case SETTINGS_ROW_HELPER_USE:   TogglePcHelperUse(); break;
     case SETTINGS_ROW_SPEED_TEST:   RunSpeedTest(gamesPath); break;
     case SETTINGS_ROW_RESYNC_LIBRARY:
         ScanLibrary(lib, gamesPath);
@@ -7356,7 +7460,8 @@ int main()
     if (!StartStoreArt())
         dprintf("ERROR: the Store's art worker didn't start - its tiles stay plain\n");
 
-    // Listens for a PC helper on the LAN, which Store downloads use if found.
+    // Listens for the PC helper on the LAN, which Store downloads use once paired.
+    ApplyPcHelperSettings();
     StartPcHelperListener();
 
     // Reads what's in the drive straight away, for the library's first tile.

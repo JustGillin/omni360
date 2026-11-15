@@ -8,12 +8,14 @@ import (
 	"strings"
 )
 
-func registerHandlers(mux *http.ServeMux, s *store) {
+func registerHandlers(mux *http.ServeMux, s *store, p *pairing) {
+	mux.HandleFunc("/pair", p.handlePair)
+
 	mux.HandleFunc("/hello", func(w http.ResponseWriter, r *http.Request) {
-		fmt.Fprint(w, "omni360-helper 1")
+		fmt.Fprintf(w, "omni360-helper 2 %s", p.ID)
 	})
 
-	mux.HandleFunc("/fetch", func(w http.ResponseWriter, r *http.Request) {
+	mux.HandleFunc("/fetch", p.requireToken(func(w http.ResponseWriter, r *http.Request) {
 		item, file := r.URL.Query().Get("item"), r.URL.Query().Get("file")
 		if item == "" || file == "" {
 			http.Error(w, "item and file are needed", http.StatusBadRequest)
@@ -26,9 +28,9 @@ func registerHandlers(mux *http.ServeMux, s *store) {
 		}
 		size, have := d.progress()
 		fmt.Fprintf(w, "%d %d", size, have)
-	})
+	}))
 
-	mux.HandleFunc("/status", func(w http.ResponseWriter, r *http.Request) {
+	mux.HandleFunc("/status", p.requireToken(func(w http.ResponseWriter, r *http.Request) {
 		s.mu.Lock()
 		d := s.all[key(r.URL.Query().Get("item"), r.URL.Query().Get("file"))]
 		s.mu.Unlock()
@@ -38,9 +40,9 @@ func registerHandlers(mux *http.ServeMux, s *store) {
 		}
 		size, have := d.progress()
 		fmt.Fprintf(w, "%d %d", size, have)
-	})
+	}))
 
-	mux.HandleFunc("/forget", func(w http.ResponseWriter, r *http.Request) {
+	mux.HandleFunc("/forget", p.requireToken(func(w http.ResponseWriter, r *http.Request) {
 		item, file := r.URL.Query().Get("item"), r.URL.Query().Get("file")
 		s.mu.Lock()
 		delete(s.all, key(item, file))
@@ -48,10 +50,10 @@ func registerHandlers(mux *http.ServeMux, s *store) {
 		p := s.cachePath(item, file)
 		os.Remove(p)
 		os.Remove(p + ".progress")
-	})
+	}))
 
 	// /file/<item>/<file>: what the console reads in place of archive.org.
-	mux.HandleFunc("/file/", func(w http.ResponseWriter, r *http.Request) {
+	mux.HandleFunc("/file/", p.requireToken(func(w http.ResponseWriter, r *http.Request) {
 		rest := strings.TrimPrefix(r.URL.Path, "/file/")
 		slash := strings.IndexByte(rest, '/')
 		if slash <= 0 {
@@ -64,7 +66,7 @@ func registerHandlers(mux *http.ServeMux, s *store) {
 			return
 		}
 		serveRange(w, r, d)
-	})
+	}))
 }
 
 func serveRange(w http.ResponseWriter, r *http.Request, d *download) {

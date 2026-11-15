@@ -10,11 +10,13 @@
 // stay on the console.
 //
 // Finding the helper: every few seconds it broadcasts
-// "OMNI360-HELPER 1 <http port> <name>" on UDP port 36060, so Omni360 can
-// list it without anyone typing an address.
+// "OMNI360-HELPER 2 <http port> <id> <name>" on UDP port 36060, so Omni360
+// can find it without anyone typing an address. Everything but /hello and
+// /pair needs a paired console's token (?t=) - see pairing.go.
 //
 // HTTP, on port 36061:
-//   GET  /hello                        -> "omni360-helper 1"
+//   GET  /hello                        -> "omni360-helper 2 <id>"
+//   GET  /pair?code=NNNN                -> "<token> <id>"
 //   POST /fetch?item=I&file=F           start (or keep) a download; the
 //                                       request's Authorization header is
 //                                       passed to archive.org, held in memory
@@ -35,32 +37,34 @@ import (
 	"time"
 )
 
-const (
-	announcePort = 36060
-	httpPort     = 36061
-)
+const announcePort = 36060
+
+var httpPort = 36061
 
 func main() {
 	cacheDir := flag.String("cache", defaultCacheDir(), "where downloads are kept")
 	conns := flag.Int("connections", 16, "connections per download")
+	flag.IntVar(&httpPort, "port", httpPort, "HTTP port the console reads from")
 	flag.Parse()
 
 	if err := os.MkdirAll(*cacheDir, 0o755); err != nil {
 		log.Fatalf("can't make the cache folder %s: %v", *cacheDir, err)
 	}
 	store := newStore(*cacheDir, *conns)
+	pair := loadPairing(*cacheDir)
 
 	name, _ := os.Hostname()
-	go announce(name)
+	go announce(name, pair.ID)
 
 	mux := http.NewServeMux()
-	registerHandlers(mux, store)
+	registerHandlers(mux, store, pair)
 	srv := &http.Server{
 		Addr:              fmt.Sprintf(":%d", httpPort),
 		Handler:           logRequests(mux),
 		ReadHeaderTimeout: 30 * time.Second,
 	}
 	log.Printf("Omni360 Helper on port %d, cache in %s", httpPort, *cacheDir)
+	pair.showCode()
 	log.Fatal(srv.ListenAndServe())
 }
 
@@ -72,9 +76,9 @@ func defaultCacheDir() string {
 }
 
 // announce broadcasts the helper's port on the LAN every 3 seconds.
-func announce(name string) {
+func announce(name, id string) {
 	addr := &net.UDPAddr{IP: net.IPv4bcast, Port: announcePort}
-	msg := []byte(fmt.Sprintf("OMNI360-HELPER 1 %d %s", httpPort, name))
+	msg := []byte(fmt.Sprintf("OMNI360-HELPER 2 %d %s %s", httpPort, id, name))
 	for {
 		if conn, err := net.DialUDP("udp4", nil, addr); err == nil {
 			conn.Write(msg)

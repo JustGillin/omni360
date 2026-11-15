@@ -2353,12 +2353,13 @@ static void RunJob(GameJob *job, const char *gamesPath)
     std::string url = std::string("https://archive.org/download/") + req.item + "/" + encodedZip;
 
     // A PC helper on the LAN downloads it for us if there is one (PcHelper.h).
-    char helperBase[64], helperName[64];
-    bool viaHelper = PcHelperUrl(helperBase, sizeof(helperBase), helperName, sizeof(helperName));
+    char helperBase[64], helperToken[64], helperName[64];
+    bool viaHelper = PcHelperUrl(helperBase, sizeof(helperBase), helperToken, sizeof(helperToken), helperName,
+                                 sizeof(helperName));
     const std::string archiveUrl = url;
     if (viaHelper)
     {
-        url = std::string(helperBase) + "/file/" + req.item + "/" + encodedZip;
+        url = std::string(helperBase) + "/file/" + req.item + "/" + encodedZip + "?t=" + helperToken;
         dprintf("[game] downloading through the PC helper \"%s\" at %s\n", helperName, helperBase);
     }
 
@@ -2742,7 +2743,10 @@ static void RunJob(GameJob *job, const char *gamesPath)
                     rate = fetched * 1000 / ms;
             }
             SetPhase(job, GAME_STEP_DOWNLOADING,
-                     wasStaged[index] ? "Checking what's already downloaded" : "Downloading", shown, needed, rate);
+                     wasStaged[index] ? "Checking what's already downloaded"
+                     : viaHelper      ? "Downloading through your PC"
+                                      : "Downloading",
+                     shown, needed, rate);
 
             if (ready || stop)
             {
