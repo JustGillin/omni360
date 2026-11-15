@@ -1,6 +1,7 @@
 #include "PcHelper.h"
 #include "HttpPlain.h"
 #include "OutputConsole.h"
+#include "parsing.h" // LogEscapePercent
 
 #include <xtl.h>
 #include <stdio.h>
@@ -347,7 +348,13 @@ bool PcHelperRoute(const char *archiveUrl, char *helperUrl, unsigned int helperU
     if (n < 0 || (unsigned int)n >= helperUrlSize)
         return false;
     if (newFile)
-        dprintf("[helper] fetching %s through the PC helper \"%s\"\n", path, name);
+    {
+        // Escaped: the path is URL-encoded, and the log formats a line twice,
+        // so "Halo%20Spartan" read "%20S" as a wide string and crashed.
+        char safePath[320];
+        LogEscapePercent(path, safePath, sizeof(safePath));
+        dprintf("[helper] fetching %s through the PC helper \"%s\"\n", safePath, name);
+    }
     return true;
 }
 

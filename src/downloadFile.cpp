@@ -1286,6 +1286,27 @@ static const char *UserAgentFor(const char *domain)
     return HostIsConsoleMods(domain) ? CONSOLEMODS_AGENT : DEFAULT_USER_AGENT;
 }
 
+// A buffer-mode GET from the PC helper into a caller's buffer of capacity
+// bytes. HttpGetPlain writes a NUL after the body, which a caller's buffer may
+// have no room for, so it reads into one of its own and copies the body out.
+static int HelperGetToBuffer(const char *helperUrl, const char *extraHeaderLines, char *dataBuffer,
+                             unsigned long long *dataBufferSize)
+{
+    const unsigned long long capacity = *dataBufferSize;
+    char *own = (char *)malloc((size_t)capacity + 1);
+    if (own == NULL)
+        return 0;
+    unsigned long long got = 0;
+    const int st = HttpGetPlain(helperUrl, extraHeaderLines, own, capacity, &got);
+    if ((st == 200 || st == 206) && got <= capacity)
+    {
+        memcpy(dataBuffer, own, (size_t)got);
+        *dataBufferSize = got;
+    }
+    free(own);
+    return st;
+}
+
 int httpRequestHTTPS(const std::string URL, HttpMethod method, const char *requestBody,
                      const char *extraHeaderLines, const std::string fileName,
                      char *dataBuffer, unsigned long long *outputBufferSize, bool downloadIntoFile,
@@ -1309,10 +1330,7 @@ int httpRequestHTTPS(const std::string URL, HttpMethod method, const char *reque
             }
             else if (dataBuffer != NULL && outputBufferSize != NULL && *outputBufferSize > 0)
             {
-                unsigned long long got = 0;
-                st = HttpGetPlain(helperUrl, extraHeaderLines, dataBuffer, *outputBufferSize, &got); // the caller left room for the NUL, as for DumpResponse
-                if (st == 200 || st == 206)
-                    *outputBufferSize = got;
+                st = HelperGetToBuffer(helperUrl, extraHeaderLines, dataBuffer, outputBufferSize);
             }
             if (st == 200 || st == 206 || st == HTTP_STATUS_CANCELLED)
                 return st;
@@ -1703,13 +1721,9 @@ int HttpsSessionGet(HttpsSession *session, const std::string &url, const char *e
         char helperUrl[1400];
         if (*dataBufferSize > 0 && PcHelperRoute(url.c_str(), helperUrl, sizeof(helperUrl)))
         {
-            unsigned long long got = 0;
-            const int st = HttpGetPlain(helperUrl, extraHeaderLines, dataBuffer, *dataBufferSize, &got); // as ReadHttpResponse below
+            const int st = HelperGetToBuffer(helperUrl, extraHeaderLines, dataBuffer, dataBufferSize);
             if (st == 200 || st == 206)
-            {
-                *dataBufferSize = got;
                 return st;
-            }
             PcHelperRouteFailed(st);
         }
     }

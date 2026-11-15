@@ -3,6 +3,7 @@
 #include "downloadFile.h"
 #include "dns.h"
 #include "OutputConsole.h"
+#include "parsing.h" // LogEscapePercent
 
 #include <xtl.h>
 #include <stdio.h>
@@ -11,6 +12,15 @@
 #include <string>
 
 #define XBOX_SO_BYPASS_SECURITY 0x5801
+
+// A URL as it can go in a log line: the log formats each line twice, so a
+// percent-encoded one ("%20S") would be read as format codes (LogEscapePercent).
+static std::string LogUrl(const char *url)
+{
+    char safe[1024];
+    LogEscapePercent(url, safe, sizeof(safe));
+    return std::string(safe);
+}
 #define PLAIN_IO_TIMEOUT_MS     (30 * 1000) // small replies - a stall is a failure well before XboxTLS's 2 minutes
 #define PLAIN_MAX_REDIRECTS     4
 
@@ -70,7 +80,7 @@ static SOCKET ConnectFor(const char *url, std::string *request, DWORD timeoutMs 
     std::string path;
     if (!SplitUrl(url, host, sizeof(host), &port, &path))
     {
-        dprintf("[http] not an http:// URL: %s\n", url);
+        dprintf("[http] not an http:// URL: %s\n", LogUrl(url).c_str());
         return INVALID_SOCKET;
     }
 
@@ -155,7 +165,7 @@ static int GetOnce(const char *url, const char *extraHeaderLines, char *buffer, 
                 {
                     if (response->bodyOverflow)
                     {
-                        dprintf("[http] %s: larger than %I64u bytes\n", url, capacity);
+                        dprintf("[http] %s: larger than %I64u bytes\n", LogUrl(url).c_str(), capacity);
                         status = -1;
                     }
                     else
@@ -170,7 +180,7 @@ static int GetOnce(const char *url, const char *extraHeaderLines, char *buffer, 
             }
             else
             {
-                dprintf("[http] %s: the response couldn't be read (status %d)\n", url, response->status);
+                dprintf("[http] %s: the response couldn't be read (status %d)\n", LogUrl(url).c_str(), response->status);
                 status = 0;
             }
         }
@@ -321,12 +331,12 @@ int HttpGetToFilePlain(const char *url, const char *extraHeaderLines, const char
 
         if (appendToFile && status == 200 && !ranged)
         {
-            dprintf("[http] %s: the whole file came back, not the range - not appending\n", url);
+            dprintf("[http] %s: the whole file came back, not the range - not appending\n", LogUrl(url).c_str());
             status = -1;
         }
         else if (status == 200 && chunked)
         {
-            dprintf("[http] %s: sent chunked, which a download to a file doesn't take\n", url);
+            dprintf("[http] %s: sent chunked, which a download to a file doesn't take\n", LogUrl(url).c_str());
             status = -1;
         }
         else if (status == 200)
@@ -381,7 +391,7 @@ int HttpGetToFilePlain(const char *url, const char *extraHeaderLines, const char
                 }
                 else if (status == 200 && (!ok || (total > 0 && done != total)))
                 {
-                    dprintf("[http] %s: got %I64u of %I64u bytes\n", url, done, total);
+                    dprintf("[http] %s: got %I64u of %I64u bytes\n", LogUrl(url).c_str(), done, total);
                     status = -1;
                 }
                 if (status != 200 && !ranged)
@@ -390,7 +400,7 @@ int HttpGetToFilePlain(const char *url, const char *extraHeaderLines, const char
         }
         else if (status != 0)
         {
-            dprintf("[http] %s: status %d\n", url, status);
+            dprintf("[http] %s: status %d\n", LogUrl(url).c_str(), status);
         }
     }
 
