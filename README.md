@@ -108,10 +108,10 @@ Your library is read straight off the hard drive, covers and all, and games star
 Omni360 works on its own, but if you have a PC on the same network, **Omni360 Helper** can roughly double how fast Store games download. It does even more for people far from archive.org's servers. The PC does the downloading and hands the game to the console over your network; the console still checks, installs and manages everything.
 
 1. Download `Omni360Helper.exe` from the [latest release](https://github.com/JustGillin/omni360/releases) and run it. Allow it through Windows Firewall when asked (private networks are enough). It sits in the system tray.
-2. Click its tray icon to see the **pairing code**.
-3. On the console: **Settings → General → PC helper → Pair**, and enter the code.
+2. On the console: **Settings → General → PC helper → Pair**.
+3. Your PC asks whether to allow the Xbox. Check it shows the same code as your TV, and choose **Yes**.
 
-That's it. While the helper is running, Store downloads go through your PC, and the Queue says *Downloading through your PC*. When it isn't running, the console downloads by itself as before. Pairing keeps other devices on your network from using it, since the console passes your archive.org keys along with each download.
+That's it. While the helper is running, Store downloads go through your PC, a small green monitor sits beside the clock, and the Queue says *Downloading through your PC*. When it isn't running, the console downloads by itself as before. Pairing keeps other devices on your network from using it, since the console passes your archive.org keys along with each download.
 
 <details>
 <summary><b>Why it's faster</b></summary>
