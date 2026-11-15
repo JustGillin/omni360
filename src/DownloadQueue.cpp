@@ -7,7 +7,7 @@ DESCRIPTION : the download queue - DLC packs and title updates, installed one
 */
 
 #include "DownloadQueue.h"
-#include "PcHelper.h" // fetching queued games ahead on the PC
+#include "PcHelper.h" // a cancelled pack dropped from the PC, and its progress there
 #include "downloadFile.h" // FormatBytes, DownloadProgressFn
 #include "HttpPlain.h"    // HttpDownloadPlain, for a homebrew mirror
 #include "SevenZip.h"
@@ -1203,12 +1203,7 @@ static EnqueueResult Enqueue(QueueJobKind kind, const DlcRarMatch *pack, const T
 EnqueueResult EnqueueDlcPack(const DlcRarMatch &pack, const char *gameName, unsigned long titleId,
                              const char *authHeader)
 {
-    const EnqueueResult result = Enqueue(QUEUE_JOB_DLC_PACK, &pack, NULL, gameName, titleId, authHeader);
-    // An Arcade game, or a DLC pack that's its archive's whole - not one file
-    // out of a shared collection RAR, which would fetch the lot.
-    if (result == ENQUEUE_ADDED && pack.only[0] == '\0')
-        PcHelperPrefetch(pack.item[0] != '\0' ? pack.item : "msx360gcdlc", pack.filename, authHeader);
-    return result;
+    return Enqueue(QUEUE_JOB_DLC_PACK, &pack, NULL, gameName, titleId, authHeader);
 }
 
 EnqueueResult EnqueueTitleUpdate(const TitleUpdateMatch &update, const char *gameName, unsigned long titleId,
@@ -1574,38 +1569,6 @@ int RunnableDownloadCount()
     LeaveCriticalSection(&g_lock);
 
     return running;
-}
-
-void PrefetchQueuedPacks()
-{
-    if (!g_running)
-        return;
-    struct Ahead
-    {
-        char item[32];
-        char file[DLC_RAR_FILENAME_LEN];
-        char auth[IAS3_AUTH_HEADER_MAX];
-    };
-    static Ahead ahead[MAX_QUEUE_JOBS]; // only the listening thread calls this
-    int n = 0;
-    EnterCriticalSection(&g_lock);
-    for (int i = 0; i < MAX_QUEUE_JOBS; ++i)
-    {
-        const QueueJob &job = g_jobs[i];
-        if (!job.used || job.kind != QUEUE_JOB_DLC_PACK || job.state == QUEUE_FINISHED || job.cancelRequested ||
-            job.pack.only[0] != '\0')
-            continue;
-        strncpy(ahead[n].item, job.pack.item[0] != '\0' ? job.pack.item : "msx360gcdlc", sizeof(ahead[n].item) - 1);
-        ahead[n].item[sizeof(ahead[n].item) - 1] = '\0';
-        strncpy(ahead[n].file, job.pack.filename, sizeof(ahead[n].file) - 1);
-        ahead[n].file[sizeof(ahead[n].file) - 1] = '\0';
-        strncpy(ahead[n].auth, job.authHeader, sizeof(ahead[n].auth) - 1);
-        ahead[n].auth[sizeof(ahead[n].auth) - 1] = '\0';
-        n++;
-    }
-    LeaveCriticalSection(&g_lock);
-    for (int i = 0; i < n; ++i)
-        PcHelperPrefetch(ahead[i].item, ahead[i].file, ahead[i].auth);
 }
 
 void CancelQueueJob(int id)

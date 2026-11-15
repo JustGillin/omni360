@@ -22,8 +22,6 @@ static char g_heardName[64];
 static DWORD g_heardAt = 0;
 static bool g_heardEver = false;
 static bool g_reportedGone = false; // said in the log that it went quiet
-static void (*g_onConnect)() = NULL;
-static bool g_wasConnected = false; // usable at the last announcement
 
 // The one paired with.
 static char g_pairedId[32];
@@ -103,8 +101,6 @@ static DWORD WINAPI ListenEntry(LPVOID)
             const bool gone = g_heardEver && !g_reportedGone && !FreshLocked();
             if (gone)
                 g_reportedGone = true;
-            if (!FreshLocked())
-                g_wasConnected = false; // so its return hands it the queue again
             const bool paired = strcmp(g_heardId, g_pairedId) == 0;
             char name[64];
             CopyOut(name, sizeof(name), g_heardName);
@@ -160,16 +156,8 @@ static DWORD WINAPI ListenEntry(LPVOID)
         if (changed)
             dprintf("[helper] PC helper \"%s\" at %s (%s)\n", pcName != NULL ? pcName : "", url,
                     paired ? "paired" : "not paired");
-
-        // Usable now and not at the last announcement: hand it the queue.
-        const bool connected = PcHelperUrl(NULL, 0, NULL, 0, NULL, 0);
-        if (connected && !g_wasConnected && g_onConnect != NULL)
-            g_onConnect();
-        g_wasConnected = connected;
     }
 }
-
-void SetPcHelperOnConnect(void (*onConnect)()) { g_onConnect = onConnect; }
 
 void StartPcHelperListener()
 {
@@ -383,45 +371,28 @@ bool PcHelperWouldRoute(const char *archiveUrl)
     return !backedOff;
 }
 
-struct PrefetchJob
+// A cancelled game, for the helper to drop - sent on a thread of its own so
+// cancelling never waits on the network.
+struct ForgetRequest
 {
-    bool forget; // /forget, not /fetch
     char url[1400];
-    char auth[400];
     char name[200];
 };
 
-static DWORD WINAPI PrefetchEntry(LPVOID param)
+static DWORD WINAPI ForgetEntry(LPVOID param)
 {
-    PrefetchJob *job = (PrefetchJob *)param;
+    ForgetRequest *job = (ForgetRequest *)param;
     char reply[64];
     unsigned long long len = 0;
-    const int status = HttpGetPlain(job->url, job->auth[0] != '\0' ? job->auth : NULL, reply, sizeof(reply) - 1, &len);
+    const int status = HttpGetPlain(job->url, NULL, reply, sizeof(reply) - 1, &len);
     char safe[400];
     LogEscapePercent(job->name, safe, sizeof(safe));
-    if (job->forget)
-        dprintf("[helper] told the PC to drop %s (HTTP %d)\n", safe, status);
-    else if (status == 200)
-        dprintf("[helper] the PC is fetching %s ahead\n", safe);
-    else
-        dprintf("[helper] couldn't ask the PC to fetch %s ahead (HTTP %d)\n", safe, status);
+    dprintf("[helper] told the PC to drop %s (HTTP %d)\n", safe, status);
     free(job);
     return 0;
 }
 
-static void SendToHelper(const char *what, const char *item, const char *file, const char *authHeader);
-
-void PcHelperPrefetch(const char *item, const char *file, const char *authHeader)
-{
-    SendToHelper("fetch", item, file, authHeader);
-}
-
 void PcHelperForget(const char *item, const char *file)
-{
-    SendToHelper("forget", item, file, NULL);
-}
-
-static void SendToHelper(const char *what, const char *item, const char *file, const char *authHeader)
 {
     if (item == NULL || file == NULL || item[0] == '\0' || file[0] == '\0')
         return;
@@ -433,22 +404,19 @@ static void SendToHelper(const char *what, const char *item, const char *file, c
     if (!UrlEncodeFormValue(item, encItem, sizeof(encItem)) || !UrlEncodeFormValue(file, encFile, sizeof(encFile)))
         return;
 
-    PrefetchJob *job = (PrefetchJob *)malloc(sizeof(PrefetchJob));
+    ForgetRequest *job = (ForgetRequest *)malloc(sizeof(ForgetRequest));
     if (job == NULL)
         return;
-    job->forget = strcmp(what, "forget") == 0;
-    const int n = _snprintf(job->url, sizeof(job->url), "%s/%s?item=%s&file=%s&t=%s", base, what, encItem, encFile,
-                            token);
+    const int n = _snprintf(job->url, sizeof(job->url), "%s/forget?item=%s&file=%s&t=%s", base, encItem, encFile, token);
     if (n < 0 || n >= (int)sizeof(job->url))
     {
         free(job);
         return;
     }
-    CopyOut(job->auth, sizeof(job->auth), authHeader != NULL ? authHeader : "");
     _snprintf(job->name, sizeof(job->name), "%s/%s", item, file);
     job->name[sizeof(job->name) - 1] = '\0';
 
-    HANDLE h = CreateThread(NULL, 0, PrefetchEntry, job, 0, NULL);
+    HANDLE h = CreateThread(NULL, 0, ForgetEntry, job, 0, NULL);
     if (h == NULL)
         free(job);
     else

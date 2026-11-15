@@ -144,10 +144,6 @@ enum EnqueueResult
 // with even if they're changed in Settings while it waits.
 EnqueueResult EnqueueDlcPack(const DlcRarMatch &pack, const char *gameName, unsigned long titleId,
                              const char *authHeader);
-// Asks the PC helper to fetch every Arcade game and whole-archive DLC pack
-// still to do ahead (PcHelper.h).
-void PrefetchQueuedPacks();
-
 EnqueueResult EnqueueTitleUpdate(const TitleUpdateMatch &update, const char *gameName, unsigned long titleId,
                                  const char *authHeader);
 

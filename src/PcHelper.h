@@ -76,18 +76,6 @@ void PcHelperRouteFailed(int status);
 // archive.org to stop and resume through it once the helper is back.
 bool PcHelperWouldRoute(const char *archiveUrl);
 
-// A game was queued: the paired helper, if it's running and in use, starts
-// fetching the archive.org file (item, file - not URL-encoded) now, so it's
-// waiting on the PC by the time the console gets to it. authHeader is the
-// download's own ("Authorization: LOW ...\r\n"). The helper fetches it only
-// while the console isn't reading another, so it never slows the one in
-// progress. Returns at once; a helper that isn't there is no matter.
-void PcHelperPrefetch(const char *item, const char *file, const char *authHeader);
-
-// Called on the listening thread each time the paired helper becomes usable -
-// heard after being away, just paired with, or turned back on - so everything
-// already queued can be fetched ahead (main.cpp sets it).
-void SetPcHelperOnConnect(void (*onConnect)());
 
 // A queued game was cancelled: the helper stops fetching item/file and drops
 // what it had. Returns at once.
