@@ -12,6 +12,8 @@ DESCRIPTION : Downloads a Redump game's zip from archive.org and installs it as
 #include "DiscWorker.h"    // WriteInstallMarker, ClearInstallMarker
 #include "ArchiveOrgDLC.h" // DriveFreeSpace
 #include "downloadFile.h"
+#include "HttpPlain.h"     // the PC helper is plain HTTP on the LAN
+#include "PcHelper.h"
 #include "XboxTLS.h"       // XboxTLS_SetThreadIoTimeout
 #include "StoreArt.h"      // FetchTitleIcon
 #include "ServiceCheck.h"  // ReportConnectionRate: whose fault a slow one is
@@ -275,6 +277,14 @@ static int Get(std::string &ioUrl, const char *auth, const char *range, char *bu
     char headers[1024];
     _snprintf(headers, sizeof(headers), "%s%s", auth != NULL ? auth : "", range != NULL ? range : "");
     headers[sizeof(headers) - 1] = '\0';
+
+    // The PC helper: plain HTTP, no redirects. HttpGetPlain wants room for a
+    // NUL past capacity.
+    if (_strnicmp(ioUrl.c_str(), "http://", 7) == 0)
+    {
+        *outLen = 0;
+        return HttpGetPlain(ioUrl.c_str(), headers, buffer, capacity > 0 ? capacity - 1 : 0, outLen);
+    }
 
     for (int hop = 0; hop < 4; ++hop)
     {
@@ -1057,6 +1067,7 @@ static std::string HostOf(const std::string &url); // with the server ranking, b
 // restarts at about 0.5 MB/s, and a minute with a stall in it went from
 // 1.0-2.3 MB/s to about 2.5. Measured over four stalls in five minutes.
 #define STALL_TIMEOUT_MS   3000
+#define HELPER_STALL_MS    60000 // the PC helper, which may be waiting on archive.org
 
 // Slow drops and failed retries on one server before moving to the next.
 // Cut-offs that resume don't count: every server cuts both connections every
@@ -1351,8 +1362,14 @@ static DWORD WINAPI ConnectionEntry(LPVOID param)
 
             const char *target = (resumeFrom > 0) ? restPath : tempPath;
             unsigned long long size = 0;
-            status = httpRequestHTTPS(url, HTTP_GET, NULL, headers, target, NULL, &size, true, NULL, 0,
-                                      QuietPrint, length - resumeFrom, PieceProgress);
+            if (_strnicmp(url.c_str(), "http://", 7) == 0)
+                // The PC helper. It may wait on archive.org for a chunk, so
+                // a longer stall than archive.org's own is fine.
+                status = HttpGetToFilePlain(url.c_str(), headers, target, length - resumeFrom, HELPER_STALL_MS,
+                                            PieceProgress);
+            else
+                status = httpRequestHTTPS(url, HTTP_GET, NULL, headers, target, NULL, &size, true, NULL, 0,
+                                          QuietPrint, length - resumeFrom, PieceProgress);
 
             // Dropped by the slow check: what came is good, as if cut off.
             EnterCriticalSection(&g_lock);
@@ -2335,10 +2352,27 @@ static void RunJob(GameJob *job, const char *gamesPath)
     }
     std::string url = std::string("https://archive.org/download/") + req.item + "/" + encodedZip;
 
+    // A PC helper on the LAN downloads it for us if there is one (PcHelper.h).
+    char helperBase[64], helperName[64];
+    bool viaHelper = PcHelperUrl(helperBase, sizeof(helperBase), helperName, sizeof(helperName));
+    const std::string archiveUrl = url;
+    if (viaHelper)
+    {
+        url = std::string(helperBase) + "/file/" + req.item + "/" + encodedZip;
+        dprintf("[game] downloading through the PC helper \"%s\" at %s\n", helperName, helperBase);
+    }
+
     // The datanode, once, so every request after goes straight there.
     char small[4096];
     unsigned long long len = 0;
     int status = Get(url, auth, "Range: bytes=0-1023\r\n", small, sizeof(small) - 1, &len);
+    if (viaHelper && (status != 206 || len < 30))
+    {
+        dprintf("[game] the PC helper answered HTTP %d - downloading from archive.org instead\n", status);
+        viaHelper = false;
+        url = archiveUrl;
+        status = Get(url, auth, "Range: bytes=0-1023\r\n", small, sizeof(small) - 1, &len);
+    }
     if (status == 401 || status == 403)
     {
         FinishLocked(job, QUEUE_OUTCOME_KEYS_REJECTED, "Keys not accepted",
@@ -2356,7 +2390,11 @@ static void RunJob(GameJob *job, const char *gamesPath)
 
     SetPhase(job, GAME_STEP_FINDING, "Finding the fastest server", 0, 0, 0);
     std::string servers[MAX_SERVERS];
-    const int serverCount = RankServers(job, url, req.item, encodedZip, auth, req.zipSize, servers, MAX_SERVERS);
+    int serverCount = 1;
+    if (viaHelper)
+        servers[0] = url; // one place to read from; the helper picks archive.org's servers itself
+    else
+        serverCount = RankServers(job, url, req.item, encodedZip, auth, req.zipSize, servers, MAX_SERVERS);
     url = servers[0];
     if (Cancelled(job))
     {

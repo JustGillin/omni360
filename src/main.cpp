@@ -39,6 +39,7 @@ end-to-end on real hardware against a real 27-game library.
 #include "StoreArt.h"
 #include "StoreCatalog.h"
 #include "DiscWorker.h"
+#include "PcHelper.h"
 #include "GameInstaller.h"
 #include "QueueState.h" // TakeRestoredTally, for the one line about last time
 #include "NightMode.h"
@@ -7354,6 +7355,9 @@ int main()
     // Waits until the Store is first opened to fetch anything.
     if (!StartStoreArt())
         dprintf("ERROR: the Store's art worker didn't start - its tiles stay plain\n");
+
+    // Listens for a PC helper on the LAN, which Store downloads use if found.
+    StartPcHelperListener();
 
     // Reads what's in the drive straight away, for the library's first tile.
     if (!StartDiscWorker(gamesPath))

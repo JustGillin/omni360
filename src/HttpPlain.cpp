@@ -63,7 +63,7 @@ static bool SplitUrl(const char *url, char *host, size_t hostSize, unsigned shor
 // A connection to url's host, and the request line and headers for it,
 // without the blank line that ends them. INVALID_SOCKET on failure, said in
 // the log.
-static SOCKET ConnectFor(const char *url, std::string *request)
+static SOCKET ConnectFor(const char *url, std::string *request, DWORD timeoutMs = PLAIN_IO_TIMEOUT_MS)
 {
     char host[256];
     unsigned short port = 80;
@@ -93,7 +93,6 @@ static SOCKET ConnectFor(const char *url, std::string *request)
         return INVALID_SOCKET;
 
     BOOL yes = TRUE;
-    DWORD timeoutMs = PLAIN_IO_TIMEOUT_MS;
     setsockopt(s, SOL_SOCKET, XBOX_SO_BYPASS_SECURITY, (PCSTR)&yes, sizeof(yes));
     setsockopt(s, IPPROTO_TCP, TCP_NODELAY, (PCSTR)&yes, sizeof(yes));
     setsockopt(s, SOL_SOCKET, SO_RCVTIMEO, (PCSTR)&timeoutMs, sizeof(timeoutMs));
@@ -261,6 +260,12 @@ static int ParseHead(const char *head, unsigned long long *contentLength, bool *
 
 int HttpDownloadPlain(const char *url, const char *filePath, DownloadProgressFn progressFn)
 {
+    return HttpGetToFilePlain(url, NULL, filePath, 0, PLAIN_IO_TIMEOUT_MS, progressFn);
+}
+
+int HttpGetToFilePlain(const char *url, const char *extraHeaderLines, const char *filePath,
+                       unsigned long long knownTotal, unsigned long timeoutMs, DownloadProgressFn progressFn)
+{
     if (url == NULL || filePath == NULL)
         return 0;
 
@@ -278,8 +283,11 @@ int HttpDownloadPlain(const char *url, const char *filePath, DownloadProgressFn 
     }
 
     int status = 0;
+    bool ranged = false;
     std::string request;
-    SOCKET s = ConnectFor(url, &request);
+    SOCKET s = ConnectFor(url, &request, timeoutMs);
+    if (extraHeaderLines != NULL)
+        request += extraHeaderLines;
     request += "\r\n";
     const int bufSize = 64 * 1024;
     char *buf = (char *)malloc(bufSize + 1);
@@ -304,6 +312,11 @@ int HttpDownloadPlain(const char *url, const char *filePath, DownloadProgressFn 
         bool chunked = false;
         if (bodyStart != NULL)
             status = ParseHead(buf, &total, &chunked);
+        if (total == 0)
+            total = knownTotal;
+        ranged = status == 206; // a Range answered: handled as a 200 until the end
+        if (ranged)
+            status = 200;
 
         if (status == 200 && chunked)
         {
@@ -348,12 +361,18 @@ int HttpDownloadPlain(const char *url, const char *filePath, DownloadProgressFn 
                     }
                 }
                 ok = (fclose(out) == 0) && ok;
-                if (status == 200 && (!ok || (total > 0 && done != total)))
+                if (ranged && ok)
+                {
+                    // A range cut short keeps what came and stays a 206, as
+                    // httpRequestHTTPS does: the caller compares the file's
+                    // size with what it asked for and asks for the rest.
+                }
+                else if (status == 200 && (!ok || (total > 0 && done != total)))
                 {
                     dprintf("[http] %s: got %I64u of %I64u bytes\n", url, done, total);
                     status = -1;
                 }
-                if (status != 200)
+                if (status != 200 && !ranged)
                     remove(filePath);
             }
         }
@@ -368,5 +387,5 @@ int HttpDownloadPlain(const char *url, const char *filePath, DownloadProgressFn 
         closesocket(s);
     WSACleanup();
     XNetCleanup();
-    return status;
+    return (status == 200 && ranged) ? 206 : status;
 }

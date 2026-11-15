@@ -166,6 +166,9 @@
     <ClCompile Include="src\HttpPlain.cpp">
       <Filter>Source Files\Network</Filter>
     </ClCompile>
+    <ClCompile Include="src\PcHelper.cpp">
+      <Filter>Source Files\Network</Filter>
+    </ClCompile>
     <ClCompile Include="src\SpeedTest.cpp">
       <Filter>Source Files\Network</Filter>
     </ClCompile>
@@ -1195,6 +1198,9 @@
       <Filter>Source Files\Installs</Filter>
     </ClInclude>
     <ClInclude Include="src\HttpPlain.h">
+      <Filter>Source Files\Network</Filter>
+    </ClInclude>
+    <ClInclude Include="src\PcHelper.h">
       <Filter>Source Files\Network</Filter>
     </ClInclude>
     <ClInclude Include="src\SpeedTest.h">

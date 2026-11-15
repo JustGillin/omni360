@@ -27,4 +27,13 @@ int HttpGetPlain(const char *url, const char *extraHeaderLines, char *buffer,
 // nothing is left at filePath.
 int HttpDownloadPlain(const char *url, const char *filePath, DownloadProgressFn progressFn);
 
+// The same with extra header lines (each ending "\r\n") - a Range for the PC
+// helper (PcHelper.h). A 206 is taken as well as a 200, and returned as 206.
+// knownTotal stands in for a missing Content-Length (0 if unknown). A ranged
+// reply cut off partway keeps what came in filePath and still returns 206 -
+// the caller checks the file's size, as with httpRequestHTTPS. timeoutMs is
+// how long a read may stall.
+int HttpGetToFilePlain(const char *url, const char *extraHeaderLines, const char *filePath,
+                       unsigned long long knownTotal, unsigned long timeoutMs, DownloadProgressFn progressFn);
+
 #endif
