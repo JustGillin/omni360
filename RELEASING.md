@@ -55,6 +55,14 @@ mv Release/Omni360.xex.sig Release/dist/v0.2.4-beta/ && cp Release/Omni360.xex R
 
 A rebuild changes the XEX's bytes even when the source hasn't changed, and the signature would no longer match — the app would refuse the release ("Its signature doesn't match"). `Release/` is ignored by git, so none of this can be committed by accident.
 
+### 2b. Build the PC helper
+
+```bash
+sh tools/build_helper.sh
+```
+
+It writes `Omni360Helper.exe` (Windows, no console window) and `Omni360Helper-linux` to `Release/dist/helper/`. Attach both to the release with the XEX. They aren't signed: the console never runs them, and people download them from the release page themselves. Go is needed (`winget install GoLang.Go`); a macOS build has to be made on a Mac.
+
 ### 3. Commit, tag and push
 
 ```bash
