@@ -44,6 +44,12 @@ DESCRIPTION : Downloads a Redump game's zip from archive.org and installs it as
 // connection went silent every 40 seconds instead of every few minutes, and
 // archive.org answered some of the extra ones with 502s.
 #define CONNECTIONS       2
+// Through the PC helper: plain HTTP on the LAN, no decryption, and the
+// helper's own connections to archive.org feeding it. A third gets closer
+// to the 100 Mbit port's ~11 MB/s than two (~7 typical) - better on
+// hardware, 2026-11-15.
+#define HELPER_CONNECTIONS 3
+#define MAX_CONNECTIONS   3 // the larger of the two: what the per-connection arrays hold
 #define CONNECTION_STAGGER_MS 1500 // four opened at the same instant all stalled once
 // Tries in a row that gain no ground before a piece is given up on. A try
 // that brought bytes - cut off, or dropped as slow - costs nothing: it is
@@ -1092,18 +1098,18 @@ struct Download
     bool *done;
     unsigned long long doneBytes;
     unsigned long long movedBytes;  // everything received, finished pieces or not
-    unsigned long long inFlight[CONNECTIONS];
-    unsigned long long resumedAt[CONNECTIONS]; // what a resumed piece already had
-    DWORD threadIds[CONNECTIONS];
+    unsigned long long inFlight[MAX_CONNECTIONS];
+    unsigned long long resumedAt[MAX_CONNECTIONS]; // what a resumed piece already had
+    DWORD threadIds[MAX_CONNECTIONS];
 
     // Each connection's request in hand, for the slow check and the log.
-    unsigned long piece[CONNECTIONS];
-    DWORD windowStart[CONNECTIONS];             // when the current window began
-    unsigned long long windowFrom[CONNECTIONS]; // the request's bytes then
-    DWORD lastLog[CONNECTIONS];
-    unsigned long long windowRate[CONNECTIONS]; // bytes a second over the last full window, 0 if none yet
-    bool tooSlow[CONNECTIONS];                  // dropped by the slow check
-    bool trickled[CONNECTIONS];                 // and it was the server, not the connection
+    unsigned long piece[MAX_CONNECTIONS];
+    DWORD windowStart[MAX_CONNECTIONS];             // when the current window began
+    unsigned long long windowFrom[MAX_CONNECTIONS]; // the request's bytes then
+    DWORD lastLog[MAX_CONNECTIONS];
+    unsigned long long windowRate[MAX_CONNECTIONS]; // bytes a second over the last full window, 0 if none yet
+    bool tooSlow[MAX_CONNECTIONS];                  // dropped by the slow check
+    bool trickled[MAX_CONNECTIONS];                 // and it was the server, not the connection
     bool failed;
     int failStatus;
     const bool *cancel;
@@ -1141,7 +1147,7 @@ static bool PieceProgress(unsigned long long done, unsigned long long, unsigned 
 
     EnterCriticalSection(&g_lock);
     DWORD me = GetCurrentThreadId();
-    for (int i = 0; i < CONNECTIONS; ++i)
+    for (int i = 0; i < MAX_CONNECTIONS; ++i)
     {
         if (d->threadIds[i] == me)
             slot = i;
@@ -1181,7 +1187,7 @@ static bool PieceProgress(unsigned long long done, unsigned long long, unsigned 
             // The best any other connection managed over its last full
             // window. Nothing to compare against until one has finished.
             unsigned long long peak = 0;
-            for (int i = 0; i < CONNECTIONS; ++i)
+            for (int i = 0; i < MAX_CONNECTIONS; ++i)
             {
                 if (i != slot && d->windowRate[i] > peak)
                     peak = d->windowRate[i];
@@ -1878,7 +1884,7 @@ public:
         EnterCriticalSection(&g_lock);
         bool downloaded = (d->doneBytes >= d->total);
         unsigned long long fetched = d->doneBytes;
-        for (int i = 0; i < CONNECTIONS; ++i)
+        for (int i = 0; i < MAX_CONNECTIONS; ++i)
             fetched += d->inFlight[i];
         LeaveCriticalSection(&g_lock);
 
@@ -2666,7 +2672,7 @@ static void RunJob(GameJob *job, const char *gamesPath)
     d.cancel = &job->cancel;
     d.pause = &job->pause;
     d.pieceReady = CreateEvent(NULL, FALSE, FALSE, NULL);
-    for (int i = 0; i < CONNECTIONS; ++i)
+    for (int i = 0; i < MAX_CONNECTIONS; ++i)
     {
         d.inFlight[i] = 0;
         d.resumedAt[i] = 0;
@@ -2705,10 +2711,11 @@ static void RunJob(GameJob *job, const char *gamesPath)
 
     g_download = &d;
 
-    ConnectionArgs args[CONNECTIONS];
-    HANDLE threads[CONNECTIONS];
+    ConnectionArgs args[MAX_CONNECTIONS];
+    HANDLE threads[MAX_CONNECTIONS];
     int started = 0;
-    for (int i = 0; !haveIndex && i < CONNECTIONS; ++i)
+    const int connections = viaHelper ? HELPER_CONNECTIONS : CONNECTIONS;
+    for (int i = 0; !haveIndex && i < connections; ++i)
     {
         args[i].d = &d;
         args[i].slot = i;
@@ -2726,7 +2733,7 @@ static void RunJob(GameJob *job, const char *gamesPath)
 #endif
         ResumeThread(threads[i]);
         started++;
-        if (i + 1 < CONNECTIONS)
+        if (i + 1 < connections)
             Sleep(CONNECTION_STAGGER_MS);
     }
 
@@ -2768,7 +2775,7 @@ static void RunJob(GameJob *job, const char *gamesPath)
             bool ready = d.done[index];
             bool stop = Stopping(&d);
             unsigned long long bytes = d.doneBytes;
-            for (int i = 0; i < CONNECTIONS; ++i)
+            for (int i = 0; i < MAX_CONNECTIONS; ++i)
                 bytes += d.inFlight[i];
             LeaveCriticalSection(&g_lock);
 
