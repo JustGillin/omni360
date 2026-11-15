@@ -45,6 +45,7 @@ const announcePort = 36060
 var httpPort = 36061
 
 func main() {
+	beDpiAware() // before the tray makes any window
 	cacheDir := flag.String("cache", defaultCacheDir(), "where downloads are kept")
 	conns := flag.Int("connections", 16, "connections per download")
 	cacheGB := flag.Int64("cache-gb", 50, "how much the downloads folder may hold, in GB")

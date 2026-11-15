@@ -1,12 +1,8 @@
 package main
 
 import (
-	"bytes"
-	"encoding/binary"
 	"fmt"
-	"image"
-	"image/color"
-	"image/png"
+	"omni360helper/icon"
 	"os/exec"
 	"runtime"
 	"time"
@@ -19,7 +15,7 @@ import (
 // (-ldflags -H=windowsgui), so this is where the code is read from.
 func runTray(s *store, p *pairing, cacheDir, logPath string) {
 	systray.Run(func() {
-		systray.SetIcon(trayIcon())
+		systray.SetIcon(stillIcon())
 		systray.SetTitle("Omni360 Helper")
 		systray.SetTooltip("Omni360 Helper")
 
@@ -49,6 +45,7 @@ func runTray(s *store, p *pairing, cacheDir, logPath string) {
 				time.Sleep(2 * time.Second)
 			}
 		}()
+		go spinWhileBusy(s)
 		go func() {
 			for {
 				select {
@@ -80,41 +77,6 @@ func openPath(path string) {
 	}
 }
 
-// trayIcon draws the icon: a green disc with a white ring, as an ICO on
-// Windows (a PNG inside an ICO header) and a plain PNG elsewhere.
-func trayIcon() []byte {
-	const size = 32
-	img := image.NewRGBA(image.Rect(0, 0, size, size))
-	green := color.RGBA{0x10, 0x7C, 0x10, 0xFF}
-	white := color.RGBA{0xFF, 0xFF, 0xFF, 0xFF}
-	c := float64(size-1) / 2
-	for y := 0; y < size; y++ {
-		for x := 0; x < size; x++ {
-			dx, dy := float64(x)-c, float64(y)-c
-			d := dx*dx + dy*dy
-			switch {
-			case d <= 15.5*15.5 && d >= 11*11 && d <= 13.5*13.5:
-				img.Set(x, y, white)
-			case d <= 15.5*15.5:
-				img.Set(x, y, green)
-			}
-		}
-	}
-	var pngBytes bytes.Buffer
-	png.Encode(&pngBytes, img)
-	if runtime.GOOS != "windows" {
-		return pngBytes.Bytes()
-	}
-
-	var ico bytes.Buffer
-	binary.Write(&ico, binary.LittleEndian, []uint16{0, 1, 1}) // reserved, type icon, one image
-	ico.Write([]byte{size, size, 0, 0})                        // width, height, colours, reserved
-	binary.Write(&ico, binary.LittleEndian, []uint16{1, 32})   // planes, bits per pixel
-	binary.Write(&ico, binary.LittleEndian, []uint32{uint32(pngBytes.Len()), 22})
-	ico.Write(pngBytes.Bytes())
-	return ico.Bytes()
-}
-
 // summary is one line for the tray: what's downloading, or that it's idle.
 func (s *store) summary() string {
 	s.mu.Lock()
@@ -144,4 +106,65 @@ func shorten(s string, n int) string {
 		return s
 	}
 	return string(r[:n-1]) + "…"
+}
+
+// The icon's frames: the disc turned 15 degrees at a time. The two wedges are
+// half a turn apart, so twelve frames make a full cycle.
+const spinFrames = 12
+
+var frames [spinFrames][]byte
+
+func stillIcon() []byte {
+	if frames[0] == nil {
+		frames[0] = trayICO(0)
+	}
+	return frames[0]
+}
+
+func trayICO(turn float64) []byte {
+	if runtime.GOOS == "windows" {
+		return icon.ICO(turn)
+	}
+	return icon.PNG(64, turn)
+}
+
+// spinWhileBusy turns the disc while anything is downloading, and puts it back
+// still when nothing is.
+func spinWhileBusy(s *store) {
+	frame, spinning := 0, false
+	for {
+		busy := s.anyBusy()
+		switch {
+		case busy:
+			frame = (frame + 1) % spinFrames
+			if frames[frame] == nil {
+				frames[frame] = trayICO(float64(frame) * 180 / spinFrames)
+			}
+			systray.SetIcon(frames[frame])
+			spinning = true
+			time.Sleep(90 * time.Millisecond)
+		case spinning:
+			frame, spinning = 0, false
+			systray.SetIcon(stillIcon())
+			time.Sleep(500 * time.Millisecond)
+		default:
+			time.Sleep(500 * time.Millisecond)
+		}
+	}
+}
+
+// anyBusy is whether any download is fetching or waiting to.
+func (s *store) anyBusy() bool {
+	s.mu.Lock()
+	all := make([]*download, 0, len(s.all))
+	for _, d := range s.all {
+		all = append(all, d)
+	}
+	s.mu.Unlock()
+	for _, d := range all {
+		if d.busy() {
+			return true
+		}
+	}
+	return false
 }
