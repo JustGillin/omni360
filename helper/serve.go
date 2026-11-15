@@ -27,6 +27,7 @@ func registerHandlers(mux *http.ServeMux, s *store, p *pairing) {
 			http.Error(w, err.Error(), http.StatusBadGateway)
 			return
 		}
+		d.wantAll()
 		size, have := d.progress()
 		fmt.Fprintf(w, "%d %d", size, have)
 	}))

@@ -20,6 +20,12 @@ import (
 // 32 MB pieces so the first bytes the console wants show up fast.
 const chunkSize = 8 << 20
 
+// readAhead is how far past what the console has asked for the PC fetches, in
+// chunks (512 MB). A disc game's zip is read front to back, so the PC stays
+// ahead of it; a DLC pack out of a big RAR costs about its own size, not the
+// whole archive's.
+const readAhead = 64
+
 // download is one archive.org file being fetched into the cache.
 type download struct {
 	item, file string
@@ -30,12 +36,14 @@ type download struct {
 	directMu sync.Mutex
 	direct   string // the datanode archive.org redirected to, used from then on
 
-	mu      sync.Mutex
-	cond    *sync.Cond
-	done    []bool // per chunk
-	pending []int  // chunks not started, front of the file first
-	failed  error
-	started bool
+	mu       sync.Mutex
+	cond     *sync.Cond
+	done     []bool // per chunk
+	queued   []bool // per chunk: waiting in pending, or being fetched
+	pending  []int  // chunks to fetch, in order
+	inFlight int    // chunks being fetched now
+	failed   error
+	started  bool
 }
 
 type store struct {
@@ -105,10 +113,13 @@ func (s *store) start(d *download) error {
 	d.size = size
 	n := int((size + chunkSize - 1) / chunkSize)
 	d.done = loadProgress(d.path, n)
+	d.queued = make([]bool, n)
 	d.pending = d.pending[:0]
+	d.inFlight = 0
+	have := 0
 	for i := 0; i < n; i++ {
-		if !d.done[i] {
-			d.pending = append(d.pending, i)
+		if d.done[i] {
+			have++
 		}
 	}
 	f, err := os.OpenFile(d.path, os.O_RDWR|os.O_CREATE, 0o644)
@@ -120,8 +131,8 @@ func (s *store) start(d *download) error {
 		return err
 	}
 	d.started = true
-	log.Printf("fetching %s/%s: %d MB, %d of %d chunks already here",
-		d.item, d.file, size>>20, n-len(d.pending), n)
+	log.Printf("ready for %s/%s: %d MB, %d of %d chunks already here",
+		d.item, d.file, size>>20, have, n)
 	for i := 0; i < s.conns; i++ {
 		go s.worker(d, f)
 	}
@@ -175,12 +186,16 @@ func (s *store) remoteSize(d *download) (int64, error) {
 func (s *store) worker(d *download, f *os.File) {
 	for {
 		d.mu.Lock()
-		if len(d.pending) == 0 || d.failed != nil {
+		for len(d.pending) == 0 && d.failed == nil {
+			d.cond.Wait() // nothing asked for yet
+		}
+		if d.failed != nil {
 			d.mu.Unlock()
 			return
 		}
 		c := d.pending[0]
 		d.pending = d.pending[1:]
+		d.inFlight++
 		d.mu.Unlock()
 
 		var err error
@@ -193,6 +208,7 @@ func (s *store) worker(d *download, f *os.File) {
 		}
 
 		d.mu.Lock()
+		d.inFlight--
 		if err != nil {
 			d.failed = err
 		} else {
@@ -226,6 +242,7 @@ func (s *store) fetchChunk(d *download, f *os.File, c int) error {
 func (d *download) waitFor(from, to int64) error {
 	d.mu.Lock()
 	defer d.mu.Unlock()
+	d.want(from, to+readAhead*chunkSize)
 	for {
 		if d.failed != nil {
 			return d.failed
@@ -243,6 +260,40 @@ func (d *download) waitFor(from, to int64) error {
 		}
 		d.cond.Wait()
 	}
+}
+
+// want queues the chunks covering [from, to) that aren't here or coming
+// already, in order. Called with d.mu held.
+func (d *download) want(from, to int64) {
+	if to > d.size {
+		to = d.size
+	}
+	added := false
+	for c := from / chunkSize; c*chunkSize < to && int(c) < len(d.done); c++ {
+		if !d.done[c] && !d.queued[c] {
+			d.queued[c] = true
+			d.pending = append(d.pending, int(c))
+			added = true
+		}
+	}
+	if added {
+		d.cond.Broadcast()
+	}
+}
+
+// wantAll queues the whole file: /fetch, for a game queued on the console
+// that it hasn't reached yet.
+func (d *download) wantAll() {
+	d.mu.Lock()
+	d.want(0, d.size)
+	d.mu.Unlock()
+}
+
+// busy is whether anything is being fetched or waiting to be.
+func (d *download) busy() bool {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	return len(d.pending) > 0 || d.inFlight > 0
 }
 
 // bump moves chunk c to the front of the queue: the console is waiting on it.
@@ -328,7 +379,7 @@ func (s *store) makeRoom(keep string) {
 	busy := map[string]bool{keep: true}
 	s.mu.Lock()
 	for _, d := range s.all {
-		if size, have := d.progress(); size == 0 || have < size {
+		if size, _ := d.progress(); size == 0 || d.busy() {
 			busy[d.path] = true
 		}
 	}

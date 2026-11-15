@@ -125,9 +125,11 @@ func (s *store) summary() string {
 	s.mu.Unlock()
 
 	for _, d := range all {
-		size, have := d.progress()
-		if size > 0 && have < size {
-			return fmt.Sprintf("Downloading %s - %d%%", shorten(d.file, 40), have*100/size)
+		if d.busy() {
+			size, have := d.progress()
+			if size > 0 {
+				return fmt.Sprintf("Downloading %s - %d%%", shorten(d.file, 40), have*100/size)
+			}
 		}
 	}
 	if len(all) > 0 {

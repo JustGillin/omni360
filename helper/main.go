@@ -15,16 +15,17 @@
 // /pair needs a paired console's token (?t=) - see pairing.go.
 //
 // HTTP, on port 36061:
-//   GET  /hello                        -> "omni360-helper 2 <id>"
-//   GET  /pair/request                  -> "<request id> <code>"; asks on the PC
-//   GET  /pair/wait?r=ID                -> "<token> <id>" once allowed
-//   POST /fetch?item=I&file=F           start (or keep) a download; the
-//                                       request's Authorization header is
-//                                       passed to archive.org, held in memory
-//   GET  /file/<item>/<file>           the file; Range supported; waits for
-//                                       bytes not downloaded yet
-//   GET  /status?item=I&file=F          "<size> <bytes done>"
-//   POST /forget?item=I&file=F          drop the cached copy
+//
+//	GET  /hello                        -> "omni360-helper 2 <id>"
+//	GET  /pair/request                  -> "<request id> <code>"; asks on the PC
+//	GET  /pair/wait?r=ID                -> "<token> <id>" once allowed
+//	POST /fetch?item=I&file=F           start (or keep) a download; the
+//	                                    request's Authorization header is
+//	                                    passed to archive.org, held in memory
+//	GET  /file/<item>/<file>           the file; Range supported; waits for
+//	                                    bytes not downloaded yet
+//	GET  /status?item=I&file=F          "<size> <bytes done>"
+//	POST /forget?item=I&file=F          drop the cached copy
 package main
 
 import (

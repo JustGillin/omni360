@@ -1281,6 +1281,7 @@ static DWORD WINAPI ConnectionEntry(LPVOID param)
     const int slot = args->slot;
 
     XboxTLS_SetThreadIoTimeout(STALL_TIMEOUT_MS);
+    PcHelperSetThreadBypass(true); // this installer picks the helper itself
 
     for (;;)
     {
@@ -2339,6 +2340,7 @@ static void InstallDiscAsFolder(GameJob *job, GodSource *image, const GodImageIn
 
 static void RunJob(GameJob *job, const char *gamesPath)
 {
+    PcHelperSetThreadBypass(true); // a disc game picks the helper itself, below
     const GameRequest &req = job->request;
     const char *auth = job->auth;
 

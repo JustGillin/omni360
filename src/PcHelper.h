@@ -61,4 +61,20 @@ bool PcHelperRequestPair(char *requestId, unsigned int requestIdSize, char *code
 PcHelperPairResult PcHelperWaitPair(const char *requestId, char *token, unsigned int tokenSize, char *id,
                                     unsigned int idSize, char *message, unsigned int messageSize);
 
+// Arcade games, DLC and title updates (downloadFile.cpp): an archive.org file
+// URL - archive.org/download/<item>/<file>, or a storage server's
+// .../items/<item>/<file> - as the paired helper's, if it's running and in use
+// and hasn't just failed. Not a file inside an archive (<file>/<path>), which
+// archive.org extracts itself and can't be read in ranges.
+bool PcHelperRoute(const char *archiveUrl, char *helperUrl, unsigned int helperUrlSize);
+
+// A routed request failed (HTTP status, or 0): archive.org takes the next
+// minute's requests, so a helper that's gone doesn't cost every one a timeout.
+void PcHelperRouteFailed(int status);
+
+// For the calling thread only: never route. The game installer's threads set
+// it - a disc game picks the helper or archive.org itself, and its archive.org
+// fallback has to reach archive.org.
+void PcHelperSetThreadBypass(bool bypass);
+
 #endif

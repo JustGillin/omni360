@@ -264,7 +264,8 @@ int HttpDownloadPlain(const char *url, const char *filePath, DownloadProgressFn 
 }
 
 int HttpGetToFilePlain(const char *url, const char *extraHeaderLines, const char *filePath,
-                       unsigned long long knownTotal, unsigned long timeoutMs, DownloadProgressFn progressFn)
+                       unsigned long long knownTotal, unsigned long timeoutMs, DownloadProgressFn progressFn,
+                       bool appendToFile)
 {
     if (url == NULL || filePath == NULL)
         return 0;
@@ -318,14 +319,19 @@ int HttpGetToFilePlain(const char *url, const char *extraHeaderLines, const char
         if (ranged)
             status = 200;
 
-        if (status == 200 && chunked)
+        if (appendToFile && status == 200 && !ranged)
+        {
+            dprintf("[http] %s: the whole file came back, not the range - not appending\n", url);
+            status = -1;
+        }
+        else if (status == 200 && chunked)
         {
             dprintf("[http] %s: sent chunked, which a download to a file doesn't take\n", url);
             status = -1;
         }
         else if (status == 200)
         {
-            FILE *out = fopen(filePath, "wb");
+            FILE *out = fopen(filePath, appendToFile ? "ab" : "wb");
             if (out == NULL)
             {
                 dprintf("[http] couldn't make %s\n", filePath);

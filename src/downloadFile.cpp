@@ -52,6 +52,8 @@ DESCRIPTION : Downloads a file. If the file is larger than 4GB, it splits it int
 #include "downloadFile.h"
 #include "HttpResponse.h" // for HttpsSession's reads
 #include "XboxTLS.h"
+#include "PcHelper.h" // Arcade games, DLC and updates through the PC helper
+#include "HttpPlain.h"
 #include "dns.h"
 #include "parsing.h"
 #include "OutputConsole.h"
@@ -1293,6 +1295,31 @@ int httpRequestHTTPS(const std::string URL, HttpMethod method, const char *reque
                      DownloadProgressFn progressFn,
                      bool appendToFile)
 {
+    // Through the PC helper, if one is paired and running (PcHelper.h). Any
+    // failure falls through to archive.org as if it had never been tried.
+    {
+        char helperUrl[1400];
+        if (method == HTTP_GET && PcHelperRoute(URL.c_str(), helperUrl, sizeof(helperUrl)))
+        {
+            int st = 0;
+            if (downloadIntoFile)
+            {
+                st = HttpGetToFilePlain(helperUrl, extraHeaderLines, fileName.c_str(), knownTotalSize, 60000,
+                                        progressFn, appendToFile);
+            }
+            else if (dataBuffer != NULL && outputBufferSize != NULL && *outputBufferSize > 0)
+            {
+                unsigned long long got = 0;
+                st = HttpGetPlain(helperUrl, extraHeaderLines, dataBuffer, *outputBufferSize - 1, &got);
+                if (st == 200 || st == 206)
+                    *outputBufferSize = got;
+            }
+            if (st == 200 || st == 206 || st == HTTP_STATUS_CANCELLED)
+                return st;
+            PcHelperRouteFailed(st);
+        }
+    }
+
     char *domain;
     char *path;
 
@@ -1670,6 +1697,22 @@ int HttpsSessionGet(HttpsSession *session, const std::string &url, const char *e
 {
     if (session == NULL || dataBuffer == NULL || dataBufferSize == NULL)
         return 0;
+
+    // Through the PC helper first, as in httpRequestHTTPS.
+    {
+        char helperUrl[1400];
+        if (*dataBufferSize > 0 && PcHelperRoute(url.c_str(), helperUrl, sizeof(helperUrl)))
+        {
+            unsigned long long got = 0;
+            const int st = HttpGetPlain(helperUrl, extraHeaderLines, dataBuffer, *dataBufferSize - 1, &got);
+            if (st == 200 || st == 206)
+            {
+                *dataBufferSize = got;
+                return st;
+            }
+            PcHelperRouteFailed(st);
+        }
+    }
 
     std::vector<char> domainBuf(url.length() + 1), pathBuf(url.length() + 1);
     char *domain = &domainBuf[0];

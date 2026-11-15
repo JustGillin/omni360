@@ -269,3 +269,96 @@ PcHelperPairResult PcHelperWaitPair(const char *requestId, char *token, unsigned
                                                 : "Lost touch with the helper. Try pairing again.");
     return PAIR_FAILED;
 }
+
+// Routing archive.org requests through the helper.
+
+static DWORD g_routeFailedAt = 0;
+static bool g_routeFailed = false;
+static char g_lastRouted[160]; // the last file routed, to log each file once
+static __declspec(thread) bool t_bypass = false;
+
+void PcHelperSetThreadBypass(bool bypass) { t_bypass = bypass; }
+
+// "<item>/<file>" out of an archive.org file URL; false for anything else.
+static bool ArchiveFilePath(const char *url, const char **start)
+{
+    if (_strnicmp(url, "https://", 8) != 0)
+        return false;
+    const char *host = url + 8;
+    const char *slash = strchr(host, '/');
+    if (slash == NULL)
+        return false;
+    const size_t hostLen = slash - host;
+    const char *suffix = ".archive.org";
+    const size_t suffixLen = strlen(suffix);
+    const bool mainHost = hostLen == 11 && _strnicmp(host, "archive.org", 11) == 0;
+    const bool storage = hostLen > suffixLen && _strnicmp(slash - suffixLen, suffix, suffixLen) == 0;
+
+    const char *rest = NULL;
+    if (mainHost && strncmp(slash, "/download/", 10) == 0)
+        rest = slash + 10;
+    else if (storage)
+    {
+        // "/<number>/items/<item>/<file>"
+        const char *items = strstr(slash, "/items/");
+        if (items == NULL)
+            return false;
+        for (const char *c = slash + 1; c < items; ++c)
+        {
+            if (*c < '0' || *c > '9')
+                return false;
+        }
+        rest = items + 7;
+    }
+    if (rest == NULL)
+        return false;
+
+    // Exactly "<item>/<file>": one slash, and no query.
+    const char *mid = strchr(rest, '/');
+    if (mid == NULL || mid == rest || mid[1] == '\0' || strchr(mid + 1, '/') != NULL || strchr(rest, '?') != NULL)
+        return false;
+    *start = rest;
+    return true;
+}
+
+bool PcHelperRoute(const char *archiveUrl, char *helperUrl, unsigned int helperUrlSize)
+{
+    const char *path = NULL;
+    if (t_bypass || archiveUrl == NULL || !ArchiveFilePath(archiveUrl, &path))
+        return false;
+
+    char base[64], token[64], name[64];
+    if (!PcHelperUrl(base, sizeof(base), token, sizeof(token), name, sizeof(name)))
+        return false;
+
+    EnterCriticalSection(&g_helperLock);
+    if (g_routeFailed && GetTickCount() - g_routeFailedAt < 60000)
+    {
+        LeaveCriticalSection(&g_helperLock);
+        return false;
+    }
+    g_routeFailed = false;
+    const bool newFile = strncmp(g_lastRouted, path, sizeof(g_lastRouted) - 1) != 0;
+    if (newFile)
+        CopyOut(g_lastRouted, sizeof(g_lastRouted), path);
+    LeaveCriticalSection(&g_helperLock);
+
+    const int n = _snprintf(helperUrl, helperUrlSize, "%s/file/%s?t=%s", base, path, token);
+    if (n < 0 || (unsigned int)n >= helperUrlSize)
+        return false;
+    if (newFile)
+        dprintf("[helper] fetching %s through the PC helper \"%s\"\n", path, name);
+    return true;
+}
+
+void PcHelperRouteFailed(int status)
+{
+    EnterCriticalSection(&g_helperLock);
+    const bool first = !g_routeFailed;
+    g_routeFailed = true;
+    g_routeFailedAt = GetTickCount();
+    g_lastRouted[0] = '\0';
+    LeaveCriticalSection(&g_helperLock);
+    if (first)
+        dprintf("[helper] the PC helper answered HTTP %d - archive.org for the next minute\n", status);
+}

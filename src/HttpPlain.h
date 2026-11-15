@@ -33,7 +33,10 @@ int HttpDownloadPlain(const char *url, const char *filePath, DownloadProgressFn 
 // reply cut off partway keeps what came in filePath and still returns 206 -
 // the caller checks the file's size, as with httpRequestHTTPS. timeoutMs is
 // how long a read may stall.
+// appendToFile adds the body to the end of the file instead of replacing it,
+// for a Range picking a download back up - only a 206 is taken then.
 int HttpGetToFilePlain(const char *url, const char *extraHeaderLines, const char *filePath,
-                       unsigned long long knownTotal, unsigned long timeoutMs, DownloadProgressFn progressFn);
+                       unsigned long long knownTotal, unsigned long timeoutMs, DownloadProgressFn progressFn,
+                       bool appendToFile = false);
 
 #endif
