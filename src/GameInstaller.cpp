@@ -1081,6 +1081,8 @@ struct Download
     int serverCount;
     int serverAt;                     // the one in use
     int strikes;                      // against it
+    int helperServer;                 // the PC helper's place in servers, or -1
+    DWORD leftHelperAt;               // when a failing helper was moved away from
     const char *auth;
     ZipPieces *pieces;
     unsigned long long total; // bytes of the zip that are needed
@@ -1227,6 +1229,8 @@ static void StrikeServer(Download *d, int server, const char *why)
     if (server == d->serverAt && ++d->strikes >= STRIKES_TO_SWITCH && d->serverCount > 1)
     {
         from = HostOf(d->servers[d->serverAt]);
+        if (d->serverAt == d->helperServer)
+            d->leftHelperAt = GetTickCount();
         d->serverAt = (d->serverAt + 1) % d->serverCount;
         d->strikes = 0;
         to = HostOf(d->servers[d->serverAt]);
@@ -1347,6 +1351,25 @@ static DWORD WINAPI ConnectionEntry(LPVOID param)
             // The server in use now - it may have changed since the last try.
             std::string url;
             int server = 0;
+
+            // The PC helper back after it went away: the next try goes to it
+            // again. Not straight after it failed - a helper that's announcing
+            // but not answering would otherwise be tried on every try.
+            bool helperBack = false;
+            if (d->helperServer >= 0 && PcHelperUrl(NULL, 0, NULL, 0, NULL, 0))
+            {
+                EnterCriticalSection(&g_lock);
+                if (d->serverAt != d->helperServer && GetTickCount() - d->leftHelperAt > 30000)
+                {
+                    d->serverAt = d->helperServer;
+                    d->strikes = 0;
+                    helperBack = true;
+                }
+                LeaveCriticalSection(&g_lock);
+                if (helperBack)
+                    dprintf("[game] the PC helper is back - downloading through it again\n");
+            }
+
             EnterCriticalSection(&g_lock);
             server = d->serverAt;
             url = d->servers[server];
@@ -2615,6 +2638,8 @@ static void RunJob(GameJob *job, const char *gamesPath)
     d.serverCount = serverCount;
     d.serverAt = 0;
     d.strikes = 0;
+    d.helperServer = viaHelper ? 0 : -1;
+    d.leftHelperAt = 0;
     d.auth = auth;
     d.pieces = &pieces;
     d.total = needed;

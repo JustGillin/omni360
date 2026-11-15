@@ -72,6 +72,10 @@ bool PcHelperRoute(const char *archiveUrl, char *helperUrl, unsigned int helperU
 // minute's requests, so a helper that's gone doesn't cost every one a timeout.
 void PcHelperRouteFailed(int status);
 
+// Whether archiveUrl would go through the helper now - for a transfer from
+// archive.org to stop and resume through it once the helper is back.
+bool PcHelperWouldRoute(const char *archiveUrl);
+
 // For the calling thread only: never route. The game installer's threads set
 // it - a disc game picks the helper or archive.org itself, and its archive.org
 // fallback has to reach archive.org.

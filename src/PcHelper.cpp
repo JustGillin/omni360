@@ -358,6 +358,19 @@ bool PcHelperRoute(const char *archiveUrl, char *helperUrl, unsigned int helperU
     return true;
 }
 
+bool PcHelperWouldRoute(const char *archiveUrl)
+{
+    const char *path = NULL;
+    if (t_bypass || archiveUrl == NULL || !ArchiveFilePath(archiveUrl, &path))
+        return false;
+    if (!PcHelperUrl(NULL, 0, NULL, 0, NULL, 0))
+        return false;
+    EnterCriticalSection(&g_helperLock);
+    const bool backedOff = g_routeFailed && GetTickCount() - g_routeFailedAt < 60000;
+    LeaveCriticalSection(&g_helperLock);
+    return !backedOff;
+}
+
 void PcHelperRouteFailed(int status)
 {
     EnterCriticalSection(&g_helperLock);

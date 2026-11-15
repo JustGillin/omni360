@@ -1307,6 +1307,31 @@ static int HelperGetToBuffer(const char *helperUrl, const char *extraHeaderLines
     return st;
 }
 
+// A file download from archive.org that the PC helper could take over: its
+// progress goes through here, which checks every few seconds whether the
+// helper is back and, if it is, stops the transfer. What came stays in the
+// file, and the caller's resume picks up from there - through the helper.
+static __declspec(thread) DownloadProgressFn t_handoffInner = NULL;
+static __declspec(thread) const char *t_handoffUrl = NULL;
+static __declspec(thread) DWORD t_handoffChecked = 0;
+static __declspec(thread) bool t_handedOff = false;
+
+static bool HandoffProgress(unsigned long long done, unsigned long long total, unsigned long long perSec,
+                            unsigned long long left)
+{
+    const DWORD now = GetTickCount();
+    if (now - t_handoffChecked >= 3000)
+    {
+        t_handoffChecked = now;
+        if (PcHelperWouldRoute(t_handoffUrl))
+        {
+            t_handedOff = true;
+            return false;
+        }
+    }
+    return t_handoffInner == NULL || t_handoffInner(done, total, perSec, left);
+}
+
 int httpRequestHTTPS(const std::string URL, HttpMethod method, const char *requestBody,
                      const char *extraHeaderLines, const std::string fileName,
                      char *dataBuffer, unsigned long long *outputBufferSize, bool downloadIntoFile,
@@ -1514,7 +1539,25 @@ int httpRequestHTTPS(const std::string URL, HttpMethod method, const char *reque
     // Step 7: Read and print response
     if (downloadIntoFile)
     {
-        if ((httpStatus = DumpResponse(&ctx, fileName, NULL, NULL, dataBuffer, outputBufferSize, cookieOutBuffer, cookieOutBufferSize, printFunction, knownTotalSize, progressFn, appendToFile)) != 200 && httpStatus != 206)
+        // A resumable download (appending) of an archive.org file is handed
+        // to the PC helper if it comes back part way through.
+        t_handedOff = false;
+        t_handoffInner = progressFn;
+        t_handoffUrl = URL.c_str();
+        t_handoffChecked = GetTickCount();
+        DownloadProgressFn fileProgress = appendToFile ? HandoffProgress : progressFn;
+
+        httpStatus = DumpResponse(&ctx, fileName, NULL, NULL, dataBuffer, outputBufferSize, cookieOutBuffer,
+                                  cookieOutBufferSize, printFunction, knownTotalSize, fileProgress, appendToFile);
+        t_handoffUrl = NULL;
+        if (t_handedOff)
+        {
+            // A cut-off range, as far as the caller's resume is concerned.
+            dprintf("[helper] the PC helper is back - stopping archive.org's transfer to carry on through it\n");
+            t_handedOff = false;
+            httpStatus = 206;
+        }
+        if (httpStatus != 200 && httpStatus != 206)
         {
             if (httpStatus != 302)
             {
