@@ -2,12 +2,12 @@ package main
 
 import (
 	"crypto/rand"
-	"crypto/subtle"
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"log"
 	"math/big"
+	"net"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -16,21 +16,33 @@ import (
 )
 
 // pairing keeps strangers on the LAN out. The console sends the user's
-// archive.org keys with each request, so only a console the user paired may
-// use the helper.
+// archive.org keys with each request, so only a console the user approved
+// may use the helper.
 //
-// Each run shows a 4-digit code. The console sends it to /pair once and gets a
-// token back, which it puts on every request after (?t=). Tokens are kept in
-// pairing.json beside the cache, so a console stays paired across restarts.
-// The helper's id is kept there too: the console uses only the helper it
-// paired with, not any helper it hears.
+// Pairing is a request the user allows on the PC. The console asks
+// (/pair/request) and gets a 4-digit code to show; the PC asks "Allow this
+// Xbox?" with the same code; the console waits (/pair/wait) and, once
+// allowed, gets a token it puts on every request after (?t=). Matching codes
+// on both screens are what show the user it's their console asking. Tokens
+// are kept in pairing.json beside the cache, so a console stays paired across
+// restarts. The helper's id is kept there too: the console uses only the
+// helper it paired with, not any helper it hears.
 type pairing struct {
-	mu     sync.Mutex
-	path   string
-	ID     string            `json:"id"`
-	Tokens map[string]string `json:"tokens"` // token -> when and from where it was made
-	code   string
-	misses int
+	mu      sync.Mutex
+	path    string
+	ID      string            `json:"id"`
+	Tokens  map[string]string `json:"tokens"` // token -> when and from where it was made
+	pending *pairRequest
+}
+
+type pairRequest struct {
+	id       string
+	code     string
+	from     string // the console's address
+	decided  chan struct{}
+	approved bool
+	token    string
+	done     bool
 }
 
 func loadPairing(dir string) *pairing {
@@ -45,7 +57,6 @@ func loadPairing(dir string) *pairing {
 		p.ID = randomHex(4)
 		p.save()
 	}
-	p.newCode()
 	return p
 }
 
@@ -56,53 +67,97 @@ func (p *pairing) save() {
 	}
 }
 
-func (p *pairing) newCode() {
-	n, _ := rand.Int(rand.Reader, big.NewInt(10000))
-	p.code = fmt.Sprintf("%04d", n.Int64())
-}
-
-func (p *pairing) currentCode() string {
-	p.mu.Lock()
-	defer p.mu.Unlock()
-	return p.code
-}
-
-func (p *pairing) showCode() {
-	log.Printf("To pair a console: Omni360 > Settings > General > PC helper > Pair, and enter %s", p.code)
-}
-
 func randomHex(n int) string {
 	b := make([]byte, n)
 	rand.Read(b)
 	return hex.EncodeToString(b)
 }
 
-// handlePair answers /pair?code=NNNN with "<token> <id>".
-func (p *pairing) handlePair(w http.ResponseWriter, r *http.Request) {
+func randomCode() string {
+	n, _ := rand.Int(rand.Reader, big.NewInt(10000))
+	return fmt.Sprintf("%04d", n.Int64())
+}
+
+// waiting is the request the tray offers to allow, if there is one.
+func (p *pairing) waiting() *pairRequest {
 	p.mu.Lock()
 	defer p.mu.Unlock()
-	if subtle.ConstantTimeCompare([]byte(r.URL.Query().Get("code")), []byte(p.code)) != 1 {
-		// Guessing 10,000 codes takes a while at a second a try, and three
-		// misses make a new code anyway.
-		p.misses++
-		if p.misses >= 3 {
-			p.misses = 0
-			p.newCode()
-			log.Printf("three wrong codes - here's a new one")
-			p.showCode()
-		}
-		time.Sleep(time.Second)
-		http.Error(w, "wrong code", http.StatusForbidden)
+	if p.pending != nil && !p.pending.done {
+		return p.pending
+	}
+	return nil
+}
+
+// decide allows or refuses req. Only the first answer counts.
+func (p *pairing) decide(req *pairRequest, allow bool) {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	if req.done {
 		return
 	}
-	token := randomHex(16)
-	p.Tokens[token] = time.Now().Format(time.RFC3339) + " " + r.RemoteAddr
-	p.save()
-	p.misses = 0
-	p.newCode() // one use each
-	log.Printf("paired with %s", r.RemoteAddr)
-	p.showCode()
-	fmt.Fprintf(w, "%s %s", token, p.ID)
+	req.done = true
+	req.approved = allow
+	if allow {
+		req.token = randomHex(16)
+		p.Tokens[req.token] = time.Now().Format(time.RFC3339) + " " + req.from
+		p.save()
+		log.Printf("paired with the Xbox at %s", req.from)
+	} else {
+		log.Printf("refused pairing with %s", req.from)
+	}
+	close(req.decided)
+}
+
+// handleRequest answers /pair/request with "<request id> <code>" and asks the
+// user on the PC.
+func (p *pairing) handleRequest(w http.ResponseWriter, r *http.Request) {
+	host, _, _ := net.SplitHostPort(r.RemoteAddr)
+	req := &pairRequest{id: randomHex(8), code: randomCode(), from: host, decided: make(chan struct{})}
+
+	p.mu.Lock()
+	if old := p.pending; old != nil && !old.done {
+		old.done = true // a newer request replaces it
+		close(old.decided)
+	}
+	p.pending = req
+	p.mu.Unlock()
+
+	log.Printf("the Xbox at %s wants to pair - code %s", host, req.code)
+	go func() {
+		// Nobody answering is a no, in time; the tray item stays until then.
+		if allow, asked := confirmPairing(host, req.code); asked {
+			p.decide(req, allow)
+		}
+	}()
+	go func() {
+		time.Sleep(2 * time.Minute)
+		p.decide(req, false)
+	}()
+	fmt.Fprintf(w, "%s %s", req.id, req.code)
+}
+
+// handleWait answers /pair/wait?r=ID: "<token> <helper id>" once allowed, 403
+// if refused, 408 if nobody has answered in 20 seconds (the console asks
+// again).
+func (p *pairing) handleWait(w http.ResponseWriter, r *http.Request) {
+	p.mu.Lock()
+	req := p.pending
+	p.mu.Unlock()
+	if req == nil || req.id != r.URL.Query().Get("r") {
+		http.Error(w, "no such request", http.StatusNotFound)
+		return
+	}
+	select {
+	case <-req.decided:
+	case <-time.After(20 * time.Second):
+		http.Error(w, "still waiting", http.StatusRequestTimeout)
+		return
+	}
+	if !req.approved || req.token == "" {
+		http.Error(w, "refused", http.StatusForbidden)
+		return
+	}
+	fmt.Fprintf(w, "%s %s", req.token, p.ID)
 }
 
 func (p *pairing) allowed(r *http.Request) bool {

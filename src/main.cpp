@@ -2040,22 +2040,30 @@ static void ToggleInstallType()
     dprintf("Game installs set to %s\n", asFolder ? "folder games" : "Games on Demand");
 }
 
-// Asks for the code the helper shows, and pairs with it.
+// Asks the helper to pair, and waits while the user allows it on the PC - the
+// same code on both screens shows it's this console asking.
 static void PairPcHelper()
 {
-    std::string code;
-    if (OpenKeyboardToString(XUSER_INDEX_ANY, &code, L"Pair with your PC",
-                             L"Enter the 4-digit code shown in the Omni360 Helper window", L"") != ERROR_SUCCESS)
-        return;
-    TrimInPlace(code);
-    if (code.empty())
-        return;
-
     RenderStatusFrame("Pairing", "Talking to your PC", NULL);
-    char token[64], id[32], message[128];
-    if (!PcHelperPair(code.c_str(), token, sizeof(token), id, sizeof(id), message, sizeof(message)))
+    char requestId[40], code[8], token[64], id[32], message[128];
+    if (!PcHelperRequestPair(requestId, sizeof(requestId), code, sizeof(code), message, sizeof(message)))
     {
         ShowMessageUI("Not paired", message, NULL);
+        return;
+    }
+
+    char detail[64];
+    _snprintf(detail, sizeof(detail), "Code %s", code);
+    detail[sizeof(detail) - 1] = '\0';
+    PcHelperPairResult result = PAIR_WAITING;
+    for (int tries = 0; tries < 7 && result == PAIR_WAITING; ++tries) // the helper gives up after 2 minutes
+    {
+        RenderStatusFrame("Allow it on your PC", "Check your PC shows the same code, and choose Yes.", detail);
+        result = PcHelperWaitPair(requestId, token, sizeof(token), id, sizeof(id), message, sizeof(message));
+    }
+    if (result != PAIR_ALLOWED)
+    {
+        ShowMessageUI("Not paired", result == PAIR_WAITING ? "Nobody answered on your PC." : message, NULL);
         return;
     }
     if (!SetSettingsValue(HELPER_ID_KEY, id) || !SetSettingsValue(HELPER_TOKEN_KEY, token))
@@ -2374,12 +2382,12 @@ static void BuildSettingsPage(SettingsPage &page, const Library &lib, const char
                                    "Store downloads go through your PC while the helper runs on it - up to twice as fast.");
                 page.rows[page.count - 1].controls[0].on = PcHelperUseSetting();
                 AddSettingsControl(page, SETTINGS_CONTROL_BUTTON, "Unpair", SETTINGS_ROW_HELPER_UNPAIR,
-                                   "Stops using this PC. Pair again with a new code from the helper.");
+                                   "Stops using this PC. You can pair again any time.");
             }
             else
             {
                 AddSettingsControl(page, SETTINGS_CONTROL_BUTTON, "Pair", SETTINGS_ROW_HELPER_PAIR,
-                                   "Run Omni360 Helper on your PC, then enter the code it shows. Downloads get faster.");
+                                   "Run Omni360 Helper on your PC, then allow this Xbox there. Downloads get faster.");
             }
         }
 

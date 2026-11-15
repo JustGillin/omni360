@@ -9,7 +9,8 @@ import (
 )
 
 func registerHandlers(mux *http.ServeMux, s *store, p *pairing) {
-	mux.HandleFunc("/pair", p.handlePair)
+	mux.HandleFunc("/pair/request", p.handleRequest)
+	mux.HandleFunc("/pair/wait", p.handleWait)
 
 	mux.HandleFunc("/hello", func(w http.ResponseWriter, r *http.Request) {
 		fmt.Fprintf(w, "omni360-helper 2 %s", p.ID)

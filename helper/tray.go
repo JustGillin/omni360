@@ -14,8 +14,8 @@ import (
 	"fyne.io/systray"
 )
 
-// The tray icon is the helper's whole interface: the pairing code, what it's
-// doing, and a way to quit. A release build has no console window
+// The tray icon is the helper's whole interface: allowing a console to pair,
+// what it's doing, and a way to quit. A release build has no console window
 // (-ldflags -H=windowsgui), so this is where the code is read from.
 func runTray(s *store, p *pairing, cacheDir, logPath string) {
 	systray.Run(func() {
@@ -25,8 +25,8 @@ func runTray(s *store, p *pairing, cacheDir, logPath string) {
 
 		title := systray.AddMenuItem("Omni360 Helper", "")
 		title.Disable()
-		code := systray.AddMenuItem("", "Enter this in Omni360 > Settings > General > PC helper > Pair")
-		code.Disable()
+		allow := systray.AddMenuItem("", "Your Xbox is asking to download through this PC")
+		allow.Hide()
 		status := systray.AddMenuItem("Waiting for your console", "")
 		status.Disable()
 		systray.AddSeparator()
@@ -37,7 +37,12 @@ func runTray(s *store, p *pairing, cacheDir, logPath string) {
 
 		go func() {
 			for {
-				code.SetTitle("Pairing code: " + p.currentCode())
+				if req := p.waiting(); req != nil {
+					allow.SetTitle(fmt.Sprintf("Allow the Xbox at %s (code %s)", req.from, req.code))
+					allow.Show()
+				} else {
+					allow.Hide()
+				}
 				line := s.summary()
 				status.SetTitle(line)
 				systray.SetTooltip("Omni360 Helper - " + line)
@@ -47,6 +52,10 @@ func runTray(s *store, p *pairing, cacheDir, logPath string) {
 		go func() {
 			for {
 				select {
+				case <-allow.ClickedCh:
+					if req := p.waiting(); req != nil {
+						p.decide(req, true)
+					}
 				case <-openCache.ClickedCh:
 					openPath(cacheDir)
 				case <-openLog.ClickedCh:

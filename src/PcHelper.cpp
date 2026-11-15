@@ -184,14 +184,17 @@ bool PcHelperUrl(char *url, unsigned int urlSize, char *token, unsigned int toke
     return ok;
 }
 
-bool PcHelperPair(const char *code, char *token, unsigned int tokenSize, char *id, unsigned int idSize,
-                  char *message, unsigned int messageSize)
+// The helper being paired with: where pairing started, so the wait goes to
+// the same one.
+static char g_pairingUrl[64];
+
+bool PcHelperRequestPair(char *requestId, unsigned int requestIdSize, char *code, unsigned int codeSize,
+                         char *message, unsigned int messageSize)
 {
     EnsureLock();
-    char base[64];
     EnterCriticalSection(&g_helperLock);
     const bool fresh = FreshLocked();
-    CopyOut(base, sizeof(base), g_heardUrl);
+    CopyOut(g_pairingUrl, sizeof(g_pairingUrl), g_heardUrl);
     LeaveCriticalSection(&g_helperLock);
     if (!fresh)
     {
@@ -199,20 +202,31 @@ bool PcHelperPair(const char *code, char *token, unsigned int tokenSize, char *i
         return false;
     }
 
-    // Digits only, so it goes in the URL as it is.
-    char digits[8];
-    int n = 0;
-    for (const char *c = code; *c != '\0' && n < 7; ++c)
-    {
-        if (*c >= '0' && *c <= '9')
-            digits[n++] = *c;
-    }
-    digits[n] = '\0';
-
     char url[128];
-    _snprintf(url, sizeof(url), "%s/pair?code=%s", base, digits);
+    _snprintf(url, sizeof(url), "%s/pair/request", g_pairingUrl);
     url[sizeof(url) - 1] = '\0';
+    char reply[128];
+    unsigned long long len = 0;
+    const int status = HttpGetPlain(url, NULL, reply, sizeof(reply) - 1, &len);
+    char gotId[40] = "", gotCode[8] = "";
+    if (status == 200 && sscanf(reply, "%39s %7s", gotId, gotCode) == 2)
+    {
+        CopyOut(requestId, requestIdSize, gotId);
+        CopyOut(code, codeSize, gotCode);
+        return true;
+    }
+    dprintf("[helper] pairing request failed: HTTP %d\n", status);
+    CopyOut(message, messageSize, status == 404 ? "Your PC's helper is out of date - download the latest one."
+                                                : "Couldn't reach the helper. Check your PC's firewall allows it.");
+    return false;
+}
 
+PcHelperPairResult PcHelperWaitPair(const char *requestId, char *token, unsigned int tokenSize, char *id,
+                                    unsigned int idSize, char *message, unsigned int messageSize)
+{
+    char url[160];
+    _snprintf(url, sizeof(url), "%s/pair/wait?r=%s", g_pairingUrl, requestId);
+    url[sizeof(url) - 1] = '\0';
     char reply[128];
     unsigned long long len = 0;
     const int status = HttpGetPlain(url, NULL, reply, sizeof(reply) - 1, &len);
@@ -222,12 +236,12 @@ bool PcHelperPair(const char *code, char *token, unsigned int tokenSize, char *i
         CopyOut(token, tokenSize, gotToken);
         CopyOut(id, idSize, gotId);
         dprintf("[helper] paired with helper %s\n", gotId);
-        return true;
+        return PAIR_ALLOWED;
     }
-    if (status == 403)
-        CopyOut(message, messageSize, "That code didn't match. Check the code in the helper's window.");
-    else
-        CopyOut(message, messageSize, "Couldn't reach the helper. Check your PC's firewall allows it.");
-    dprintf("[helper] pairing failed: HTTP %d\n", status);
-    return false;
+    if (status == 408)
+        return PAIR_WAITING;
+    dprintf("[helper] pairing ended: HTTP %d\n", status);
+    CopyOut(message, messageSize, status == 403 ? "Pairing wasn't allowed on your PC."
+                                                : "Lost touch with the helper. Try pairing again.");
+    return PAIR_FAILED;
 }

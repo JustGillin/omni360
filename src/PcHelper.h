@@ -45,9 +45,20 @@ PcHelperStatus GetPcHelperStatus(char *name, unsigned int nameSize);
 bool PcHelperUrl(char *url, unsigned int urlSize, char *token, unsigned int tokenSize,
                  char *name, unsigned int nameSize);
 
-// Sends code to the helper heard most recently. On success (true) token and id
-// get what to save; on failure message says why, in a line for a popup.
-bool PcHelperPair(const char *code, char *token, unsigned int tokenSize, char *id, unsigned int idSize,
-                  char *message, unsigned int messageSize);
+// Pairing is a request the user allows on the PC. RequestPair asks the helper
+// heard most recently and gets a request id and the 4-digit code both screens
+// show. WaitPair then waits up to about 20 seconds for the answer:
+// PAIR_ALLOWED fills token and id with what to save; PAIR_WAITING means ask
+// again; PAIR_FAILED puts why in message, in a line for a popup.
+enum PcHelperPairResult
+{
+    PAIR_ALLOWED,
+    PAIR_WAITING,
+    PAIR_FAILED
+};
+bool PcHelperRequestPair(char *requestId, unsigned int requestIdSize, char *code, unsigned int codeSize,
+                         char *message, unsigned int messageSize);
+PcHelperPairResult PcHelperWaitPair(const char *requestId, char *token, unsigned int tokenSize, char *id,
+                                    unsigned int idSize, char *message, unsigned int messageSize);
 
 #endif

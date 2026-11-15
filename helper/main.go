@@ -16,7 +16,8 @@
 //
 // HTTP, on port 36061:
 //   GET  /hello                        -> "omni360-helper 2 <id>"
-//   GET  /pair?code=NNNN                -> "<token> <id>"
+//   GET  /pair/request                  -> "<request id> <code>"; asks on the PC
+//   GET  /pair/wait?r=ID                -> "<token> <id>" once allowed
 //   POST /fetch?item=I&file=F           start (or keep) a download; the
 //                                       request's Authorization header is
 //                                       passed to archive.org, held in memory
@@ -73,7 +74,6 @@ func main() {
 	}
 
 	log.Printf("Omni360 Helper on port %d, cache in %s", httpPort, *cacheDir)
-	pair.showCode()
 	go func() { log.Fatal(srv.ListenAndServe()) }()
 	runTray(store, pair, *cacheDir, logPath)
 }
