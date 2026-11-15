@@ -1352,6 +1352,7 @@ int httpRequestHTTPS(const std::string URL, HttpMethod method, const char *reque
         if (method == HTTP_GET && PcHelperRoute(URL.c_str(), helperUrl, sizeof(helperUrl)))
         {
             int st = 0;
+            PcHelperTransferBegin();
             if (downloadIntoFile)
             {
                 st = HttpGetToFilePlain(helperUrl, extraHeaderLines, fileName.c_str(), knownTotalSize, 60000,
@@ -1361,6 +1362,7 @@ int httpRequestHTTPS(const std::string URL, HttpMethod method, const char *reque
             {
                 st = HelperGetToBuffer(helperUrl, extraHeaderLines, dataBuffer, outputBufferSize);
             }
+            PcHelperTransferEnd(st == 200 || st == 206);
             if (st == 200 || st == 206 || st == HTTP_STATUS_CANCELLED)
                 return st;
             PcHelperRouteFailed(st);
@@ -1768,7 +1770,9 @@ int HttpsSessionGet(HttpsSession *session, const std::string &url, const char *e
         char helperUrl[1400];
         if (*dataBufferSize > 0 && PcHelperRoute(url.c_str(), helperUrl, sizeof(helperUrl)))
         {
+            PcHelperTransferBegin();
             const int st = HelperGetToBuffer(helperUrl, extraHeaderLines, dataBuffer, dataBufferSize);
+            PcHelperTransferEnd(st == 200 || st == 206);
             if (st == 200 || st == 206)
                 return st;
             PcHelperRouteFailed(st);

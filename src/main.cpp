@@ -6606,9 +6606,16 @@ static void SnapshotQueue(Shell &shell, const Library &lib)
         row.stepFraction = -1.0f;
         numbers[0] = '\0';
 
+        row.viaPc = false;
         if (job.state == QUEUE_WAITING)
         {
-            _snprintf(status, statusSize, "Waiting");
+            // Fetched ahead on the PC: how far, so it's plain it'll be quick.
+            if (job.pcKnown && job.pcPercent >= 100)
+                _snprintf(status, statusSize, "Waiting" SETTINGS_MIDDOT "ready on your PC");
+            else if (job.pcKnown)
+                _snprintf(status, statusSize, "Waiting" SETTINGS_MIDDOT "%d%% on your PC", job.pcPercent);
+            else
+                _snprintf(status, statusSize, "Waiting");
             row.tone = QUEUE_ROW_WAITING;
             row.showBar = true;
             row.fraction = -1.0f;
@@ -6634,6 +6641,7 @@ static void SnapshotQueue(Shell &shell, const Library &lib)
                 _snprintf(status, statusSize, "%s", phase);
             FormatTransferNumbers(job, numbers, sizeof(shell.queueNumbers[i]));
             row.numbers = numbers;
+            row.viaPc = job.viaPc;
             row.tone = QUEUE_ROW_ACTIVE;
             row.showBar = true;
             row.fraction = job.fraction;

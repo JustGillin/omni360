@@ -84,6 +84,17 @@ bool PcHelperWouldRoute(const char *archiveUrl);
 // progress. Returns at once; a helper that isn't there is no matter.
 void PcHelperPrefetch(const char *item, const char *file, const char *authHeader);
 
+// How much of item/file the PC has fetched ahead, from the last time it was
+// asked (every few seconds, on a thread of its own, while something keeps
+// asking). False if it isn't known, or the PC isn't fetching it.
+bool PcHelperAheadPercent(const char *item, const char *file, int *percent);
+
+// Around a request routed through the helper (downloadFile.cpp), so the Queue
+// can say a download is coming through the PC.
+void PcHelperTransferBegin();
+void PcHelperTransferEnd(bool ok);
+bool PcHelperTransferActive();
+
 // For the calling thread only: never route. The game installer's threads set
 // it - a disc game picks the helper or archive.org itself, and its archive.org
 // fallback has to reach archive.org.

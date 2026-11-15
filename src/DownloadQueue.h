@@ -89,6 +89,13 @@ struct QueueJobSnapshot
     char resultText[64];
     char resultDetail[160];
 
+    // The PC helper (PcHelper.h). viaPc: this download is coming through it
+    // right now. pcKnown/pcPercent: a waiting job the PC is fetching ahead,
+    // and how much of it is there (100: all of it).
+    bool viaPc;
+    bool pcKnown;
+    int pcPercent;
+
     // Whether finishing deserves a popup. False for a cancel - the user did
     // that themselves - and for jobs failed alongside one whose keys were
     // refused, which already raised one.

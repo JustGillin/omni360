@@ -725,6 +725,7 @@ struct QueueRowView
     int libraryIndex;     // whose icon to draw, into the view's games; -1 for none
     unsigned long titleId; // whose box art - found even for a game that isn't in the library
     QueueRowTone tone;
+    bool viaPc;           // coming through the PC helper: the numbers are green, and say so
 };
 
 // A game that finished installing, as a tile in the row across the top of

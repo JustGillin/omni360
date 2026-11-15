@@ -1519,7 +1519,19 @@ int SnapshotDownloadQueue(QueueJobSnapshot *out, int maxJobs)
         count = maxJobs;
 
     for (int i = 0; i < count; ++i)
-        out[i] = g_jobs[order[i]].view;
+    {
+        const QueueJob &job = g_jobs[order[i]];
+        out[i] = job.view;
+        // The PC helper: an Arcade game or whole DLC pack coming through it
+        // now, or fetched ahead while it waits. (One job runs at a time, so a
+        // routed transfer going is this one's.)
+        out[i].viaPc = job.state == QUEUE_ACTIVE && job.kind == QUEUE_JOB_DLC_PACK && PcHelperTransferActive();
+        out[i].pcKnown = false;
+        if ((job.state == QUEUE_WAITING || job.state == QUEUE_PAUSED) && job.kind == QUEUE_JOB_DLC_PACK &&
+            job.pack.only[0] == '\0')
+            out[i].pcKnown = PcHelperAheadPercent(job.pack.item[0] != '\0' ? job.pack.item : "msx360gcdlc",
+                                                  job.pack.filename, &out[i].pcPercent);
+    }
 
     LeaveCriticalSection(&g_lock);
 

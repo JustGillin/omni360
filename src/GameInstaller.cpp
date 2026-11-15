@@ -59,6 +59,7 @@ DESCRIPTION : Downloads a Redump game's zip from archive.org and installs it as
 struct GameJob
 {
     bool used; // the slot holds a job
+    volatile bool viaPc; // its download is coming through the PC helper now
     QueueJobSnapshot snap;
     GameRequest request;
     char auth[AUTH_MAX];
@@ -2787,7 +2788,7 @@ static void RunJob(GameJob *job, const char *gamesPath)
             }
             SetPhase(job, GAME_STEP_DOWNLOADING,
                      wasStaged[index] ? "Checking what's already downloaded"
-                     : (viaHelper && d.serverAt == 0) ? "Downloading through your PC"
+                     : (job->viaPc = viaHelper && d.serverAt == 0) ? "Downloading through your PC"
                                       : "Downloading",
                      shown, needed, rate);
 
@@ -3333,6 +3334,18 @@ void RestoreGameInstalls(const char *authHeader)
         dprintf("[game] picked %d install%s back up from last time\n", queued, queued == 1 ? "" : "s");
 }
 
+// A job's row, with what the PC helper adds: whether it's coming through the
+// PC now, or how much of it the PC has fetched ahead while it waits.
+static QueueJobSnapshot SnapFor(const GameJob &job)
+{
+    QueueJobSnapshot s = job.snap;
+    s.viaPc = s.state == QUEUE_ACTIVE && job.viaPc;
+    s.pcKnown = false;
+    if (s.state == QUEUE_WAITING || s.state == QUEUE_PAUSED)
+        s.pcKnown = PcHelperAheadPercent(job.request.item, job.request.zipName, &s.pcPercent);
+    return s;
+}
+
 int SnapshotGameJobs(QueueJobSnapshot *out, int maxJobs)
 {
     if (!g_running)
@@ -3341,14 +3354,14 @@ int SnapshotGameJobs(QueueJobSnapshot *out, int maxJobs)
     int n = 0;
     EnterCriticalSection(&g_lock);
     for (int i = NextJob(QUEUE_ACTIVE, 0, false); i >= 0 && n < maxJobs; i = NextJob(QUEUE_ACTIVE, g_jobs[i].snap.id, false))
-        out[n++] = g_jobs[i].snap;
+        out[n++] = SnapFor(g_jobs[i]);
     for (int i = NextJob(QUEUE_WAITING, 0, false); i >= 0 && n < maxJobs; i = NextJob(QUEUE_WAITING, g_jobs[i].snap.id, false))
-        out[n++] = g_jobs[i].snap;
+        out[n++] = SnapFor(g_jobs[i]);
     // After the ones still going, before the ones that are over.
     for (int i = NextJob(QUEUE_PAUSED, 0, false); i >= 0 && n < maxJobs; i = NextJob(QUEUE_PAUSED, g_jobs[i].snap.id, false))
-        out[n++] = g_jobs[i].snap;
+        out[n++] = SnapFor(g_jobs[i]);
     for (int i = NextJob(QUEUE_FINISHED, 0x7FFFFFFF, true); i >= 0 && n < maxJobs; i = NextJob(QUEUE_FINISHED, g_jobs[i].snap.id, true))
-        out[n++] = g_jobs[i].snap;
+        out[n++] = SnapFor(g_jobs[i]);
     LeaveCriticalSection(&g_lock);
     return n;
 }

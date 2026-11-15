@@ -8423,13 +8423,29 @@ void RenderQueueFrame(QueuePageView &view, const UiHint *hints, int hintCount)
         // The game and the live numbers, then the status on a line of its
         // own, coloured by how it went - some of them are a sentence long.
         char detail[300];
-        if (q.numbers != NULL && q.numbers[0] != '\0')
-            _snprintf(detail, sizeof(detail), "%s" MIDDOT "%s", q.gameName != NULL ? q.gameName : "", q.numbers);
+        if (q.viaPc && q.numbers != NULL && q.numbers[0] != '\0')
+        {
+            // Coming through the PC helper: the numbers in green, with "+ PC"
+            // after the speed's line, so the row itself says it - not only
+            // the icon by the clock.
+            char lead[160];
+            _snprintf(lead, sizeof(lead), "%s" MIDDOT, q.gameName != NULL ? q.gameName : "");
+            lead[sizeof(lead) - 1] = '\0';
+            _snprintf(detail, sizeof(detail), "%s   + PC", q.numbers);
+            detail[sizeof(detail) - 1] = '\0';
+            const float leadW = TextWidth(lead, 0.75f);
+            TextFit(textX, lineY, 0.75f, COL_TEXT2, lead, textRight - textX);
+            TextFit(textX + leadW, lineY, 0.75f, COL_GREEN_TEXT, detail, textRight - textX - leadW);
+        }
         else
-            _snprintf(detail, sizeof(detail), "%s", q.gameName != NULL ? q.gameName : "");
-        detail[sizeof(detail) - 1] = '\0';
-
-        TextFit(textX, lineY, 0.75f, COL_TEXT2, detail, textRight - textX);
+        {
+            if (q.numbers != NULL && q.numbers[0] != '\0')
+                _snprintf(detail, sizeof(detail), "%s" MIDDOT "%s", q.gameName != NULL ? q.gameName : "", q.numbers);
+            else
+                _snprintf(detail, sizeof(detail), "%s", q.gameName != NULL ? q.gameName : "");
+            detail[sizeof(detail) - 1] = '\0';
+            TextFit(textX, lineY, 0.75f, COL_TEXT2, detail, textRight - textX);
+        }
         TextFit(textX, lineY + LineHeight(0.75f) * 1.2f + S(4.0f), 0.78f, QueueStatusColor(q.tone),
                 q.status, textRight - textX, true);
     }

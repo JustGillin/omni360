@@ -426,6 +426,127 @@ void PcHelperPrefetch(const char *item, const char *file, const char *authHeader
         CloseHandle(h);
 }
 
+// --- What the PC has fetched ahead, for the Queue's waiting rows ---------
+
+#define AHEAD_SLOTS 16
+
+struct AheadEntry
+{
+    char item[96];
+    char file[256];
+    int percent;      // -1 until known
+    DWORD askedAt;    // the Queue last wanted it
+};
+
+static AheadEntry g_ahead[AHEAD_SLOTS];
+static bool g_aheadThread = false;
+
+static DWORD WINAPI AheadEntryThread(LPVOID)
+{
+    for (;;)
+    {
+        Sleep(3000);
+        for (int i = 0; i < AHEAD_SLOTS; ++i)
+        {
+            char item[96], file[256];
+            EnterCriticalSection(&g_helperLock);
+            const bool wanted = g_ahead[i].item[0] != '\0' && GetTickCount() - g_ahead[i].askedAt < 10000;
+            CopyOut(item, sizeof(item), g_ahead[i].item);
+            CopyOut(file, sizeof(file), g_ahead[i].file);
+            LeaveCriticalSection(&g_helperLock);
+            if (!wanted)
+                continue;
+
+            char base[64], token[64];
+            if (!PcHelperUrl(base, sizeof(base), token, sizeof(token), NULL, 0))
+                continue;
+            char encItem[200], encFile[800], url[1400];
+            if (!UrlEncodeFormValue(item, encItem, sizeof(encItem)) || !UrlEncodeFormValue(file, encFile, sizeof(encFile)))
+                continue;
+            _snprintf(url, sizeof(url), "%s/status?item=%s&file=%s&t=%s", base, encItem, encFile, token);
+            url[sizeof(url) - 1] = '\0';
+
+            char reply[64];
+            unsigned long long len = 0, size = 0, have = 0;
+            int percent = -1;
+            if (HttpGetPlain(url, NULL, reply, sizeof(reply) - 1, &len) == 200 &&
+                sscanf(reply, "%I64u %I64u", &size, &have) == 2 && size > 0)
+                percent = (int)(have * 100 / size);
+
+            EnterCriticalSection(&g_helperLock);
+            if (strcmp(g_ahead[i].item, item) == 0 && strcmp(g_ahead[i].file, file) == 0)
+                g_ahead[i].percent = percent;
+            LeaveCriticalSection(&g_helperLock);
+        }
+    }
+}
+
+bool PcHelperAheadPercent(const char *item, const char *file, int *percent)
+{
+    if (item == NULL || file == NULL || item[0] == '\0' || file[0] == '\0')
+        return false;
+    if (!PcHelperUrl(NULL, 0, NULL, 0, NULL, 0))
+        return false;
+
+    EnsureLock();
+    EnterCriticalSection(&g_helperLock);
+    int slot = -1, oldest = 0;
+    for (int i = 0; i < AHEAD_SLOTS; ++i)
+    {
+        if (strcmp(g_ahead[i].item, item) == 0 && strcmp(g_ahead[i].file, file) == 0)
+        {
+            slot = i;
+            break;
+        }
+        if (g_ahead[i].askedAt < g_ahead[oldest].askedAt)
+            oldest = i;
+    }
+    if (slot < 0)
+    {
+        slot = oldest;
+        CopyOut(g_ahead[slot].item, sizeof(g_ahead[slot].item), item);
+        CopyOut(g_ahead[slot].file, sizeof(g_ahead[slot].file), file);
+        g_ahead[slot].percent = -1;
+    }
+    g_ahead[slot].askedAt = GetTickCount();
+    const int known = g_ahead[slot].percent;
+    const bool start = !g_aheadThread;
+    g_aheadThread = true;
+    LeaveCriticalSection(&g_helperLock);
+
+    if (start)
+    {
+        HANDLE h = CreateThread(NULL, 0, AheadEntryThread, NULL, 0, NULL);
+        if (h != NULL)
+            CloseHandle(h);
+    }
+    if (known < 0)
+        return false;
+    *percent = known;
+    return true;
+}
+
+// --- Whether a routed transfer is going -----------------------------------
+
+static volatile LONG g_transfers = 0;
+static DWORD g_transferOkAt = 0;
+
+void PcHelperTransferBegin() { InterlockedIncrement(&g_transfers); }
+
+void PcHelperTransferEnd(bool ok)
+{
+    InterlockedDecrement(&g_transfers);
+    if (ok)
+        g_transferOkAt = GetTickCount();
+}
+
+// A routed request in flight, or one that finished well in the last few
+// seconds - a DLC member's small header reads come and go between them.
+bool PcHelperTransferActive()
+{
+    return g_transfers > 0 || (g_transferOkAt != 0 && GetTickCount() - g_transferOkAt < 5000);
+}
+
 void PcHelperRouteFailed(int status)
 {
     EnterCriticalSection(&g_helperLock);
