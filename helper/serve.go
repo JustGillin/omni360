@@ -3,6 +3,7 @@ package main
 import (
 	"fmt"
 	"io"
+	"log"
 	"net/http"
 	"os"
 	"strings"
@@ -47,11 +48,14 @@ func registerHandlers(mux *http.ServeMux, s *store, p *pairing) {
 	mux.HandleFunc("/forget", p.requireToken(func(w http.ResponseWriter, r *http.Request) {
 		item, file := r.URL.Query().Get("item"), r.URL.Query().Get("file")
 		s.mu.Lock()
+		d := s.all[key(item, file)]
 		delete(s.all, key(item, file))
 		s.mu.Unlock()
-		p := s.cachePath(item, file)
-		os.Remove(p)
-		os.Remove(p + ".progress")
+		if d != nil {
+			d.stop() // its workers finish the chunk they're on, then stop
+		}
+		s.removeSoon(s.cachePath(item, file))
+		log.Printf("dropped %s/%s - the console cancelled it", item, file)
 	}))
 
 	// /file/<item>/<file>: what the console reads in place of archive.org.

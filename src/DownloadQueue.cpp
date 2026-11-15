@@ -1594,6 +1594,9 @@ void CancelQueueJob(int id)
 
         if (job.state == QUEUE_WAITING || job.state == QUEUE_PAUSED)
         {
+            if (job.kind == QUEUE_JOB_DLC_PACK && job.pack.only[0] == '\0')
+                PcHelperForget(job.pack.item[0] != '\0' ? job.pack.item : "msx360gcdlc", job.pack.filename);
+
             // Never started, or not running now, so it can finish right here.
             JobResult result;
             SetResult(result, QUEUE_OUTCOME_CANCELLED, "Cancelled", "Nothing was installed.");

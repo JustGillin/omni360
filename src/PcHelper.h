@@ -84,6 +84,10 @@ bool PcHelperWouldRoute(const char *archiveUrl);
 // progress. Returns at once; a helper that isn't there is no matter.
 void PcHelperPrefetch(const char *item, const char *file, const char *authHeader);
 
+// A queued game was cancelled: the helper stops fetching item/file and drops
+// what it had. Returns at once.
+void PcHelperForget(const char *item, const char *file);
+
 // How much of item/file the PC has fetched ahead, from the last time it was
 // asked (every few seconds, on a thread of its own, while something keeps
 // asking). False if it isn't known, or the PC isn't fetching it.

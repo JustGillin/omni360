@@ -373,6 +373,7 @@ bool PcHelperWouldRoute(const char *archiveUrl)
 
 struct PrefetchJob
 {
+    bool forget; // /forget, not /fetch
     char url[1400];
     char auth[400];
     char name[200];
@@ -386,7 +387,9 @@ static DWORD WINAPI PrefetchEntry(LPVOID param)
     const int status = HttpGetPlain(job->url, job->auth[0] != '\0' ? job->auth : NULL, reply, sizeof(reply) - 1, &len);
     char safe[400];
     LogEscapePercent(job->name, safe, sizeof(safe));
-    if (status == 200)
+    if (job->forget)
+        dprintf("[helper] told the PC to drop %s (HTTP %d)\n", safe, status);
+    else if (status == 200)
         dprintf("[helper] the PC is fetching %s ahead\n", safe);
     else
         dprintf("[helper] couldn't ask the PC to fetch %s ahead (HTTP %d)\n", safe, status);
@@ -394,7 +397,19 @@ static DWORD WINAPI PrefetchEntry(LPVOID param)
     return 0;
 }
 
+static void SendToHelper(const char *what, const char *item, const char *file, const char *authHeader);
+
 void PcHelperPrefetch(const char *item, const char *file, const char *authHeader)
+{
+    SendToHelper("fetch", item, file, authHeader);
+}
+
+void PcHelperForget(const char *item, const char *file)
+{
+    SendToHelper("forget", item, file, NULL);
+}
+
+static void SendToHelper(const char *what, const char *item, const char *file, const char *authHeader)
 {
     if (item == NULL || file == NULL || item[0] == '\0' || file[0] == '\0')
         return;
@@ -409,7 +424,9 @@ void PcHelperPrefetch(const char *item, const char *file, const char *authHeader
     PrefetchJob *job = (PrefetchJob *)malloc(sizeof(PrefetchJob));
     if (job == NULL)
         return;
-    const int n = _snprintf(job->url, sizeof(job->url), "%s/fetch?item=%s&file=%s&t=%s", base, encItem, encFile, token);
+    job->forget = strcmp(what, "forget") == 0;
+    const int n = _snprintf(job->url, sizeof(job->url), "%s/%s?item=%s&file=%s&t=%s", base, what, encItem, encFile,
+                            token);
     if (n < 0 || n >= (int)sizeof(job->url))
     {
         free(job);

@@ -8433,7 +8433,7 @@ void RenderQueueFrame(QueuePageView &view, const UiHint *hints, int hintCount)
             lead[sizeof(lead) - 1] = '\0';
             _snprintf(detail, sizeof(detail), "%s   + PC", q.numbers);
             detail[sizeof(detail) - 1] = '\0';
-            const float leadW = TextWidth(lead, 0.75f);
+            const float leadW = TextWidth(lead, 0.75f) + S(6.0f); // the dot's trailing space isn't measured
             TextFit(textX, lineY, 0.75f, COL_TEXT2, lead, textRight - textX);
             TextFit(textX + leadW, lineY, 0.75f, COL_GREEN_TEXT, detail, textRight - textX - leadW);
         }

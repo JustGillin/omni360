@@ -254,8 +254,10 @@ func (s *store) worker(d *download, f *os.File) {
 		d.mu.Lock()
 		d.inFlight--
 		if err != nil {
-			d.failed = err
-		} else {
+			if d.failed == nil {
+				d.failed = err
+			}
+		} else if d.failed != errForgotten { // dropped meanwhile: its files are going
 			d.done[c] = true
 			saveProgress(d.path, d.done)
 		}
@@ -448,4 +450,30 @@ func (s *store) makeRoom(keep string) {
 		s.mu.Unlock()
 		log.Printf("made room: removed an old download (%d MB)", f.size>>20)
 	}
+}
+
+var errForgotten = errors.New("cancelled on the console")
+
+// stop ends a download: no more chunks are started.
+func (d *download) stop() {
+	d.mu.Lock()
+	d.failed = errForgotten
+	d.pending = nil
+	d.cond.Broadcast()
+	d.mu.Unlock()
+}
+
+// removeSoon deletes a download's files once its workers have let go of them
+// (Windows won't delete a file that's open), trying for half a minute.
+func (s *store) removeSoon(path string) {
+	go func() {
+		for i := 0; i < 30; i++ {
+			err := os.Remove(path)
+			if err == nil || os.IsNotExist(err) {
+				os.Remove(path + ".progress")
+				return
+			}
+			time.Sleep(time.Second)
+		}
+	}()
 }

@@ -3415,9 +3415,14 @@ void CancelGameJob(int id)
 
         job.cancel = true;
 
-        // A paused job has no worker to notice - it finishes here. Its
+        // Fetched ahead on the PC, perhaps: it needn't be any more.
+        if (job.snap.state == QUEUE_WAITING || job.snap.state == QUEUE_PAUSED)
+            PcHelperForget(job.request.item, job.request.zipName);
+
+        // A waiting or paused job has no worker to notice - it finishes here,
+        // rather than sitting at "Waiting" until the queue reaches it. Its
         // download goes with it, as any cancelled one's does.
-        if (job.snap.state == QUEUE_PAUSED)
+        if (job.snap.state == QUEUE_PAUSED || job.snap.state == QUEUE_WAITING)
         {
             char root[300], dir[320];
             StagingRoot(g_gamesPath, root, sizeof(root));
