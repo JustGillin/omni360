@@ -159,10 +159,33 @@ static DWORD WINAPI ListenEntry(LPVOID)
     }
 }
 
+// Checks in with the paired helper every 10 seconds, so its tray can say an
+// Xbox is connected - the helper otherwise only hears from the console when
+// it downloads. A thread of its own: a request can take a while to fail, and
+// the listener mustn't miss announcements meanwhile.
+static DWORD WINAPI CheckInEntry(LPVOID)
+{
+    for (;;)
+    {
+        Sleep(10000);
+        char base[64], token[64];
+        if (!PcHelperUrl(base, sizeof(base), token, sizeof(token), NULL, 0))
+            continue;
+        char url[160], reply[64];
+        _snprintf(url, sizeof(url), "%s/hello?t=%s", base, token);
+        url[sizeof(url) - 1] = '\0';
+        unsigned long long len = 0;
+        HttpGetPlain(url, NULL, reply, sizeof(reply) - 1, &len);
+    }
+}
+
 void StartPcHelperListener()
 {
     EnsureLock();
     HANDLE h = CreateThread(NULL, 0, ListenEntry, NULL, 0, NULL);
+    if (h != NULL)
+        CloseHandle(h);
+    h = CreateThread(NULL, 0, CheckInEntry, NULL, 0, NULL);
     if (h != NULL)
         CloseHandle(h);
 }

@@ -34,9 +34,25 @@ var (
 	core  = color.RGBA{26, 26, 26, 0xFF}
 )
 
+// grey turns a colour into a lighter grey of the same brightness, for the
+// icon when no Xbox is connected.
+func grey(c color.RGBA) color.RGBA {
+	l := uint8((uint16(c.R)*30 + uint16(c.G)*59 + uint16(c.B)*11) / 100)
+	l = l/2 + 96
+	return color.RGBA{l, l, l, c.A}
+}
+
 // shade is the colour at (x, y) in the unit square, and whether anything is
 // there at all (outside the rounded corners there isn't).
-func shade(x, y, turn float64) (color.RGBA, bool) {
+func shade(x, y, turn float64, dim bool) (color.RGBA, bool) {
+	c, ok := shadeColour(x, y, turn)
+	if ok && dim {
+		c = grey(c)
+	}
+	return c, ok
+}
+
+func shadeColour(x, y, turn float64) (color.RGBA, bool) {
 	// The rounded square.
 	cx := math.Max(cornerRadius-x, math.Max(0, x-(1-cornerRadius)))
 	cy := math.Max(cornerRadius-y, math.Max(0, y-(1-cornerRadius)))
@@ -74,7 +90,10 @@ func shade(x, y, turn float64) (color.RGBA, bool) {
 
 // Render draws the icon size pixels square, the disc turned by turn degrees.
 // Each pixel is the average of a 4x4 grid of samples, so edges are smooth.
-func Render(size int, turn float64) *image.RGBA {
+func Render(size int, turn float64) *image.RGBA { return RenderStyle(size, turn, false) }
+
+// RenderStyle is Render, greyed when dim.
+func RenderStyle(size int, turn float64, dim bool) *image.RGBA {
 	img := image.NewRGBA(image.Rect(0, 0, size, size))
 	const n = 4
 	for py := 0; py < size; py++ {
@@ -84,7 +103,7 @@ func Render(size int, turn float64) *image.RGBA {
 				for sx := 0; sx < n; sx++ {
 					x := (float64(px) + (float64(sx)+0.5)/n) / float64(size)
 					y := (float64(py) + (float64(sy)+0.5)/n) / float64(size)
-					if c, ok := shade(x, y, turn); ok {
+					if c, ok := shade(x, y, turn, dim); ok {
 						r += float64(c.R)
 						g += float64(c.G)
 						b += float64(c.B)
@@ -104,19 +123,25 @@ func Render(size int, turn float64) *image.RGBA {
 }
 
 // PNG is Render as PNG bytes.
-func PNG(size int, turn float64) []byte {
+func PNG(size int, turn float64) []byte { return PNGStyle(size, turn, false) }
+
+// PNGStyle is PNG, greyed when dim.
+func PNGStyle(size int, turn float64, dim bool) []byte {
 	var buf bytes.Buffer
-	png.Encode(&buf, Render(size, turn))
+	png.Encode(&buf, RenderStyle(size, turn, dim))
 	return buf.Bytes()
 }
 
 // ICO holds the icon at every size Windows' tray and Explorer ask for, so
 // Windows picks the one that fits instead of scaling one.
-func ICO(turn float64) []byte {
+func ICO(turn float64) []byte { return ICOStyle(turn, false) }
+
+// ICOStyle is ICO, greyed when dim.
+func ICOStyle(turn float64, dim bool) []byte {
 	sizes := []int{16, 20, 24, 32, 40, 48, 64, 256}
 	images := make([][]byte, len(sizes))
 	for i, s := range sizes {
-		images[i] = PNG(s, turn)
+		images[i] = PNGStyle(s, turn, dim)
 	}
 
 	var out bytes.Buffer

@@ -14,6 +14,7 @@ func registerHandlers(mux *http.ServeMux, s *store, p *pairing) {
 	mux.HandleFunc("/pair/wait", p.handleWait)
 
 	mux.HandleFunc("/hello", func(w http.ResponseWriter, r *http.Request) {
+		p.allowed(r) // a paired console's check-in: the tray says it's connected
 		fmt.Fprintf(w, "omni360-helper 2 %s", p.ID)
 	})
 

@@ -33,6 +33,18 @@ type pairing struct {
 	ID      string            `json:"id"`
 	Tokens  map[string]string `json:"tokens"` // token -> when and from where it was made
 	pending *pairRequest
+
+	// The last request from a paired console - a download, or its check-in
+	// every 10 seconds - for the tray to say whether one is connected.
+	seenAt   time.Time
+	seenFrom string
+}
+
+// xbox is the paired console heard in the last 30 seconds, if there is one.
+func (p *pairing) xbox() (string, bool) {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	return p.seenFrom, !p.seenAt.IsZero() && time.Since(p.seenAt) < 30*time.Second
 }
 
 type pairRequest struct {
@@ -168,6 +180,10 @@ func (p *pairing) allowed(r *http.Request) bool {
 	p.mu.Lock()
 	defer p.mu.Unlock()
 	_, ok := p.Tokens[t]
+	if ok {
+		p.seenAt = time.Now()
+		p.seenFrom, _, _ = net.SplitHostPort(r.RemoteAddr)
+	}
 	return ok
 }
 

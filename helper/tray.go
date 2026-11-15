@@ -22,6 +22,8 @@ func runTray(s *store, p *pairing, cacheDir, logPath string) {
 
 		title := systray.AddMenuItem("Omni360 Helper", "")
 		title.Disable()
+		xbox := systray.AddMenuItem("No Xbox connected", "Whether a paired Xbox has checked in")
+		xbox.Disable()
 		allow := systray.AddMenuItem("", "Your Xbox is asking to download through this PC")
 		allow.Hide()
 		status := systray.AddMenuItem("Waiting for your console", "")
@@ -40,13 +42,19 @@ func runTray(s *store, p *pairing, cacheDir, logPath string) {
 				} else {
 					allow.Hide()
 				}
-				line := s.summary()
+				from, connected := p.xbox()
+				if connected {
+					xbox.SetTitle("Connected to your Xbox (" + from + ")")
+				} else {
+					xbox.SetTitle("No Xbox connected")
+				}
+				line := s.summary(connected)
 				status.SetTitle(line)
 				systray.SetTooltip("Omni360 Helper - " + line)
 				time.Sleep(2 * time.Second)
 			}
 		}()
-		go spinWhileBusy(s)
+		go spinWhileBusy(s, p)
 		go func() {
 			for {
 				select {
@@ -79,7 +87,7 @@ func openPath(path string) {
 }
 
 // summary is one line for the tray: what's downloading, or that it's idle.
-func (s *store) summary() string {
+func (s *store) summary(connected bool) string {
 	s.mu.Lock()
 	all := make([]*download, 0, len(s.all))
 	for _, d := range s.all {
@@ -100,10 +108,10 @@ func (s *store) summary() string {
 			}
 		}
 	}
-	if len(all) > 0 {
-		return "Ready - everything asked for is downloaded"
+	if !connected {
+		return "Open Omni360 on your Xbox to use this PC"
 	}
-	return "Waiting for your console"
+	return "Ready for downloads"
 }
 
 func shorten(s string, n int) string {
@@ -119,43 +127,57 @@ func shorten(s string, n int) string {
 const spinFrames = 12
 
 var frames [spinFrames][]byte
+var dimIcon []byte
 
-func stillIcon() []byte {
+// stillIcon is the disc at rest: green with an Xbox connected, grey without.
+func stillIcon() []byte { return stillFor(false) }
+
+func stillFor(connected bool) []byte {
+	if !connected {
+		if dimIcon == nil {
+			dimIcon = trayICO(0, true)
+		}
+		return dimIcon
+	}
 	if frames[0] == nil {
-		frames[0] = trayICO(0)
+		frames[0] = trayICO(0, false)
 	}
 	return frames[0]
 }
 
-func trayICO(turn float64) []byte {
+func trayICO(turn float64, dim bool) []byte {
 	if runtime.GOOS == "windows" {
-		return icon.ICO(turn)
+		return icon.ICOStyle(turn, dim)
 	}
-	return icon.PNG(64, turn)
+	return icon.PNGStyle(64, turn, dim)
 }
 
-// spinWhileBusy turns the disc while anything is downloading, and puts it back
-// still when nothing is.
-func spinWhileBusy(s *store) {
+// spinWhileBusy turns the disc while anything is downloading, and otherwise
+// keeps it still - green with a paired Xbox connected, grey without.
+func spinWhileBusy(s *store, p *pairing) {
 	frame, spinning := 0, false
+	shown := -1 // the still icon on show: 0 grey, 1 green, -1 neither yet
 	for {
-		busy := s.anyBusy()
-		switch {
-		case busy:
+		_, connected := p.xbox()
+		if s.anyBusy() {
 			frame = (frame + 1) % spinFrames
 			if frames[frame] == nil {
-				frames[frame] = trayICO(float64(frame) * 180 / spinFrames)
+				frames[frame] = trayICO(float64(frame)*180/spinFrames, false)
 			}
 			systray.SetIcon(frames[frame])
-			spinning = true
+			spinning, shown = true, -1
 			time.Sleep(90 * time.Millisecond)
-		case spinning:
-			frame, spinning = 0, false
-			systray.SetIcon(stillIcon())
-			time.Sleep(500 * time.Millisecond)
-		default:
-			time.Sleep(500 * time.Millisecond)
+			continue
 		}
+		want := 0
+		if connected {
+			want = 1
+		}
+		if spinning || shown != want {
+			frame, spinning, shown = 0, false, want
+			systray.SetIcon(stillFor(connected))
+		}
+		time.Sleep(500 * time.Millisecond)
 	}
 }
 
