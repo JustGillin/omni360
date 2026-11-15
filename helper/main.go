@@ -29,6 +29,7 @@ package main
 import (
 	"flag"
 	"fmt"
+	"io"
 	"log"
 	"net"
 	"net/http"
@@ -44,13 +45,14 @@ var httpPort = 36061
 func main() {
 	cacheDir := flag.String("cache", defaultCacheDir(), "where downloads are kept")
 	conns := flag.Int("connections", 16, "connections per download")
+	cacheGB := flag.Int64("cache-gb", 50, "how much the downloads folder may hold, in GB")
 	flag.IntVar(&httpPort, "port", httpPort, "HTTP port the console reads from")
 	flag.Parse()
 
 	if err := os.MkdirAll(*cacheDir, 0o755); err != nil {
 		log.Fatalf("can't make the cache folder %s: %v", *cacheDir, err)
 	}
-	store := newStore(*cacheDir, *conns)
+	store := newStore(*cacheDir, *conns, *cacheGB<<30)
 	pair := loadPairing(*cacheDir)
 
 	name, _ := os.Hostname()
@@ -63,9 +65,17 @@ func main() {
 		Handler:           logRequests(mux),
 		ReadHeaderTimeout: 30 * time.Second,
 	}
+	// The log goes to a file beside the cache as well, for "Open log" when
+	// there's no console window.
+	logPath := filepath.Join(*cacheDir, "helper.log")
+	if f, err := os.OpenFile(logPath, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0o644); err == nil {
+		log.SetOutput(io.MultiWriter(os.Stderr, f))
+	}
+
 	log.Printf("Omni360 Helper on port %d, cache in %s", httpPort, *cacheDir)
 	pair.showCode()
-	log.Fatal(srv.ListenAndServe())
+	go func() { log.Fatal(srv.ListenAndServe()) }()
+	runTray(store, pair, *cacheDir, logPath)
 }
 
 func defaultCacheDir() string {

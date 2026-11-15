@@ -61,6 +61,12 @@ func (p *pairing) newCode() {
 	p.code = fmt.Sprintf("%04d", n.Int64())
 }
 
+func (p *pairing) currentCode() string {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	return p.code
+}
+
 func (p *pairing) showCode() {
 	log.Printf("To pair a console: Omni360 > Settings > General > PC helper > Pair, and enter %s", p.code)
 }

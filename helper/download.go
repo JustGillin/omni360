@@ -11,6 +11,7 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
+	"sort"
 	"sync"
 	"time"
 )
@@ -38,15 +39,16 @@ type download struct {
 }
 
 type store struct {
-	dir   string
-	conns int
-	mu    sync.Mutex
-	all   map[string]*download
-	http  *http.Client
+	dir      string
+	conns    int
+	maxBytes int64 // the cache's limit; the oldest downloads go to make room
+	mu       sync.Mutex
+	all      map[string]*download
+	http     *http.Client
 }
 
-func newStore(dir string, conns int) *store {
-	return &store{dir: dir, conns: conns, all: map[string]*download{},
+func newStore(dir string, conns int, maxBytes int64) *store {
+	return &store{dir: dir, conns: conns, maxBytes: maxBytes, all: map[string]*download{},
 		http: &http.Client{Timeout: 0}}
 }
 
@@ -66,12 +68,16 @@ func archiveURL(item, file string) string {
 func (s *store) get(item, file, auth string) (*download, error) {
 	s.mu.Lock()
 	d := s.all[key(item, file)]
-	if d == nil {
+	isNew := d == nil
+	if isNew {
 		d = &download{item: item, file: file, path: s.cachePath(item, file)}
 		d.cond = sync.NewCond(&d.mu)
 		s.all[key(item, file)] = d
 	}
 	s.mu.Unlock()
+	if isNew {
+		s.makeRoom(d.path)
+	}
 
 	d.mu.Lock()
 	defer d.mu.Unlock()
@@ -285,4 +291,66 @@ func saveProgress(path string, done []bool) {
 		}
 	}
 	os.WriteFile(path+".progress", b, 0o644)
+}
+
+// makeRoom removes the least recently used downloads until the cache is under
+// its limit, leaving keep and anything still downloading alone. A new
+// download's own size isn't known yet, so the limit is a little soft.
+func (s *store) makeRoom(keep string) {
+	entries, err := os.ReadDir(s.dir)
+	if err != nil {
+		return
+	}
+	type cached struct {
+		path string
+		size int64
+		used time.Time
+	}
+	var files []cached
+	var total int64
+	for _, e := range entries {
+		name := e.Name()
+		if e.IsDir() || filepath.Ext(name) != "" { // downloads have no extension; .progress, .json, .log do
+			continue
+		}
+		info, err := e.Info()
+		if err != nil {
+			continue
+		}
+		files = append(files, cached{filepath.Join(s.dir, name), info.Size(), info.ModTime()})
+		total += info.Size()
+	}
+	if total <= s.maxBytes {
+		return
+	}
+	sort.Slice(files, func(i, j int) bool { return files[i].used.Before(files[j].used) })
+
+	busy := map[string]bool{keep: true}
+	s.mu.Lock()
+	for _, d := range s.all {
+		if size, have := d.progress(); size == 0 || have < size {
+			busy[d.path] = true
+		}
+	}
+	s.mu.Unlock()
+
+	for _, f := range files {
+		if total <= s.maxBytes {
+			break
+		}
+		if busy[f.path] {
+			continue
+		}
+		os.Remove(f.path)
+		os.Remove(f.path + ".progress")
+		total -= f.size
+		s.mu.Lock()
+		for k, d := range s.all {
+			if d.path == f.path {
+				delete(s.all, k)
+			}
+		}
+		s.mu.Unlock()
+		log.Printf("made room: removed an old download (%d MB)", f.size>>20)
+	}
 }
