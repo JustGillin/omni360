@@ -335,7 +335,11 @@ int HttpGetToFilePlain(const char *url, const char *extraHeaderLines, const char
             {
                 bodyStart += 4;
                 unsigned long long done = (unsigned long long)(buf + have - bodyStart);
-                bool ok = done == 0 || fwrite(bodyStart, 1, (size_t)done, out) == done;
+                // The drive gets its own thread, as in httpRequestHTTPS: a
+                // write here is time the connection stands still.
+                FileWriter *writer = FileWriterStart(out);
+                bool ok = done == 0 || (writer != NULL ? FileWriterWrite(writer, bodyStart, (size_t)done)
+                                                       : fwrite(bodyStart, 1, (size_t)done, out) == done);
                 const DWORD started = GetTickCount();
                 DWORD lastReport = 0;
                 while (ok && (total == 0 || done < total))
@@ -343,7 +347,7 @@ int HttpGetToFilePlain(const char *url, const char *extraHeaderLines, const char
                     const int n = recv(s, buf, bufSize, 0);
                     if (n <= 0)
                         break;
-                    ok = fwrite(buf, 1, n, out) == (size_t)n;
+                    ok = writer != NULL ? FileWriterWrite(writer, buf, (size_t)n) : fwrite(buf, 1, n, out) == (size_t)n;
                     done += n;
 
                     const DWORD now = GetTickCount();
@@ -360,6 +364,8 @@ int HttpGetToFilePlain(const char *url, const char *extraHeaderLines, const char
                         }
                     }
                 }
+                if (writer != NULL)
+                    ok = FileWriterFinish(writer) && ok;
                 ok = (fclose(out) == 0) && ok;
                 if (ranged && ok)
                 {

@@ -107,4 +107,14 @@ int HttpsSessionGet(HttpsSession *session, const std::string &url, const char *e
 /// empty, if there was none.
 bool HttpsSessionServerDate(HttpsSession *session, char *out, size_t outSize);
 
+/// Writes a download to its file on a thread of its own, so the receiving
+/// thread never stands still for the drive - httpRequestHTTPS uses it for big
+/// bodies. Start gives NULL if it can't be set up (write directly then).
+/// Finish writes out what's queued and frees the writer; false if any of it
+/// didn't reach the file. The FILE stays the caller's to close.
+struct FileWriter;
+FileWriter *FileWriterStart(FILE *file);
+bool FileWriterWrite(FileWriter *writer, const char *data, size_t len);
+bool FileWriterFinish(FileWriter *writer);
+
 #endif

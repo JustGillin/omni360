@@ -572,6 +572,14 @@ static bool AsyncWriterFinish(AsyncWriter *w)
     return ok;
 }
 
+// The same writer for HttpPlain's downloads (downloadFile.h).
+FileWriter *FileWriterStart(FILE *file) { return (FileWriter *)AsyncWriterStart(file); }
+bool FileWriterWrite(FileWriter *w, const char *data, size_t len)
+{
+    return AsyncWriterWrite((AsyncWriter *)w, data, len);
+}
+bool FileWriterFinish(FileWriter *w) { return AsyncWriterFinish((AsyncWriter *)w); }
+
 int DumpResponse(XboxTLSContext *ctx,
                  const std::string filename,
                  char *outputBuffer,
