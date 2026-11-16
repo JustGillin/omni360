@@ -414,6 +414,8 @@
     <ClInclude Include="src\UiSound.h" />
     <ClInclude Include="src\Featured.h" />
     <ClInclude Include="src\ServiceCheck.h" />
+    <ClInclude Include="src\XboxCompat.h" />
+    <ClInclude Include="src\ZipExtract.h" />
     <ClInclude Include="src\TrustAnchors.h" />
     <ClInclude Include="src\UiText.h" />
     <ClInclude Include="SSL\config.h" />
@@ -500,6 +502,8 @@
     <ClCompile Include="src\UiSound.cpp" />
     <ClCompile Include="src\Featured.cpp" />
     <ClCompile Include="src\ServiceCheck.cpp" />
+    <ClCompile Include="src\XboxCompat.cpp" />
+    <ClCompile Include="src\ZipExtract.cpp" />
     <ClCompile Include="src\UiText.cpp" />
     <ClCompile Include="SSL\aead\ccm.c" />
     <ClCompile Include="SSL\aead\eax.c" />

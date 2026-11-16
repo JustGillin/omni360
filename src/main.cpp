@@ -50,6 +50,7 @@ end-to-end on real hardware against a real 27-game library.
 #include "DiscSource.h"
 #include "ReadAhead.h"
 #include "TitleNames.h"
+#include "XboxCompat.h"  // the Original Xbox emulator, checked before one starts
 #define HOMEBREW_CATALOG_DATA
 #include "HomebrewCatalog.h"
 #include "dns.h"         // StartNetwork, LogNetworkStatus
@@ -132,6 +133,11 @@ bool CheckGameMounted()
         fclose(fd1);
         remove("Hdd1:\\test.tmp");
     }
+
+    // The Original Xbox emulator's partition, for a restored install of its
+    // files - see XboxCompat.h. A drive without one is fine until an
+    // Original Xbox game is played.
+    MountCompatPartition();
 
     // The USB ports, by Aurora's names, for library folders and installs on
     // a USB drive formatted FAT32. A port with nothing in it just reads as
@@ -5078,10 +5084,72 @@ static bool ConfirmLeaving()
                          "Leave");
 }
 
+static void ReportEnqueue(EnqueueResult result, const char *filename);
+
+// Before an Original Xbox game: whether the 360's emulator is set up, and
+// if it isn't, saying so and offering to set it up rather than letting the
+// game fail to start with no reason given. True to go ahead.
+static bool XboxEmulatorReady()
+{
+    char missing[32];
+    const XboxCompatState state = CheckXboxCompat(missing, sizeof(missing));
+    if (state == XBOX_COMPAT_READY)
+        return true;
+
+    // Plain words throughout: no partitions, file names or sites. What was
+    // missing is in the log.
+    if (state == XBOX_COMPAT_NO_FILES)
+    {
+        if (ShowConfirmUI("Emulator missing", "The emulator that plays Original Xbox games isn't installed.",
+                          "Omni360 can download and install it for you.", "Fix it"))
+            ReportEnqueue((EnqueueResult)QueueXefuPack(), "Original Xbox emulator");
+        return false;
+    }
+
+    if (!ShowConfirmUI("Emulator missing", "The emulator that plays Original Xbox games isn't installed.",
+                       "Omni360 can fix this for you. Fixing it needs the console to restart.", "Fix it"))
+        return false;
+
+    switch (FormatCompatPartition())
+    {
+    case XBOX_FORMAT_OK:
+        // On to the emulator files, which the new partition doesn't have -
+        // queued without asking again.
+        ReportEnqueue((EnqueueResult)QueueXefuPack(), "Original Xbox emulator");
+        return false;
+    case XBOX_FORMAT_RESTART:
+    {
+        // The kernel keeps the partition as it found it until the console
+        // restarts - restarting Omni360 isn't enough. Said first, then the
+        // console is turned off the way night mode does it.
+        // The files can't be queued until the partition mounts, after the
+        // restart; the next startup queues them by itself.
+        MarkXefuPackPending();
+        ShowAlertUI("Successful", "The console will shut down now.", NULL, "OK", NULL);
+        RenderStatusFrame("Shutting down", "Successful", "");
+        StopDownloadQueue(15000);
+        StopDiscWorker(15000);
+        StopGameInstaller(20000);
+        StopSearchWorker(3000);
+        StopCoverArt(3000);
+        StopStoreArt(3000);
+        PowerOffConsole();
+        return false; // only if the SMC didn't take it
+    }
+    case XBOX_FORMAT_ALREADY_THERE:
+    default:
+        ShowMessageUI("Couldn't fix it", "The emulator couldn't be set up on this console.",
+                      "Nothing was changed. The log has the details.");
+        return false;
+    }
+}
+
 // A on a library game, or Play on its page. Returns only if it didn't start,
 // having said so.
 static void PlayLibraryGame(const InstalledGame &game)
 {
+    if (game.contentType == GOD_CONTENT_XBOX_ORIGINAL && !XboxEmulatorReady())
+        return;
     if (!ConfirmLeaving())
         return;
     dprintf("Playing: %s (Title ID %08lX)\n", game.displayName, game.titleId);
@@ -6271,7 +6339,7 @@ static bool DiscTileAction(Shell &shell, const Library &lib, const char *gamesPa
     // installs it, or installs it again.
     if (pressed & XINPUT_GAMEPAD_A)
     {
-        if (ConfirmLeaving())
+        if ((!disc.original || XboxEmulatorReady()) && ConfirmLeaving())
         {
             dprintf("Playing the disc: %s (Title ID %08lX)\n", shell.discName, disc.titleId);
             // Recorded like any other game: it shows on Home if the same
@@ -7597,7 +7665,14 @@ int main()
             char keptAuth[IAS3_AUTH_HEADER_MAX];
             QuietAuthHeader(keptAuth, sizeof(keptAuth));
             if (downloadsStarted)
+            {
                 RestoreDownloadQueue(keptAuth);
+                // The emulator files, when the last run set the emulator up
+                // and shut the console down to finish it - see XboxCompat.h.
+                if (QueueXefuPackIfPending())
+                    ShowShellToast("Installing the emulator", "Original Xbox games will play once it's done.",
+                                   UI_TOAST_INFO);
+            }
             RestoreGameInstalls(keptAuth);
             RestoreDiscRecords();
         }

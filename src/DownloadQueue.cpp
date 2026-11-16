@@ -11,6 +11,7 @@ DESCRIPTION : the download queue - DLC packs and title updates, installed one
 #include "downloadFile.h" // FormatBytes, DownloadProgressFn
 #include "HttpPlain.h"    // HttpDownloadPlain, for a homebrew mirror
 #include "SevenZip.h"
+#include "ZipExtract.h"
 #include "QueueState.h"   // the jobs, kept between runs
 #include "OutputConsole.h"
 #include "zlib/zlib.h"    // crc32, to name a download's staging file
@@ -699,6 +700,12 @@ static const char *UrlFileName(const char *url)
     return slash != NULL ? slash + 1 : url;
 }
 
+static bool UrlIsZip(const char *url)
+{
+    const size_t n = strlen(url);
+    return n >= 4 && _stricmp(url + n - 4, ".zip") == 0;
+}
+
 static unsigned long long FileSizeOf(const char *path)
 {
     WIN32_FILE_ATTRIBUTE_DATA attrs;
@@ -851,7 +858,14 @@ static void RunHomebrew(const QueueJob &job, JobResult &result)
 
         SetActivePhase("Unpacking", 0, 1, i + 1, hb.urlCount, (float)(i + 1) / (float)hb.urlCount);
         int leftOut = 0;
-        const SevenZipResult unpacked = ExtractSevenZip(archive, dest, hb.folder, WorkerUnpackProgress, &leftOut);
+        // The ConsoleMods wiki's own uploads, the xefu packs among them, are
+        // zips rather than the repo's .7z archives.
+        const bool isZip = UrlIsZip(hb.urls[i]);
+        const ZipResult zipped =
+            isZip ? ExtractZip(archive, dest, hb.folder, WorkerUnpackProgress, &leftOut) : ZIP_OK;
+        const SevenZipResult unpacked =
+            isZip ? (zipped == ZIP_OK ? SEVEN_ZIP_OK : zipped == ZIP_CANCELLED ? SEVEN_ZIP_CANCELLED : SEVEN_ZIP_CORRUPT)
+                  : ExtractSevenZip(archive, dest, hb.folder, WorkerUnpackProgress, &leftOut);
         skippedNames += leftOut;
 
         if (unpacked == SEVEN_ZIP_CANCELLED)
@@ -870,7 +884,8 @@ static void RunHomebrew(const QueueJob &job, JobResult &result)
         if (unpacked != SEVEN_ZIP_OK)
         {
             char detail[160];
-            _snprintf(detail, sizeof(detail), "%s: %s.", UrlFileName(url), SevenZipResultText(unpacked));
+            _snprintf(detail, sizeof(detail), "%s: %s.", UrlFileName(url),
+                      isZip ? ZipResultText(zipped) : SevenZipResultText(unpacked));
             detail[sizeof(detail) - 1] = '\0';
             SetResult(result, QUEUE_OUTCOME_FAILED, "Couldn't unpack it", detail);
             return;

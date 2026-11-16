@@ -60,7 +60,7 @@ Its store carries about 1,500 Xbox 360 disc games, 740 Xbox Live Arcade games, 3
 
 Everything downloads and installs in the background while you keep browsing, with disc games installed as Games on Demand, and a game disc in the drive can be copied to the hard drive the same way. Nothing downloads without you choosing it, and a popup says when each job finishes or fails.
 
-Your library is read straight off the hard drive, covers and all, and games start from Omni360 just as they would from the dashboard - alongside your apps, homebrew and emulators, if you point it at folders for them. It opens on the games you played last, each under its own wallpaper, and keeps itself up to date, installing only releases signed with the project's key.
+Your library is read straight off the hard drive, covers and all, and games start from Omni360 just as they would from the dashboard - alongside your apps, homebrew and emulators, if you point it at folders for them. Original Xbox games need nothing set up first: if the console is missing the emulator they run on, Omni360 offers to set it all up for you. It opens on the games you played last, each under its own wallpaper, and keeps itself up to date, installing only releases signed with the project's key.
 
 **Status: beta (0.17.0-beta), working on real hardware.** Every kind of install has been run end to end on a modded console with a real library.
 
