@@ -50,6 +50,19 @@ STR(PILL_INSTALLING,        "INSTALLING")
 STR(HOME_IN_THE_DRIVE,      "IN THE DRIVE")
 STR(HOME_CONTINUE_PLAYING,  "CONTINUE PLAYING")
 
+// ---- System popup (Back on Home) -------------------------------------------
+STR(SYSTEM,                 "System")
+STR(SYSTEM_IP_ADDRESS,      "IP address")
+STR(SYSTEM_NOT_CONNECTED,   "Not connected")
+STR(SYSTEM_TEMPERATURES,    "Temperatures")
+STR(SYSTEM_TEMP_CPU,        "CPU")
+STR(SYSTEM_TEMP_GPU,        "GPU")
+STR(SYSTEM_TEMP_MEMORY,     "Memory")
+STR(SYSTEM_TEMP_CASE,       "Case")
+STR(SYSTEM_FAHRENHEIT,      "Fahrenheit")
+STR(SYSTEM_CELSIUS,         "Celsius")
+STR(SYSTEM_CLOSE,           "Close")
+
 // ---- Library ----------------------------------------------------------------
 STR(LIB_SEARCHED,           "Searched {1}")
 STR(LIB_NO_FOLDER,          "(no folder set)")

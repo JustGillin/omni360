@@ -2930,6 +2930,10 @@ struct Shell
     int homeSelected;
     int homeScroll;
 
+    // The System popup (Back on Home) is up, over the page. It takes all
+    // input while it is - see SystemPopupInput.
+    bool systemPopup;
+
     int librarySelected;
     int libraryScroll; // -1 until placed - see LibraryPageView
 
@@ -6104,10 +6108,127 @@ static LibraryDiscTile DiscTileState(const Shell &shell)
 //
 // The strings the view points at are held in statics: it's built, drawn and
 // thrown away inside one frame, like the other Make*View calls.
+// ---------------------------------------------------------------------------
+// The System popup: Back on Home
+// ---------------------------------------------------------------------------
+//
+// The console's address and its four temperatures, the way other dashboards
+// show them - a card over Home rather than a page, since there is nothing to
+// do on it but look. ShowShellPopup draws it; the state and input are here.
+
+extern "C" VOID HalSendSMCMessage(LPVOID input, LPVOID output);
+
+#define SMC_QUERY_TEMPS 0x07
+#define SYSTEM_TEMP_COUNT 4
+#define SYSTEM_TEMP_MAX_C 90.0f // a full bar
+#define SYSTEM_TEMP_REFRESH_MS 1000
+
+static bool g_systemFahrenheit = false;
+static float g_systemTemps[SYSTEM_TEMP_COUNT]; // CPU, GPU, memory, case - degrees C
+static bool g_systemTempsRead = false;
+static DWORD g_systemTempsAt = 0;
+
+// The SMC answers 0x07 with four little-endian 8.8 fixed-point values, in
+// that order.
+static void ReadSystemTemps()
+{
+    if (g_systemTempsRead && GetTickCount() - g_systemTempsAt < SYSTEM_TEMP_REFRESH_MS)
+        return;
+
+    unsigned char request[16];
+    unsigned char reply[16];
+    memset(request, 0, sizeof(request));
+    memset(reply, 0, sizeof(reply));
+    request[0] = SMC_QUERY_TEMPS;
+    HalSendSMCMessage(request, reply);
+
+    for (int i = 0; i < SYSTEM_TEMP_COUNT; ++i)
+        g_systemTemps[i] = (float)(reply[1 + i * 2] | (reply[2 + i * 2] << 8)) / 256.0f;
+    g_systemTempsRead = true;
+    g_systemTempsAt = GetTickCount();
+}
+
+static void OpenSystemPopup(Shell &shell)
+{
+    shell.systemPopup = true;
+    g_systemTempsRead = false; // fresh numbers on opening
+    PlayUiSound(UI_SOUND_SELECT);
+}
+
+// All of the popup's input while it's up: nothing reaches the page under it.
+static void SystemPopupInput(Shell &shell, const UiInput &input)
+{
+    if (input.pressed & (XINPUT_GAMEPAD_B | XINPUT_GAMEPAD_BACK))
+    {
+        shell.systemPopup = false;
+        PlayUiSound(UI_SOUND_BACK);
+    }
+    else if (input.pressed & XINPUT_GAMEPAD_X)
+    {
+        g_systemFahrenheit = !g_systemFahrenheit;
+        PlayUiSound(UI_SOUND_MOVE);
+    }
+}
+
+// Called each frame it's up, before Home's frame is drawn.
+static void ShowSystemPopup()
+{
+    ReadSystemTemps();
+
+    static char ip[32];
+    XNADDR xna;
+    memset(&xna, 0, sizeof(xna));
+    const DWORD flags = XNetGetTitleXnAddr(&xna);
+    if (flags != XNET_GET_XNADDR_PENDING && !(flags & XNET_GET_XNADDR_NONE) && xna.ina.s_addr != 0)
+        XNetInAddrToString(xna.ina, ip, sizeof(ip));
+    else
+        strcpy(ip, Tr(STR_SYSTEM_NOT_CONNECTED));
+
+    static const StringId kNames[SYSTEM_TEMP_COUNT] = {
+        STR_SYSTEM_TEMP_CPU, STR_SYSTEM_TEMP_GPU, STR_SYSTEM_TEMP_MEMORY, STR_SYSTEM_TEMP_CASE};
+    // The dashboard's green for the chips, a cooler blue for the case.
+    static const D3DCOLOR kColors[SYSTEM_TEMP_COUNT] = {0xFF1FA01F, 0xFF1FA01F, 0xFF1FA01F, 0xFF2D8FD9};
+    static char values[SYSTEM_TEMP_COUNT][16];
+
+    UiPopupView view;
+    memset(&view, 0, sizeof(view));
+    view.heading = Tr(STR_SYSTEM);
+    view.rows[0].label = Tr(STR_SYSTEM_IP_ADDRESS);
+    view.rows[0].value = ip;
+    view.rowCount = 1;
+
+    view.barsHeading = Tr(STR_SYSTEM_TEMPERATURES);
+    for (int i = 0; i < SYSTEM_TEMP_COUNT; ++i)
+    {
+        const float c = g_systemTemps[i];
+        // "\xC2\xB0" is the degree sign.
+        if (g_systemFahrenheit)
+            _snprintf(values[i], sizeof(values[i]), "%d\xC2\xB0" "F", (int)(c * 9.0f / 5.0f + 32.0f + 0.5f));
+        else
+            _snprintf(values[i], sizeof(values[i]), "%d\xC2\xB0" "C", (int)(c + 0.5f));
+        values[i][sizeof(values[i]) - 1] = '\0';
+
+        UiPopupBar &bar = view.bars[i];
+        bar.label = Tr(kNames[i]);
+        bar.valueText = values[i];
+        bar.fraction = c / SYSTEM_TEMP_MAX_C;
+        // Amber past 70, red past 80 - the chips' own warnings sit higher.
+        bar.color = c >= 80.0f ? 0xFFFF6B61 : c >= 70.0f ? 0xFFF0BE12 : kColors[i];
+    }
+    view.barCount = SYSTEM_TEMP_COUNT;
+
+    view.hints[0].button = UI_BUTTON_B;
+    view.hints[0].label = TrW(STR_SYSTEM_CLOSE);
+    view.hints[1].button = UI_BUTTON_X;
+    view.hints[1].label = TrW(g_systemFahrenheit ? STR_SYSTEM_CELSIUS : STR_SYSTEM_FAHRENHEIT);
+    view.hintCount = 2;
+
+    ShowShellPopup(view);
+}
+
 static HomePageView MakeHomeView(const Shell &shell, const Library &lib)
 {
     static char clock[16];
-    static char storage[40];
 
     HomePageView view;
     memset(&view, 0, sizeof(view));
@@ -6122,13 +6243,6 @@ static HomePageView MakeHomeView(const Shell &shell, const Library &lib)
     GetLocalTime(&now);
     FormatClock(clock, sizeof(clock), now);
     view.clock = clock;
-
-    if (shell.storage.detail[0] != '\0')
-    {
-        _snprintf(storage, sizeof(storage), "%s", shell.storage.detail);
-        storage[sizeof(storage) - 1] = '\0';
-        view.storage = storage;
-    }
 
     // The four places Home goes. Apps, Homebrew and Emulators aren't here:
     // they sit in the Games page's own sidebar, beside the games, which is
@@ -8116,7 +8230,15 @@ int main()
         bool exitRequested = false;
         const unsigned long focusBefore = (pressed != 0 || input.nav != 0) ? FocusSignature(shell) : 0;
 
-        if (shell.page == SHELL_PAGE_HOME)
+        if (shell.page == SHELL_PAGE_HOME && shell.systemPopup)
+        {
+            SystemPopupInput(shell, input);
+        }
+        else if (shell.page == SHELL_PAGE_HOME && (pressed & XINPUT_GAMEPAD_BACK))
+        {
+            OpenSystemPopup(shell);
+        }
+        else if (shell.page == SHELL_PAGE_HOME)
         {
             // Home's chrome is the nav row across the top rather than the
             // sidebar, so the same back-stack every other page has - content,
@@ -8969,6 +9091,8 @@ int main()
                     hintCount = AddHint(hints, hintCount, UI_BUTTON_LBRB, TrW(STR_PAGE));
             }
 
+            if (shell.systemPopup)
+                ShowSystemPopup();
             RenderHomeFrame(view, hints, hintCount);
             shell.homeScroll = view.recentScroll;
             break;

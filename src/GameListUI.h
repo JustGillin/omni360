@@ -191,7 +191,7 @@ struct HomeNavView
 
 struct HomePageView
 {
-    // Along the top. clock and storage may be NULL; gamertag is NULL until
+    // Along the top. clock may be NULL; gamertag is NULL until
     // there's a profile to show, and the row then starts with the app's name.
     const char *gamertag;
     const char *clock;
@@ -795,6 +795,54 @@ void ShowShellToast(const char *heading, const char *message, UiToastTone tone);
 // again after an install. NULL clears it. It takes no input and blocks
 // nothing; it is only there so a page that is briefly out of date says so.
 void SetShellBusy(const char *label);
+
+// ---------------------------------------------------------------------------
+// Modal popup
+// ---------------------------------------------------------------------------
+
+// A card in the middle of the screen over whatever page is showing, which
+// dims behind it - for something small enough not to need a page of its own
+// (the System popup Back opens on Home). It is drawn last, after the page's
+// own text, so nothing on the page shows through.
+//
+// It holds no state and takes no input: the caller owns both. Hand it the
+// view every frame it should show, before that frame's Render*Frame call;
+// the frame draws it and forgets it, so a frame without the call has none.
+// The strings must last until that Render*Frame returns.
+//
+// Sections stack top to bottom: label/value rows, then bars. Either may be
+// empty.
+#define UI_POPUP_MAX_ROWS  6
+#define UI_POPUP_MAX_BARS  6
+#define UI_POPUP_MAX_HINTS 4
+
+struct UiPopupRow
+{
+    const char *label; // small, dim, above the value
+    const char *value;
+};
+
+struct UiPopupBar
+{
+    const char *label;     // left of the bar
+    const char *valueText; // right of it, e.g. "62°C"
+    float fraction;        // fill, 0-1; clamped
+    D3DCOLOR color;
+};
+
+struct UiPopupView
+{
+    const char *heading;
+    UiPopupRow rows[UI_POPUP_MAX_ROWS];
+    int rowCount;
+    const char *barsHeading; // NULL for none
+    UiPopupBar bars[UI_POPUP_MAX_BARS];
+    int barCount;
+    UiHint hints[UI_POPUP_MAX_HINTS];
+    int hintCount;
+};
+
+void ShowShellPopup(const UiPopupView &view);
 
 // ---------------------------------------------------------------------------
 // Blocking screens

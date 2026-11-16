@@ -2347,6 +2347,115 @@ static void DrawHelperIcon(float right, float centerY)
     FillRound(x + w * 0.5f - S(6.0f), y + h + S(3.0f), S(12.0f), S(2.0f), S(1.0f), COL_GREEN_TEXT);
 }
 
+// The controller's battery, left of the clock as on the Series X|S
+// dashboard: an outline with a nub and up to three bars. The 360 only knows
+// the level in steps - the Guide's three bars - so there's no percentage to
+// give. Not in the XDK: xam's export 0x197, XamInputGetDeviceStats by
+// Xenia's table, which doesn't say what the stats hold. Read into a buffer
+// well past any size it could be, the level taken as the first DWORD, and
+// the raw answer logged when it changes, so the layout can be checked on a
+// console.
+#define BATTERY_ICON_W 30.0f
+#define BATTERY_ICON_GAP 14.0f
+#define BATTERY_POLL_MS 2000
+#define XAM_INPUT_GET_DEVICE_STATS 0x197
+
+extern "C" LONG XexGetModuleHandle(PSZ moduleName, PHANDLE outHandle);
+extern "C" LONG XexGetProcedureAddress(HANDLE module, DWORD ordinal, PVOID *outAddress);
+typedef DWORD (*XamInputGetDeviceStatsFn)(DWORD userIndex, PVOID stats);
+
+// 0-3 bars, or -1 for no wireless controller (or no answer).
+static int ControllerBatteryLevel()
+{
+    static bool looked = false;
+    static XamInputGetDeviceStatsFn getStats = NULL;
+    static DWORD polledAt = 0;
+    static int level = -1;
+    static DWORD lastRaw[6] = {0xFFFFFFFF};
+
+    if (!looked)
+    {
+        looked = true;
+        HANDLE xam = NULL;
+        PVOID address = NULL;
+        if (XexGetModuleHandle("xam.xex", &xam) >= 0 && xam != NULL &&
+            XexGetProcedureAddress(xam, XAM_INPUT_GET_DEVICE_STATS, &address) >= 0)
+            getStats = (XamInputGetDeviceStatsFn)address;
+        dprintf("[battery] XamInputGetDeviceStats %s\n", getStats != NULL ? "found" : "not found");
+    }
+    if (getStats == NULL)
+        return -1;
+    if (polledAt != 0 && GetTickCount() - polledAt < BATTERY_POLL_MS)
+        return level;
+    polledAt = GetTickCount();
+
+    // The first controller that's connected.
+    level = -1;
+    for (DWORD port = 0; port < XUSER_MAX_COUNT; ++port)
+    {
+        XINPUT_CAPABILITIES caps;
+        if (XInputGetCapabilities(port, XINPUT_FLAG_GAMEPAD, &caps) != ERROR_SUCCESS)
+            continue;
+
+        DWORD stats[32];
+        memset(stats, 0, sizeof(stats));
+        const DWORD result = getStats(port, stats);
+
+        if (memcmp(lastRaw, stats, sizeof(lastRaw)) != 0)
+        {
+            memcpy(lastRaw, stats, sizeof(lastRaw));
+            dprintf("[battery] port %lu: result 0x%08lX, stats %08lX %08lX %08lX %08lX %08lX %08lX\n",
+                    port, result, stats[0], stats[1], stats[2], stats[3], stats[4], stats[5]);
+        }
+
+        if (result == ERROR_SUCCESS && stats[0] <= 3)
+            level = (int)stats[0];
+        break;
+    }
+    return level;
+}
+
+// right is the icon's right edge, centerY the clock text's middle.
+static void DrawBatteryIcon(float right, float centerY, int level)
+{
+    const float nubW = S(2.5f), nubH = S(6.0f);
+    const float w = S(BATTERY_ICON_W) - nubW, h = S(14.0f);
+    const float x = right - S(BATTERY_ICON_W), y = centerY - h * 0.5f + S(1.0f); // level with the digits, which sit low in their line
+    const float line = S(1.5f);
+
+    StrokeRound(x, y, w, h, S(3.0f), line, COL_TEXT);
+    FillRound(x + w, y + (h - nubH) * 0.5f, nubW, nubH, S(1.0f), COL_TEXT);
+
+    const float inset = line + S(1.5f);
+    const float slotGap = S(1.5f);
+    const float slotW = (w - inset * 2.0f - slotGap * 2.0f) / 3.0f;
+    const float slotH = h - inset * 2.0f;
+    if (level <= 0)
+    {
+        // Empty: a red sliver, as the dashboards warn.
+        FillRound(x + inset, y + inset, slotW * 0.45f, slotH, S(1.0f), COL_ERROR);
+        return;
+    }
+    for (int i = 0; i < level && i < 3; ++i)
+        FillRound(x + inset + i * (slotW + slotGap), y + inset, slotW, slotH, S(1.0f), COL_TEXT);
+}
+
+// The icons left of the clock: the battery, then the PC helper's. Quads
+// only. clockLeft is the clock text's left edge.
+static void DrawClockIcons(float clockLeft, float centerY)
+{
+    float right = clockLeft;
+    const int battery = ControllerBatteryLevel();
+    if (battery >= 0)
+    {
+        right -= S(BATTERY_ICON_GAP);
+        DrawBatteryIcon(right, centerY, battery);
+        right -= S(BATTERY_ICON_W);
+    }
+    if (HelperConnected())
+        DrawHelperIcon(right - S(HELPER_ICON_GAP), centerY);
+}
+
 static void HeaderClock(char *clock, size_t size)
 {
     SYSTEMTIME now;
@@ -2362,14 +2471,10 @@ static void DrawHeaderQuads(bool showToast)
         DrawToastQuads();
         return;
     }
-    if (HelperConnected())
-    {
-        char clock[16];
-        HeaderClock(clock, sizeof(clock));
-        const float right = g_M.contentX + g_M.contentW;
-        DrawHelperIcon(right - TextWidth(clock, 0.95f) - S(HELPER_ICON_GAP),
-                       g_M.headerY + S(4.0f) + LineHeight(0.95f) * 0.5f);
-    }
+    char clock[16];
+    HeaderClock(clock, sizeof(clock));
+    const float right = g_M.contentX + g_M.contentW;
+    DrawClockIcons(right - TextWidth(clock, 0.95f), g_M.headerY + S(4.0f) + LineHeight(0.95f) * 0.5f);
 }
 
 // Text. subtitle may be NULL. The clock is the console's local time, the way
@@ -3411,8 +3516,202 @@ void FadeOutStartupScreen()
     g_startupFadeAt = 0;
 }
 
+// ---------------------------------------------------------------------------
+// Modal popup
+// ---------------------------------------------------------------------------
+//
+// Drawn by EndFrame, after the page has finished both of its passes, with
+// its own quads-then-text: that ordering is what lets it sit over the page's
+// text, which the toast can't. Handed in each frame and dropped once drawn.
+
+static bool g_popupShown = false;
+static UiPopupView g_popup;
+
+void ShowShellPopup(const UiPopupView &view)
+{
+    g_popup = view;
+    if (g_popup.rowCount > UI_POPUP_MAX_ROWS) g_popup.rowCount = UI_POPUP_MAX_ROWS;
+    if (g_popup.barCount > UI_POPUP_MAX_BARS) g_popup.barCount = UI_POPUP_MAX_BARS;
+    if (g_popup.hintCount > UI_POPUP_MAX_HINTS) g_popup.hintCount = UI_POPUP_MAX_HINTS;
+    if (g_popup.rowCount < 0) g_popup.rowCount = 0;
+    if (g_popup.barCount < 0) g_popup.barCount = 0;
+    if (g_popup.hintCount < 0) g_popup.hintCount = 0;
+    g_popupShown = true;
+}
+
+struct PopupLayout
+{
+    float x, y, w, h;
+    float headH;    // the heading band
+    float pad;
+    float rowsY;    // first row's top
+    float rowH;
+    float barsHeadY; // the bars' heading, or < 0
+    float barsY;    // first bar row's top
+    float barH;
+    float hintsCY;  // the hints' centre line
+};
+
+static PopupLayout LayOutPopup(const UiPopupView &p)
+{
+    PopupLayout L;
+    L.pad = S(28.0f);
+    L.headH = S(64.0f);
+    L.rowH = S(64.0f);
+    L.barH = S(38.0f);
+
+    L.w = S(620.0f);
+    if (L.w > g_M.screenW - g_M.safeX * 2.0f)
+        L.w = g_M.screenW - g_M.safeX * 2.0f;
+
+    float body = L.pad;
+    L.rowsY = body;
+    body += p.rowCount * L.rowH;
+    if (p.barCount > 0)
+    {
+        if (p.rowCount > 0)
+            body += S(12.0f);
+        if (p.barsHeading != NULL)
+        {
+            L.barsHeadY = body;
+            body += S(40.0f);
+        }
+        else
+            L.barsHeadY = -1.0f;
+        L.barsY = body;
+        body += p.barCount * L.barH;
+    }
+    else
+    {
+        L.barsHeadY = -1.0f;
+        L.barsY = body;
+    }
+    body += S(16.0f);
+    const float hintsCY = body + S(26.0f);
+    body += S(52.0f);
+
+    L.h = L.headH + body;
+    L.x = (g_M.screenW - L.w) * 0.5f;
+    L.y = (g_M.screenH - L.h) * 0.5f;
+
+    // Body offsets to screen.
+    const float top = L.y + L.headH;
+    L.rowsY += top;
+    if (L.barsHeadY >= 0.0f) L.barsHeadY += top;
+    L.barsY += top;
+    L.hintsCY = top + hintsCY;
+    return L;
+}
+
+// The bars' label column and value column, sized to what's in them.
+static void PopupBarColumns(const UiPopupView &p, const PopupLayout &L, float *trackX, float *trackW)
+{
+    float labelW = 0.0f, valueW = 0.0f;
+    for (int i = 0; i < p.barCount; ++i)
+    {
+        const float lw = TextWidth(p.bars[i].label, 0.8f);
+        const float vw = TextWidth(p.bars[i].valueText, 0.8f, true);
+        if (lw > labelW) labelW = lw;
+        if (vw > valueW) valueW = vw;
+    }
+    *trackX = L.x + L.pad + labelW + S(18.0f);
+    *trackW = (L.x + L.w - L.pad - valueW - S(18.0f)) - *trackX;
+    if (*trackW < S(40.0f))
+        *trackW = S(40.0f);
+}
+
+static void DrawShellPopup()
+{
+    const UiPopupView &p = g_popup;
+    const PopupLayout L = LayOutPopup(p);
+
+    ButtonHint hints[UI_POPUP_MAX_HINTS];
+    for (int i = 0; i < p.hintCount; ++i)
+    {
+        hints[i].sprite = SpriteForButton(p.hints[i].button);
+        hints[i].label = p.hints[i].label;
+    }
+    // Inside the card, from its left.
+    LayoutButtonHints(hints, p.hintCount, L.x + L.pad);
+
+    // --- Quads ---
+    ClearClip();
+    g_pd3dDevice->SetRenderState(D3DRS_SCISSORTESTENABLE, FALSE);
+    FillRound(0.0f, 0.0f, g_M.screenW, g_M.screenH, 0.0f, 0xB3000000);
+    ShadowRound(L.x, L.y + S(10.0f), L.w, L.h, g_M.radius, S(30.0f), COL_SHADOW);
+    FillRound(L.x, L.y, L.w, L.h, g_M.radius, COL_SURFACE);
+    FillRound(L.x, L.y, L.w, L.headH, g_M.radius, COL_SURFACE_HI);
+    // Square off the heading band's bottom corners.
+    FillRound(L.x, L.y + L.headH - g_M.radius, L.w, g_M.radius, 0.0f, COL_SURFACE_HI);
+
+    float trackX = 0.0f, trackW = 0.0f;
+    if (p.barCount > 0)
+    {
+        PopupBarColumns(p, L, &trackX, &trackW);
+        const float trackH = S(12.0f);
+        for (int i = 0; i < p.barCount; ++i)
+        {
+            const float cy = L.barsY + L.barH * (i + 0.5f);
+            float f = p.bars[i].fraction;
+            if (f < 0.0f) f = 0.0f;
+            if (f > 1.0f) f = 1.0f;
+            FillRound(trackX, cy - trackH * 0.5f, trackW, trackH, trackH * 0.5f, COL_TRACK);
+            if (f > 0.0f)
+            {
+                float fillW = trackW * f;
+                if (fillW < trackH) fillW = trackH;
+                FillRound(trackX, cy - trackH * 0.5f, fillW, trackH, trackH * 0.5f, p.bars[i].color);
+            }
+        }
+    }
+
+    // Not DrawButtonHintShapes/Text: those also draw the footer's busy
+    // label, which belongs to the page under the dim.
+    for (int i = 0; i < p.hintCount; ++i)
+        DrawButtonSprite(hints[i].sprite, hints[i].badgeX, L.hintsCY);
+
+    // --- Text ---
+    g_UiFont.Begin();
+
+    const float textW = L.w - L.pad * 2.0f;
+    TextMid(L.x + L.pad, L.y + L.headH * 0.5f, 1.2f, COL_TEXT, p.heading, ATGFONT_TRUNCATED, textW, true);
+
+    for (int i = 0; i < p.rowCount; ++i)
+    {
+        const float y = L.rowsY + L.rowH * i;
+        TextFit(L.x + L.pad, y, 0.72f, COL_DIM, p.rows[i].label, textW);
+        TextFit(L.x + L.pad, y + LineHeight(0.72f) * 1.15f, 1.1f, COL_TEXT, p.rows[i].value, textW, true);
+    }
+
+    if (L.barsHeadY >= 0.0f)
+        TextFit(L.x + L.pad, L.barsHeadY, 0.72f, COL_DIM, p.barsHeading, textW);
+
+    for (int i = 0; i < p.barCount; ++i)
+    {
+        const float cy = L.barsY + L.barH * (i + 0.5f);
+        TextMid(L.x + L.pad, cy, 0.8f, COL_TEXT2, p.bars[i].label);
+        const char *value = p.bars[i].valueText;
+        TextMid(L.x + L.w - L.pad - TextWidth(value, 0.8f, true), cy, 0.8f, COL_TEXT, value, 0, 0.0f, true);
+    }
+
+    const float hintScale = HINT_LABEL_SCALE * g_M.textScale;
+    g_UiFont.SetBold(false);
+    g_UiFont.SetScaleFactors(hintScale, hintScale);
+    for (int i = 0; i < p.hintCount; ++i)
+        g_UiFont.DrawText(hints[i].labelX, TextTopForCenter(L.hintsCY, hintScale), COL_TEXT2, hints[i].label);
+
+    g_UiFont.SetScaleFactors(1.0f, 1.0f);
+    g_UiFont.End();
+}
+
 static void EndFrame()
 {
+    if (g_popupShown)
+    {
+        DrawShellPopup();
+        g_popupShown = false;
+    }
+
     if (g_startupFading)
     {
         // Timed from the first frame it's over, so whatever that frame cost
@@ -6098,10 +6397,8 @@ void RenderHomeFrame(HomePageView &view, const UiHint *hints, int hintCount)
     DrawButtonHintShapes(footer, footerCount, g_M.footerY);
     if (showToast)
         DrawToastQuads();
-    else if (view.clock != NULL && HelperConnected())
-        DrawHelperIcon(g_M.screenW - g_M.safeX - TextWidth(view.clock, 1.0f, true) - S(HELPER_ICON_GAP),
-                       L.navY + L.navH * 0.5f);
-    const bool homeHelperIcon = !showToast && view.clock != NULL && HelperConnected();
+    else if (view.clock != NULL)
+        DrawClockIcons(g_M.screenW - g_M.safeX - TextWidth(view.clock, 1.0f, true), L.navY + L.navH * 0.5f);
     g_pd3dDevice->SetRenderState(D3DRS_SCISSORTESTENABLE, FALSE);
 
     // --- Pass 2: all text, one Begin/End ---
@@ -6111,30 +6408,19 @@ void RenderHomeFrame(HomePageView &view, const UiHint *hints, int hintCount)
     TextMid(g_M.safeX, L.navY + L.navH * 0.5f, 1.0f, COL_TEXT,
             view.gamertag != NULL ? view.gamertag : "Omni360", 0, 0.0f, true);
 
-    // The clock and free space, right-aligned - unless the toast is showing,
-    // which takes that corner on every other page too.
+    // The clock, right-aligned, with its icons left of it - unless the toast
+    // is showing, which takes that corner on every other page too. Free space
+    // is on the Apps page; it no longer sits here.
     if (showToast)
     {
         DrawToastText();
     }
-    else
+    else if (view.clock != NULL)
     {
         const float right = g_M.screenW - g_M.safeX;
         const float centerY = L.navY + L.navH * 0.5f;
-        float x = right;
-        if (view.clock != NULL)
-        {
-            x -= TextWidth(view.clock, 1.0f, true);
-            TextMid(x, centerY, 1.0f, COL_TEXT, view.clock, 0, 0.0f, true);
-            NoteClockBox(right, centerY + LineHeight(1.0f) * 0.5f);
-        }
-        if (homeHelperIcon)
-            x -= S(HELPER_ICON_GAP) + S(HELPER_ICON_W);
-        if (view.storage != NULL)
-        {
-            x -= S(18.0f) + TextWidth(view.storage, 0.78f);
-            TextMid(x, centerY, 0.78f, COL_TEXT2, view.storage);
-        }
+        TextMid(right - TextWidth(view.clock, 1.0f, true), centerY, 1.0f, COL_TEXT, view.clock, 0, 0.0f, true);
+        NoteClockBox(right, centerY + LineHeight(1.0f) * 0.5f);
     }
 
     for (int i = 0; i < navCount; ++i)
