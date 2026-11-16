@@ -635,10 +635,10 @@ LANGUAGE_PICK_HELP = A cambia Omni360 a este idioma.
 LANGUAGE_PARTIAL_HELP = {1} de {2} líneas traducidas; el resto está en inglés.
 MACHINE_TRANSLATED = Traducción automática
 CLOCK_SETTING = Reloj
-CLOCK_FOLLOW_LANGUAGE = Según idioma
+CLOCK_FOLLOW_LANGUAGE = Automático
 CLOCK_12_HOUR = 12 horas
 CLOCK_24_HOUR = 24 horas
-CLOCK_HELP = Cómo se muestra la hora. «Según idioma» usa lo habitual donde se habla el idioma; izquierda y derecha lo cambian.
+CLOCK_HELP = Cómo se muestra la hora. «Automático» usa lo habitual donde se habla el idioma; izquierda y derecha lo cambian.
 CLOCK_12_FORMAT = {1}:{2} {3}
 CLOCK_24_FORMAT = {1}:{2}
 
