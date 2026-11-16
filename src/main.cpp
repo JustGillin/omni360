@@ -33,6 +33,7 @@ end-to-end on real hardware against a real 27-game library.
 #include "ServiceCheck.h"
 #include "SpeedTest.h"
 #include "GameListUI.h"
+#include "Strings.h" // Tr() - every string the UI shows
 #include "DownloadQueue.h"
 #include "SearchWorker.h"
 #include "CoverArt.h"
@@ -79,6 +80,8 @@ extern "C" NTSTATUS XexGetModuleHandle(PSZ moduleName, PHANDLE outHandle);
 #define EJECT_KEY "eject-after-install: " // "yes" opens the tray once a disc has installed
 #define DISC_SPEED_KEY "disc-speed: "       // 1 to 4, DiscWorker's spindle speed for installs
 #define STORE_FILTER_KEY "store-filter: "   // the Store letters' filters and order: "sort=a-z;regions=usa,eur;..."
+#define LANGUAGE_KEY "language: "           // a code from Strings.h ("fr"); absent follows the console's language
+#define CLOCK_KEY "clock: "                 // "12" or "24"; absent follows the language (its @clock)
 #define HOMEBREW_MIRROR_KEY "homebrew-mirror: " // for testing: homebrew from "http://PC:8000", a folder of the repo's .7z files
 #define CREDENTIALS_FILE "game:\\ArchiveOrgKeys.txt"
 #define CONTENT_PATH_KEY "xbla-path: "   // X-Store's name for it, kept so an old settings.txt still works
@@ -679,7 +682,7 @@ enum FolderKind
 static const char *const kFolderKindNames[FOLDER_KIND_COUNT] = { "Games", "Homebrew", "Apps", "Emulators" };
 static const char *const kFolderKindKeys[FOLDER_KIND_COUNT] = { GAMES_PATH_KEY, HOMEBREW_PATH_KEY, APPS_PATH_KEY,
                                                                 EMULATORS_PATH_KEY };
-static const char *const kFolderKindPages[FOLDER_KIND_COUNT] = { "Games", "Homebrew", "Apps", "Emulators" };
+static const StringId kFolderKindPages[FOLDER_KIND_COUNT] = { STR_NAV_GAMES, STR_NAV_HOMEBREW, STR_NAV_APPS, STR_NAV_EMULATORS };
 
 // Every kind but games has a shelf.
 static Shelf &ShelfFor(FolderKind kind)
@@ -1001,17 +1004,17 @@ static bool PromptKeys(std::string &accessKey, std::string &secretKey)
     NarrowToWide(accessKey.c_str(), currentAccess, 128);
 
     std::string typedAccess;
-    if (OpenKeyboardToString(XUSER_INDEX_ANY, &typedAccess, L"Archive.org Access Key",
-                             L"From archive.org/account/s3.php", currentAccess) != ERROR_SUCCESS)
+    if (OpenKeyboardToString(XUSER_INDEX_ANY, &typedAccess, TrW(STR_ARCHIVE_ORG_ACCESS_KEY),
+                             TrW(STR_FROM_ARCHIVE_ORG_ACCOUNT_S3), currentAccess) != ERROR_SUCCESS)
         return false;
     TrimInPlace(typedAccess);
 
     const bool haveSecret = !secretKey.empty();
 
     std::string typedSecret;
-    if (OpenKeyboardToString(XUSER_INDEX_ANY, &typedSecret, L"Archive.org Secret Key",
-                             haveSecret ? L"Leave blank to keep your current secret key"
-                                        : L"From archive.org/account/s3.php",
+    if (OpenKeyboardToString(XUSER_INDEX_ANY, &typedSecret, TrW(STR_ARCHIVE_ORG_SECRET_KEY),
+                             haveSecret ? TrW(STR_LEAVE_BLANK_TO_KEEP_YOUR)
+                                        : TrW(STR_FROM_ARCHIVE_ORG_ACCOUNT_S3),
                              L"") != ERROR_SUCCESS)
         return false;
     TrimInPlace(typedSecret);
@@ -1060,13 +1063,13 @@ static KeyEntryOutcome EnterCheckAndSaveKeys(std::string &accessKey, std::string
         char header[IAS3_AUTH_HEADER_MAX];
         if (!BuildIas3AuthHeader(accessKey, secretKey, header, sizeof(header)))
         {
-            if (ShowConfirmUI("Keys too long", "Those are too long to be archive.org keys.",
-                              "Copy them again from archive.org/account/s3.php.", "Try again"))
+            if (ShowConfirmUI(Tr(STR_KEYS_TOO_LONG), Tr(STR_THOSE_ARE_TOO_LONG_TO),
+                              Tr(STR_COPY_THEM_AGAIN_FROM_ARCHIVE), Tr(STR_TRY_AGAIN)))
                 continue;
             return KEY_ENTRY_FAILED;
         }
 
-        RenderStatusFrame("Checking keys", "Asking archive.org whether these keys work", NULL);
+        RenderStatusFrame(Tr(STR_CHECKING_KEYS), Tr(STR_ASKING_ARCHIVE_ORG_WHETHER_THESE), NULL);
 
         char reason[160] = "";
         KeyCheckResult check = CheckArchiveOrgKeys(header, reason, sizeof(reason), dprintf);
@@ -1075,26 +1078,26 @@ static KeyEntryOutcome EnterCheckAndSaveKeys(std::string &accessKey, std::string
         {
             // archive.org's own wording where it gave one - it can say which
             // of the two keys it objects to.
-            if (ShowConfirmUI("Keys not accepted", "archive.org didn't accept those keys.",
-                              reason[0] != '\0' ? reason : "Check them at archive.org/account/s3.php.",
-                              "Try again"))
+            if (ShowConfirmUI(Tr(STR_KEYS_NOT_ACCEPTED), Tr(STR_ARCHIVE_ORG_DIDNT_ACCEPT_THOSE),
+                              reason[0] != '\0' ? reason : Tr(STR_CHECK_THEM_AT_ARCHIVE_ORG),
+                              Tr(STR_TRY_AGAIN)))
                 continue;
             return KEY_ENTRY_FAILED;
         }
 
         if (!SaveKeys(accessKey, secretKey))
         {
-            ShowMessageUI("Keys not saved", "ArchiveOrgKeys.txt could not be written.",
-                          "Your previous keys, if any, are unchanged.");
+            ShowMessageUI(Tr(STR_KEYS_NOT_SAVED), Tr(STR_ARCHIVEORGKEYS_TXT_COULD_NOT_BE),
+                          Tr(STR_YOUR_PREVIOUS_KEYS_IF_ANY));
             return KEY_ENTRY_FAILED;
         }
 
         if (check == KEYS_ACCEPTED)
-            ShowMessageUI("Keys saved", "archive.org accepted your keys.",
-                          "They're saved on this console for your next download.");
+            ShowMessageUI(Tr(STR_KEYS_SAVED), Tr(STR_ARCHIVE_ORG_ACCEPTED_YOUR_KEYS),
+                          Tr(STR_THEYRE_SAVED_ON_THIS_CONSOLE));
         else
-            ShowMessageUI("Keys saved", "Saved, but not checked - archive.org didn't answer.",
-                          "If a download fails, check them again in Settings.");
+            ShowMessageUI(Tr(STR_KEYS_SAVED), Tr(STR_SAVED_BUT_NOT_CHECKED_ARCHIVE),
+                          Tr(STR_IF_A_DOWNLOAD_FAILS_CHECK));
 
         return KEY_ENTRY_SAVED;
     }
@@ -1157,9 +1160,9 @@ static void ReadStorageStatus(const char *path, StorageStatus *out)
     char freeText[64] = "", totalText[64] = "";
     FormatBytes(freeToCaller.QuadPart, freeText, sizeof(freeText));
     FormatBytes(total.QuadPart, totalText, sizeof(totalText));
-    _snprintf(out->detail, sizeof(out->detail), "%s free", freeText);
+    TrFormat(out->detail, sizeof(out->detail), STR_FREE_SPACE, freeText);
     out->detail[sizeof(out->detail) - 1] = '\0';
-    _snprintf(out->total, sizeof(out->total), "of %s", totalText);
+    TrFormat(out->total, sizeof(out->total), STR_OF_TOTAL, totalText);
     out->total[sizeof(out->total) - 1] = '\0';
 
     out->used = (float)(1.0 - (double)freeToCaller.QuadPart / (double)total.QuadPart);
@@ -1168,17 +1171,17 @@ static void ReadStorageStatus(const char *path, StorageStatus *out)
 static void ShowNotEnoughSpace(const char *path, unsigned long long needed, unsigned long long freeSpace)
 {
     char drive[16];
-    DriveLabel(path, drive, sizeof(drive), "The drive");
+    DriveLabel(path, drive, sizeof(drive), Tr(STR_THE_DRIVE));
 
     char neededText[64] = "", freeText[64] = "";
     FormatBytes(needed, neededText, sizeof(neededText));
     FormatBytes(freeSpace, freeText, sizeof(freeText));
 
     char message[160];
-    _snprintf(message, sizeof(message), "This needs %s, but %s has %s free.", neededText, drive, freeText);
+    TrFormat(message, sizeof(message), STR_NEEDS_SPACE, neededText, drive, freeText);
     message[sizeof(message) - 1] = '\0';
 
-    ShowMessageUI("Not enough space", message, "Free up some space on the drive and try again.");
+    ShowMessageUI(Tr(STR_NOT_ENOUGH_SPACE), message, Tr(STR_FREE_UP_SOME_SPACE_ON));
 }
 
 static bool GetArchiveOrgAuthHeader(char *authHeader, unsigned long long authHeaderSize)
@@ -1202,17 +1205,17 @@ static bool GetArchiveOrgAuthHeader(char *authHeader, unsigned long long authHea
         // the screen (see SetConsoleQuiet), and this is the one piece of
         // guidance the user genuinely cannot act without - it tells them
         // where to get the keys they're about to be asked for.
-        ShowMessageUI("archive.org keys needed",
-                      "Get your access and secret key at archive.org/account/s3.php",
-                      "Press A to type them in, or put them in ArchiveOrgKeys.txt beforehand.");
+        ShowMessageUI(Tr(STR_ARCHIVE_ORG_KEYS_NEEDED),
+                      Tr(STR_GET_YOUR_ACCESS_AND_SECRET),
+                      Tr(STR_PRESS_A_TO_TYPE_THEM));
 
         KeyEntryOutcome entry = EnterCheckAndSaveKeys(accessKey, secretKey);
 
         if (entry == KEY_ENTRY_CANCELLED)
         {
             dprintf("ERROR: no keys entered\n");
-            ShowMessageUI("No keys entered", "Both keys are required to download from archive.org.",
-                          "You can add them any time in Settings - press Y on the game list.");
+            ShowMessageUI(Tr(STR_NO_KEYS_ENTERED), Tr(STR_BOTH_KEYS_ARE_REQUIRED_TO),
+                          Tr(STR_YOU_CAN_ADD_THEM_ANY));
         }
 
         if (entry != KEY_ENTRY_SAVED)
@@ -1225,8 +1228,8 @@ static bool GetArchiveOrgAuthHeader(char *authHeader, unsigned long long authHea
     if (!BuildIas3AuthHeader(accessKey, secretKey, authHeader, authHeaderSize))
     {
         dprintf("ERROR: could not build auth header from saved keys - delete %s and re-enter them\n", CREDENTIALS_FILE);
-        ShowMessageUI("Saved keys unusable", "The saved keys are too long to be archive.org keys.",
-                      "Re-enter them in Settings - press Y on the game list.");
+        ShowMessageUI(Tr(STR_SAVED_KEYS_UNUSABLE), Tr(STR_THE_SAVED_KEYS_ARE_TOO),
+                      Tr(STR_RE_ENTER_THEM_IN_SETTINGS));
         return false;
     }
 
@@ -1628,7 +1631,7 @@ static void SaveLibrary(Library &lib, const char *gamesPath)
 
 static void ScanLibrary(Library &lib, const char *gamesPath)
 {
-    RenderStatusFrame("Scanning", "Reading your installed games", gamesPath);
+    RenderStatusFrame(Tr(STR_SCANNING), Tr(STR_READING_YOUR_INSTALLED_GAMES), gamesPath);
 
     // The cover cache was built from the old scan's images - drop both.
     ReleaseGameListIcons();
@@ -1668,7 +1671,10 @@ enum SettingsRow
     SETTINGS_ROW_HELPER_UNPAIR,
     SETTINGS_ROW_HELPER_USE,   // whether downloads go through it
     SETTINGS_ROW_INSTALL_TYPE, // Games on Demand or folder games, for Store installs
-    SETTINGS_ROW_RESYNC_LIBRARY // re-read the library from disk and re-fetch missing icons
+    SETTINGS_ROW_RESYNC_LIBRARY, // re-read the library from disk and re-fetch missing icons
+    SETTINGS_ROW_LANGUAGE,     // a language's row: A picks it (arg is its index)
+    SETTINGS_ROW_LANGUAGE_REFRESH, // looks again for language files beside Omni360
+    SETTINGS_ROW_CLOCK         // 12- or 24-hour, or what the language says: left and right
 };
 
 // Rescans with the library folders now in settings.txt.
@@ -1682,7 +1688,7 @@ static void RescanFolders(Library &lib, const char *gamesPath, SettingsOutcome &
 // thread's first read is done, which usually it long is.
 static void RescanShelves(const Library &lib)
 {
-    RenderStatusFrame("Scanning", "Looking for apps, homebrew and emulators", NULL);
+    RenderStatusFrame(Tr(STR_SCANNING), Tr(STR_LOOKING_FOR_APPS_HOMEBREW_AND), NULL);
     while (!g_shelvesRead)
         Sleep(20);
     for (int s = 0; s < SHELF_COUNT; ++s)
@@ -1705,14 +1711,14 @@ static void RescanKind(FolderKind kind, Library &lib, const char *gamesPath, Set
 static void TooManyFolders(FolderKind kind)
 {
     char detail[64];
-    _snprintf(detail, sizeof(detail), "Up to %d %s folders can be added.",
-              kind == FOLDER_GAMES ? MAX_MORE_GAMES_PATHS : MAX_SHELF_PATHS,
-              kind == FOLDER_GAMES       ? "more games"
-              : kind == FOLDER_HOMEBREW  ? "homebrew"
-              : kind == FOLDER_EMULATORS ? "emulators"
-                                         : "apps");
+    TrFormat(detail, sizeof(detail),
+             kind == FOLDER_GAMES       ? STR_TOO_MANY_GAMES_FOLDERS
+             : kind == FOLDER_HOMEBREW  ? STR_TOO_MANY_HOMEBREW_FOLDERS
+             : kind == FOLDER_EMULATORS ? STR_TOO_MANY_EMULATORS_FOLDERS
+                                        : STR_TOO_MANY_APPS_FOLDERS,
+             TrNum(kind == FOLDER_GAMES ? MAX_MORE_GAMES_PATHS : MAX_SHELF_PATHS));
     detail[sizeof(detail) - 1] = '\0';
-    ShowMessageUI("Too many folders", "Remove one of them first.", detail);
+    ShowMessageUI(Tr(STR_TOO_MANY_FOLDERS), Tr(STR_REMOVE_ONE_OF_THEM_FIRST), detail);
 }
 
 // A on a folder's row: scanned, it's removed - what's in it stays where it
@@ -1730,9 +1736,9 @@ static void ToggleLibraryFolder(int index, Library &lib, const char *gamesPath, 
         if (!row.suggested)
         {
             char message[MAX_TEXT_LENGTH + 64];
-            _snprintf(message, sizeof(message), "Stop looking in %s?", row.path);
+            TrFormat(message, sizeof(message), STR_STOP_LOOKING_IN, row.path);
             message[sizeof(message) - 1] = '\0';
-            if (!ShowConfirmUI("Folder", message, "What's in it stays where it is.", "Remove"))
+            if (!ShowConfirmUI(Tr(STR_FOLDER), message, Tr(STR_WHATS_IN_IT_STAYS_WHERE), Tr(STR_REMOVE)))
                 return;
         }
     }
@@ -1744,7 +1750,7 @@ static void ToggleLibraryFolder(int index, Library &lib, const char *gamesPath, 
 
     if (!WriteFolderKind(row.kind, gamesPath, row.scanned ? row.path : NULL, row.scanned ? NULL : row.path))
     {
-        ShowMessageUI("Not saved", "settings.txt could not be written.", row.path);
+        ShowMessageUI(Tr(STR_NOT_SAVED), Tr(STR_SETTINGS_TXT_COULD_NOT_BE), row.path);
         return;
     }
     dprintf("%s folder %s %s\n", kFolderKindNames[row.kind], row.path, row.scanned ? "removed" : "added");
@@ -1779,7 +1785,7 @@ static void StepFolderKind(int index, int step, Library &lib, const char *gamesP
     // one of them rather than neither.
     if (!WriteFolderKind(kind, gamesPath, NULL, row.path) || !WriteFolderKind(row.kind, gamesPath, row.path, NULL))
     {
-        ShowMessageUI("Not saved", "settings.txt could not be written.", row.path);
+        ShowMessageUI(Tr(STR_NOT_SAVED), Tr(STR_SETTINGS_TXT_COULD_NOT_BE), row.path);
         return;
     }
     dprintf("Folder %s now holds %s, was %s\n", row.path, kFolderKindNames[kind], kFolderKindNames[row.kind]);
@@ -1795,36 +1801,37 @@ static void StepFolderKind(int index, int step, Library &lib, const char *gamesP
 static void AddLibraryFolder(Library &lib, const char *gamesPath, SettingsOutcome &outcome)
 {
     std::string typed;
-    if (OpenKeyboardToString(XUSER_INDEX_ANY, &typed, L"Add Folder",
-                             L"A folder of games, homebrew or apps, like Usb0:\\Games", L"Usb0:\\") != ERROR_SUCCESS)
+    if (OpenKeyboardToString(XUSER_INDEX_ANY, &typed, TrW(STR_ADD_FOLDER),
+                             TrW(STR_A_FOLDER_OF_GAMES_HOMEBREW), L"Usb0:\\") != ERROR_SUCCESS)
         return; // cancelled
 
     char newPath[MAX_TEXT_LENGTH];
     if (!NormaliseGamesPath(typed, newPath, sizeof(newPath)))
     {
-        ShowMessageUI("Not a folder path", "Include the drive, like Hdd1:\\Games or Usb0:\\Games.", typed.c_str());
+        ShowMessageUI(Tr(STR_NOT_A_FOLDER_PATH), Tr(STR_INCLUDE_THE_DRIVE_LIKE_HDD1), typed.c_str());
         return;
     }
     if (!FolderExists(newPath))
     {
-        ShowMessageUI("Folder not found", "There is no folder at that path.", newPath);
+        ShowMessageUI(Tr(STR_FOLDER_NOT_FOUND), Tr(STR_THERE_IS_NO_FOLDER_AT), newPath);
         return;
     }
     if (FolderScannedAsAnything(newPath, gamesPath))
     {
-        ShowMessageUI("Already added", "That folder is looked in already. Its row in Settings says what for.",
+        ShowMessageUI(Tr(STR_ALREADY_ADDED), Tr(STR_THAT_FOLDER_IS_LOOKED_IN),
                       newPath);
         return;
     }
 
-    static const char *labels[FOLDER_KIND_COUNT] = { "Games", "Homebrew", "Apps", "Emulators" };
-    static const char *sublabels[FOLDER_KIND_COUNT] = {
-        "Games on Demand, arcade games and extracted games - Your Library",
-        "Homebrew games - the Homebrew page",
-        "Dashboards, file managers and tools - the Apps page",
-        "Emulators - the Emulators page",
+    const char *labels[FOLDER_KIND_COUNT] = { Tr(STR_NAV_GAMES), Tr(STR_NAV_HOMEBREW), Tr(STR_NAV_APPS),
+                                              Tr(STR_NAV_EMULATORS) };
+    const char *sublabels[FOLDER_KIND_COUNT] = {
+        Tr(STR_FOLDER_GAMES_HELP),
+        Tr(STR_FOLDER_HOMEBREW_HELP),
+        Tr(STR_FOLDER_APPS_HELP),
+        Tr(STR_FOLDER_EMULATORS_HELP),
     };
-    const int chosen = ShowChoiceUI("What's in this folder?", newPath, labels, sublabels, FOLDER_KIND_COUNT, L"Choose");
+    const int chosen = ShowChoiceUI(Tr(STR_WHATS_IN_THIS_FOLDER), newPath, labels, sublabels, FOLDER_KIND_COUNT, TrW(STR_CHOOSE));
     if (chosen < 0)
         return;
     const FolderKind kind = (FolderKind)chosen;
@@ -1836,7 +1843,7 @@ static void AddLibraryFolder(Library &lib, const char *gamesPath, SettingsOutcom
 
     if (!WriteFolderKind(kind, gamesPath, NULL, newPath))
     {
-        ShowMessageUI("Not saved", "settings.txt could not be written.", newPath);
+        ShowMessageUI(Tr(STR_NOT_SAVED), Tr(STR_SETTINGS_TXT_COULD_NOT_BE), newPath);
         return;
     }
     dprintf("%s folder %s added\n", kFolderKindNames[kind], newPath);
@@ -1849,14 +1856,14 @@ static void ChangeGamesFolder(Library &lib, char *gamesPath, size_t gamesPathSiz
     NarrowToWide(gamesPath, current, MAX_TEXT_LENGTH);
 
     std::string typed;
-    if (OpenKeyboardToString(XUSER_INDEX_ANY, &typed, L"Games Folder",
-                             L"Where your installed games are - usually Hdd1:\\Content\\0000000000000000", current) != ERROR_SUCCESS)
+    if (OpenKeyboardToString(XUSER_INDEX_ANY, &typed, TrW(STR_GAMES_FOLDER),
+                             TrW(STR_WHERE_YOUR_INSTALLED_GAMES_ARE), current) != ERROR_SUCCESS)
         return; // cancelled
 
     char newPath[MAX_TEXT_LENGTH];
     if (!NormaliseGamesPath(typed, newPath, sizeof(newPath)) || strlen(newPath) >= gamesPathSize)
     {
-        ShowMessageUI("Not a folder path", "Include the drive, like Hdd1:\\Games or Usb0:\\Games.",
+        ShowMessageUI(Tr(STR_NOT_A_FOLDER_PATH), Tr(STR_INCLUDE_THE_DRIVE_LIKE_HDD1),
                       typed.c_str());
         return;
     }
@@ -1868,7 +1875,7 @@ static void ChangeGamesFolder(Library &lib, char *gamesPath, size_t gamesPathSiz
     // is still in place rather than after it has been overwritten.
     if (!FolderExists(newPath))
     {
-        ShowMessageUI("Folder not found", "There is no folder at that path.", newPath);
+        ShowMessageUI(Tr(STR_FOLDER_NOT_FOUND), Tr(STR_THERE_IS_NO_FOLDER_AT), newPath);
         return;
     }
 
@@ -1895,8 +1902,8 @@ static void ChangeGamesFolder(Library &lib, char *gamesPath, size_t gamesPathSiz
 
     if (!saved)
     {
-        ShowMessageUI("Not saved", "Using this folder for now, but settings.txt could not be written.",
-                      "It will go back to the old folder next time Omni360 starts.");
+        ShowMessageUI(Tr(STR_NOT_SAVED), Tr(STR_USING_THIS_FOLDER_FOR_NOW),
+                      Tr(STR_IT_WILL_GO_BACK_TO));
     }
 }
 
@@ -1917,20 +1924,20 @@ static char g_updatingTo[32];
 static void DrawUpdateProgress(unsigned long long done, unsigned long long total)
 {
     char message[64], detail[96], doneText[32] = "", totalText[32] = "";
-    _snprintf(message, sizeof(message), "Downloading Omni360 %s", g_updatingTo);
+    TrFormat(message, sizeof(message), STR_DOWNLOADING_OMNI360, g_updatingTo);
     message[sizeof(message) - 1] = '\0';
     FormatBytes(done, doneText, sizeof(doneText));
     if (total > 0)
     {
         FormatBytes(total, totalText, sizeof(totalText));
-        _snprintf(detail, sizeof(detail), "%s of %s", doneText, totalText);
+        TrFormat(detail, sizeof(detail), STR_SIZE_OF_SIZE, doneText, totalText);
     }
     else
     {
         _snprintf(detail, sizeof(detail), "%s", doneText);
     }
     detail[sizeof(detail) - 1] = '\0';
-    RenderStatusFrame("Updating", message, detail);
+    RenderStatusFrame(Tr(STR_UPDATING), message, detail);
 }
 
 // Restarting ends whatever's running, so updating waits for the Queue.
@@ -1947,20 +1954,22 @@ static void ShowUpdate()
     if (GetUpdateState(&info, NULL) != UPDATE_AVAILABLE)
     {
         StartUpdateCheck();
-        ShowShellToast("Checking for updates", "Asking GitHub for the latest version", UI_TOAST_INFO);
+        ShowShellToast(Tr(STR_CHECKING_FOR_UPDATES), Tr(STR_ASKING_GITHUB_FOR_THE_LATEST), UI_TOAST_INFO);
         return;
     }
 
     char heading[64];
-    _snprintf(heading, sizeof(heading), "Omni360 %s", info.version);
+    TrFormat(heading, sizeof(heading), STR_OMNI360_VERSION, info.version);
     heading[sizeof(heading) - 1] = '\0';
 
     const bool installable = UpdateInstallable(info);
     const bool busy = AnythingQueued();
-    const char *foot = !installable ? "Get it from " UPDATE_RELEASES_PAGE
-                     : busy        ? "To update, let what's in the Queue finish, or stop it, first."
-                                   : "Update installs it and restarts Omni360. Your settings, keys and games stay.";
-    if (!ShowNotesUI(heading, info.title, info.notes, foot, installable && !busy ? L"Update" : NULL))
+    char getItFrom[160];
+    TrFormat(getItFrom, sizeof(getItFrom), STR_UPDATE_GET_IT_FROM, UPDATE_RELEASES_PAGE);
+    const char *foot = !installable ? getItFrom
+                     : busy        ? Tr(STR_UPDATE_BUSY)
+                                   : Tr(STR_UPDATE_INSTALLS);
+    if (!ShowNotesUI(heading, info.title, info.notes, foot, installable && !busy ? TrW(STR_UPDATE) : NULL))
         return;
 
     _snprintf(g_updatingTo, sizeof(g_updatingTo), "%s", info.version);
@@ -1971,14 +1980,14 @@ static void ShowUpdate()
     const UpdateInstallResult result = InstallUpdate(info, DrawUpdateProgress, xexPath, sizeof(xexPath));
     if (result != UPDATE_INSTALL_OK)
     {
-        ShowMessageUI("Couldn't update", UpdateInstallResultText(result), "Omni360 hasn't changed.");
+        ShowMessageUI(Tr(STR_COULDNT_UPDATE), UpdateInstallResultText(result), Tr(STR_OMNI360_HASNT_CHANGED));
         return;
     }
 
     char message[96];
-    _snprintf(message, sizeof(message), "Omni360 %s is installed.", info.version);
+    TrFormat(message, sizeof(message), STR_OMNI360_INSTALLED, info.version);
     message[sizeof(message) - 1] = '\0';
-    ShowMessageUI("Updated", message, "It starts when you continue. The previous version is kept as .old beside it.");
+    ShowMessageUI(Tr(STR_UPDATED), message, Tr(STR_IT_STARTS_WHEN_YOU_CONTINUE));
 
     dprintf("Restarting into %s\n", xexPath);
     XLaunchNewImage(xexPath, 0);
@@ -2014,10 +2023,10 @@ static const char *DiscSpeedName(int speed)
 {
     switch (speed)
     {
-    case 1:  return "Slowest";
-    case 2:  return "Slow";
-    case 3:  return "Fast";
-    default: return "Full";
+    case 1:  return Tr(STR_SPEED_SLOWEST);
+    case 2:  return Tr(STR_SPEED_SLOW);
+    case 3:  return Tr(STR_SPEED_FAST);
+    default: return Tr(STR_SPEED_FULL);
     }
 }
 
@@ -2031,9 +2040,90 @@ static void StepDiscSpeed(int step)
     _snprintf(value, sizeof(value), "%d", speed);
     value[sizeof(value) - 1] = '\0';
     if (!SetSettingsValue(DISC_SPEED_KEY, value))
-        ShowMessageUI("Not saved", "settings.txt could not be written.", NULL);
+        ShowMessageUI(Tr(STR_NOT_SAVED), Tr(STR_SETTINGS_TXT_COULD_NOT_BE), NULL);
     SetDiscReadSpeed(speed);
     dprintf("Disc read speed set to %d (%s)\n", speed, DiscSpeedName(speed));
+}
+
+// The language picked in Settings, or the console's own when none has been.
+// Read by hand rather than with GetSettingsPath, which takes nothing shorter
+// than three characters - and most codes are two.
+static void LanguageSetting(char *out, size_t outSize)
+{
+    _snprintf(out, outSize, "%s", ConsoleLanguageCode());
+    out[outSize - 1] = '\0';
+
+    FILE *fd = fopen(SETTINGS_FILE, "r");
+    if (fd == NULL)
+        return;
+    char line[128];
+    const size_t keyLen = strlen(LANGUAGE_KEY);
+    while (fgets(line, sizeof(line), fd) != NULL)
+    {
+        if (line[0] != '#' && strncmp(line, LANGUAGE_KEY, keyLen) == 0)
+        {
+            char *value = line + keyLen;
+            value[strcspn(value, " \t\r\n")] = '\0';
+            if (value[0] != '\0')
+            {
+                _snprintf(out, outSize, "%s", value);
+                out[outSize - 1] = '\0';
+            }
+            break;
+        }
+    }
+    fclose(fd);
+}
+
+// A on a language's row: that one, in use at once and saved. Text already
+// shown elsewhere - a finished job's result in the Queue - keeps the
+// language it was written in.
+// The clock's setting: "12" or "24" pins it; anything else, or none,
+// follows the language.
+static ClockStyle ClockSetting()
+{
+    ClockStyle style = CLOCK_FOLLOW_LANGUAGE;
+    FILE *fd = fopen(SETTINGS_FILE, "r");
+    if (fd == NULL)
+        return style;
+    char line[64];
+    const size_t keyLen = strlen(CLOCK_KEY);
+    while (fgets(line, sizeof(line), fd) != NULL)
+    {
+        if (line[0] != '#' && strncmp(line, CLOCK_KEY, keyLen) == 0)
+        {
+            const int hours = atoi(line + keyLen);
+            style = hours == 12 ? CLOCK_12_HOUR : hours == 24 ? CLOCK_24_HOUR : CLOCK_FOLLOW_LANGUAGE;
+            break;
+        }
+    }
+    fclose(fd);
+    return style;
+}
+
+// Left and right on the clock's row: through language, 12-hour, 24-hour,
+// stopping at either end like the disc speed.
+static void StepClock(int step)
+{
+    const int next = (int)GetClockStyle() + step;
+    if (next < 0 || next >= CLOCK_STYLE_COUNT)
+        return;
+    SetClockStyle((ClockStyle)next);
+    const char *value = next == CLOCK_12_HOUR ? "12" : next == CLOCK_24_HOUR ? "24" : "language";
+    if (!SetSettingsValue(CLOCK_KEY, value))
+        ShowMessageUI(Tr(STR_NOT_SAVED), Tr(STR_SETTINGS_TXT_COULD_NOT_BE), NULL);
+    dprintf("Clock set to %s\n", value);
+}
+
+static void PickLanguage(int index)
+{
+    if (index < 0 || index >= LanguageCount())
+        return;
+    const int now = SetLanguage(LanguageCode(index));
+    SetStoreLocale(XboxLocaleForLanguage()); // game pages' synopsis and genres
+    if (!SetSettingsValue(LANGUAGE_KEY, LanguageCode(now)))
+        ShowMessageUI(Tr(STR_NOT_SAVED), Tr(STR_SETTINGS_TXT_COULD_NOT_BE), NULL);
+    dprintf("Language set to %s (%s)\n", LanguageCode(now), LanguageName(now));
 }
 
 // Left, right or A on the install type's row: the other one, saved.
@@ -2041,7 +2131,7 @@ static void ToggleInstallType()
 {
     const bool asFolder = !InstallAsFolderSetting();
     if (!SetSettingsValue(INSTALL_TYPE_KEY, asFolder ? "folder" : "god"))
-        ShowMessageUI("Not saved", "settings.txt could not be written.", NULL);
+        ShowMessageUI(Tr(STR_NOT_SAVED), Tr(STR_SETTINGS_TXT_COULD_NOT_BE), NULL);
     SetGameInstallAsFolder(asFolder);
     dprintf("Game installs set to %s\n", asFolder ? "folder games" : "Games on Demand");
 }
@@ -2050,48 +2140,48 @@ static void ToggleInstallType()
 // same code on both screens shows it's this console asking.
 static void PairPcHelper()
 {
-    RenderStatusFrame("Pairing", "Talking to your PC", NULL);
+    RenderStatusFrame(Tr(STR_PAIRING), Tr(STR_TALKING_TO_YOUR_PC), NULL);
     char requestId[40], code[8], token[64], id[32], message[128];
     if (!PcHelperRequestPair(requestId, sizeof(requestId), code, sizeof(code), message, sizeof(message)))
     {
-        ShowMessageUI("Not paired", message, NULL);
+        ShowMessageUI(Tr(STR_NOT_PAIRED), message, NULL);
         return;
     }
 
     char detail[64];
-    _snprintf(detail, sizeof(detail), "Code %s", code);
+    TrFormat(detail, sizeof(detail), STR_PAIR_CODE, code);
     detail[sizeof(detail) - 1] = '\0';
     PcHelperPairResult result = PAIR_WAITING;
     for (int tries = 0; tries < 7 && result == PAIR_WAITING; ++tries) // the helper gives up after 2 minutes
     {
-        RenderStatusFrame("Allow it on your PC", "Check your PC shows the same code, and choose Yes.", detail);
+        RenderStatusFrame(Tr(STR_ALLOW_IT_ON_YOUR_PC), Tr(STR_CHECK_YOUR_PC_SHOWS_THE), detail);
         result = PcHelperWaitPair(requestId, token, sizeof(token), id, sizeof(id), message, sizeof(message));
     }
     if (result != PAIR_ALLOWED)
     {
-        ShowMessageUI("Not paired", result == PAIR_WAITING ? "Nobody answered on your PC." : message, NULL);
+        ShowMessageUI(Tr(STR_NOT_PAIRED), result == PAIR_WAITING ? Tr(STR_NOBODY_ANSWERED_ON_YOUR_PC) : message, NULL);
         return;
     }
     if (!SetSettingsValue(HELPER_ID_KEY, id) || !SetSettingsValue(HELPER_TOKEN_KEY, token))
     {
-        ShowMessageUI("Not saved", "settings.txt could not be written.", NULL);
+        ShowMessageUI(Tr(STR_NOT_SAVED), Tr(STR_SETTINGS_TXT_COULD_NOT_BE), NULL);
         return;
     }
     ApplyPcHelperSettings();
-    ShowMessageUI("Paired", "Store downloads go through your PC while the helper is running.", NULL);
+    ShowMessageUI(Tr(STR_PAIRED), Tr(STR_STORE_DOWNLOADS_GO_THROUGH_YOUR), NULL);
 }
 
 static void UnpairPcHelper()
 {
     if (!SetSettingsValue(HELPER_ID_KEY, "") || !SetSettingsValue(HELPER_TOKEN_KEY, ""))
-        ShowMessageUI("Not saved", "settings.txt could not be written.", NULL);
+        ShowMessageUI(Tr(STR_NOT_SAVED), Tr(STR_SETTINGS_TXT_COULD_NOT_BE), NULL);
     ApplyPcHelperSettings();
 }
 
 static void TogglePcHelperUse()
 {
     if (!SetSettingsValue(HELPER_USE_KEY, PcHelperUseSetting() ? "off" : "yes"))
-        ShowMessageUI("Not saved", "settings.txt could not be written.", NULL);
+        ShowMessageUI(Tr(STR_NOT_SAVED), Tr(STR_SETTINGS_TXT_COULD_NOT_BE), NULL);
     ApplyPcHelperSettings();
 }
 
@@ -2099,7 +2189,7 @@ static void ToggleEjectAfterInstall()
 {
     const bool on = !EjectAfterInstallSetting();
     if (!SetSettingsValue(EJECT_KEY, on ? "yes" : "off"))
-        ShowMessageUI("Not saved", "settings.txt could not be written.", NULL);
+        ShowMessageUI(Tr(STR_NOT_SAVED), Tr(STR_SETTINGS_TXT_COULD_NOT_BE), NULL);
     SetEjectAfterInstall(on);
 }
 
@@ -2107,7 +2197,7 @@ static void ToggleUiSounds()
 {
     const bool on = !UiSoundsSetting();
     if (!SetSettingsValue(SOUNDS_KEY, on ? "yes" : "off"))
-        ShowMessageUI("Not saved", "settings.txt could not be written.", NULL);
+        ShowMessageUI(Tr(STR_NOT_SAVED), Tr(STR_SETTINGS_TXT_COULD_NOT_BE), NULL);
     SetUiSoundsOn(on);
 }
 
@@ -2115,24 +2205,24 @@ static void ToggleUpdateChecks()
 {
     const bool on = !UpdateChecksOn();
     if (!SetSettingsValue(UPDATE_CHECK_KEY, on ? "yes" : "off"))
-        ShowMessageUI("Not saved", "settings.txt could not be written.", NULL);
+        ShowMessageUI(Tr(STR_NOT_SAVED), Tr(STR_SETTINGS_TXT_COULD_NOT_BE), NULL);
 }
 
 static void RemoveKeys(SettingsOutcome &outcome)
 {
-    if (!ShowConfirmUI("Remove keys", "Remove the archive.org keys saved on this console?",
-                       "You'll need to add them again before you can download.", "Remove"))
+    if (!ShowConfirmUI(Tr(STR_REMOVE_KEYS), Tr(STR_REMOVE_THE_ARCHIVE_ORG_KEYS),
+                       Tr(STR_YOULL_NEED_TO_ADD_THEM), Tr(STR_REMOVE)))
         return;
 
     if (remove(CREDENTIALS_FILE) != 0)
     {
-        ShowMessageUI("Could not remove", "ArchiveOrgKeys.txt could not be deleted.", NULL);
+        ShowMessageUI(Tr(STR_COULD_NOT_REMOVE), Tr(STR_ARCHIVEORGKEYS_TXT_COULD_NOT_BE_2), NULL);
         return;
     }
 
     dprintf("Saved archive.org keys removed\n");
     outcome.keysChanged = true;
-    ShowMessageUI("Keys removed", "Your archive.org keys have been removed from this console.", NULL);
+    ShowMessageUI(Tr(STR_KEYS_REMOVED), Tr(STR_YOUR_ARCHIVE_ORG_KEYS_HAVE), NULL);
 }
 
 // The settings page, as GameListUI's SettingsRowView rows: the library
@@ -2209,20 +2299,22 @@ enum SettingsSection
     SETTINGS_SECTION_COUNT
 };
 
-static const char *const kSettingsSectionNames[SETTINGS_SECTION_COUNT] =
+static const StringId kSettingsSectionIds[SETTINGS_SECTION_COUNT] =
 {
-    "General",
-    "Assets",
-    "Storage",
-    "Language",
-    "About"
+    STR_SETTINGS_GENERAL,
+    STR_SETTINGS_ASSETS,
+    STR_SETTINGS_STORAGE,
+    STR_SETTINGS_LANGUAGE,
+    STR_SETTINGS_ABOUT
 };
+// Looked up when the sidebar is drawn, so they follow the language.
+static const char *kSettingsSectionNames[SETTINGS_SECTION_COUNT];
 
 // Something not built yet: its name, "Coming soon", and nothing to press.
 static void AddComingSoonRow(SettingsPage &page, const char *label, const char *help)
 {
     SettingsRowView &row = AddSettingsRow(page, SETTINGS_VIEW_LINE, label);
-    row.status = "Coming soon";
+    row.status = Tr(STR_COMING_SOON);
     row.help = help;
 }
 
@@ -2245,23 +2337,20 @@ static void BuildSettingsPage(SettingsPage &page, const Library &lib, const char
         // itself, so it's clear where DLC, updates and arcade games land - they
         // follow this drive, but always in its Content folder.
         if (_stricmp(g_contentBase, gamesPath) == 0)
-            _snprintf(page.installHelp, sizeof(page.installHelp),
-                      "Store downloads and disc installs go here. A picks another path.");
+            TrFormat(page.installHelp, sizeof(page.installHelp), STR_INSTALL_PATH_HELP);
         else
-            _snprintf(page.installHelp, sizeof(page.installHelp),
-                      "Store downloads and disc installs go here, DLC and arcade games to %s. A picks another path.",
-                      g_contentBase);
+            TrFormat(page.installHelp, sizeof(page.installHelp), STR_INSTALL_PATH_HELP_CONTENT, g_contentBase);
         page.installHelp[sizeof(page.installHelp) - 1] = '\0';
         // One heading, one button: adding a path. Moving where downloads go is
         // A on that path's own row, rather than a second button up here whose
         // target you had to find.
-        AddSettingsRow(page, SETTINGS_VIEW_HEADING, "Manage paths");
-        AddSettingsControl(page, SETTINGS_CONTROL_BUTTON, "Add path", SETTINGS_ROW_ADD_FOLDER,
-                           "Type the path of another folder of games, homebrew or apps, like Usb0:\\Games");
+        AddSettingsRow(page, SETTINGS_VIEW_HEADING, Tr(STR_MANAGE_PATHS));
+        AddSettingsControl(page, SETTINGS_CONTROL_BUTTON, Tr(STR_ADD_PATH), SETTINGS_ROW_ADD_FOLDER,
+                           Tr(STR_TYPE_THE_PATH_OF_ANOTHER));
 
         // Where downloads and disc installs go: always scanned, always first.
-        _snprintf(page.installStatus, sizeof(page.installStatus), "Downloads go here" SETTINGS_MIDDOT "%d game%s",
-                  lib.folderFound[0], lib.folderFound[0] == 1 ? "" : "s");
+        TrCount(page.installStatus, sizeof(page.installStatus), STR_DOWNLOADS_GO_HERE_ONE, STR_DOWNLOADS_GO_HERE,
+                lib.folderFound[0]);
         page.installStatus[sizeof(page.installStatus) - 1] = '\0';
         {
             SettingsRowView &row = AddSettingsRow(page, SETTINGS_VIEW_FOLDER, gamesPath);
@@ -2283,37 +2372,36 @@ static void BuildSettingsPage(SettingsPage &page, const Library &lib, const char
             const size_t statusSize = sizeof(page.folderStatus[i]);
             char *help = page.folderHelp[i];
             const size_t helpSize = sizeof(page.folderHelp[i]);
-            const char *kindName = kFolderKindNames[folder.kind];
+            const char *kindName = Tr(kFolderKindPages[folder.kind]);
             SettingsRowView &row = AddSettingsRow(page, SETTINGS_VIEW_FOLDER, folder.path);
             page.args[page.count - 1] = i;
             page.actions[page.count - 1][0] = SETTINGS_ROW_LIBRARY_FOLDER;
             row.checked = folder.scanned;
             if (!folder.scanned)
             {
-                _snprintf(status, statusSize, "Not scanned");
-                _snprintf(help, helpSize, "Not scanned. A adds it to %s - left and right change what it holds.",
-                          kFolderKindPages[folder.kind]);
+                TrFormat(status, statusSize, STR_NOT_SCANNED);
+                TrFormat(help, helpSize, STR_NOT_SCANNED_HELP, Tr(kFolderKindPages[folder.kind]));
             }
             else if (!folder.exists)
             {
-                _snprintf(status, statusSize, "Not found");
+                TrFormat(status, statusSize, STR_NOT_FOUND);
                 row.missing = true;
-                _snprintf(help, helpSize, "This folder isn't there any more. A stops looking for it.");
+                TrFormat(help, helpSize, STR_FOLDER_GONE_HELP);
             }
             else
             {
                 if (folder.games < 0)
-                    _snprintf(status, statusSize, "Scanning\xE2\x80\xA6");
+                    TrFormat(status, statusSize, STR_SCANNING_ELLIPSIS);
                 else if (folder.kind == FOLDER_GAMES)
-                    _snprintf(status, statusSize, "%d game%s", folder.games, folder.games == 1 ? "" : "s");
+                    TrCount(status, statusSize, STR_COUNT_GAME, STR_COUNT_GAMES, folder.games);
                 else if (folder.kind == FOLDER_APPS)
-                    _snprintf(status, statusSize, "%d app%s", folder.games, folder.games == 1 ? "" : "s");
+                    TrCount(status, statusSize, STR_COUNT_APP, STR_COUNT_APPS, folder.games);
                 else if (folder.kind == FOLDER_EMULATORS)
-                    _snprintf(status, statusSize, "%d emulator%s", folder.games, folder.games == 1 ? "" : "s");
+                    TrCount(status, statusSize, STR_COUNT_EMULATOR, STR_COUNT_EMULATORS, folder.games);
                 else
-                    _snprintf(status, statusSize, "%d found", folder.games);
-                _snprintf(help, helpSize, "Shown in %s. A %s - left and right change what it holds.",
-                          kFolderKindPages[folder.kind], folder.suggested ? "stops scanning it" : "removes it");
+                    TrFormat(status, statusSize, STR_COUNT_FOUND, TrNum(folder.games));
+                TrFormat(help, helpSize, folder.suggested ? STR_FOLDER_SHOWN_HELP_SUGGESTED : STR_FOLDER_SHOWN_HELP,
+                         Tr(kFolderKindPages[folder.kind]));
             }
             status[statusSize - 1] = '\0';
             help[helpSize - 1] = '\0';
@@ -2334,9 +2422,9 @@ static void BuildSettingsPage(SettingsPage &page, const Library &lib, const char
 
     if (page.section == SETTINGS_SECTION_GENERAL)
     {
-        AddSettingsRow(page, SETTINGS_VIEW_LINE, "Navigation sounds");
+        AddSettingsRow(page, SETTINGS_VIEW_LINE, Tr(STR_NAVIGATION_SOUNDS));
         AddSettingsControl(page, SETTINGS_CONTROL_CHECK, NULL, SETTINGS_ROW_SOUNDS,
-                           "A soft tick as you move around, and a sound for A and B.");
+                           Tr(STR_A_SOFT_TICK_AS_YOU));
         page.rows[page.count - 1].controls[0].on = UiSoundsSetting();
 
         // Only the start of the access key is shown - enough to tell which keys
@@ -2346,19 +2434,19 @@ static void BuildSettingsPage(SettingsPage &page, const Library &lib, const char
             char shown[5] = "";
             strncpy(shown, accessKey.c_str(), 4);
             shown[4] = '\0';
-            _snprintf(page.keysStatus, sizeof(page.keysStatus), "Saved" SETTINGS_MIDDOT "access key %s\xE2\x80\xA6", shown);
+            TrFormat(page.keysStatus, sizeof(page.keysStatus), STR_KEYS_SAVED_STATUS, shown);
         }
         else
         {
-            _snprintf(page.keysStatus, sizeof(page.keysStatus), "Not set" SETTINGS_MIDDOT "needed to download");
+            TrFormat(page.keysStatus, sizeof(page.keysStatus), STR_KEYS_NOT_SET_STATUS);
         }
         page.keysStatus[sizeof(page.keysStatus) - 1] = '\0';
-        AddSettingsRow(page, SETTINGS_VIEW_LINE, "archive.org keys").status = page.keysStatus;
-        AddSettingsControl(page, SETTINGS_CONTROL_BUTTON, haveKeys ? "Change" : "Add keys", SETTINGS_ROW_KEYS,
-                           "Type your access key and secret key, from archive.org/account/s3.php");
+        AddSettingsRow(page, SETTINGS_VIEW_LINE, Tr(STR_ARCHIVE_ORG_KEYS)).status = page.keysStatus;
+        AddSettingsControl(page, SETTINGS_CONTROL_BUTTON, haveKeys ? Tr(STR_CHANGE) : Tr(STR_ADD_KEYS), SETTINGS_ROW_KEYS,
+                           Tr(STR_TYPE_YOUR_ACCESS_KEY_AND));
         if (haveKeys)
-            AddSettingsControl(page, SETTINGS_CONTROL_BUTTON, "Remove", SETTINGS_ROW_REMOVE_KEYS,
-                               "Deletes the saved keys from this console. Store installs stop until new ones are added.");
+            AddSettingsControl(page, SETTINGS_CONTROL_BUTTON, Tr(STR_REMOVE), SETTINGS_ROW_REMOVE_KEYS,
+                               Tr(STR_DELETES_THE_SAVED_KEYS_FROM));
 
         // The PC helper: what's running, and pairing with it.
         {
@@ -2367,78 +2455,129 @@ static void BuildSettingsPage(SettingsPage &page, const Library &lib, const char
             switch (helper)
             {
             case PC_HELPER_PAIRED_ONLINE:
-                _snprintf(page.helperStatus, sizeof(page.helperStatus), "Paired" SETTINGS_MIDDOT "%s", pcName);
+                TrFormat(page.helperStatus, sizeof(page.helperStatus), STR_HELPER_PAIRED_ONLINE, pcName);
                 break;
             case PC_HELPER_PAIRED_OFFLINE:
-                _snprintf(page.helperStatus, sizeof(page.helperStatus), "Paired" SETTINGS_MIDDOT "not running");
+                TrFormat(page.helperStatus, sizeof(page.helperStatus), STR_HELPER_PAIRED_OFFLINE);
                 break;
             case PC_HELPER_FOUND:
-                _snprintf(page.helperStatus, sizeof(page.helperStatus), "Found %s" SETTINGS_MIDDOT "not paired", pcName);
+                TrFormat(page.helperStatus, sizeof(page.helperStatus), STR_HELPER_FOUND, pcName);
                 break;
             default:
-                _snprintf(page.helperStatus, sizeof(page.helperStatus), "Not found");
+                TrFormat(page.helperStatus, sizeof(page.helperStatus), STR_NOT_FOUND);
                 break;
             }
             page.helperStatus[sizeof(page.helperStatus) - 1] = '\0';
             const bool paired = helper == PC_HELPER_PAIRED_ONLINE || helper == PC_HELPER_PAIRED_OFFLINE;
-            AddSettingsRow(page, SETTINGS_VIEW_LINE, "PC helper").status = page.helperStatus;
+            AddSettingsRow(page, SETTINGS_VIEW_LINE, Tr(STR_PC_HELPER)).status = page.helperStatus;
             if (paired)
             {
-                AddSettingsControl(page, SETTINGS_CONTROL_CHECK, "Use", SETTINGS_ROW_HELPER_USE,
-                                   "Store downloads go through your PC while the helper runs on it - up to twice as fast.");
+                AddSettingsControl(page, SETTINGS_CONTROL_CHECK, Tr(STR_USE), SETTINGS_ROW_HELPER_USE,
+                                   Tr(STR_STORE_DOWNLOADS_GO_THROUGH_YOUR_2));
                 page.rows[page.count - 1].controls[0].on = PcHelperUseSetting();
-                AddSettingsControl(page, SETTINGS_CONTROL_BUTTON, "Unpair", SETTINGS_ROW_HELPER_UNPAIR,
-                                   "Stops using this PC. You can pair again any time.");
+                AddSettingsControl(page, SETTINGS_CONTROL_BUTTON, Tr(STR_UNPAIR), SETTINGS_ROW_HELPER_UNPAIR,
+                                   Tr(STR_STOPS_USING_THIS_PC_YOU));
             }
             else
             {
-                AddSettingsControl(page, SETTINGS_CONTROL_BUTTON, "Pair", SETTINGS_ROW_HELPER_PAIR,
-                                   "Run Omni360 Helper on your PC, then allow this Xbox there. Downloads get faster.");
+                AddSettingsControl(page, SETTINGS_CONTROL_BUTTON, Tr(STR_PAIR), SETTINGS_ROW_HELPER_PAIR,
+                                   Tr(STR_RUN_OMNI360_HELPER_ON_YOUR));
             }
         }
 
         // How fast a disc install reads: left and right change it.
-        static const char *const speedNames[DISC_SPEED_FULL] = { "Slowest", "Slow", "Fast", "Full" };
+        const char *const speedNames[DISC_SPEED_FULL] = { Tr(STR_SPEED_SLOWEST), Tr(STR_SPEED_SLOW), Tr(STR_SPEED_FAST),
+                                                           Tr(STR_SPEED_FULL) };
         const int speed = DiscSpeedSetting();
-        AddSettingsRow(page, SETTINGS_VIEW_LINE, "Disc read speed");
+        AddSettingsRow(page, SETTINGS_VIEW_LINE, Tr(STR_DISC_READ_SPEED));
         AddSettingsControl(page, SETTINGS_CONTROL_VALUE, speedNames[speed - 1], SETTINGS_ROW_NONE,
                            speed == DISC_SPEED_FULL
-                               ? "The fastest. If a disc fails partway through, try a slower speed - left and right change it."
-                               : "Slower, and gentler on a scratched disc. Full is the fastest - left and right change it.");
+                               ? Tr(STR_THE_FASTEST_IF_A_DISC)
+                               : Tr(STR_SLOWER_AND_GENTLER_ON_A));
         {
             SettingsControlView &c = page.rows[page.count - 1].controls[0];
             c.valueIndex = speed - 1;
             c.valueCount = DISC_SPEED_FULL;
         }
 
-        AddSettingsRow(page, SETTINGS_VIEW_LINE, "Eject disc after install");
+        AddSettingsRow(page, SETTINGS_VIEW_LINE, Tr(STR_EJECT_DISC_AFTER_INSTALL));
         AddSettingsControl(page, SETTINGS_CONTROL_CHECK, NULL, SETTINGS_ROW_EJECT,
-                           "Opens the tray once a disc has installed, ready for the next one.");
+                           Tr(STR_OPENS_THE_TRAY_ONCE_A));
         page.rows[page.count - 1].controls[0].on = EjectAfterInstallSetting();
 
         // How a Store game installs: left and right change it.
         const bool asFolder = InstallAsFolderSetting();
-        AddSettingsRow(page, SETTINGS_VIEW_LINE, "Install disc games as");
-        AddSettingsControl(page, SETTINGS_CONTROL_VALUE, asFolder ? "Folder (default.xex)" : "Games on Demand",
-                           SETTINGS_ROW_INSTALL_TYPE, "Only affects retail Xbox 360 games.");
+        AddSettingsRow(page, SETTINGS_VIEW_LINE, Tr(STR_INSTALL_DISC_GAMES_AS));
+        AddSettingsControl(page, SETTINGS_CONTROL_VALUE, asFolder ? Tr(STR_FOLDER_DEFAULT_XEX) : Tr(STR_GAMES_ON_DEMAND),
+                           SETTINGS_ROW_INSTALL_TYPE, Tr(STR_ONLY_AFFECTS_RETAIL_XBOX_360));
         {
             SettingsControlView &c = page.rows[page.count - 1].controls[0];
             c.valueIndex = asFolder ? 1 : 0;
             c.valueCount = 2;
         }
 
-        AddComingSoonRow(page, "Auto sign in", "Signing a profile in when Omni360 starts. Not built yet.");
+        AddComingSoonRow(page, Tr(STR_AUTO_SIGN_IN), Tr(STR_SIGNING_A_PROFILE_IN_WHEN));
     }
 
     if (page.section == SETTINGS_SECTION_ASSETS)
     {
-        AddSettingsRow(page, SETTINGS_VIEW_LINE, "Re-sync library");
-        AddSettingsControl(page, SETTINGS_CONTROL_BUTTON, "Re-sync", SETTINGS_ROW_RESYNC_LIBRARY,
-                           "Re-reads your installed games from disk and fills in any missing icons from Xbox Live.");
+        AddSettingsRow(page, SETTINGS_VIEW_LINE, Tr(STR_RE_SYNC_LIBRARY));
+        AddSettingsControl(page, SETTINGS_CONTROL_BUTTON, Tr(STR_RE_SYNC), SETTINGS_ROW_RESYNC_LIBRARY,
+                           Tr(STR_RE_READS_YOUR_INSTALLED_GAMES));
     }
 
     if (page.section == SETTINGS_SECTION_LANGUAGE)
-        AddComingSoonRow(page, "English", "Other languages are on the way.");
+    {
+        // The clock first, since the list below can run long: what the
+        // language says, or 12- or 24-hour pinned. Left and right change it.
+        {
+            static const StringId clockNames[CLOCK_STYLE_COUNT] = { STR_CLOCK_FOLLOW_LANGUAGE, STR_CLOCK_12_HOUR,
+                                                                    STR_CLOCK_24_HOUR };
+            const ClockStyle style = GetClockStyle();
+            AddSettingsRow(page, SETTINGS_VIEW_LINE, Tr(STR_CLOCK_SETTING));
+            AddSettingsControl(page, SETTINGS_CONTROL_VALUE, Tr(clockNames[style]), SETTINGS_ROW_CLOCK,
+                               Tr(STR_CLOCK_HELP));
+            SettingsControlView &c = page.rows[page.count - 1].controls[0];
+            c.valueIndex = (int)style;
+            c.valueCount = CLOCK_STYLE_COUNT;
+        }
+
+        // A heading with Refresh - for files copied beside Omni360 since it
+        // started - then every language on a row of its own, as Aurora lists
+        // them: its name, who translated it, and a tick on the one in use.
+        AddSettingsRow(page, SETTINGS_VIEW_HEADING, Tr(STR_LANGUAGES_HEADING));
+        AddSettingsControl(page, SETTINGS_CONTROL_BUTTON, Tr(STR_LANGUAGE_REFRESH), SETTINGS_ROW_LANGUAGE_REFRESH,
+                           Tr(STR_LANGUAGE_REFRESH_HELP));
+
+        static char help[200];
+        const int current = CurrentLanguage();
+        if (current > 0 && TranslatedCount() < (int)STR_COUNT)
+        {
+            char done[16], all[16];
+            _snprintf(done, sizeof(done), "%d", TranslatedCount());
+            done[sizeof(done) - 1] = '\0';
+            _snprintf(all, sizeof(all), "%d", (int)STR_COUNT);
+            all[sizeof(all) - 1] = '\0';
+            TrFormat(help, sizeof(help), STR_LANGUAGE_PARTIAL_HELP, done, all);
+        }
+        else
+            TrFormat(help, sizeof(help), STR_LANGUAGE_IN_USE_HELP);
+
+        for (int i = 0; i < LanguageCount() && page.count < MAX_SETTINGS_ROWS; ++i)
+        {
+            SettingsRowView &row = AddSettingsRow(page, SETTINGS_VIEW_LINE, LanguageName(i));
+            row.flag = LanguageFlag(i); // "" for none keeps the names lined up all the same
+            const char *contributor = LanguageContributor(i);
+            if (LanguageMachineTranslated(i))
+                row.status = Tr(STR_MACHINE_TRANSLATED);
+            else if (contributor[0] != '\0')
+                row.status = contributor;
+            page.args[page.count - 1] = i;
+            AddSettingsControl(page, SETTINGS_CONTROL_CHECK, NULL, SETTINGS_ROW_LANGUAGE,
+                               i == current ? help : Tr(STR_LANGUAGE_PICK_HELP));
+            page.rows[page.count - 1].controls[0].on = (i == current);
+        }
+    }
 
     if (page.section == SETTINGS_SECTION_ABOUT)
     {
@@ -2448,18 +2587,18 @@ static void BuildSettingsPage(SettingsPage &page, const Library &lib, const char
         switch (state)
         {
         case UPDATE_AVAILABLE:
-            _snprintf(page.updatesStatus, sizeof(page.updatesStatus), "%s" SETTINGS_MIDDOT "%s is available", CURRENT_VERSION,
-                      update.version);
-            _snprintf(page.updatesHelp, sizeof(page.updatesHelp), "What's new in %s - and updating to it.", update.version);
+            TrFormat(page.updatesStatus, sizeof(page.updatesStatus), STR_UPDATES_AVAILABLE_STATUS, CURRENT_VERSION,
+                     update.version);
+            TrFormat(page.updatesHelp, sizeof(page.updatesHelp), STR_UPDATES_AVAILABLE_HELP, update.version);
             break;
         case UPDATE_CHECKING:
-            _snprintf(page.updatesStatus, sizeof(page.updatesStatus), "%s" SETTINGS_MIDDOT "checking\xE2\x80\xA6", CURRENT_VERSION);
+            TrFormat(page.updatesStatus, sizeof(page.updatesStatus), STR_UPDATES_CHECKING_STATUS, CURRENT_VERSION);
             break;
         case UPDATE_CURRENT:
-            _snprintf(page.updatesStatus, sizeof(page.updatesStatus), "%s" SETTINGS_MIDDOT "up to date", CURRENT_VERSION);
+            TrFormat(page.updatesStatus, sizeof(page.updatesStatus), STR_UPDATES_CURRENT_STATUS, CURRENT_VERSION);
             break;
         case UPDATE_FAILED:
-            _snprintf(page.updatesStatus, sizeof(page.updatesStatus), "%s" SETTINGS_MIDDOT "couldn't reach GitHub", CURRENT_VERSION);
+            TrFormat(page.updatesStatus, sizeof(page.updatesStatus), STR_UPDATES_FAILED_STATUS, CURRENT_VERSION);
             break;
         default:
             _snprintf(page.updatesStatus, sizeof(page.updatesStatus), "%s", CURRENT_VERSION);
@@ -2467,22 +2606,21 @@ static void BuildSettingsPage(SettingsPage &page, const Library &lib, const char
         }
         page.updatesStatus[sizeof(page.updatesStatus) - 1] = '\0';
         page.updatesHelp[sizeof(page.updatesHelp) - 1] = '\0';
-        AddSettingsRow(page, SETTINGS_VIEW_LINE, "Updates").status = page.updatesStatus;
+        AddSettingsRow(page, SETTINGS_VIEW_LINE, Tr(STR_UPDATES)).status = page.updatesStatus;
         if (state == UPDATE_AVAILABLE)
-            AddSettingsControl(page, SETTINGS_CONTROL_BUTTON, "What's new", SETTINGS_ROW_UPDATES, page.updatesHelp);
+            AddSettingsControl(page, SETTINGS_CONTROL_BUTTON, Tr(STR_WHATS_NEW), SETTINGS_ROW_UPDATES, page.updatesHelp);
         else
-            AddSettingsControl(page, SETTINGS_CONTROL_BUTTON, "Check now", SETTINGS_ROW_UPDATES,
-                               "Asks GitHub for the latest version now.");
-        AddSettingsControl(page, SETTINGS_CONTROL_CHECK, "At start", SETTINGS_ROW_UPDATE_CHECKS,
-                           "Asks GitHub for the latest version each time Omni360 starts.");
+            AddSettingsControl(page, SETTINGS_CONTROL_BUTTON, Tr(STR_CHECK_NOW), SETTINGS_ROW_UPDATES,
+                               Tr(STR_ASKS_GITHUB_FOR_THE_LATEST));
+        AddSettingsControl(page, SETTINGS_CONTROL_CHECK, Tr(STR_AT_START), SETTINGS_ROW_UPDATE_CHECKS,
+                           Tr(STR_ASKS_GITHUB_FOR_THE_LATEST_2));
         page.rows[page.count - 1].controls[1].on = UpdateChecksOn();
 
-        AddComingSoonRow(page, "Version info", "Omni360's build, and the console's dashboard and kernel versions. Not built yet.");
+        AddComingSoonRow(page, Tr(STR_VERSION_INFO), Tr(STR_OMNI360S_BUILD_AND_THE_CONSOLES));
 
-        AddSettingsRow(page, SETTINGS_VIEW_LINE, "Speed test");
-        AddSettingsControl(page, SETTINGS_CONTROL_BUTTON, "Run test", SETTINGS_ROW_SPEED_TEST,
-                           "Checks how fast your internet, your console and archive.org are, to see what slows "
-                           "downloads down. About a minute.");
+        AddSettingsRow(page, SETTINGS_VIEW_LINE, Tr(STR_SPEED_TEST));
+        AddSettingsControl(page, SETTINGS_CONTROL_BUTTON, Tr(STR_RUN_TEST), SETTINGS_ROW_SPEED_TEST,
+                           Tr(STR_CHECKS_HOW_FAST_YOUR_INTERNET));
     }
 
     // The focus where it was, on a row that's still there.
@@ -2559,6 +2697,14 @@ static SettingsOutcome RunSettingsRow(SettingsRow row, int arg, Library &lib, ch
     case SETTINGS_ROW_HELPER_UNPAIR: UnpairPcHelper(); break;
     case SETTINGS_ROW_HELPER_USE:   TogglePcHelperUse(); break;
     case SETTINGS_ROW_SPEED_TEST:   RunSpeedTest(gamesPath); break;
+    case SETTINGS_ROW_LANGUAGE:     PickLanguage(arg); break;
+    case SETTINGS_ROW_LANGUAGE_REFRESH:
+        // Files copied in since Omni360 started - and the current one read
+        // again, so an edited file shows without picking another first.
+        FindLanguages();
+        SetLanguage(LanguageCode(CurrentLanguage()));
+        SetStoreLocale(XboxLocaleForLanguage());
+        break;
     case SETTINGS_ROW_RESYNC_LIBRARY:
         ScanLibrary(lib, gamesPath);
         StartIconSync(lib.games, lib.count);
@@ -2687,7 +2833,7 @@ static void CleanUpInterruptedInstall()
 
     dprintf("[disc] removing the unfinished install of \"%s\" (%08lX, media %08lX) from %s\n",
             name, titleId, mediaId, root);
-    RenderStatusFrame("Cleaning up", "Removing a game install that didn't finish", name);
+    RenderStatusFrame(Tr(STR_CLEANING_UP), Tr(STR_REMOVING_A_GAME_INSTALL_THAT), name);
     GodRemovePackage(root, titleId, mediaId);
     ClearInstallMarker();
 }
@@ -2703,13 +2849,16 @@ static bool AskDiscName(const char *suggested, unsigned int discNumber, unsigned
 
     WCHAR description[160];
     if (discCount > 1)
-        swprintf_s(description, 160, L"The name the dashboard and Aurora show. This is disc %u of %u.",
-                   discNumber, discCount);
+    {
+        char line[160];
+        TrFormat(line, sizeof(line), STR_GAME_NAME_HELP_DISC, TrNum((long)discNumber), TrNum((long)discCount));
+        Utf8ToWideText(line, description, 160);
+    }
     else
-        swprintf_s(description, 160, L"The name the dashboard and Aurora show.");
+        Utf8ToWideText(Tr(STR_GAME_NAME_HELP), description, 160);
 
     std::string typed;
-    if (OpenKeyboardToString(XUSER_INDEX_ANY, &typed, L"Game Name", description, wideSuggested) != ERROR_SUCCESS)
+    if (OpenKeyboardToString(XUSER_INDEX_ANY, &typed, TrW(STR_GAME_NAME), description, wideSuggested) != ERROR_SUCCESS)
         return false;
     TrimInPlace(typed);
 
@@ -3064,11 +3213,15 @@ static const StoreButtonView kStoreButtons[STORE_BUTTON_COUNT] = {
 #define STORE_BUTTON_XBLA  1
 #define STORE_BUTTON_XBLIG 2
 #define STORE_BUTTON_XBOX  3
-static const char *const kStoreButtonsSoon[STORE_BUTTON_COUNT] = {
-    "Homebrew apps, games and emulators",
-    "Xbox Live Arcade games, A to Z",
-    "Xbox Live Indie Games, A to Z",
-    "Original Xbox games, A to Z",
+static const StringId kStoreButtonsSoon[STORE_BUTTON_COUNT] = {
+    STR_STORE_SOON_HOMEBREW,
+    STR_STORE_SOON_XBLA,
+    STR_STORE_SOON_XBLIG,
+    STR_STORE_SOON_XBOX,
+};
+// The buttons' labels, looked up as they're shown.
+static const StringId kStoreButtonNames[STORE_BUTTON_COUNT] = {
+    STR_STORE_BUTTON_HOMEBREW, STR_STORE_BUTTON_XBLA, STR_STORE_BUTTON_XBLIG, STR_SECTION_XBOX,
 };
 
 static const char kStoreLetters[] = "*#ABCDEFGHIJKLMNOPQRSTUVWXYZ"; // STORE_LETTER_ALL first
@@ -3077,9 +3230,13 @@ static const char kStoreLetters[] = "*#ABCDEFGHIJKLMNOPQRSTUVWXYZ"; // STORE_LET
 static void BrowseHint(WCHAR *out, int outSize, char letter)
 {
     if (letter == STORE_LETTER_ALL)
-        _snwprintf(out, outSize, L"Browse all");
+        _snwprintf(out, outSize, L"%s", TrW(STR_BROWSE_ALL));
     else
-        _snwprintf(out, outSize, L"Browse %c", (WCHAR)letter);
+    {
+        char one[2] = { letter, '\0' }, line[64];
+        TrFormat(line, sizeof(line), STR_BROWSE_LETTER, one);
+        Utf8ToWideText(line, out, outSize);
+    }
     out[outSize - 1] = L'\0';
 }
 
@@ -3094,7 +3251,7 @@ static int g_rowCount = 0;
 // StoreCollections.h has them. Only rows with cards, from the top.
 struct StoreCardRow
 {
-    const char *name;
+    StringId name; // looked up as the view is made, so it follows the language
     StoreCollectionView cards[STORE_COLLECTIONS_MAX];
     int ids[STORE_COLLECTIONS_MAX]; // each card's, for StoreCollectionGames
     int count;
@@ -3145,7 +3302,7 @@ static void BuildStoreRows()
     g_cardRowCount = 0;
     {
         StoreCardRow &row = g_cardRows[g_cardRowCount];
-        row.name = "Collections";
+        row.name = STR_STORE_COLLECTIONS;
         row.count = 0;
         for (int c = 0; c < StoreCollectionCount(); ++c)
             AddStoreCard(row, c, -1);
@@ -3154,7 +3311,7 @@ static void BuildStoreRows()
     }
     {
         StoreCardRow &row = g_cardRows[g_cardRowCount];
-        row.name = "Publishers";
+        row.name = STR_STORE_PUBLISHERS;
         row.count = 0;
         for (int p = 0; p < StorePublisherCount(); ++p)
             AddStoreCard(row, StorePublisherCollection(p), p);
@@ -3198,15 +3355,20 @@ static StorePageView MakeStoreView(const Shell &shell)
     view.featuredLabel = g_featured.label;
     view.featuredCount = g_featuredCount;
     view.spotlight = g_spotlight;
-    view.spotlightDetail = "Games no newer console can play";
+    if (g_spotlightId >= 0)
+        view.spotlight.name = StoreCollectionName(g_spotlightId);
+    view.spotlightDetail = Tr(STR_STORE_SPOTLIGHT_DETAIL);
     view.cardRowCount = g_cardRowCount;
     for (int cr = 0; cr < g_cardRowCount; ++cr)
     {
         StoreCardRowView &cards = view.cardRows[cr];
-        cards.name = g_cardRows[cr].name;
+        cards.name = Tr(g_cardRows[cr].name);
         cards.count = g_cardRows[cr].count;
         for (int c = 0; c < cards.count; ++c)
+        {
             cards.cards[c] = g_cardRows[cr].cards[c];
+            cards.cards[c].name = StoreCollectionName(g_cardRows[cr].ids[c]);
+        }
         cards.scroll = shell.storeCardScroll[cr];
     }
     view.rowCount = g_rowCount;
@@ -3231,7 +3393,10 @@ static StorePageView MakeStoreView(const Shell &shell)
         view.featured[0].detail = g_featuredDetail[0] != '\0' ? g_featuredDetail : NULL;
     }
     for (int i = 0; i < STORE_BUTTON_COUNT; ++i)
+    {
         view.buttons[i] = kStoreButtons[i];
+        view.buttons[i].label = Tr(kStoreButtonNames[i]);
+    }
     view.letters = kStoreLetters;
     view.focus = shell.storeFocus;
     view.scroll = shell.storeScroll;
@@ -3498,9 +3663,9 @@ static const char *SectionName(int section)
 {
     switch (section)
     {
-    case SECTION_XBLIG: return "Xbox Live Indie Games";
-    case SECTION_XBOX:  return "Original Xbox";
-    default:            return "Xbox Live Arcade";
+    case SECTION_XBLIG: return Tr(STR_SECTION_XBLIG);
+    case SECTION_XBOX:  return Tr(STR_SECTION_XBOX);
+    default:            return Tr(STR_SECTION_XBLA);
     }
 }
 
@@ -3519,16 +3684,16 @@ enum StoreSort
     STORE_SORT_COUNT
 };
 static const char *const kSortKeys[STORE_SORT_COUNT] = { "a-z", "popular", "rated" };
-static const char *const kSortNames[STORE_SORT_COUNT] = { "A to Z", "Most popular", "Top rated" };
+static const StringId kSortNames[STORE_SORT_COUNT] = { STR_SORT_A_TO_Z, STR_SORT_POPULAR, STR_SORT_RATED };
 
 // The region checkboxes; none ticked is every region. A region-free (World)
 // game is under every one.
-static const struct { const char *key; const char *name; unsigned short mask; } kFilterRegions[] =
+static const struct { const char *key; StringId name; unsigned short mask; } kFilterRegions[] =
 {
-    { "usa",  "USA",    STORE_REGIONS_USA },
-    { "eur",  "Europe", STORE_REGIONS_EUR },
-    { "jpn",  "Japan",  STORE_REGIONS_JPN },
-    { "asia", "Asia",   STORE_REGIONS_ASIA },
+    { "usa",  STR_REGION_USA,    STORE_REGIONS_USA },
+    { "eur",  STR_REGION_EUROPE, STORE_REGIONS_EUR },
+    { "jpn",  STR_REGION_JAPAN,  STORE_REGIONS_JPN },
+    { "asia", STR_REGION_ASIA,   STORE_REGIONS_ASIA },
 };
 #define FILTER_REGION_COUNT (int)(sizeof(kFilterRegions) / sizeof(kFilterRegions[0]))
 
@@ -3538,7 +3703,7 @@ static const struct { const char *key; const char *name; unsigned short mask; } 
 #define FILTER_GENRE_KINECT (STORE_GENRE_COUNT + 2)
 #define FILTER_GENRE_VALUES (STORE_GENRE_COUNT + 3)
 
-static const char *const kRatingNames[] = { "Any", "3 stars and up", "4 stars and up" };
+static const StringId kRatingNames[] = { STR_ANY, STR_RATING_3_UP, STR_RATING_4_UP };
 #define FILTER_RATING_VALUES 3
 
 // Top rated puts games fewer people rated than this after the rest - five
@@ -3560,10 +3725,10 @@ static bool g_filterRead = false;
 static const char *GenreValueName(int genre)
 {
     if (genre == FILTER_GENRE_FAMILY)
-        return "For the family";
+        return Tr(STR_GENRE_FAMILY);
     if (genre == FILTER_GENRE_KINECT)
-        return "Kinect";
-    return genre > 0 ? StoreGenreName(genre) : "Any";
+        return Tr(STR_GENRE_KINECT);
+    return genre > 0 ? StoreGenreName(genre) : Tr(STR_ANY);
 }
 
 // "name=" in settings.txt's line, up to the next ';', into out.
@@ -3640,7 +3805,7 @@ static void SaveFilter()
               f.language > 0 ? StoreLanguageName(f.language - 1) : "", f.showMissing ? 1 : 0);
     line[sizeof(line) - 1] = '\0';
     if (!SetSettingsValue(STORE_FILTER_KEY, line))
-        ShowMessageUI("Not saved", "settings.txt could not be written.", NULL);
+        ShowMessageUI(Tr(STR_NOT_SAVED), Tr(STR_SETTINGS_TXT_COULD_NOT_BE), NULL);
 }
 
 // Whether anything but the order is chosen.
@@ -3846,18 +4011,18 @@ static const char *FilterSummary(int section, bool full)
     for (int i = 0; i < FILTER_REGION_COUNT; ++i)
     {
         if (f.regions & (1u << i))
-            parts[n++] = kFilterRegions[i].name;
+            parts[n++] = Tr(kFilterRegions[i].name);
     }
     if (f.genre != 0)
         parts[n++] = GenreValueName(f.genre);
     if (f.language != 0)
         parts[n++] = StoreLanguageName(f.language - 1);
     if (f.rating != 0)
-        parts[n++] = kRatingNames[f.rating];
+        parts[n++] = Tr(kRatingNames[f.rating]);
     if (f.showMissing)
-        parts[n++] = "Missing shown";
+        parts[n++] = Tr(STR_FILTER_MISSING_SHOWN);
     if (f.sort != STORE_SORT_AZ)
-        parts[n++] = kSortNames[f.sort];
+        parts[n++] = Tr(kSortNames[f.sort]);
     if (n == 0)
         return NULL;
 
@@ -4059,21 +4224,21 @@ static const StoreFilterView *MakeFilterPanel(const Shell &shell)
     const StoreFilter f = FilterFor(shell.storeLetterSection);
     memset(rows, 0, sizeof(rows));
 
-    FilterValueRow(rows[FILTER_ROW_SORT], "Sort by", kSortNames[f.sort], f.sort, STORE_SORT_COUNT);
+    FilterValueRow(rows[FILTER_ROW_SORT], Tr(STR_SORT_BY), Tr(kSortNames[f.sort]), f.sort, STORE_SORT_COUNT);
     for (int i = 0; i < FILTER_REGION_COUNT; ++i)
-        FilterCheckRow(rows[FILTER_ROW_REGIONS + i], kFilterRegions[i].name, (f.regions & (1u << i)) != 0);
-    rows[FILTER_ROW_REGIONS].heading = "Regions";
-    FilterValueRow(rows[FILTER_ROW_GENRE], "Genre", GenreValueName(f.genre), f.genre, FILTER_GENRE_VALUES);
-    rows[FILTER_ROW_GENRE].heading = "Show only";
-    FilterValueRow(rows[FILTER_ROW_LANGUAGE], "Language", f.language > 0 ? StoreLanguageName(f.language - 1) : "Any",
+        FilterCheckRow(rows[FILTER_ROW_REGIONS + i], Tr(kFilterRegions[i].name), (f.regions & (1u << i)) != 0);
+    rows[FILTER_ROW_REGIONS].heading = Tr(STR_FILTER_REGIONS);
+    FilterValueRow(rows[FILTER_ROW_GENRE], Tr(STR_GENRE), GenreValueName(f.genre), f.genre, FILTER_GENRE_VALUES);
+    rows[FILTER_ROW_GENRE].heading = Tr(STR_FILTER_SHOW_ONLY);
+    FilterValueRow(rows[FILTER_ROW_LANGUAGE], Tr(STR_LANGUAGE), f.language > 0 ? StoreLanguageName(f.language - 1) : Tr(STR_ANY),
                    f.language, 1 + STORE_LANGUAGE_COUNT);
-    FilterValueRow(rows[FILTER_ROW_RATING], "Rating", kRatingNames[f.rating], f.rating, FILTER_RATING_VALUES);
+    FilterValueRow(rows[FILTER_ROW_RATING], Tr(STR_RATING), Tr(kRatingNames[f.rating]), f.rating, FILTER_RATING_VALUES);
     // Says why they're in the grid rather than whose fault it is. The row has
     // about 424 design pixels for a label at this size, so it can't be the
     // full "not available for download" without being truncated.
-    FilterCheckRow(rows[FILTER_ROW_SHOW_MISSING], "Show games you can't download", f.showMissing);
+    FilterCheckRow(rows[FILTER_ROW_SHOW_MISSING], Tr(STR_SHOW_GAMES_YOU_CANT_DOWNLOAD), f.showMissing);
     rows[FILTER_ROW_RESET].kind = STORE_FILTER_BUTTON;
-    rows[FILTER_ROW_RESET].label = "Reset filters";
+    rows[FILTER_ROW_RESET].label = Tr(STR_RESET_FILTERS);
     for (int r = 0; r < FILTER_ROW_COUNT; ++r)
     {
         if (!FilterRowDisabled(shell, r))
@@ -4186,8 +4351,8 @@ static bool OpenStoreSearch(Shell &shell)
     WCHAR typedBefore[64];
     NarrowToWide(shell.storeQuery, typedBefore, 64);
     std::string typed;
-    if (OpenKeyboardToString(XUSER_INDEX_ANY, &typed, L"Search the Store",
-                             L"A game's name, or part of it - every list is searched", typedBefore) != ERROR_SUCCESS)
+    if (OpenKeyboardToString(XUSER_INDEX_ANY, &typed, TrW(STR_SEARCH_THE_STORE),
+                             TrW(STR_A_GAMES_NAME_OR_PART), typedBefore) != ERROR_SUCCESS)
         return true; // cancelled
     TrimInPlace(typed);
     if (typed.empty())
@@ -4199,7 +4364,7 @@ static bool OpenStoreSearch(Shell &shell)
     shell.storeQuery[sizeof(shell.storeQuery) - 1] = '\0';
     if (shown == 0)
     {
-        ShowShellToast("No games found", shell.storeQuery, UI_TOAST_INFO);
+        ShowShellToast(Tr(STR_LIB_NO_GAMES), shell.storeQuery, UI_TOAST_INFO);
         return true;
     }
 
@@ -4253,10 +4418,9 @@ static StoreLetterView MakeStoreLetterView(const Shell &shell)
         _snprintf(title, sizeof(title), "\xE2\x80\x9C%s\xE2\x80\x9D", shell.storeQuery); // in curly quotes
         title[sizeof(title) - 1] = '\0';
         if (g_searchTotal > shell.storeGameCount)
-            _snprintf(section, sizeof(section), "Search" STORE_MIDDOT "the best %d of %d", shell.storeGameCount,
-                      g_searchTotal);
+            TrFormat(section, sizeof(section), STR_SEARCH_BEST_OF, TrNum(shell.storeGameCount), TrNum(g_searchTotal));
         else
-            _snprintf(section, sizeof(section), "Search");
+            TrFormat(section, sizeof(section), STR_SEARCH);
         section[sizeof(section) - 1] = '\0';
         view.title = title;
         view.section = section;
@@ -4265,7 +4429,7 @@ static StoreLetterView MakeStoreLetterView(const Shell &shell)
     {
         view.title = StoreCollectionName(shell.storeCollection);
         view.section = (shell.storeCollection >= StoreCollectionCount() &&
-                        shell.storeCollection != StoreSpotlightCollection()) ? "Publisher" : "Collection";
+                        shell.storeCollection != StoreSpotlightCollection()) ? Tr(STR_STORE_PUBLISHER) : Tr(STR_STORE_COLLECTION);
     }
     const bool filtered = LetterFilterable(shell);
     view.filter = filtered ? FilterSummary(shell.storeLetterSection, false) : NULL;
@@ -4413,10 +4577,10 @@ static StoreSectionView MakeSectionView(const Shell &shell)
     const int set = shell.storeSection;
     static char subtitle[96];
     if (set == SECTION_XBOX)
-        _snprintf(subtitle, sizeof(subtitle), "%d games from archive.org that the 360 can run", XBOX_GAME_COUNT);
+        TrFormat(subtitle, sizeof(subtitle), STR_XBOX_SECTION_SUBTITLE, TrNum(XBOX_GAME_COUNT));
     else
-        _snprintf(subtitle, sizeof(subtitle), "%d games from archive.org",
-                  set == SECTION_XBLIG ? XBLIG_GAME_COUNT : XBLA_GAME_COUNT);
+        TrFormat(subtitle, sizeof(subtitle), STR_SECTION_SUBTITLE,
+                 TrNum(set == SECTION_XBLIG ? XBLIG_GAME_COUNT : XBLA_GAME_COUNT));
     subtitle[sizeof(subtitle) - 1] = '\0';
 
     StoreSectionView view;
@@ -4592,14 +4756,13 @@ static void OpenArcadeGame(Shell &shell, const XblaGame &game)
     if (game.packages > 1)
     {
         if (indie)
-            _snprintf(detail, sizeof(detail), "%u packages", (unsigned)game.packages);
+            TrFormat(detail, sizeof(detail), STR_COUNT_PACKAGES, TrNum((long)game.packages));
         else
-            _snprintf(detail, sizeof(detail), "With %u add-on%s", (unsigned)(game.packages - 1),
-                      game.packages == 2 ? "" : "s");
+            TrCount(detail, sizeof(detail), STR_WITH_ADD_ON, STR_WITH_ADD_ONS, (long)game.packages - 1);
         detail[sizeof(detail) - 1] = '\0';
     }
     FormatBytes(game.size, g_storeVersionSize[0], sizeof(g_storeVersionSize[0]));
-    g_storeVersions[0].label = indie ? "Indie game" : "Xbox Live Arcade";
+    g_storeVersions[0].label = indie ? Tr(STR_INDIE_GAME) : Tr(STR_SECTION_XBLA);
     g_storeVersions[0].detail = detail;
     g_storeVersions[0].size = g_storeVersionSize[0];
     g_storeArcade = &game;
@@ -4935,13 +5098,13 @@ static int RemoveLibraryGamePackages(const InstalledGame &game)
 static bool UninstallStoreVersion(Shell &shell, const Library &lib, const char *gamesPath)
 {
     char message[200];
-    _snprintf(message, sizeof(message), "Remove %s from the hard drive?", g_storeGame.name);
+    TrFormat(message, sizeof(message), STR_REMOVE_FROM_HARD_DRIVE, g_storeGame.name);
     message[sizeof(message) - 1] = '\0';
-    if (!ShowConfirmUI("Uninstall", message, StoreGameIsIndie() ? "Only its own packages are removed."
-                                                                : "Its DLC and title updates stay.", "Uninstall"))
+    if (!ShowConfirmUI(Tr(STR_UNINSTALL), message, StoreGameIsIndie() ? Tr(STR_ONLY_ITS_OWN_PACKAGES_ARE)
+                                                                : Tr(STR_ITS_DLC_AND_TITLE_UPDATES), Tr(STR_UNINSTALL)))
         return false;
 
-    RenderStatusFrame("Uninstalling", g_storeGame.name, NULL);
+    RenderStatusFrame(Tr(STR_UNINSTALLING), g_storeGame.name, NULL);
 
     int removed = 0;
     const StoreRelease *release = StoreReleaseOf(&g_storeGame, shell.storeVersionChosen);
@@ -5005,9 +5168,9 @@ static bool UninstallStoreVersion(Shell &shell, const Library &lib, const char *
     shell.rescanLibrary = true;
     shell.stale = true;
     if (removed > 0)
-        ShowShellToast("Uninstalled", g_storeGame.name, UI_TOAST_SUCCESS);
+        ShowShellToast(Tr(STR_UNINSTALLED), g_storeGame.name, UI_TOAST_SUCCESS);
     else
-        ShowShellToast("Nothing to uninstall", "Its package wasn't where the library said.", UI_TOAST_ERROR);
+        ShowShellToast(Tr(STR_NOTHING_TO_UNINSTALL), Tr(STR_ITS_PACKAGE_WASNT_WHERE_THE), UI_TOAST_ERROR);
     return removed > 0;
 }
 
@@ -5074,14 +5237,12 @@ static bool ConfirmLeaving()
         return true;
 
     char message[96];
-    _snprintf(message, sizeof(message), "%d job%s still in the queue.",
-              pending, pending == 1 ? " is" : "s are");
+    TrCount(message, sizeof(message), STR_JOBS_PENDING_ONE, STR_JOBS_PENDING, pending);
     message[sizeof(message) - 1] = '\0';
 
-    return ShowConfirmUI("Leave Omni360?", message,
-                         "Leaving stops them. Files that already finished stay installed; "
-                         "a disc install is removed.",
-                         "Leave");
+    return ShowConfirmUI(Tr(STR_LEAVE_OMNI360), message,
+                         Tr(STR_LEAVING_STOPS_THEM_FILES_THAT),
+                         Tr(STR_LEAVE));
 }
 
 static void ReportEnqueue(EnqueueResult result, const char *filename);
@@ -5100,14 +5261,14 @@ static bool XboxEmulatorReady()
     // missing is in the log.
     if (state == XBOX_COMPAT_NO_FILES)
     {
-        if (ShowConfirmUI("Emulator missing", "The emulator that plays Original Xbox games isn't installed.",
-                          "Omni360 can download and install it for you.", "Fix it"))
-            ReportEnqueue((EnqueueResult)QueueXefuPack(), "Original Xbox emulator");
+        if (ShowConfirmUI(Tr(STR_EMULATOR_MISSING), Tr(STR_THE_EMULATOR_THAT_PLAYS_ORIGINAL),
+                          Tr(STR_OMNI360_CAN_DOWNLOAD_AND_INSTALL), Tr(STR_FIX_IT)))
+            ReportEnqueue((EnqueueResult)QueueXefuPack(), Tr(STR_ORIGINAL_XBOX_EMULATOR));
         return false;
     }
 
-    if (!ShowConfirmUI("Emulator missing", "The emulator that plays Original Xbox games isn't installed.",
-                       "Omni360 can fix this for you. Fixing it needs the console to restart.", "Fix it"))
+    if (!ShowConfirmUI(Tr(STR_EMULATOR_MISSING), Tr(STR_THE_EMULATOR_THAT_PLAYS_ORIGINAL),
+                       Tr(STR_OMNI360_CAN_FIX_THIS_FOR), Tr(STR_FIX_IT)))
         return false;
 
     switch (FormatCompatPartition())
@@ -5115,7 +5276,7 @@ static bool XboxEmulatorReady()
     case XBOX_FORMAT_OK:
         // On to the emulator files, which the new partition doesn't have -
         // queued without asking again.
-        ReportEnqueue((EnqueueResult)QueueXefuPack(), "Original Xbox emulator");
+        ReportEnqueue((EnqueueResult)QueueXefuPack(), Tr(STR_ORIGINAL_XBOX_EMULATOR));
         return false;
     case XBOX_FORMAT_RESTART:
     {
@@ -5125,8 +5286,8 @@ static bool XboxEmulatorReady()
         // The files can't be queued until the partition mounts, after the
         // restart; the next startup queues them by itself.
         MarkXefuPackPending();
-        ShowAlertUI("Successful", "The console will shut down now.", NULL, "OK", NULL);
-        RenderStatusFrame("Shutting down", "Successful", "");
+        ShowAlertUI(Tr(STR_SUCCESSFUL), Tr(STR_THE_CONSOLE_WILL_SHUT_DOWN), NULL, Tr(STR_BUTTON_OK), NULL);
+        RenderStatusFrame(Tr(STR_SHUTTING_DOWN), Tr(STR_SUCCESSFUL), "");
         StopDownloadQueue(15000);
         StopDiscWorker(15000);
         StopGameInstaller(20000);
@@ -5138,8 +5299,8 @@ static bool XboxEmulatorReady()
     }
     case XBOX_FORMAT_ALREADY_THERE:
     default:
-        ShowMessageUI("Couldn't fix it", "The emulator couldn't be set up on this console.",
-                      "Nothing was changed. The log has the details.");
+        ShowMessageUI(Tr(STR_COULDNT_FIX_IT), Tr(STR_THE_EMULATOR_COULDNT_BE_SET),
+                      Tr(STR_NOTHING_WAS_CHANGED_THE_LOG));
         return false;
     }
 }
@@ -5156,9 +5317,9 @@ static void PlayLibraryGame(const InstalledGame &game)
     // Before the loader takes over: starting a game ends Omni360, so this is
     // the only chance to record it for Home's recents.
     NoteGamePlayed(game.titleId, game.contentType);
-    RenderLaunchFrame("Starting", game.displayName, game.titleId);
+    RenderLaunchFrame(Tr(STR_STARTING), game.displayName, game.titleId);
     LaunchInstalledGame(game);
-    ShowMessageUI("Couldn't start this game", game.displayName, "The console's loader refused it - see the log.");
+    ShowMessageUI(Tr(STR_COULDNT_START_THIS_GAME), game.displayName, Tr(STR_THE_CONSOLES_LOADER_REFUSED_IT));
 }
 
 // B on Home: the one way out of the app. Ending Omni360 takes the console
@@ -5171,17 +5332,15 @@ static bool ExitMenu()
 
     char message[96];
     if (pending > 0)
-        _snprintf(message, sizeof(message), "%d job%s still in the queue.", pending,
-                  pending == 1 ? " is" : "s are");
+        TrCount(message, sizeof(message), STR_JOBS_PENDING_ONE, STR_JOBS_PENDING, pending);
     else
-        _snprintf(message, sizeof(message), "The console goes back to its dashboard.");
+        TrFormat(message, sizeof(message), STR_BACK_TO_DASHBOARD);
     message[sizeof(message) - 1] = '\0';
 
-    return ShowConfirmUI("Exit Omni360?", message,
-                         pending > 0 ? "Leaving stops them. Files that already finished stay installed; "
-                                       "a disc install is removed."
+    return ShowConfirmUI(Tr(STR_EXIT_OMNI360), message,
+                         pending > 0 ? Tr(STR_LEAVING_STOPS_THEM_FILES_THAT)
                                      : NULL,
-                         "Exit");
+                         Tr(STR_EXIT));
 }
 static StoreGameView MakeStoreGameView(Shell &shell, const Library &lib)
 {
@@ -5227,62 +5386,59 @@ static StoreGameView MakeStoreGameView(Shell &shell, const Library &lib)
     switch (view.install)
     {
     case STORE_INSTALL_QUEUED:
-        view.buttons[0] = "Queued";
+        view.buttons[0] = Tr(STR_QUEUED);
         break;
     case STORE_INSTALL_INSTALLING:
         if (view.installFraction >= 0.0f)
         {
-            _snprintf(installLabel, sizeof(installLabel), "Installing %d%%", (int)(view.installFraction * 100.0f));
+            TrFormat(installLabel, sizeof(installLabel), STR_STORE_INSTALLING_PCT, TrNum((int)(view.installFraction * 100.0f)));
             installLabel[sizeof(installLabel) - 1] = '\0';
             view.buttons[0] = installLabel;
         }
         else
         {
-            view.buttons[0] = "Installing";
+            view.buttons[0] = Tr(STR_INSTALLING);
         }
         break;
     case STORE_INSTALL_INSTALLED:
         // Played from here too, where the library has it to play.
-        view.buttons[0] = LibraryGameByTitleId(lib, g_storeGame.titleId) != NULL ? "Play" : "Installed";
+        view.buttons[0] = LibraryGameByTitleId(lib, g_storeGame.titleId) != NULL ? Tr(STR_PLAY) : Tr(STR_INSTALLED);
         break;
     default:
         if (DiscInDriveFor(shell, g_storeGame.titleId))
         {
             // Even for a game archive.org hasn't got, which has no version
             // to install and so would leave the button disabled.
-            view.buttons[0] = "Install from disc";
+            view.buttons[0] = Tr(STR_INSTALL_FROM_DISC);
         }
         else if (StoreVersionCount() == 0)
         {
             // Nothing to install: a game nobody has uploaded, or one opened
             // from the library that the Store's lists don't have.
-            view.buttons[0] = "Not available";
+            view.buttons[0] = Tr(STR_NOT_AVAILABLE);
             view.buttonDisabled[0] = true;
         }
         else
         {
-            view.buttons[0] = partial ? "Install remaining" : "Install";
+            view.buttons[0] = partial ? Tr(STR_INSTALL_REMAINING) : Tr(STR_INSTALL);
         }
         break;
     }
-    view.buttons[1] = "Find DLC";
-    view.buttons[2] = "Title updates";
+    view.buttons[1] = Tr(STR_FIND_DLC);
+    view.buttons[2] = Tr(STR_TITLE_UPDATES);
     if (view.indie)
     {
         // Indie games had neither, and Xbox Live's catalog doesn't list them.
         view.buttonDisabled[1] = view.buttonDisabled[2] = true;
         view.loading = false;
-        view.description = "An Xbox Live Indie Game. Xbox Live's catalog doesn't list indie games, "
-                           "so there's no description or screenshots for it here.";
+        view.description = Tr(STR_INDIE_DESCRIPTION);
     }
     else if (StoreGameIsXbox())
     {
         // The archive's DLC and title updates are the 360's.
         view.buttonDisabled[1] = view.buttonDisabled[2] = true;
         view.loading = false;
-        view.description = "An Original Xbox game, played through the 360's backwards compatibility - it's "
-                           "on Microsoft's list of the games that run. Xbox Live's catalog doesn't list "
-                           "Original Xbox games, so there's no description or screenshots for it here.";
+        view.description = Tr(STR_XBOX_DESCRIPTION);
     }
     else if (g_storeArcade == NULL && StoreGameMissing(g_storeGame))
     {
@@ -5293,7 +5449,7 @@ static StoreGameView MakeStoreGameView(Shell &shell, const Library &lib)
         view.buttonDisabled[1] = view.buttonDisabled[2] = true;
     }
     if (view.install == STORE_INSTALL_INSTALLED || (view.install == STORE_INSTALL_AVAILABLE && partial))
-        view.buttons[3] = "Uninstall"; // else not shown
+        view.buttons[3] = Tr(STR_UNINSTALL); // else not shown
 
     view.versions = g_storeVersions;
     view.versionCount = StoreVersionCount();
@@ -5416,10 +5572,9 @@ static void InstallArcadeGame(const char *authHeader)
     if (runtime && result == ENQUEUE_ADDED)
     {
         char message[192];
-        _snprintf(message, sizeof(message), "%s, and the " INDIE_RUNTIME_NAME " indie games need to start",
-                  g_storeArcade->name);
+        TrFormat(message, sizeof(message), STR_INDIE_RUNTIME_ADDED, g_storeArcade->name);
         message[sizeof(message) - 1] = '\0';
-        ShowShellToast("Added to the queue", message, UI_TOAST_INFO);
+        ShowShellToast(Tr(STR_ADDED_TO_THE_QUEUE), message, UI_TOAST_INFO);
     }
     else
     {
@@ -5432,11 +5587,10 @@ static void InstallArcadeGame(const char *authHeader)
 // InstallCompilationPackages. False if the user backed out.
 static bool ConfirmCompilationInstall()
 {
-    return ShowConfirmUI("Installs as separate games",
-                         "Each Arcade game on this disc is installed as a game of its own.",
-                         "The disc's own menu isn't installed - it only works from the disc in the drive. "
-                         "Demos and videos on the disc are left out.",
-                         "Install");
+    return ShowConfirmUI(Tr(STR_INSTALLS_AS_SEPARATE_GAMES),
+                         Tr(STR_EACH_ARCADE_GAME_ON_THIS),
+                         Tr(STR_THE_DISCS_OWN_MENU_ISNT),
+                         Tr(STR_INSTALL));
 }
 
 // Install on a game page: every disc of the chosen version that isn't
@@ -5470,12 +5624,11 @@ static bool InstallStoreVersion(const Shell &shell, const Library &lib, const ch
     if (unpacks)
     {
         char message[192];
-        _snprintf(message, sizeof(message), "archive.org only has %s as a compressed .rar file.", g_storeGame.name);
+        TrFormat(message, sizeof(message), STR_RAR_ONLY, g_storeGame.name);
         message[sizeof(message) - 1] = '\0';
-        if (!ShowConfirmUI("Slow install", message,
-                           "It can still be installed, but it has to be unpacked on your console first, "
-                           "so it takes a lot longer than other games.",
-                           "Install"))
+        if (!ShowConfirmUI(Tr(STR_SLOW_INSTALL), message,
+                           Tr(STR_IT_CAN_STILL_BE_INSTALLED),
+                           Tr(STR_INSTALL)))
             return true;
     }
 
@@ -5497,7 +5650,7 @@ static bool InstallStoreVersion(const Shell &shell, const Library &lib, const ch
         // The disc's number in its name, so the Queue page and the dashboard
         // tell the discs apart.
         if (release->discCount > 1 && disc->disc > 0)
-            _snprintf(request.name, sizeof(request.name), "%s (Disc %u)", g_storeGame.name, (unsigned)disc->disc);
+            TrFormat(request.name, sizeof(request.name), STR_GAME_DISC_NAME, g_storeGame.name, TrNum((long)disc->disc));
         else
             _snprintf(request.name, sizeof(request.name), "%s", g_storeGame.name);
         request.item[sizeof(request.item) - 1] = '\0';
@@ -5514,21 +5667,21 @@ static bool InstallStoreVersion(const Shell &shell, const Library &lib, const ch
     }
 
     if (failure == GAME_QUEUE_FULL)
-        ShowShellToast("The queue is full", added > 0 ? "Not every disc fit - try again when one finishes."
-                                                      : "Wait for an install to finish first.", UI_TOAST_ERROR);
+        ShowShellToast(Tr(STR_THE_QUEUE_IS_FULL), added > 0 ? Tr(STR_NOT_EVERY_DISC_FIT_TRY)
+                                                      : Tr(STR_WAIT_FOR_AN_INSTALL_TO), UI_TOAST_ERROR);
     else if (failure != GAME_QUEUED)
-        ShowShellToast("Couldn't add it", "The game installer isn't running.", UI_TOAST_ERROR);
+        ShowShellToast(Tr(STR_COULDNT_ADD_IT), Tr(STR_THE_GAME_INSTALLER_ISNT_RUNNING), UI_TOAST_ERROR);
     else if (added > 1)
     {
         char message[64];
-        _snprintf(message, sizeof(message), "%d discs of %s", added, g_storeGame.name);
+        TrFormat(message, sizeof(message), STR_DISCS_OF, TrNum(added), g_storeGame.name);
         message[sizeof(message) - 1] = '\0';
-        ShowShellToast("Added to the queue", message, UI_TOAST_INFO);
+        ShowShellToast(Tr(STR_ADDED_TO_THE_QUEUE), message, UI_TOAST_INFO);
     }
     else if (added == 1)
-        ShowShellToast("Added to the queue", g_storeGame.name, UI_TOAST_INFO);
+        ShowShellToast(Tr(STR_ADDED_TO_THE_QUEUE), g_storeGame.name, UI_TOAST_INFO);
     else
-        ShowShellToast("Already in the queue", g_storeGame.name, UI_TOAST_INFO);
+        ShowShellToast(Tr(STR_ALREADY_IN_THE_QUEUE), g_storeGame.name, UI_TOAST_INFO);
     return unpacks || compilation;
 }
 
@@ -5546,7 +5699,7 @@ static bool InstallStoreVersion(const Shell &shell, const Library &lib, const ch
 // \Emulators, which then becomes that folder.
 
 static const FolderKind kHomebrewFolderKinds[HOMEBREW_KIND_COUNT] = { FOLDER_APPS, FOLDER_HOMEBREW, FOLDER_EMULATORS };
-static const char *const kHomebrewHeadings[HOMEBREW_KIND_COUNT] = { "Apps", "Homebrew", "Emulators" };
+static const StringId kHomebrewHeadings[HOMEBREW_KIND_COUNT] = { STR_NAV_APPS, STR_NAV_HOMEBREW, STR_NAV_EMULATORS };
 static const char *const kHomebrewDefaultFolders[HOMEBREW_KIND_COUNT] = { "Hdd1:\\Apps", "Hdd1:\\Homebrew",
                                                                           "Hdd1:\\Emulators" };
 
@@ -5676,22 +5829,22 @@ static StoreRowsView MakeHomebrewView(const Shell &shell)
 {
     StoreRowsView view;
     memset(&view, 0, sizeof(view));
-    view.title = "Homebrew";
+    view.title = Tr(STR_NAV_HOMEBREW);
 
     char mirror[MAX_TEXT_LENGTH];
     HomebrewMirror(mirror, sizeof(mirror));
     static char subtitle[MAX_TEXT_LENGTH + 64];
     if (mirror[0] != '\0')
-        _snprintf(subtitle, sizeof(subtitle), "From the ConsoleMods repo" STORE_MIDDOT "downloads from %s", mirror);
+        TrFormat(subtitle, sizeof(subtitle), STR_HOMEBREW_SUBTITLE_MIRROR, mirror);
     else
-        _snprintf(subtitle, sizeof(subtitle), "From the ConsoleMods repo, as Aurora's Homebrew Store lists it");
+        TrFormat(subtitle, sizeof(subtitle), STR_HOMEBREW_SUBTITLE);
     subtitle[sizeof(subtitle) - 1] = '\0';
     view.subtitle = subtitle;
 
     for (int k = 0; k < HOMEBREW_KIND_COUNT; ++k)
     {
         StoreRowView &row = view.rows[k];
-        row.name = kHomebrewHeadings[k];
+        row.name = Tr(kHomebrewHeadings[k]);
         row.tiles = &g_homebrewTiles[g_homebrewRowStart[k]];
         row.count = HomebrewRowCount(k);
         row.scroll = shell.homebrewRowScroll[k];
@@ -5717,7 +5870,7 @@ static void ShowHomebrewItem(Shell &shell, int index)
     std::string body = item.description;
     char facts[160] = "";
     if (item.version[0] != '\0')
-        _snprintf(facts, sizeof(facts), "Version %s", item.version);
+        TrFormat(facts, sizeof(facts), STR_HOMEBREW_VERSION, item.version);
     facts[sizeof(facts) - 1] = '\0';
     if (item.author[0] != '\0')
     {
@@ -5736,12 +5889,12 @@ static void ShowHomebrewItem(Shell &shell, int index)
               kindFolder, item.folder, mirror[0] != '\0' ? "  -  from your test mirror" : "");
     foot[sizeof(foot) - 1] = '\0';
 
-    if (!ShowNotesUI(kHomebrewHeadings[item.kind], item.title, body.c_str(), foot,
-                     g_homebrewInstalled[index] ? L"Install again" : L"Install"))
+    if (!ShowNotesUI(Tr(kHomebrewHeadings[item.kind]), item.title, body.c_str(), foot,
+                     g_homebrewInstalled[index] ? TrW(STR_INSTALL_AGAIN) : TrW(STR_INSTALL)))
         return;
     if (g_homebrewInstalled[index] &&
-        !ShowConfirmUI("Install again?", item.title,
-                       "Files it brings are replaced; anything else in its folder, like settings, stays.", "Install"))
+        !ShowConfirmUI(Tr(STR_INSTALL_AGAIN_2), item.title,
+                       Tr(STR_FILES_IT_BRINGS_ARE_REPLACED), Tr(STR_INSTALL)))
         return;
 
     // The first of its kind: the usual folder becomes its kind's, so its
@@ -5750,7 +5903,7 @@ static void ShowHomebrewItem(Shell &shell, int index)
     {
         if (!WriteFolderKind(kHomebrewFolderKinds[item.kind], "", NULL, kindFolder))
         {
-            ShowMessageUI("Not saved", "settings.txt could not be written.", kindFolder);
+            ShowMessageUI(Tr(STR_NOT_SAVED), Tr(STR_SETTINGS_TXT_COULD_NOT_BE), kindFolder);
             return;
         }
         shell.rescanShelves = true;
@@ -5780,12 +5933,12 @@ static bool ActOnStoreFocus(Shell &shell)
         if (StoreGameByTitleId(featured.titleId, &g_storeGame))
             OpenStoreGame(shell, g_storeGame);
         else
-            ShowShellToast("Not in the collection", featured.name, UI_TOAST_ERROR);
+            ShowShellToast(Tr(STR_NOT_IN_THE_COLLECTION), featured.name, UI_TOAST_ERROR);
     }
     else if (i < STORE_FOCUS_LETTERS)
     {
         if (kStoreButtons[i - STORE_FOCUS_BUTTONS].disabled)
-            ShowShellToast("Coming soon", kStoreButtonsSoon[i - STORE_FOCUS_BUTTONS], UI_TOAST_INFO);
+            ShowShellToast(Tr(STR_COMING_SOON), Tr(kStoreButtonsSoon[i - STORE_FOCUS_BUTTONS]), UI_TOAST_INFO);
         else if (i - STORE_FOCUS_BUTTONS == STORE_BUTTON_XBLA)
             OpenSection(shell, SECTION_XBLA);
         else if (i - STORE_FOCUS_BUTTONS == STORE_BUTTON_XBLIG)
@@ -5795,7 +5948,7 @@ static bool ActOnStoreFocus(Shell &shell)
         else if (i - STORE_FOCUS_BUTTONS == STORE_BUTTON_HOMEBREW)
             OpenHomebrew(shell);
         else
-            ShowShellToast("Coming soon", kStoreButtonsSoon[i - STORE_FOCUS_BUTTONS], UI_TOAST_INFO);
+            ShowShellToast(Tr(STR_COMING_SOON), Tr(kStoreButtonsSoon[i - STORE_FOCUS_BUTTONS]), UI_TOAST_INFO);
     }
     else if (i < STORE_FOCUS_SPOTLIGHT)
     {
@@ -5907,6 +6060,8 @@ static void PublishSidebar(const Shell &shell, const Library &lib)
     sidebar.storageTotal[sizeof(sidebar.storageTotal) - 1] = '\0';
 
     // Settings lists its sections in the pages' place.
+    for (int s = 0; s < SETTINGS_SECTION_COUNT; ++s)
+        kSettingsSectionNames[s] = Tr(kSettingsSectionIds[s]);
     sidebar.sections = kSettingsSectionNames;
     sidebar.sectionCount = shell.page == SHELL_PAGE_SETTINGS ? SETTINGS_SECTION_COUNT : 0;
     sidebar.section = shell.settings.section;
@@ -5965,11 +6120,7 @@ static HomePageView MakeHomeView(const Shell &shell, const Library &lib)
 
     SYSTEMTIME now;
     GetLocalTime(&now);
-    int hour = now.wHour % 12;
-    if (hour == 0)
-        hour = 12;
-    _snprintf(clock, sizeof(clock), "%d:%02d %s", hour, (int)now.wMinute, now.wHour < 12 ? "AM" : "PM");
-    clock[sizeof(clock) - 1] = '\0';
+    FormatClock(clock, sizeof(clock), now);
     view.clock = clock;
 
     if (shell.storage.detail[0] != '\0')
@@ -5990,7 +6141,7 @@ static HomePageView MakeHomeView(const Shell &shell, const Library &lib)
     {
         const ShellPage p = kHomeNavPages[i];
         HomeNavView &item = view.nav[view.navCount++];
-        item.label = (p == SHELL_PAGE_LIBRARY) ? "Games + Apps" : ShellPageName(p);
+        item.label = (p == SHELL_PAGE_LIBRARY) ? Tr(STR_GAMES_AND_APPS) : ShellPageName(p);
         item.page = p;
         item.count = (p == SHELL_PAGE_QUEUE) ? queued : 0;
     }
@@ -6028,9 +6179,8 @@ static HomePageView MakeHomeView(const Shell &shell, const Library &lib)
 
     if (view.recentCount == 0)
     {
-        view.emptyTitle = lib.count > 0 ? "Nothing played yet" : "No games installed yet";
-        view.emptyHint = lib.count > 0 ? "Games you start show up here."
-                                       : "Find something in the Store to get going.";
+        view.emptyTitle = Tr(lib.count > 0 ? STR_HOME_NOTHING_PLAYED : STR_HOME_NO_GAMES);
+        view.emptyHint = Tr(lib.count > 0 ? STR_HOME_NOTHING_PLAYED_HINT : STR_HOME_NO_GAMES_HINT);
     }
 
     return view;
@@ -6044,7 +6194,7 @@ static LibraryPageView MakeLibraryView(const Shell &shell, const Library &lib, c
     view.selected = shell.librarySelected;
     view.scroll = shell.libraryScroll;
     view.gamesPath = gamesPath;
-    view.bannerText = shell.keysSaved ? NULL : "Add your archive.org keys in Settings to start downloading.";
+    view.bannerText = shell.keysSaved ? NULL : Tr(STR_KEYS_BANNER);
     view.focused = !shell.sidebarFocused;
     view.heading = NULL;
     view.emptyTitle = NULL;
@@ -6071,10 +6221,10 @@ static LibraryPageView MakeLibraryView(const Shell &shell, const Library &lib, c
 // The Apps or Homebrew page, drawn as the library's grid is.
 static LibraryPageView MakeShelfView(const Shell &shell, ShelfKind kind)
 {
-    static const char *const headings[SHELF_COUNT] = { "Apps", "Homebrew", "Emulators" };
-    static const char *const looking[SHELF_COUNT] = { "Looking for apps", "Looking for homebrew",
-                                                      "Looking for emulators" };
-    static const char *const none[SHELF_COUNT] = { "No apps found", "No homebrew found", "No emulators found" };
+    const char *const headings[SHELF_COUNT] = { Tr(STR_NAV_APPS), Tr(STR_NAV_HOMEBREW), Tr(STR_NAV_EMULATORS) };
+    const char *const looking[SHELF_COUNT] = { Tr(STR_LOOKING_FOR_APPS), Tr(STR_LOOKING_FOR_HOMEBREW),
+                                               Tr(STR_LOOKING_FOR_EMULATORS) };
+    const char *const none[SHELF_COUNT] = { Tr(STR_NO_APPS_FOUND), Tr(STR_NO_HOMEBREW_FOUND), Tr(STR_NO_EMULATORS_FOUND) };
     const Shelf &shelf = g_shelves[kind];
 
     LibraryPageView view;
@@ -6110,9 +6260,9 @@ static void PlayApp(const InstalledGame &app)
     if (!ConfirmLeaving())
         return;
     dprintf("Starting app: %s (%s)\n", app.displayName, app.packagePath);
-    RenderLaunchFrame("Starting", app.displayName, app.titleId);
+    RenderLaunchFrame(Tr(STR_STARTING), app.displayName, app.titleId);
     LaunchApp(app.packagePath);
-    ShowMessageUI("Couldn't start it", app.displayName, "The console's loader refused it - see the log.");
+    ShowMessageUI(Tr(STR_COULDNT_START_IT), app.displayName, Tr(STR_THE_CONSOLES_LOADER_REFUSED_IT));
 }
 
 // The D-pad and shoulder buttons on a grid of tiles - the library's, or an
@@ -6207,12 +6357,17 @@ static void UpdateDisc(Shell &shell, const Library &lib, const char *gamesPath)
             if (listed != NULL)
                 _snprintf(shell.discName, sizeof(shell.discName), "%s", listed);
             else
-                _snprintf(shell.discName, sizeof(shell.discName), "Title %08lX", now.titleId);
+            {
+                char id[12];
+                _snprintf(id, sizeof(id), "%08lX", now.titleId);
+                id[sizeof(id) - 1] = '\0';
+                TrFormat(shell.discName, sizeof(shell.discName), STR_DISC_TITLE_ID, id);
+            }
             shell.discInstalled = IsDiscInstalled(gamesPath, now.titleId, now.mediaId);
         }
         else if (now.state == DISC_READING)
         {
-            _snprintf(shell.discName, sizeof(shell.discName), "Reading the disc");
+            TrFormat(shell.discName, sizeof(shell.discName), STR_READING_THE_DISC);
             shell.discInstalled = false;
         }
         else if (now.state == DISC_UNREADABLE)
@@ -6253,8 +6408,8 @@ static bool StartDiscInstall(Shell &shell, const char *gamesPath)
         return false;
 
     if (shell.discInstalled &&
-        !ShowConfirmUI("Install again?", shell.discName,
-                       "Installing it again replaces the copy on the drive.", "Reinstall"))
+        !ShowConfirmUI(Tr(STR_INSTALL_AGAIN_2), shell.discName,
+                       Tr(STR_INSTALLING_IT_AGAIN_REPLACES_THE), Tr(STR_REINSTALL)))
         return true;
 
     // A compilation disc says what it installs as, as the Store does.
@@ -6289,16 +6444,16 @@ static bool StartDiscInstall(Shell &shell, const char *gamesPath)
     case DISC_INSTALL_QUEUED:
         _snprintf(detail, sizeof(detail), "%s" "  \xC2\xB7  " "%s, on the Queue page", name.c_str(), sizeText);
         detail[sizeof(detail) - 1] = '\0';
-        ShowShellToast("Installing", detail, UI_TOAST_INFO);
+        ShowShellToast(Tr(STR_INSTALLING), detail, UI_TOAST_INFO);
         break;
     case DISC_INSTALL_BUSY:
-        ShowShellToast("Already installing", "One disc installs at a time.", UI_TOAST_INFO);
+        ShowShellToast(Tr(STR_ALREADY_INSTALLING), Tr(STR_ONE_DISC_INSTALLS_AT_A), UI_TOAST_INFO);
         break;
     case DISC_INSTALL_NO_DISC:
-        ShowShellToast("Couldn't install", "The disc in the drive changed. Try again in a moment.", UI_TOAST_ERROR);
+        ShowShellToast(Tr(STR_COULDNT_INSTALL), Tr(STR_THE_DISC_IN_THE_DRIVE), UI_TOAST_ERROR);
         break;
     default:
-        ShowShellToast("Couldn't install", "The disc worker didn't start - the log says why.", UI_TOAST_ERROR);
+        ShowShellToast(Tr(STR_COULDNT_INSTALL), Tr(STR_THE_DISC_WORKER_DIDNT_START), UI_TOAST_ERROR);
         break;
     }
     return tookScreen;
@@ -6314,7 +6469,7 @@ static bool DiscTileAction(Shell &shell, const Library &lib, const char *gamesPa
     {
         if (pressed & XINPUT_GAMEPAD_A)
         {
-            ShowMessageUI("Can't install this disc", disc.reason, "Only Xbox 360 game discs can be installed.");
+            ShowMessageUI(Tr(STR_CANT_INSTALL_THIS_DISC), disc.reason, Tr(STR_ONLY_XBOX_360_GAME_DISCS));
             return true;
         }
         return false;
@@ -6345,11 +6500,11 @@ static bool DiscTileAction(Shell &shell, const Library &lib, const char *gamesPa
             // Recorded like any other game: it shows on Home if the same
             // title is also installed, and drops out if it isn't.
             NoteGamePlayed(disc.titleId, 0);
-            RenderLaunchFrame("Starting", shell.discName, disc.titleId);
+            RenderLaunchFrame(Tr(STR_STARTING), shell.discName, disc.titleId);
             // Nothing may be reading the drive as the game starts from it.
             StopDiscWorker(3000);
             LaunchDisc(disc.original);
-            ShowMessageUI("Couldn't start this disc", shell.discName, "The console's loader refused it - see the log.");
+            ShowMessageUI(Tr(STR_COULDNT_START_THIS_DISC), shell.discName, Tr(STR_THE_CONSOLES_LOADER_REFUSED_IT));
         }
         return true;
     }
@@ -6488,7 +6643,7 @@ static void FormatTransferNumbers(const QueueJobSnapshot &job, char *out, size_t
             _snprintf(left, sizeof(left), "%d:%02d", minutesLeft, secsLeft);
         left[sizeof(left) - 1] = '\0';
 
-        _snprintf(out, outSize, "%s of %s   %s/s   %s left", done, total, speed, left);
+        TrFormat(out, outSize, STR_TRANSFER_NUMBERS, done, total, speed, left);
     }
     else
     {
@@ -6679,11 +6834,11 @@ static void SnapshotQueue(Shell &shell, const Library &lib)
         {
             // Fetched ahead on the PC: how far, so it's plain it'll be quick.
             if (job.pcKnown && job.pcPercent >= 100)
-                _snprintf(status, statusSize, "Waiting" SETTINGS_MIDDOT "ready on your PC");
+                TrFormat(status, statusSize, STR_WAITING_READY_ON_PC);
             else if (job.pcKnown)
-                _snprintf(status, statusSize, "Waiting" SETTINGS_MIDDOT "%d%% on your PC", job.pcPercent);
+                TrFormat(status, statusSize, STR_WAITING_ON_PC, TrNum(job.pcPercent));
             else
-                _snprintf(status, statusSize, "Waiting");
+                TrFormat(status, statusSize, STR_WAITING);
             row.tone = QUEUE_ROW_WAITING;
             row.showBar = true;
             row.fraction = -1.0f;
@@ -6692,19 +6847,19 @@ static void SnapshotQueue(Shell &shell, const Library &lib)
         {
             // Dimmed like a waiting job, since that is what it is - one that
             // won't be picked up until it's told to.
-            _snprintf(status, statusSize, "Paused");
+            TrFormat(status, statusSize, STR_PAUSED);
             row.tone = QUEUE_ROW_WAITING;
             row.showBar = true;
             row.fraction = -1.0f;
         }
         else if (job.state == QUEUE_ACTIVE)
         {
-            const char *phase = job.phase[0] != '\0' ? job.phase : "Starting";
+            const char *phase = job.phase[0] != '\0' ? job.phase : Tr(STR_STARTING);
             if (job.stepCount > 1 && job.stepFraction >= 0.0f)
-                _snprintf(status, statusSize, "Step %d of %d: %s (%d%%)", job.step + 1, job.stepCount, phase,
-                          (int)((job.stepFraction > 1.0f ? 1.0f : job.stepFraction) * 100.0f));
+                TrFormat(status, statusSize, STR_STEP_OF_PCT, TrNum(job.step + 1), TrNum(job.stepCount), phase,
+                         TrNum((int)((job.stepFraction > 1.0f ? 1.0f : job.stepFraction) * 100.0f)));
             else if (job.stepCount > 1)
-                _snprintf(status, statusSize, "Step %d of %d: %s", job.step + 1, job.stepCount, phase);
+                TrFormat(status, statusSize, STR_STEP_OF, TrNum(job.step + 1), TrNum(job.stepCount), phase);
             else
                 _snprintf(status, statusSize, "%s", phase);
             FormatTransferNumbers(job, numbers, sizeof(shell.queueNumbers[i]));
@@ -6763,9 +6918,9 @@ static void PollUpdateCheck(Shell &shell)
     {
         announced = true;
         char title[64];
-        _snprintf(title, sizeof(title), "Omni360 %s is available", info.version);
+        TrFormat(title, sizeof(title), STR_OMNI360_AVAILABLE, info.version);
         title[sizeof(title) - 1] = '\0';
-        ShowShellToast(title, "See Settings for what's new", UI_TOAST_INFO);
+        ShowShellToast(title, Tr(STR_SEE_SETTINGS_FOR_WHATS_NEW), UI_TOAST_INFO);
     }
 }
 
@@ -6789,20 +6944,14 @@ static void DrawNightFrame(int secondsLeft, bool force)
     lastMinute = (int)now.wMinute;
     lastSeconds = secondsLeft;
 
-    int hour = now.wHour % 12;
-    if (hour == 0)
-        hour = 12;
-
-    char clock[16];
-    _snprintf(clock, sizeof(clock), "%d:%02d %s", hour, (int)now.wMinute, now.wHour < 12 ? "AM" : "PM");
-    clock[sizeof(clock) - 1] = '\0';
+    char clock[24];
+    FormatClock(clock, sizeof(clock), now);
 
     char countdown[96];
     const char *line;
     if (secondsLeft > 0)
     {
-        _snprintf(countdown, sizeof(countdown), "Turning off in %d second%s - press anything to stay on",
-                  secondsLeft, secondsLeft == 1 ? "" : "s");
+        TrCount(countdown, sizeof(countdown), STR_NIGHT_COUNTDOWN_ONE, STR_NIGHT_COUNTDOWN, secondsLeft);
         countdown[sizeof(countdown) - 1] = '\0';
         line = countdown;
     }
@@ -6813,7 +6962,7 @@ static void DrawNightFrame(int secondsLeft, bool force)
         // here would be vague about what it was counting and usually out
         // of date by the time anyone read it. The one thing worth saying
         // at one in the morning is that the console sees itself out.
-        line = "The console will turn off when the queued downloads are done";
+        line = Tr(STR_NIGHT_WAITING);
     }
 
     RenderNightFrame(clock, line);
@@ -6922,17 +7071,17 @@ static void ReportEnqueue(EnqueueResult result, const char *filename)
     switch (result)
     {
     case ENQUEUE_ADDED:
-        ShowShellToast("Added to the queue", filename, UI_TOAST_INFO);
+        ShowShellToast(Tr(STR_ADDED_TO_THE_QUEUE), filename, UI_TOAST_INFO);
         break;
     case ENQUEUE_ALREADY_QUEUED:
-        ShowShellToast("Already in the queue", filename, UI_TOAST_INFO);
+        ShowShellToast(Tr(STR_ALREADY_IN_THE_QUEUE), filename, UI_TOAST_INFO);
         break;
     case ENQUEUE_FULL:
-        ShowShellToast("The queue is full", "Wait for a download to finish, or remove finished ones from the Queue.",
+        ShowShellToast(Tr(STR_THE_QUEUE_IS_FULL), Tr(STR_WAIT_FOR_A_DOWNLOAD_TO),
                        UI_TOAST_ERROR);
         break;
     default:
-        ShowShellToast("Downloads aren't available", "The download worker didn't start - see the log.",
+        ShowShellToast(Tr(STR_DOWNLOADS_ARENT_AVAILABLE), Tr(STR_THE_DOWNLOAD_WORKER_DIDNT_START),
                        UI_TOAST_ERROR);
         break;
     }
@@ -6957,24 +7106,24 @@ static void RenderGamePageFrame(Shell &shell, const Library &lib, UiHint *hints,
         const int f = shell.storeGameFocus;
         if (shell.storeVersionsOpen)
         {
-            hintCount = AddHint(hints, hintCount, UI_BUTTON_A, L"Choose");
-            hintCount = AddHint(hints, hintCount, UI_BUTTON_B, L"Done");
+            hintCount = AddHint(hints, hintCount, UI_BUTTON_A, TrW(STR_CHOOSE));
+            hintCount = AddHint(hints, hintCount, UI_BUTTON_B, TrW(STR_DONE));
         }
         else if (f >= STORE_GAME_FOCUS_SIMILAR)
-            hintCount = AddHint(hints, hintCount, UI_BUTTON_A, L"View game", L"View");
+            hintCount = AddHint(hints, hintCount, UI_BUTTON_A, TrW(STR_VIEW_GAME), TrW(STR_VIEW));
         else if (f == STORE_GAME_FOCUS_BUTTONS && StoreVersionCount() > 0)
-            hintCount = AddHint(hints, hintCount, UI_BUTTON_A, GamePagePlays(shell, lib) ? L"Play" : L"Install");
+            hintCount = AddHint(hints, hintCount, UI_BUTTON_A, GamePagePlays(shell, lib) ? TrW(STR_PLAY) : TrW(STR_INSTALL));
         else if (f == STORE_GAME_FOCUS_BUTTONS + 1 && !StoreGameIsIndie() && !StoreGameIsXbox())
-            hintCount = AddHint(hints, hintCount, UI_BUTTON_A, L"Find DLC", L"DLC");
+            hintCount = AddHint(hints, hintCount, UI_BUTTON_A, TrW(STR_FIND_DLC), TrW(STR_DLC));
         else if (f == STORE_GAME_FOCUS_BUTTONS + 2 && !StoreGameIsIndie() && !StoreGameIsXbox())
-            hintCount = AddHint(hints, hintCount, UI_BUTTON_A, L"Find title updates", L"Updates");
+            hintCount = AddHint(hints, hintCount, UI_BUTTON_A, TrW(STR_FIND_TITLE_UPDATES), TrW(STR_UPDATES));
         else if (f == STORE_GAME_FOCUS_BUTTONS + 3)
-            hintCount = AddHint(hints, hintCount, UI_BUTTON_A, L"Uninstall");
+            hintCount = AddHint(hints, hintCount, UI_BUTTON_A, TrW(STR_UNINSTALL));
         if (!shell.storeVersionsOpen)
         {
-            hintCount = AddHint(hints, hintCount, UI_BUTTON_B, L"Back");
+            hintCount = AddHint(hints, hintCount, UI_BUTTON_B, TrW(STR_BUTTON_BACK));
             if (StoreVersionCount() > 1)
-                hintCount = AddHint(hints, hintCount, UI_BUTTON_Y, L"Versions");
+                hintCount = AddHint(hints, hintCount, UI_BUTTON_Y, TrW(STR_STORE_VERSIONS));
         }
     }
 
@@ -6992,44 +7141,44 @@ static void RenderPickerFrame(Shell &shell, UiHint *hints, int hintCount)
     if (shell.picker.kind != PICKER_NONE && shell.picker.status != PICKER_READY)
     {
         const Picker &picker = shell.picker;
-        const char *heading = (picker.kind == PICKER_DLC) ? "Choose a DLC pack" : "Choose a title update";
+        const char *heading = (picker.kind == PICKER_DLC) ? Tr(STR_CHOOSE_DLC_PACK) : Tr(STR_CHOOSE_TITLE_UPDATE);
         const char *gameName = picker.gameName;
 
         if (picker.status == PICKER_UNREACHABLE)
-            hintCount = AddHint(hints, hintCount, UI_BUTTON_A, L"Try again");
-        hintCount = AddHint(hints, hintCount, UI_BUTTON_B, L"Back");
+            hintCount = AddHint(hints, hintCount, UI_BUTTON_A, TrW(STR_TRY_AGAIN));
+        hintCount = AddHint(hints, hintCount, UI_BUTTON_B, TrW(STR_BUTTON_BACK));
 
         if (picker.status == PICKER_SEARCHING)
         {
             // The dots step about three times a second - something
             // has to move, or a slow answer reads as a hang.
-            static const char *const kSearching[] = {
-                "Searching archive.org", "Searching archive.org.",
-                "Searching archive.org..", "Searching archive.org..."};
-            const char *message = kSearching[(GetTickCount() / 333) % 4];
+            static const char *const kDots[] = { "", ".", "..", "..." };
+            char message[96];
+            _snprintf(message, sizeof(message), "%s%s", Tr(STR_SEARCHING_ARCHIVE_ORG), kDots[(GetTickCount() / 333) % 4]);
+            message[sizeof(message) - 1] = '\0';
             RenderPlaceholderFrame(heading, message, gameName, hints, hintCount);
         }
         else if (picker.status == PICKER_NOTHING)
         {
             RenderPlaceholderFrame(heading,
-                                   picker.kind == PICKER_DLC ? "No DLC in the collection matched this game."
-                                                             : "No title update matched this game.",
+                                   picker.kind == PICKER_DLC ? Tr(STR_NO_DLC_IN_THE_COLLECTION)
+                                                             : Tr(STR_NO_TITLE_UPDATE_MATCHED_THIS),
                                    gameName, hints, hintCount);
         }
         else
         {
-            RenderPlaceholderFrame(heading, "Could not reach archive.org.",
-                                   "Check the console's network connection and try again.",
+            RenderPlaceholderFrame(heading, Tr(STR_COULD_NOT_REACH_ARCHIVE_ORG),
+                                   Tr(STR_CHECK_THE_CONSOLES_NETWORK_CONNECTION),
                                    hints, hintCount);
         }
     }
     else
     {
-        hintCount = AddHint(hints, hintCount, UI_BUTTON_A, L"Add to queue", L"Queue");
-        hintCount = AddHint(hints, hintCount, UI_BUTTON_B, L"Back");
+        hintCount = AddHint(hints, hintCount, UI_BUTTON_A, TrW(STR_ADD_TO_QUEUE), TrW(STR_NAV_QUEUE));
+        hintCount = AddHint(hints, hintCount, UI_BUTTON_B, TrW(STR_BUTTON_BACK));
 
         ListPageView view;
-        view.heading = (shell.picker.kind == PICKER_DLC) ? "Choose a DLC pack" : "Choose a title update";
+        view.heading = (shell.picker.kind == PICKER_DLC) ? Tr(STR_CHOOSE_DLC_PACK) : Tr(STR_CHOOSE_TITLE_UPDATE);
         view.subheading = shell.picker.gameName;
         view.labels = shell.picker.labels;
         view.sublabels = shell.picker.sublabels;
@@ -7408,7 +7557,7 @@ static bool StartLibraryRescan(const char *gamesPath)
     }
 
     g_rescan.running = true;
-    SetShellBusy("Refreshing library");
+    SetShellBusy(Tr(STR_REFRESHING_LIBRARY));
     return true;
 }
 
@@ -7488,6 +7637,17 @@ int main()
     if (StartUiSounds())
         SetUiSoundsOn(UiSoundsSetting());
     StartupStep("disc speed + sounds");
+
+    // The language, before anything is drawn in it.
+    {
+        char language[16];
+        LanguageSetting(language, sizeof(language));
+        FindLanguages();
+        SetLanguage(language);
+        SetStoreLocale(XboxLocaleForLanguage());
+        SetClockStyle(ClockSetting());
+    }
+    StartupStep("language");
 
     if (!InitGameListUI())
     {
@@ -7670,7 +7830,7 @@ int main()
                 // The emulator files, when the last run set the emulator up
                 // and shut the console down to finish it - see XboxCompat.h.
                 if (QueueXefuPackIfPending())
-                    ShowShellToast("Installing the emulator", "Original Xbox games will play once it's done.",
+                    ShowShellToast(Tr(STR_INSTALLING_THE_EMULATOR), Tr(STR_ORIGINAL_XBOX_GAMES_WILL_PLAY),
                                    UI_TOAST_INFO);
             }
             RestoreGameInstalls(keptAuth);
@@ -7725,15 +7885,13 @@ int main()
         if (restored > 0)
         {
             char heading[64], message[160];
-            _snprintf(heading, sizeof(heading), "%d download%s finished last time", restored,
-                      restored == 1 ? "" : "s");
+            TrCount(heading, sizeof(heading), STR_RESTORED_ONE, STR_RESTORED, restored);
             heading[sizeof(heading) - 1] = '\0';
 
             if (restoredFailed > 0)
-                _snprintf(message, sizeof(message), "%d of them didn't install - the Queue says why.",
-                          restoredFailed);
+                TrFormat(message, sizeof(message), STR_RESTORED_FAILED, TrNum(restoredFailed));
             else
-                _snprintf(message, sizeof(message), "All of them installed. The Queue has the list.");
+                TrFormat(message, sizeof(message), STR_RESTORED_ALL_OK);
             message[sizeof(message) - 1] = '\0';
 
             ShowShellToast(heading, message, restoredFailed > 0 ? UI_TOAST_ERROR : UI_TOAST_SUCCESS);
@@ -7886,8 +8044,8 @@ int main()
             // they do when the app is closed normally, so a game install's
             // staging is flushed and the disc drive is left alone - then the
             // power goes.
-            RenderStatusFrame("Turning off", "Nothing left in the queue",
-                              "Stopping downloads and installs first.");
+            RenderStatusFrame(Tr(STR_TURNING_OFF), Tr(STR_NOTHING_LEFT_IN_THE_QUEUE),
+                              Tr(STR_STOPPING_DOWNLOADS_AND_INSTALLS_FIRST));
             StopDownloadQueue(15000);
             StopDiscWorker(15000);
             StopGameInstaller(20000);
@@ -7901,8 +8059,8 @@ int main()
             // stopped, so there is no shell to go back to. Leaving is as
             // close to off as this can get from here.
             LeaveNightMode();
-            RenderStatusFrame("Couldn't turn off", "The console didn't take the power-off",
-                              "Leaving Omni360 instead. What finished is in the Queue next time.");
+            RenderStatusFrame(Tr(STR_COULDNT_TURN_OFF), Tr(STR_THE_CONSOLE_DIDNT_TAKE_THE),
+                              Tr(STR_LEAVING_OMNI360_INSTEAD_WHAT_FINISHED));
             Sleep(5000);
             break;
         }
@@ -8257,7 +8415,7 @@ int main()
                          installState != STORE_INSTALL_AVAILABLE)
                 {
                     // On its way or already there.
-                    ShowShellToast(installState == STORE_INSTALL_INSTALLED ? "Already installed" : "Already in the queue",
+                    ShowShellToast(installState == STORE_INSTALL_INSTALLED ? Tr(STR_ALREADY_INSTALLED) : Tr(STR_ALREADY_IN_THE_QUEUE),
                                    g_storeGame.name, UI_TOAST_INFO);
                 }
                 else if (f == STORE_GAME_FOCUS_BUTTONS && StoreVersionCount() > 0)
@@ -8436,7 +8594,7 @@ int main()
                 if (g_sectionLetterCounts[set][l] > 0)
                     OpenStoreLetter(shell, kStoreLetters[l], set);
                 else
-                    ShowShellToast("No games here", "Nothing in the collection starts with that.", UI_TOAST_INFO);
+                    ShowShellToast(Tr(STR_NO_GAMES_HERE), Tr(STR_NOTHING_IN_THE_COLLECTION_STARTS), UI_TOAST_INFO);
             }
             else if (input.nav != 0)
                 StepSectionFocus(input.nav, shell);
@@ -8513,9 +8671,8 @@ int main()
                     acted = true;
                 }
                 else
-                    ShowShellToast("Nothing is downloading",
-                                   "Night mode turns the console off when the queue empties. "
-                                   "It's empty already.",
+                    ShowShellToast(Tr(STR_NOTHING_IS_DOWNLOADING),
+                                   Tr(STR_NIGHT_MODE_TURNS_THE_CONSOLE),
                                    UI_TOAST_INFO);
             }
             else if (input.nav == XINPUT_GAMEPAD_DPAD_LEFT && !shell.queueOnRecents)
@@ -8571,17 +8728,17 @@ int main()
                 }
                 else if (IsGameJobId(job.id))
                 {
-                    if (ShowConfirmUI("Stop installing?", job.gameName,
-                                      "The game won't be installed. What has been downloaded is removed.",
-                                      "Stop"))
+                    if (ShowConfirmUI(Tr(STR_STOP_INSTALLING), job.gameName,
+                                      Tr(STR_THE_GAME_WONT_BE_INSTALLED),
+                                      Tr(STR_STOP)))
                         CancelGameJob(job.id);
                     acted = true;
                 }
                 else if (IsDiscJobId(job.id))
                 {
-                    if (ShowConfirmUI("Stop installing?", job.gameName,
-                                      "The game won't be installed. What has been copied so far is removed.",
-                                      "Stop"))
+                    if (ShowConfirmUI(Tr(STR_STOP_INSTALLING), job.gameName,
+                                      Tr(STR_THE_GAME_WONT_BE_INSTALLED_2),
+                                      Tr(STR_STOP)))
                         CancelDiscJob(job.id);
                     acted = true;
                 }
@@ -8590,10 +8747,10 @@ int main()
                     // Asked, like stopping a disc install: a big pack can be
                     // most of the way there. The download carries on while the
                     // question is up - it's on its own thread now.
-                    if (ShowConfirmUI("Stop downloading?", job.title,
-                                      job.kind == QUEUE_JOB_DLC_PACK ? "Files that already finished stay installed."
-                                                                     : "The update won't be installed.",
-                                      "Stop"))
+                    if (ShowConfirmUI(Tr(STR_STOP_DOWNLOADING), job.title,
+                                      job.kind == QUEUE_JOB_DLC_PACK ? Tr(STR_FILES_THAT_ALREADY_FINISHED_STAY)
+                                                                     : Tr(STR_THE_UPDATE_WONT_BE_INSTALLED),
+                                      Tr(STR_STOP)))
                         CancelQueueJob(job.id);
                     acted = true;
                 }
@@ -8649,6 +8806,11 @@ int main()
                         else
                             shell.settingsStale = true;
                     }
+                }
+                else if (onValue && settings.actions[settings.focusRow][settings.focusCol] == SETTINGS_ROW_CLOCK)
+                {
+                    StepClock(right ? 1 : -1);
+                    shell.stale = true;
                 }
                 else if (onValue && settings.actions[settings.focusRow][settings.focusCol] == SETTINGS_ROW_INSTALL_TYPE)
                 {
@@ -8752,8 +8914,8 @@ int main()
         if (shell.sidebarFocused)
         {
             if (PageTakesFocus(shell, shell.page))
-                hintCount = AddHint(hints, hintCount, UI_BUTTON_A, L"Select");
-            hintCount = AddHint(hints, hintCount, UI_BUTTON_B, L"Home");
+                hintCount = AddHint(hints, hintCount, UI_BUTTON_A, TrW(STR_SELECT));
+            hintCount = AddHint(hints, hintCount, UI_BUTTON_B, TrW(STR_NAV_HOME));
         }
 
         switch (shell.page)
@@ -8765,8 +8927,8 @@ int main()
             if (shell.homeFocus == HOME_FOCUS_NAV)
             {
                 if (view.navCount > 0)
-                    hintCount = AddHint(hints, hintCount, UI_BUTTON_A, L"Open");
-                hintCount = AddHint(hints, hintCount, UI_BUTTON_B, L"Exit");
+                    hintCount = AddHint(hints, hintCount, UI_BUTTON_A, TrW(STR_OPEN));
+                hintCount = AddHint(hints, hintCount, UI_BUTTON_B, TrW(STR_EXIT));
             }
             else
             {
@@ -8778,20 +8940,20 @@ int main()
                     switch (DiscTileState(shell))
                     {
                     case DISC_TILE_READY:
-                        hintCount = AddHint(hints, hintCount, UI_BUTTON_A, L"Play");
-                        hintCount = AddHint(hints, hintCount, UI_BUTTON_X, L"View game", L"View");
-                        hintCount = AddHint(hints, hintCount, UI_BUTTON_START, L"Install to hard drive", L"Install");
+                        hintCount = AddHint(hints, hintCount, UI_BUTTON_A, TrW(STR_PLAY));
+                        hintCount = AddHint(hints, hintCount, UI_BUTTON_X, TrW(STR_VIEW_GAME), TrW(STR_VIEW));
+                        hintCount = AddHint(hints, hintCount, UI_BUTTON_START, TrW(STR_INSTALL_TO_HARD_DRIVE), TrW(STR_INSTALL));
                         break;
                     case DISC_TILE_INSTALLED:
-                        hintCount = AddHint(hints, hintCount, UI_BUTTON_A, L"Play");
-                        hintCount = AddHint(hints, hintCount, UI_BUTTON_X, L"View game", L"View");
-                        hintCount = AddHint(hints, hintCount, UI_BUTTON_START, L"Install again", L"Reinstall");
+                        hintCount = AddHint(hints, hintCount, UI_BUTTON_A, TrW(STR_PLAY));
+                        hintCount = AddHint(hints, hintCount, UI_BUTTON_X, TrW(STR_VIEW_GAME), TrW(STR_VIEW));
+                        hintCount = AddHint(hints, hintCount, UI_BUTTON_START, TrW(STR_INSTALL_AGAIN), TrW(STR_REINSTALL));
                         break;
                     case DISC_TILE_INSTALLING:
-                        hintCount = AddHint(hints, hintCount, UI_BUTTON_A, L"View in the Queue", L"Queue");
+                        hintCount = AddHint(hints, hintCount, UI_BUTTON_A, TrW(STR_VIEW_IN_THE_QUEUE), TrW(STR_NAV_QUEUE));
                         break;
                     case DISC_TILE_UNREADABLE:
-                        hintCount = AddHint(hints, hintCount, UI_BUTTON_A, L"Why?");
+                        hintCount = AddHint(hints, hintCount, UI_BUTTON_A, TrW(STR_WHY));
                         break;
                     default:
                         break;
@@ -8799,12 +8961,12 @@ int main()
                 }
                 else if (view.recentCount > 0)
                 {
-                    hintCount = AddHint(hints, hintCount, UI_BUTTON_A, L"Play");
-                    hintCount = AddHint(hints, hintCount, UI_BUTTON_X, L"View game", L"View");
+                    hintCount = AddHint(hints, hintCount, UI_BUTTON_A, TrW(STR_PLAY));
+                    hintCount = AddHint(hints, hintCount, UI_BUTTON_X, TrW(STR_VIEW_GAME), TrW(STR_VIEW));
                 }
-                hintCount = AddHint(hints, hintCount, UI_BUTTON_B, L"Exit");
+                hintCount = AddHint(hints, hintCount, UI_BUTTON_B, TrW(STR_EXIT));
                 if (view.recentCount > HomeRecentsAcross())
-                    hintCount = AddHint(hints, hintCount, UI_BUTTON_LBRB, L"Page");
+                    hintCount = AddHint(hints, hintCount, UI_BUTTON_LBRB, TrW(STR_PAGE));
             }
 
             RenderHomeFrame(view, hints, hintCount);
@@ -8837,20 +8999,20 @@ int main()
                         switch (view.discTile)
                         {
                         case DISC_TILE_READY:
-                            hintCount = AddHint(hints, hintCount, UI_BUTTON_A, L"Play");
-                            hintCount = AddHint(hints, hintCount, UI_BUTTON_X, L"View game", L"View");
-                            hintCount = AddHint(hints, hintCount, UI_BUTTON_START, L"Install to hard drive", L"Install");
+                            hintCount = AddHint(hints, hintCount, UI_BUTTON_A, TrW(STR_PLAY));
+                            hintCount = AddHint(hints, hintCount, UI_BUTTON_X, TrW(STR_VIEW_GAME), TrW(STR_VIEW));
+                            hintCount = AddHint(hints, hintCount, UI_BUTTON_START, TrW(STR_INSTALL_TO_HARD_DRIVE), TrW(STR_INSTALL));
                             break;
                         case DISC_TILE_INSTALLED:
-                            hintCount = AddHint(hints, hintCount, UI_BUTTON_A, L"Play");
-                            hintCount = AddHint(hints, hintCount, UI_BUTTON_X, L"View game", L"View");
-                            hintCount = AddHint(hints, hintCount, UI_BUTTON_START, L"Install again", L"Reinstall");
+                            hintCount = AddHint(hints, hintCount, UI_BUTTON_A, TrW(STR_PLAY));
+                            hintCount = AddHint(hints, hintCount, UI_BUTTON_X, TrW(STR_VIEW_GAME), TrW(STR_VIEW));
+                            hintCount = AddHint(hints, hintCount, UI_BUTTON_START, TrW(STR_INSTALL_AGAIN), TrW(STR_REINSTALL));
                             break;
                         case DISC_TILE_INSTALLING:
-                            hintCount = AddHint(hints, hintCount, UI_BUTTON_A, L"View in the Queue", L"Queue");
+                            hintCount = AddHint(hints, hintCount, UI_BUTTON_A, TrW(STR_VIEW_IN_THE_QUEUE), TrW(STR_NAV_QUEUE));
                             break;
                         case DISC_TILE_UNREADABLE:
-                            hintCount = AddHint(hints, hintCount, UI_BUTTON_A, L"Why?");
+                            hintCount = AddHint(hints, hintCount, UI_BUTTON_A, TrW(STR_WHY));
                             break;
                         default:
                             break;
@@ -8858,12 +9020,12 @@ int main()
                     }
                     else if (lib.count > 0)
                     {
-                        hintCount = AddHint(hints, hintCount, UI_BUTTON_A, L"Play");
-                        hintCount = AddHint(hints, hintCount, UI_BUTTON_X, L"View game", L"View");
+                        hintCount = AddHint(hints, hintCount, UI_BUTTON_A, TrW(STR_PLAY));
+                        hintCount = AddHint(hints, hintCount, UI_BUTTON_X, TrW(STR_VIEW_GAME), TrW(STR_VIEW));
                     }
-                    hintCount = AddHint(hints, hintCount, UI_BUTTON_B, L"Home");
+                    hintCount = AddHint(hints, hintCount, UI_BUTTON_B, TrW(STR_NAV_HOME));
                     if (itemCount > LibraryPageVisibleRows(view) * LibraryGridColumns())
-                        hintCount = AddHint(hints, hintCount, UI_BUTTON_LBRB, L"Page");
+                        hintCount = AddHint(hints, hintCount, UI_BUTTON_LBRB, TrW(STR_PAGE));
                 }
 
                 RenderLibraryFrame(view, hints, hintCount);
@@ -8885,10 +9047,10 @@ int main()
             if (!shell.sidebarFocused)
             {
                 if (view.count > 0)
-                    hintCount = AddHint(hints, hintCount, UI_BUTTON_A, L"Start");
-                hintCount = AddHint(hints, hintCount, UI_BUTTON_B, L"Home");
+                    hintCount = AddHint(hints, hintCount, UI_BUTTON_A, TrW(STR_START));
+                hintCount = AddHint(hints, hintCount, UI_BUTTON_B, TrW(STR_NAV_HOME));
                 if (view.count > LibraryPageVisibleRows(view) * LibraryGridColumns())
-                    hintCount = AddHint(hints, hintCount, UI_BUTTON_LBRB, L"Page");
+                    hintCount = AddHint(hints, hintCount, UI_BUTTON_LBRB, TrW(STR_PAGE));
             }
 
             RenderLibraryFrame(view, hints, hintCount);
@@ -8911,10 +9073,10 @@ int main()
             {
                 if (!shell.sidebarFocused)
                 {
-                    hintCount = AddHint(hints, hintCount, UI_BUTTON_A, L"View");
-                    hintCount = AddHint(hints, hintCount, UI_BUTTON_B, L"Store");
+                    hintCount = AddHint(hints, hintCount, UI_BUTTON_A, TrW(STR_VIEW));
+                    hintCount = AddHint(hints, hintCount, UI_BUTTON_B, TrW(STR_NAV_STORE));
                     if (HomebrewRowCount(shell.homebrewRow) > StoreRowTilesAcross())
-                        hintCount = AddHint(hints, hintCount, UI_BUTTON_LBRB, L"Page");
+                        hintCount = AddHint(hints, hintCount, UI_BUTTON_LBRB, TrW(STR_PAGE));
                 }
 
                 StoreRowsView view = MakeHomebrewView(shell);
@@ -8929,24 +9091,24 @@ int main()
             {
                 if (shell.storeFilterOpen)
                 {
-                    hintCount = AddHint(hints, hintCount, UI_BUTTON_A, L"Select");
-                    hintCount = AddHint(hints, hintCount, UI_BUTTON_B, L"Done");
+                    hintCount = AddHint(hints, hintCount, UI_BUTTON_A, TrW(STR_SELECT));
+                    hintCount = AddHint(hints, hintCount, UI_BUTTON_B, TrW(STR_DONE));
                 }
                 else if (!shell.sidebarFocused)
                 {
                     if (shell.storeGameCount > 0)
-                        hintCount = AddHint(hints, hintCount, UI_BUTTON_A, L"View game", L"View");
-                    hintCount = AddHint(hints, hintCount, UI_BUTTON_B, L"Store");
+                        hintCount = AddHint(hints, hintCount, UI_BUTTON_A, TrW(STR_VIEW_GAME), TrW(STR_VIEW));
+                    hintCount = AddHint(hints, hintCount, UI_BUTTON_B, TrW(STR_NAV_STORE));
                     if (shell.storeSearch)
-                        hintCount = AddHint(hints, hintCount, UI_BUTTON_Y, L"Search again", L"Search");
+                        hintCount = AddHint(hints, hintCount, UI_BUTTON_Y, TrW(STR_SEARCH_AGAIN), TrW(STR_SEARCH));
                     else if (LetterFilterable(shell))
-                        hintCount = AddHint(hints, hintCount, UI_BUTTON_Y, L"Filter and sort", L"Filter");
+                        hintCount = AddHint(hints, hintCount, UI_BUTTON_Y, TrW(STR_STORE_FILTER_SORT), TrW(STR_FILTER));
                     if (LetterFiltersEmptied(shell))
-                        hintCount = AddHint(hints, hintCount, UI_BUTTON_X, L"Reset filters", L"Reset");
+                        hintCount = AddHint(hints, hintCount, UI_BUTTON_X, TrW(STR_RESET_FILTERS), TrW(STR_RESET));
                     if (shell.storeGameCount > StoreLetterVisibleRows() * StoreGridColumns())
-                        hintCount = AddHint(hints, hintCount, UI_BUTTON_LBRB, L"Page");
+                        hintCount = AddHint(hints, hintCount, UI_BUTTON_LBRB, TrW(STR_PAGE));
                     if (LetterJumps(shell))
-                        hintCount = AddHint(hints, hintCount, UI_BUTTON_LTRT, L"Letter");
+                        hintCount = AddHint(hints, hintCount, UI_BUTTON_LTRT, TrW(STR_LETTER));
                 }
 
                 StoreLetterView view = MakeStoreLetterView(shell);
@@ -8963,9 +9125,9 @@ int main()
                     if (g_sectionLetterCounts[shell.storeSection][l] > 0)
                     {
                         BrowseHint(browse, 32, kStoreLetters[l]);
-                        hintCount = AddHint(hints, hintCount, UI_BUTTON_A, browse, L"Browse");
+                        hintCount = AddHint(hints, hintCount, UI_BUTTON_A, browse, TrW(STR_BROWSE));
                     }
-                    hintCount = AddHint(hints, hintCount, UI_BUTTON_B, L"Store");
+                    hintCount = AddHint(hints, hintCount, UI_BUTTON_B, TrW(STR_NAV_STORE));
                 }
 
                 StoreSectionView view = MakeSectionView(shell);
@@ -8982,28 +9144,28 @@ int main()
                     const int i = shell.storeFocus;
                     if (i < STORE_FOCUS_BUTTONS)
                     {
-                        hintCount = AddHint(hints, hintCount, UI_BUTTON_A, L"View game", L"View");
+                        hintCount = AddHint(hints, hintCount, UI_BUTTON_A, TrW(STR_VIEW_GAME), TrW(STR_VIEW));
                     }
                     else if (i < STORE_FOCUS_LETTERS)
                     {
                         if (!kStoreButtons[i - STORE_FOCUS_BUTTONS].disabled)
-                            hintCount = AddHint(hints, hintCount, UI_BUTTON_A, L"Browse", L"Browse");
+                            hintCount = AddHint(hints, hintCount, UI_BUTTON_A, TrW(STR_BROWSE), TrW(STR_BROWSE));
                     }
                     else if (i < STORE_FOCUS_SPOTLIGHT)
                     {
                         BrowseHint(browse, 32, kStoreLetters[i - STORE_FOCUS_LETTERS]);
-                        hintCount = AddHint(hints, hintCount, UI_BUTTON_A, browse, L"Browse");
+                        hintCount = AddHint(hints, hintCount, UI_BUTTON_A, browse, TrW(STR_BROWSE));
                     }
                     else if (i < STORE_FOCUS_ROWS)
                     {
-                        hintCount = AddHint(hints, hintCount, UI_BUTTON_A, L"View collection", L"View");
+                        hintCount = AddHint(hints, hintCount, UI_BUTTON_A, TrW(STR_VIEW_COLLECTION), TrW(STR_VIEW));
                     }
                     else
                     {
-                        hintCount = AddHint(hints, hintCount, UI_BUTTON_A, L"View game", L"View");
+                        hintCount = AddHint(hints, hintCount, UI_BUTTON_A, TrW(STR_VIEW_GAME), TrW(STR_VIEW));
                     }
-                    hintCount = AddHint(hints, hintCount, UI_BUTTON_B, L"Home");
-                    hintCount = AddHint(hints, hintCount, UI_BUTTON_Y, L"Search");
+                    hintCount = AddHint(hints, hintCount, UI_BUTTON_B, TrW(STR_NAV_HOME));
+                    hintCount = AddHint(hints, hintCount, UI_BUTTON_Y, TrW(STR_SEARCH));
                 }
 
                 StorePageView view = MakeStoreView(shell);
@@ -9020,8 +9182,8 @@ int main()
         case SHELL_PAGE_QUEUE:
             if (shell.queueCount == 0 && shell.queueRecentCount == 0)
             {
-                RenderPlaceholderFrame("Queue", "Nothing is downloading",
-                                       "DLC and title updates you choose will wait here while they download.",
+                RenderPlaceholderFrame(Tr(STR_NAV_QUEUE), Tr(STR_NOTHING_IS_DOWNLOADING),
+                                       Tr(STR_DLC_AND_TITLE_UPDATES_YOU),
                                        hints, hintCount);
             }
             else
@@ -9030,7 +9192,7 @@ int main()
                 {
                     if (shell.queueOnRecents)
                     {
-                        hintCount = AddHint(hints, hintCount, UI_BUTTON_X, L"Remove");
+                        hintCount = AddHint(hints, hintCount, UI_BUTTON_X, TrW(STR_REMOVE));
                     }
                     else
                     {
@@ -9042,18 +9204,18 @@ int main()
                         // carry on from.
                         if (!finished && !IsDiscJobId(sel.id))
                             hintCount = AddHint(hints, hintCount, UI_BUTTON_A,
-                                                sel.state == QUEUE_PAUSED ? L"Resume" : L"Pause");
+                                                sel.state == QUEUE_PAUSED ? TrW(STR_RESUME) : TrW(STR_PAUSE));
 
-                        hintCount = finished ? AddHint(hints, hintCount, UI_BUTTON_X, L"Remove")
-                                             : AddHint(hints, hintCount, UI_BUTTON_X, L"Stop download", L"Stop");
+                        hintCount = finished ? AddHint(hints, hintCount, UI_BUTTON_X, TrW(STR_REMOVE))
+                                             : AddHint(hints, hintCount, UI_BUTTON_X, TrW(STR_STOP_DOWNLOAD), TrW(STR_STOP));
                     }
 
                     // Only worth offering while something would finish - it
                     // is refused otherwise.
                     if (RunningJobCount() > 0)
-                        hintCount = AddHint(hints, hintCount, UI_BUTTON_Y, L"Turn off when done", L"Night mode");
+                        hintCount = AddHint(hints, hintCount, UI_BUTTON_Y, TrW(STR_TURN_OFF_WHEN_DONE), TrW(STR_NIGHT_MODE));
 
-                    hintCount = AddHint(hints, hintCount, UI_BUTTON_B, L"Home");
+                    hintCount = AddHint(hints, hintCount, UI_BUTTON_B, TrW(STR_NAV_HOME));
                 }
 
                 QueuePageView view;
@@ -9096,14 +9258,14 @@ int main()
                 {
                     const LibraryFolderRow &folder = g_folderRows[settings.args[settings.focusRow]];
                     hintCount = AddHint(hints, hintCount, UI_BUTTON_A,
-                                        !folder.scanned ? L"Scan" : (folder.suggested && folder.exists) ? L"Stop scanning"
-                                                                                                       : L"Remove");
+                                        !folder.scanned ? TrW(STR_SCAN) : (folder.suggested && folder.exists) ? TrW(STR_STOP_SCANNING)
+                                                                                                       : TrW(STR_REMOVE));
                 }
                 else if (control != NULL && control->kind == SETTINGS_CONTROL_CHECK)
-                    hintCount = AddHint(hints, hintCount, UI_BUTTON_A, control->on ? L"Turn off" : L"Turn on");
+                    hintCount = AddHint(hints, hintCount, UI_BUTTON_A, control->on ? TrW(STR_TURN_OFF) : TrW(STR_TURN_ON));
                 else if (action != SETTINGS_ROW_NONE)
-                    hintCount = AddHint(hints, hintCount, UI_BUTTON_A, L"Select");
-                hintCount = AddHint(hints, hintCount, UI_BUTTON_B, L"Home");
+                    hintCount = AddHint(hints, hintCount, UI_BUTTON_A, TrW(STR_SELECT));
+                hintCount = AddHint(hints, hintCount, UI_BUTTON_B, TrW(STR_NAV_HOME));
             }
 
             SettingsPageView view;
@@ -9147,7 +9309,7 @@ int main()
     // its next progress report; a request already waiting on archive.org
     // can't be interrupted, so this is bounded rather than waited out.
     if (PendingDownloadCount() + PendingDiscJobCount() + PendingGameJobCount() > 0)
-        RenderStatusFrame("Stopping", "Stopping downloads and installs", "Files that already finished stay installed.");
+        RenderStatusFrame(Tr(STR_STOPPING), Tr(STR_STOPPING_DOWNLOADS_AND_INSTALLS), Tr(STR_FILES_THAT_ALREADY_FINISHED_STAY));
     StopDownloadQueue(15000);
 
     // An install stops at its next 816KB and removes what it copied.

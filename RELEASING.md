@@ -33,6 +33,14 @@ That writes the private key to `%USERPROFILE%\.omni360\release-signing-key.pem` 
 
 Versions are compared as `MAJOR.MINOR.PATCH`, then an optional suffix after a `-`: `0.3.0` is newer than `0.3.0-beta`, which is newer than `0.2.9`, and `beta.10` is newer than `beta.2`. The tag is the version with a `v` in front: `v0.2.4-beta`.
 
+### 1b. Compile the languages
+
+```
+python tools/make_languages.py
+```
+
+This compiles every `Languages/<code>.txt` into `src/LanguagePacks.h`, so the XEX carries them. It prints how many lines each one translates. If `src/Strings.def` has changed since the last release, also run it with `--template` so translators get the new lines. `Languages/README.md` has the details.
+
 ### 2. Build and sign
 
 Build the Release configuration (see `COMPILING.md`), then:

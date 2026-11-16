@@ -42,7 +42,7 @@ static void QuietPrint(const char *format, ...)
         dprintf("%s", line);
 }
 #define CATALOG_URL     "http://catalog.xboxlive.com/Catalog/Catalog.asmx/Query?methodName=FindGames" \
-                        "&Names=Locale&Values=en-US&Names=LegalLocale&Values=en-US&Names=Store&Values=1" \
+                        "&Names=Locale&Values=%s&Names=LegalLocale&Values=en-US&Names=Store&Values=1" \
                         "&Names=PageSize&Values=10&Names=PageNum&Values=1&Names=DetailView&Values=5" \
                         "&Names=OfferFilterLevel&Values=1&Names=MediaIds&Values=66acd000-77fe-1000-9115-d802%08lx" \
                         "&Names=UserTypes&Values=2&Names=MediaTypes&Values=1&Names=MediaTypes&Values=21" \
@@ -70,6 +70,14 @@ struct DetailsSlot
 };
 
 static CRITICAL_SECTION g_lock;
+
+// The catalog's language for game pages - Locale only. LegalLocale stays
+// en-US: it picks the ratings board, and fr-FR's (PEGI, as 14004) isn't the
+// ESRB numbering the rest of this file reads. Changing it bumps the
+// generation, so an answer that was on its way in the old language is
+// dropped rather than shown.
+static char g_locale[8] = "en-US";
+static unsigned g_localeGeneration = 0;
 static HANDLE g_wake = NULL;
 static HANDLE g_thread = NULL;
 static bool g_running = false;
@@ -442,14 +450,15 @@ static bool ParseCatalog(const char *xml, unsigned long titleId, StoreDetails *d
     long ratings = TagNumber(xml, "numberOfRatings");
     d->ratings = ratings > 0 ? (unsigned long)ratings : 0;
 
-    // The genres are the <live:name>s of the categories, less the two
-    // that every game has.
+    // The genres are the categories' names, less the two every game has -
+    // told apart by ID (3000 Game Genres, 3027 Xbox LIVE Games), since
+    // their names are in the catalog's language.
     const char *p = xml;
-    char name[64];
-    while (TagText(p, "name", name, sizeof(name), &p))
+    char id[16], name[64];
+    while (TagText(p, "categoryId", id, sizeof(id), &p) && TagText(p, "name", name, sizeof(name), &p))
     {
-        if (strcmp(name, "Game Genres") != 0 && strcmp(name, "Xbox LIVE Games") != 0 &&
-            strstr(d->genre, name) == NULL)
+        const long category = atol(id);
+        if (category != 3000 && category != 3027 && strstr(d->genre, name) == NULL)
         {
             size_t used = strlen(d->genre);
             _snprintf(d->genre + used, sizeof(d->genre) - used, "%s%s", used > 0 ? ", " : "", name);
@@ -491,10 +500,21 @@ static bool ParseCatalog(const char *xml, unsigned long titleId, StoreDetails *d
     return true;
 }
 
-static StoreDetailsState LoadDetails(unsigned long titleId, StoreDetails *out)
+// The cache file for a game's entry in a language: en-US keeps the name it
+// always had, so caches from before languages aren't fetched again.
+static void CatalogCachePath(unsigned long titleId, const char *locale, const char *suffix, char *out, size_t outSize)
+{
+    if (strcmp(locale, "en-US") == 0)
+        _snprintf(out, outSize, STORE_DIR "\\%08lX.%s", titleId, suffix);
+    else
+        _snprintf(out, outSize, STORE_DIR "\\%08lX.%s.%s", titleId, locale, suffix);
+    out[outSize - 1] = '\0';
+}
+
+static StoreDetailsState LoadDetails(unsigned long titleId, const char *locale, StoreDetails *out)
 {
     char path[64];
-    _snprintf(path, sizeof(path), STORE_DIR "\\%08lX.cat.xml", titleId);
+    CatalogCachePath(titleId, locale, "cat.xml", path, sizeof(path));
     path[sizeof(path) - 1] = '\0';
 
     // A cached entry is used for a week, then asked for again - ratings
@@ -502,8 +522,7 @@ static StoreDetailsState LoadDetails(unsigned long titleId, StoreDetails *out)
     unsigned long size = 0;
     char *xml = NULL;
     char marker[64];
-    _snprintf(marker, sizeof(marker), STORE_DIR "\\%08lX.cat.none", titleId);
-    marker[sizeof(marker) - 1] = '\0';
+    CatalogCachePath(titleId, locale, "cat.none", marker, sizeof(marker));
 
     if (WrittenRecently(path))
         xml = (char *)ReadWholeFile(path, CATALOG_MAX_BYTES, &size);
@@ -513,7 +532,7 @@ static StoreDetailsState LoadDetails(unsigned long titleId, StoreDetails *out)
     if (xml == NULL)
     {
         char url[600];
-        _snprintf(url, sizeof(url), CATALOG_URL, titleId);
+        _snprintf(url, sizeof(url), CATALOG_URL, locale, titleId);
         url[sizeof(url) - 1] = '\0';
 
         xml = (char *)malloc(CATALOG_MAX_BYTES + 1);
@@ -627,16 +646,21 @@ static DWORD WINAPI StoreArtEntry(LPVOID)
         if (detail >= 0)
         {
             const unsigned long titleId = g_details[detail].details.titleId;
+            char locale[sizeof(g_locale)];
+            memcpy(locale, g_locale, sizeof(locale));
+            const unsigned generation = g_localeGeneration;
             LeaveCriticalSection(&g_lock);
 
             StoreDetails *parsed = (StoreDetails *)malloc(sizeof(StoreDetails));
             StoreDetailsState state = STORE_DETAILS_NONE;
             if (parsed != NULL)
-                state = LoadDetails(titleId, parsed);
+                state = LoadDetails(titleId, locale, parsed);
 
             EnterCriticalSection(&g_lock);
-            // Still the same game's slot - it may have been reused meanwhile.
-            if (g_details[detail].details.titleId == titleId && g_details[detail].state == STORE_DETAILS_LOADING)
+            // Still the same game's slot - it may have been reused meanwhile
+            // - and still the language it was asked for in.
+            if (g_details[detail].details.titleId == titleId && g_details[detail].state == STORE_DETAILS_LOADING &&
+                g_localeGeneration == generation)
             {
                 g_details[detail].state = state;
                 if (state == STORE_DETAILS_READY)
@@ -831,6 +855,33 @@ bool TakeStoreArt(StoreArtData *out)
     if (took)
         SetEvent(g_wake); // room for the next one
     return took;
+}
+
+void SetStoreLocale(const char *locale)
+{
+    if (locale == NULL || locale[0] == '\0' || strlen(locale) >= sizeof(g_locale))
+        locale = "en-US";
+    if (!g_running)
+    {
+        // Before the worker starts: nothing loaded yet, no lock needed.
+        _snprintf(g_locale, sizeof(g_locale), "%s", locale);
+        return;
+    }
+    EnterCriticalSection(&g_lock);
+    if (strcmp(g_locale, locale) != 0)
+    {
+        _snprintf(g_locale, sizeof(g_locale), "%s", locale);
+        g_localeGeneration++;
+        // Every page's details are the old language's: forget them, so the
+        // next look asks again. A slot still loading is left LOADING, so the
+        // worker picks it up again in the new language.
+        for (int i = 0; i < MAX_DETAILS; ++i)
+        {
+            if (g_details[i].state != STORE_DETAILS_LOADING)
+                memset(&g_details[i], 0, sizeof(g_details[i]));
+        }
+    }
+    LeaveCriticalSection(&g_lock);
 }
 
 void RequestStoreDetails(unsigned long titleId)

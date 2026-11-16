@@ -6,6 +6,7 @@ DESCRIPTION : Tells a slow archive.org apart from a slow line, by measuring a
 */
 
 #include "ServiceCheck.h"
+#include "Strings.h" // Tr() - every string the UI shows
 #include "downloadFile.h" // HttpsSession
 #include "OutputConsole.h"
 
@@ -59,12 +60,6 @@ DESCRIPTION : Tells a slow archive.org apart from a slow line, by measuring a
 #define VERDICT_FOR_MS  (15 * 60 * 1000)
 
 #define VERDICT_MAX 200
-
-static const char kBlameArchive[] =
-    "archive.org is slow right now, not your connection. Downloads will take longer than usual but will still finish.";
-
-static const char kBlameLine[] =
-    "Downloads are slow right now, and so is everything else - it looks like your connection rather than archive.org.";
 
 static CRITICAL_SECTION g_lock;
 static bool g_ready = false;
@@ -153,7 +148,7 @@ static DWORD WINAPI ProbeEntry(LPVOID)
         const bool archiveIsSlow = (mine >= theirs * CLEARLY_FASTER);
         dprintf("[check] archive.org %.2f MB/s a connection, GitHub %.2f MB/s - %s\n", theirs / 1048576.0,
                 mine / 1048576.0, archiveIsSlow ? "archive.org is the slow one" : "the line here is the slow one");
-        PublishVerdict(archiveIsSlow ? kBlameArchive : kBlameLine);
+        PublishVerdict(Tr(archiveIsSlow ? STR_BLAME_ARCHIVE : STR_BLAME_LINE));
     }
 
     EnterCriticalSection(&g_lock);

@@ -6,6 +6,7 @@
 #define STORE_COLLECTIONS_DATA
 #define CATALOG_TITLES_DATA
 #include "StoreCatalog.h"
+#include "Strings.h" // Tr() - every string the UI shows
 #include "StoreRows.h"
 #include "StoreCollections.h"
 
@@ -560,31 +561,31 @@ bool StoreGameInfoOf(unsigned long titleId, StoreGameInfo *out)
 
 const char *StoreGenreName(int genre)
 {
-    return (genre >= 1 && genre <= STORE_GENRE_COUNT) ? kStoreGenres[genre - 1] : "";
+    return (genre >= 1 && genre <= STORE_GENRE_COUNT) ? TrEnglish(kStoreGenres[genre - 1]) : "";
 }
 
 // Redump's codes for them, and the regions whose releases have that one
 // language when they list none.
-static const struct { const char *code; const char *name; unsigned short regions; } kLanguages[STORE_LANGUAGE_COUNT] =
+static const struct { const char *code; StringId name; unsigned short regions; } kLanguages[STORE_LANGUAGE_COUNT] =
 {
-    { "En", "English",    STORE_REGION_USA | STORE_REGION_WORLD | STORE_REGION_EUROPE | STORE_REGION_UK |
+    { "En", STR_LANG_ENGLISH,    STORE_REGION_USA | STORE_REGION_WORLD | STORE_REGION_EUROPE | STORE_REGION_UK |
                           STORE_REGION_AUSTRALIA },
-    { "Fr", "French",     STORE_REGION_FRANCE },
-    { "De", "German",     STORE_REGION_GERMANY },
-    { "Es", "Spanish",    STORE_REGION_SPAIN },
-    { "It", "Italian",    STORE_REGION_ITALY },
-    { "Ja", "Japanese",   STORE_REGION_JAPAN },
-    { "Pt", "Portuguese", 0 },
-    { "Ru", "Russian",    STORE_REGION_RUSSIA },
-    { "Pl", "Polish",     0 },
-    { "Ko", "Korean",     STORE_REGION_KOREA },
-    { "Nl", "Dutch",      0 },
-    { "Zh", "Chinese",    STORE_REGION_CHINA | STORE_REGION_TAIWAN },
+    { "Fr", STR_LANG_FRENCH,     STORE_REGION_FRANCE },
+    { "De", STR_LANG_GERMAN,     STORE_REGION_GERMANY },
+    { "Es", STR_LANG_SPANISH,    STORE_REGION_SPAIN },
+    { "It", STR_LANG_ITALIAN,    STORE_REGION_ITALY },
+    { "Ja", STR_LANG_JAPANESE,   STORE_REGION_JAPAN },
+    { "Pt", STR_LANG_PORTUGUESE, 0 },
+    { "Ru", STR_LANG_RUSSIAN,    STORE_REGION_RUSSIA },
+    { "Pl", STR_LANG_POLISH,     0 },
+    { "Ko", STR_LANG_KOREAN,     STORE_REGION_KOREA },
+    { "Nl", STR_LANG_DUTCH,      0 },
+    { "Zh", STR_LANG_CHINESE,    STORE_REGION_CHINA | STORE_REGION_TAIWAN },
 };
 
 const char *StoreLanguageName(int language)
 {
-    return (language >= 0 && language < STORE_LANGUAGE_COUNT) ? kLanguages[language].name : "";
+    return (language >= 0 && language < STORE_LANGUAGE_COUNT) ? Tr(kLanguages[language].name) : "";
 }
 
 // One part of a detail, len long: if it's a list of languages - "En, Fr, De"
@@ -661,7 +662,7 @@ int StoreRowCount()
 
 const char *StoreRowName(int row)
 {
-    return (row >= 0 && row < STORE_ROW_COUNT) ? kStoreRows[row].name : "";
+    return (row >= 0 && row < STORE_ROW_COUNT) ? TrEnglish(kStoreRows[row].name) : "";
 }
 
 int StoreRowGames(int row, StoreGame *out, int maxGames)
@@ -714,7 +715,7 @@ int StoreSpotlightCollection()
 
 const char *StoreCollectionName(int collection)
 {
-    return (collection >= 0 && collection < STORE_COLLECTION_ENTRIES) ? kStoreCollections[collection].name : "";
+    return (collection >= 0 && collection < STORE_COLLECTION_ENTRIES) ? TrEnglish(kStoreCollections[collection].name) : "";
 }
 
 unsigned long StoreCollectionArt(int collection)

@@ -11,6 +11,7 @@ and were checked against the original Iso2God and iso2god-rs.
 */
 
 #include "GodConvert.h"
+#include "Strings.h" // Tr() - every string the UI shows
 #include "OutputConsole.h" // dprintf
 
 #ifdef _XBOX
@@ -102,16 +103,16 @@ const char *GodResultText(GodResult result)
     switch (result)
     {
     case GOD_OK:               return "OK";
-    case GOD_NOT_A_DISC_IMAGE: return "This isn't an Xbox 360 disc image";
-    case GOD_BAD_FILESYSTEM:   return "The disc image's file table is damaged";
-    case GOD_NO_DEFAULT_XEX:   return "No default.xex or default.xbe on the disc";
-    case GOD_BAD_XEX:          return "The disc's default.xex or default.xbe has no title information";
-    case GOD_READ_FAILED:      return "Couldn't read the disc image";
-    case GOD_WRITE_FAILED:     return "Couldn't write the game to the drive";
-    case GOD_OUT_OF_MEMORY:    return "Out of memory";
-    case GOD_CANCELLED:        return "Cancelled";
+    case GOD_NOT_A_DISC_IMAGE: return Tr(STR_GOD_NOT_DISC_IMAGE);
+    case GOD_BAD_FILESYSTEM:   return Tr(STR_GOD_BAD_FILESYSTEM);
+    case GOD_NO_DEFAULT_XEX:   return Tr(STR_GOD_NO_DEFAULT_XEX);
+    case GOD_BAD_XEX:          return Tr(STR_GOD_BAD_XEX);
+    case GOD_READ_FAILED:      return Tr(STR_GOD_READ_FAILED);
+    case GOD_WRITE_FAILED:     return Tr(STR_GOD_WRITE_FAILED);
+    case GOD_OUT_OF_MEMORY:    return Tr(STR_OUT_OF_MEMORY);
+    case GOD_CANCELLED:        return Tr(STR_CANCELLED);
     }
-    return "Unknown error";
+    return Tr(STR_UNKNOWN_ERROR);
 }
 
 // ---------------------------------------------------------------------------

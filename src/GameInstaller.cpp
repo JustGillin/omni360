@@ -6,6 +6,7 @@ DESCRIPTION : Downloads a Redump game's zip from archive.org and installs it as
 */
 
 #include "GameInstaller.h"
+#include "Strings.h" // Tr() - every string the UI shows
 #include "InflateSource.h"
 #include "GodConvert.h"
 #include "ReadAhead.h"
@@ -1560,7 +1561,7 @@ static void SetPhase(GameJob *job, GameStep step, const char *phase, unsigned lo
     // Asked to pause, and the connections haven't come back round to
     // noticing yet - one stalled can take STALL_TIMEOUT_MS. Say so, rather
     // than go on reporting a download the user has already stopped.
-    _snprintf(s.phase, sizeof(s.phase), "%s", (job->pause && !job->cancel) ? "Pausing" : phase);
+    _snprintf(s.phase, sizeof(s.phase), "%s", (job->pause && !job->cancel) ? Tr(STR_PAUSING) : phase);
     s.phase[sizeof(s.phase) - 1] = '\0';
     s.bytesDone = done;
     s.bytesTotal = total;
@@ -1583,7 +1584,7 @@ static bool ConvertProgressFn(unsigned long long done, unsigned long long total,
 {
     ConvertProgress *p = (ConvertProgress *)context;
     DWORD ms = GetTickCount() - p->started;
-    SetPhase(p->job, GAME_STEP_INSTALLING, "Installing", done, total, ms > 3000 ? done * 1000 / ms : 0);
+    SetPhase(p->job, GAME_STEP_INSTALLING, Tr(STR_INSTALLING), done, total, ms > 3000 ? done * 1000 / ms : 0);
 
     EnterCriticalSection(&g_lock);
     bool keepGoing = !p->job->cancel && !p->job->pause && !g_shutdown;
@@ -1895,18 +1896,18 @@ public:
                 fetched = d->total;
             const unsigned long long whole = d->total + unpackTotal;
             if (!opened)
-                SetPhase(job, GAME_STEP_DOWNLOADING, downloaded ? "Reading the archive" : "Downloading", fetched,
+                SetPhase(job, GAME_STEP_DOWNLOADING, downloaded ? Tr(STR_READING_THE_ARCHIVE) : Tr(STR_LIB_DOWNLOADING), fetched,
                          whole, ms > 3000 ? fetched * 1000 / ms : 0);
             else
             {
                 const DWORD unpackMs = now - unpackStarted;
-                SetPhase(job, GAME_STEP_DOWNLOADING, "Unpacking", d->total + unpackDone, whole,
+                SetPhase(job, GAME_STEP_DOWNLOADING, Tr(STR_UNPACKING), d->total + unpackDone, whole,
                          unpackMs > 3000 ? unpackDone * 1000 / unpackMs : 0);
             }
             return;
         }
 
-        SetPhase(job, GAME_STEP_DOWNLOADING, downloaded ? "Unpacking" : "Downloading and unpacking", consumed,
+        SetPhase(job, GAME_STEP_DOWNLOADING, downloaded ? Tr(STR_UNPACKING) : Tr(STR_DOWNLOADING_AND_UNPACKING), consumed,
                  d->total, ms > 3000 ? consumed * 1000 / ms : 0);
     }
 
@@ -2246,7 +2247,7 @@ static void FinishFolderGame(GameJob *job, const char *gamesPath, const char *di
     {
         dprintf("[game] %s unpacked, but there's no default.xex at its top\n", req.zipName);
         EndStaging(dir, false);
-        FinishLocked(job, QUEUE_OUTCOME_FAILED, "Couldn't install", "The archive doesn't hold a game to launch.", true);
+        FinishLocked(job, QUEUE_OUTCOME_FAILED, Tr(STR_COULDNT_INSTALL), Tr(STR_THE_ARCHIVE_DOESNT_HOLD_A), true);
         return;
     }
 
@@ -2254,8 +2255,8 @@ static void FinishFolderGame(GameJob *job, const char *gamesPath, const char *di
     if (!MoveIntoFolderGames(gamesPath, req.name, imageDir, target, sizeof(target)))
     {
         EndStaging(dir, false);
-        FinishLocked(job, QUEUE_OUTCOME_FAILED, "Couldn't write the game",
-                     "Check the drive the games folder is on, then try again.", true);
+        FinishLocked(job, QUEUE_OUTCOME_FAILED, Tr(STR_COULDNT_WRITE_THE_GAME),
+                     Tr(STR_CHECK_THE_DRIVE_THE_GAMES), true);
         return;
     }
     dprintf("[game] installed as a folder game: %s\n", target);
@@ -2263,7 +2264,7 @@ static void FinishFolderGame(GameJob *job, const char *gamesPath, const char *di
 
     // Not in Installed.txt: the library finds it by its title ID, and its
     // folder is what an uninstall removes - see ProgressOfDisc in main.cpp.
-    FinishLocked(job, QUEUE_OUTCOME_INSTALLED, "Installed", "Play it from Omni360 or Aurora.", true);
+    FinishLocked(job, QUEUE_OUTCOME_INSTALLED, Tr(STR_INSTALLED), Tr(STR_PLAY_IT_FROM_OMNI360_OR), true);
 }
 
 static volatile bool g_installAsFolder = false;
@@ -2315,15 +2316,15 @@ static void InstallDiscAsFolder(GameJob *job, GodSource *image, const GodImageIn
     if (!CreateDirectoryA(filesDir, NULL))
     {
         EndStaging(dir, keepOnStop);
-        FinishLocked(job, QUEUE_OUTCOME_FAILED, "Couldn't write the game",
-                     "Check the drive the games folder is on, then try again.", true);
+        FinishLocked(job, QUEUE_OUTCOME_FAILED, Tr(STR_COULDNT_WRITE_THE_GAME),
+                     Tr(STR_CHECK_THE_DRIVE_THE_GAMES), true);
         return;
     }
 
     ConvertProgress progress;
     progress.job = job;
     progress.started = GetTickCount();
-    SetPhase(job, GAME_STEP_INSTALLING, "Installing", 0, info.usedSize, 0);
+    SetPhase(job, GAME_STEP_INSTALLING, Tr(STR_INSTALLING), 0, info.usedSize, 0);
 
     GodTimings timings;
     memset(&timings, 0, sizeof(timings));
@@ -2348,15 +2349,18 @@ static void InstallDiscAsFolder(GameJob *job, GodSource *image, const GodImageIn
             EndStaging(dir, false);
             if (packages < 0)
             {
-                FinishLocked(job, QUEUE_OUTCOME_FAILED, "Couldn't write the game",
-                             "Check the drive the games folder is on, then try again.", true);
+                FinishLocked(job, QUEUE_OUTCOME_FAILED, Tr(STR_COULDNT_WRITE_THE_GAME),
+                             Tr(STR_CHECK_THE_DRIVE_THE_GAMES), true);
                 return;
             }
             char detail[96];
-            _snprintf(detail, sizeof(detail), "%d Arcade game%s, each in the library on its own.", packages,
-                      packages == 1 ? "" : "s");
+            char count[16];
+            _snprintf(count, sizeof(count), "%d", packages);
+            count[sizeof(count) - 1] = '\0';
+            TrFormat(detail, sizeof(detail), packages == 1 ? STR_ARCADE_GAMES_SEPARATE_ONE : STR_ARCADE_GAMES_SEPARATE,
+                     count);
             detail[sizeof(detail) - 1] = '\0';
-            FinishLocked(job, QUEUE_OUTCOME_INSTALLED, "Installed", detail, true);
+            FinishLocked(job, QUEUE_OUTCOME_INSTALLED, Tr(STR_INSTALLED), detail, true);
             return;
         }
         dprintf("[game] the compilation disc held no packages - installing it as a folder game\n");
@@ -2372,12 +2376,12 @@ static void InstallDiscAsFolder(GameJob *job, GodSource *image, const GodImageIn
     EndStaging(dir, keepOnStop && (result == GOD_WRITE_FAILED ||
                                    (result == GOD_CANCELLED && (ClosingDown() || Paused(job)))));
     if (result == GOD_CANCELLED)
-        FinishLocked(job, QUEUE_OUTCOME_CANCELLED, "Stopped", "Nothing was installed.", false);
+        FinishLocked(job, QUEUE_OUTCOME_CANCELLED, Tr(STR_STOPPED), Tr(STR_NOTHING_WAS_INSTALLED), false);
     else if (result == GOD_WRITE_FAILED)
-        FinishLocked(job, QUEUE_OUTCOME_FAILED, "Couldn't write the game",
-                     "Check the drive the games folder is on, then try again.", true);
+        FinishLocked(job, QUEUE_OUTCOME_FAILED, Tr(STR_COULDNT_WRITE_THE_GAME),
+                     Tr(STR_CHECK_THE_DRIVE_THE_GAMES), true);
     else
-        FinishLocked(job, QUEUE_OUTCOME_FAILED, "Couldn't install", GodResultText(result), true);
+        FinishLocked(job, QUEUE_OUTCOME_FAILED, Tr(STR_COULDNT_INSTALL), GodResultText(result), true);
 }
 
 static void RunJob(GameJob *job, const char *gamesPath)
@@ -2386,12 +2390,12 @@ static void RunJob(GameJob *job, const char *gamesPath)
     const GameRequest &req = job->request;
     const char *auth = job->auth;
 
-    SetPhase(job, GAME_STEP_FINDING, "Starting", 0, 0, 0);
+    SetPhase(job, GAME_STEP_FINDING, Tr(STR_STARTING), 0, 0, 0);
 
     char encodedZip[700];
     if (!UrlEncodeFormValue(req.zipName, encodedZip, sizeof(encodedZip)))
     {
-        FinishLocked(job, QUEUE_OUTCOME_FAILED, "Couldn't install", "The file name is too long.", true);
+        FinishLocked(job, QUEUE_OUTCOME_FAILED, Tr(STR_COULDNT_INSTALL), Tr(STR_THE_FILE_NAME_IS_TOO), true);
         return;
     }
     std::string url = std::string("https://archive.org/download/") + req.item + "/" + encodedZip;
@@ -2420,20 +2424,23 @@ static void RunJob(GameJob *job, const char *gamesPath)
     }
     if (status == 401 || status == 403)
     {
-        FinishLocked(job, QUEUE_OUTCOME_KEYS_REJECTED, "Keys not accepted",
-                     "archive.org refused the keys - check them in Settings.", true);
+        FinishLocked(job, QUEUE_OUTCOME_KEYS_REJECTED, Tr(STR_KEYS_NOT_ACCEPTED),
+                     Tr(STR_ARCHIVE_ORG_REFUSED_THE_KEYS), true);
         return;
     }
     if (status != 206 || len < 30)
     {
         char detail[96];
-        _snprintf(detail, sizeof(detail), "archive.org answered HTTP %d.", status);
+        char code[16];
+        _snprintf(code, sizeof(code), "%d", status);
+        code[sizeof(code) - 1] = '\0';
+        TrFormat(detail, sizeof(detail), STR_ARCHIVE_ORG_ANSWERED_HTTP, code);
         detail[sizeof(detail) - 1] = '\0';
-        FinishLocked(job, QUEUE_OUTCOME_FAILED, "Couldn't reach archive.org", detail, true);
+        FinishLocked(job, QUEUE_OUTCOME_FAILED, Tr(STR_COULDNT_REACH_ARCHIVE_ORG), detail, true);
         return;
     }
 
-    SetPhase(job, GAME_STEP_FINDING, "Finding the fastest server", 0, 0, 0);
+    SetPhase(job, GAME_STEP_FINDING, Tr(STR_FINDING_THE_FASTEST_SERVER), 0, 0, 0);
     std::string servers[MAX_SERVERS];
     int serverCount = 1;
     if (viaHelper)
@@ -2459,7 +2466,7 @@ static void RunJob(GameJob *job, const char *gamesPath)
     url = servers[0];
     if (Cancelled(job))
     {
-        FinishLocked(job, QUEUE_OUTCOME_CANCELLED, "Stopped", "Nothing was installed.", false);
+        FinishLocked(job, QUEUE_OUTCOME_CANCELLED, Tr(STR_STOPPED), Tr(STR_NOTHING_WAS_INSTALLED), false);
         return;
     }
 
@@ -2479,10 +2486,10 @@ static void RunJob(GameJob *job, const char *gamesPath)
                                                   &compressedRar, &folderGame);
         if (rar != RAR_MEMBER_OK)
         {
-            FinishLocked(job, QUEUE_OUTCOME_FAILED, "Couldn't install",
-                         rar == RAR_MEMBER_ENCRYPTED ? "This RAR has a password."
-                         : rar == RAR_MEMBER_SPLIT     ? "This RAR is split into parts."
-                                                       : "The RAR's headers couldn't be read.",
+            FinishLocked(job, QUEUE_OUTCOME_FAILED, Tr(STR_COULDNT_INSTALL),
+                         rar == RAR_MEMBER_ENCRYPTED ? Tr(STR_THIS_RAR_HAS_A_PASSWORD)
+                         : rar == RAR_MEMBER_SPLIT     ? Tr(STR_THIS_RAR_IS_SPLIT_INTO)
+                                                       : Tr(STR_THE_RARS_HEADERS_COULDNT_BE),
                          true);
             return;
         }
@@ -2496,7 +2503,7 @@ static void RunJob(GameJob *job, const char *gamesPath)
         {
             if (req.zipSize == 0)
             {
-                FinishLocked(job, QUEUE_OUTCOME_FAILED, "Couldn't install", "The RAR's size isn't known.", true);
+                FinishLocked(job, QUEUE_OUTCOME_FAILED, Tr(STR_COULDNT_INSTALL), Tr(STR_THE_RARS_SIZE_ISNT_KNOWN), true);
                 return;
             }
             _snprintf(member.name, sizeof(member.name), "%s", "(every file)");
@@ -2508,13 +2515,13 @@ static void RunJob(GameJob *job, const char *gamesPath)
     {
         if (!ReadZipDirectory(url, auth, req.zipSize, &member) || member.unpacked == 0)
         {
-            FinishLocked(job, QUEUE_OUTCOME_FAILED, "Couldn't install", "The zip's directory couldn't be read.", true);
+            FinishLocked(job, QUEUE_OUTCOME_FAILED, Tr(STR_COULDNT_INSTALL), Tr(STR_THE_ZIPS_DIRECTORY_COULDNT_BE), true);
             return;
         }
         if (member.method != 8)
         {
             dprintf("[game] %s: compression method %u isn't deflate\n", req.zipName, (unsigned)member.method);
-            FinishLocked(job, QUEUE_OUTCOME_FAILED, "Couldn't install", "The zip isn't compressed the usual way.", true);
+            FinishLocked(job, QUEUE_OUTCOME_FAILED, Tr(STR_COULDNT_INSTALL), Tr(STR_THE_ZIP_ISNT_COMPRESSED_THE), true);
             return;
         }
 
@@ -2535,7 +2542,7 @@ static void RunJob(GameJob *job, const char *gamesPath)
         }
         if (LE32(local) != 0x04034B50)
         {
-            FinishLocked(job, QUEUE_OUTCOME_FAILED, "Couldn't install", "The zip's file header is missing.", true);
+            FinishLocked(job, QUEUE_OUTCOME_FAILED, Tr(STR_COULDNT_INSTALL), Tr(STR_THE_ZIPS_FILE_HEADER_IS), true);
             return;
         }
         dataStart = member.localHeader + 30 + LE16(local + 26) + LE16(local + 28);
@@ -2570,7 +2577,7 @@ static void RunJob(GameJob *job, const char *gamesPath)
         const DWORD attrs = GetFileAttributesA(dir);
         if (attrs == (DWORD)-1 || !(attrs & FILE_ATTRIBUTE_DIRECTORY))
         {
-            FinishLocked(job, QUEUE_OUTCOME_FAILED, "Couldn't install", "The staging folder couldn't be made.", true);
+            FinishLocked(job, QUEUE_OUTCOME_FAILED, Tr(STR_COULDNT_INSTALL), Tr(STR_THE_STAGING_FOLDER_COULDNT_BE), true);
             return;
         }
     }
@@ -2606,7 +2613,7 @@ static void RunJob(GameJob *job, const char *gamesPath)
     if (haveIndex)
     {
         dprintf("[game] the whole zip is here and indexed (%d restart points) - straight to installing\n", savedCount);
-        SetPhase(job, GAME_STEP_INSTALLING, "Installing", 0, 0, 0);
+        SetPhase(job, GAME_STEP_INSTALLING, Tr(STR_INSTALLING), 0, 0, 0);
     }
     else
         DiscardStagingIndex(dir); // it goes with this download's pieces or not at all
@@ -2626,14 +2633,14 @@ static void RunJob(GameJob *job, const char *gamesPath)
         char needText[64] = "", freeText[64] = "", detail[160];
         FormatBytes(spaceNeeded, needText, sizeof(needText));
         FormatBytes(freeSpace, freeText, sizeof(freeText));
-        _snprintf(detail, sizeof(detail), "It needs up to %s while it installs, and %s is free.", needText, freeText);
+        TrFormat(detail, sizeof(detail), STR_NEEDS_UP_TO_WHILE_INSTALLING, needText, freeText);
         detail[sizeof(detail) - 1] = '\0';
         free(done);
         free(wasStaged);
         free(savedPoints);
         if (stagedPieces == 0)
             DiscardStaging(dir); // nothing of worth in it - don't leave it sitting there
-        FinishLocked(job, QUEUE_OUTCOME_NO_SPACE, "Not enough space", detail, true);
+        FinishLocked(job, QUEUE_OUTCOME_NO_SPACE, Tr(STR_NOT_ENOUGH_SPACE), detail, true);
         return;
     }
 
@@ -2648,7 +2655,7 @@ static void RunJob(GameJob *job, const char *gamesPath)
         free(wasStaged);
         free(savedPoints);
         DiscardStaging(dir);
-        FinishLocked(job, QUEUE_OUTCOME_FAILED, "Couldn't install", "The staging folder couldn't be made.", true);
+        FinishLocked(job, QUEUE_OUTCOME_FAILED, Tr(STR_COULDNT_INSTALL), Tr(STR_THE_STAGING_FOLDER_COULDNT_BE), true);
         return;
     }
     Download d;
@@ -2705,7 +2712,7 @@ static void RunJob(GameJob *job, const char *gamesPath)
         free(chunk);
         if (stagedPieces == 0)
             DiscardStaging(dir);
-        FinishLocked(job, QUEUE_OUTCOME_FAILED, "Couldn't install", "Out of memory.", true);
+        FinishLocked(job, QUEUE_OUTCOME_FAILED, Tr(STR_COULDNT_INSTALL), Tr(STR_OUT_OF_MEMORY), true);
         return;
     }
 
@@ -2806,9 +2813,9 @@ static void RunJob(GameJob *job, const char *gamesPath)
                     rate = fetched * 1000 / ms;
             }
             SetPhase(job, GAME_STEP_DOWNLOADING,
-                     wasStaged[index] ? "Checking what's already downloaded"
-                     : (job->viaPc = viaHelper && d.serverAt == 0) ? "Downloading through your PC"
-                                      : "Downloading",
+                     wasStaged[index] ? Tr(STR_CHECKING_WHATS_ALREADY_DOWNLOADED)
+                     : (job->viaPc = viaHelper && d.serverAt == 0) ? Tr(STR_DOWNLOADING_THROUGH_YOUR_PC)
+                                      : Tr(STR_LIB_DOWNLOADING),
                      shown, needed, rate);
 
             if (ready || stop)
@@ -2847,7 +2854,7 @@ static void RunJob(GameJob *job, const char *gamesPath)
             if (wasStaged[index])
             {
                 DWORD ms = GetTickCount() - downloadStart;
-                SetPhase(job, GAME_STEP_DOWNLOADING, "Checking what's already downloaded", from, needed,
+                SetPhase(job, GAME_STEP_DOWNLOADING, Tr(STR_CHECKING_WHATS_ALREADY_DOWNLOADED), from, needed,
                          ms > 3000 ? from * 1000 / ms : 0);
 
                 // Reading a whole download back takes minutes; a pause or a
@@ -2911,22 +2918,22 @@ static void RunJob(GameJob *job, const char *gamesPath)
         EndStaging(dir, !compressedRar && (cancelled ? (ClosingDown() || Paused(job)) : !indexOk));
 
         if (cancelled)
-            FinishLocked(job, QUEUE_OUTCOME_CANCELLED, "Stopped", "Nothing was installed.", false);
+            FinishLocked(job, QUEUE_OUTCOME_CANCELLED, Tr(STR_STOPPED), Tr(STR_NOTHING_WAS_INSTALLED), false);
         else if (failStatus == 401 || failStatus == 403)
-            FinishLocked(job, QUEUE_OUTCOME_KEYS_REJECTED, "Keys not accepted",
-                         "archive.org refused the keys - check them in Settings.", true);
+            FinishLocked(job, QUEUE_OUTCOME_KEYS_REJECTED, Tr(STR_KEYS_NOT_ACCEPTED),
+                         Tr(STR_ARCHIVE_ORG_REFUSED_THE_KEYS), true);
         else if (indexOk && unpacked == RAR_UNPACK_UNSUPPORTED)
-            FinishLocked(job, QUEUE_OUTCOME_FAILED, "Couldn't install",
-                         "This RAR is packed in a way the console can't unpack.", true);
+            FinishLocked(job, QUEUE_OUTCOME_FAILED, Tr(STR_COULDNT_INSTALL),
+                         Tr(STR_THIS_RAR_IS_PACKED_IN), true);
         else if (indexOk && unpacked == RAR_UNPACK_WRITE_FAILED)
-            FinishLocked(job, QUEUE_OUTCOME_FAILED, "Couldn't install",
-                         "The unpacked game couldn't be written - is the drive full?", true);
+            FinishLocked(job, QUEUE_OUTCOME_FAILED, Tr(STR_COULDNT_INSTALL),
+                         Tr(STR_THE_UNPACKED_GAME_COULDNT_BE), true);
         else if (indexOk)
-            FinishLocked(job, QUEUE_OUTCOME_FAILED, "Download was damaged",
-                         "The game's data didn't match its checksum. Try again.", true);
+            FinishLocked(job, QUEUE_OUTCOME_FAILED, Tr(STR_DOWNLOAD_WAS_DAMAGED),
+                         Tr(STR_THE_GAMES_DATA_DIDNT_MATCH), true);
         else
-            FinishLocked(job, QUEUE_OUTCOME_FAILED, "Download failed",
-                         "archive.org stopped answering. Try again later.", true);
+            FinishLocked(job, QUEUE_OUTCOME_FAILED, Tr(STR_DOWNLOAD_FAILED),
+                         Tr(STR_ARCHIVE_ORG_STOPPED_ANSWERING_TRY), true);
         return;
     }
 
@@ -2963,7 +2970,7 @@ static void RunJob(GameJob *job, const char *gamesPath)
         // read - fetching it again would only arrive at the same place.
         free(points);
         EndStaging(dir, false);
-        FinishLocked(job, QUEUE_OUTCOME_FAILED, "Couldn't install", GodResultText(result), true);
+        FinishLocked(job, QUEUE_OUTCOME_FAILED, Tr(STR_COULDNT_INSTALL), GodResultText(result), true);
         return;
     }
 
@@ -2986,14 +2993,14 @@ static void RunJob(GameJob *job, const char *gamesPath)
         char needText[64] = "", freeText[64] = "", detail[160];
         FormatBytes(installSize, needText, sizeof(needText));
         FormatBytes(freeSpace, freeText, sizeof(freeText));
-        _snprintf(detail, sizeof(detail), "It needs %s, and %s is free.", needText, freeText);
+        TrFormat(detail, sizeof(detail), STR_NEEDS_AND_FREE, needText, freeText);
         detail[sizeof(detail) - 1] = '\0';
         // The download is here and checks out - it's the game it makes that
         // won't fit. Kept, so freeing space and choosing it again installs
         // from what's already down rather than fetching it all over again.
         free(points);
         EndStaging(dir, !compressedRar);
-        FinishLocked(job, QUEUE_OUTCOME_NO_SPACE, "Not enough space", detail, true);
+        FinishLocked(job, QUEUE_OUTCOME_NO_SPACE, Tr(STR_NOT_ENOUGH_SPACE), detail, true);
         return;
     }
 
@@ -3007,7 +3014,7 @@ static void RunJob(GameJob *job, const char *gamesPath)
     ConvertProgress progress;
     progress.job = job;
     progress.started = GetTickCount();
-    SetPhase(job, GAME_STEP_INSTALLING, "Installing", 0, info.usedSize, 0);
+    SetPhase(job, GAME_STEP_INSTALLING, Tr(STR_INSTALLING), 0, info.usedSize, 0);
 
     // The game's icon for the package, so the dashboard and Aurora show it.
     // Without one the install goes ahead, with the dashboard's placeholder.
@@ -3051,16 +3058,16 @@ static void RunJob(GameJob *job, const char *gamesPath)
         // Noted before it's reported, so the Store never sees it finished
         // but not installed.
         RecordInstalledZip(req.zipName, info.title.titleId, info.title.mediaId);
-        FinishLocked(job, QUEUE_OUTCOME_INSTALLED, "Installed",
-                     "Play it from the dashboard or Aurora.", true);
+        FinishLocked(job, QUEUE_OUTCOME_INSTALLED, Tr(STR_INSTALLED),
+                     Tr(STR_PLAY_IT_FROM_THE_DASHBOARD), true);
     }
     else if (result == GOD_CANCELLED)
-        FinishLocked(job, QUEUE_OUTCOME_CANCELLED, "Stopped", "Nothing was installed.", false);
+        FinishLocked(job, QUEUE_OUTCOME_CANCELLED, Tr(STR_STOPPED), Tr(STR_NOTHING_WAS_INSTALLED), false);
     else if (result == GOD_WRITE_FAILED)
-        FinishLocked(job, QUEUE_OUTCOME_FAILED, "Couldn't write the game",
-                     "Check the drive the games folder is on, then try again.", true);
+        FinishLocked(job, QUEUE_OUTCOME_FAILED, Tr(STR_COULDNT_WRITE_THE_GAME),
+                     Tr(STR_CHECK_THE_DRIVE_THE_GAMES), true);
     else
-        FinishLocked(job, QUEUE_OUTCOME_FAILED, "Couldn't install", GodResultText(result), true);
+        FinishLocked(job, QUEUE_OUTCOME_FAILED, Tr(STR_COULDNT_INSTALL), GodResultText(result), true);
 }
 
 // ---------------------------------------------------------------------------
@@ -3088,7 +3095,7 @@ static DWORD WINAPI InstallerEntry(LPVOID)
                 job->snap.state = QUEUE_ACTIVE;
                 break;
             }
-            Finish(job, QUEUE_OUTCOME_CANCELLED, "Stopped", "Nothing was installed.", false);
+            Finish(job, QUEUE_OUTCOME_CANCELLED, Tr(STR_STOPPED), Tr(STR_NOTHING_WAS_INSTALLED), false);
             job = NULL;
         }
         memcpy(gamesPath, g_gamesPath, sizeof(gamesPath));
@@ -3443,7 +3450,7 @@ void CancelGameJob(int id)
             char root[300], dir[320];
             StagingRoot(g_gamesPath, root, sizeof(root));
             StagingDirFor(root, job.request, dir, sizeof(dir));
-            Finish(&job, QUEUE_OUTCOME_CANCELLED, "Stopped", "Nothing was installed.", false);
+            Finish(&job, QUEUE_OUTCOME_CANCELLED, Tr(STR_STOPPED), Tr(STR_NOTHING_WAS_INSTALLED), false);
             LeaveCriticalSection(&g_lock);
             DiscardStaging(dir);
             SetEvent(g_wake);
@@ -3482,7 +3489,7 @@ void PauseGameJob(int id)
             // it is still downloading, and the row says so rather than
             // claiming a pause that hasn't happened yet. Finish sets the
             // state.
-            _snprintf(job.snap.phase, sizeof(job.snap.phase), "%s", "Pausing");
+            _snprintf(job.snap.phase, sizeof(job.snap.phase), "%s", Tr(STR_PAUSING));
             job.snap.phase[sizeof(job.snap.phase) - 1] = '\0';
             SaveInstallStateLocked(); // saved as paused in case the app closes meanwhile
         }

@@ -5,6 +5,7 @@ DESCRIPTION : The Original Xbox emulator's partition and files. See XboxCompat.h
 */
 
 #include "XboxCompat.h"
+#include "Strings.h" // Tr() - every string the UI shows
 #include "DownloadQueue.h" // EnqueueHomebrew
 #include "OutputConsole.h" // dprintf
 #include "driveMount.h"    // mount
@@ -285,7 +286,7 @@ int QueueXefuPack()
 
     HomebrewJobSpec spec;
     memset(&spec, 0, sizeof(spec));
-    _snprintf(spec.title, sizeof(spec.title) - 1, "Original Xbox emulator");
+    _snprintf(spec.title, sizeof(spec.title) - 1, "%s", Tr(STR_ORIGINAL_XBOX_EMULATOR));
     _snprintf(spec.urls[0], sizeof(spec.urls[0]) - 1, "%s", XEFU_PACK_URL);
     spec.urlCount = 1;
     _snprintf(spec.kindFolder, sizeof(spec.kindFolder) - 1, "HddX:");

@@ -17,6 +17,7 @@ TLS handshakes) and times the bytes after, over MEASURE_MS.
 #include <string>
 
 #include "SpeedTest.h"
+#include "Strings.h" // Tr() - every string the UI shows
 #include "GameListUI.h"   // RenderStatusFrame, ShowNotesUI, PollUiInput
 #include "UiSound.h"
 #include "downloadFile.h" // httpRequestHTTPS
@@ -532,13 +533,13 @@ static double TestArchive(int connections, int suites, unsigned short *outSuite)
 
 static DWORD WINAPI SpeedTestEntry(LPVOID)
 {
-    SetPhase("Checking your internet connection");
+    SetPhase(Tr(STR_CHECKING_YOUR_INTERNET_CONNECTION));
     g_results.plain = TestPlain(PLAIN_NEAR);
     dprintf("[speedtest] network, no encryption, nearby (%s): %.2f MB/s\n", kPlainHosts[PLAIN_NEAR], g_results.plain);
 
     if (!Cancelled())
     {
-        SetPhase("Checking your internet connection, further away");
+        SetPhase(Tr(STR_CHECKING_YOUR_INTERNET_CONNECTION_FURTHER));
         g_results.plainFar = TestPlain(PLAIN_FAR);
         dprintf("[speedtest] network, no encryption, far away (%s): %.2f MB/s\n", kPlainHosts[PLAIN_FAR],
                 g_results.plainFar);
@@ -546,7 +547,7 @@ static DWORD WINAPI SpeedTestEntry(LPVOID)
 
     if (!Cancelled())
     {
-        SetPhase("Checking your console");
+        SetPhase(Tr(STR_CHECKING_YOUR_CONSOLE));
         TestDecrypt(&g_results.chacha, &g_results.gcm);
         dprintf("[speedtest] decrypting on one core: ChaCha20-Poly1305 %.2f MB/s, AES-128-GCM %.2f MB/s\n",
                 g_results.chacha, g_results.gcm);
@@ -560,7 +561,14 @@ static DWORD WINAPI SpeedTestEntry(LPVOID)
             // On screen, just which of the runs; the log says what each one is.
             const int n = kRunConnections[run];
             char phase[96], what[96];
-            _snprintf(phase, sizeof(phase), "Checking archive.org (%d of %d)", run + 1, RUN_COUNT);
+            {
+                char n1[16], n2[16];
+                _snprintf(n1, sizeof(n1), "%d", run + 1);
+                n1[sizeof(n1) - 1] = '\0';
+                _snprintf(n2, sizeof(n2), "%d", RUN_COUNT);
+                n2[sizeof(n2) - 1] = '\0';
+                TrFormat(phase, sizeof(phase), STR_CHECKING_ARCHIVE_ORG_RUN, n1, n2);
+            }
             phase[sizeof(phase) - 1] = '\0';
             if (run == RUN_ONE_SERVER_CHOICE)
                 _snprintf(what, sizeof(what), "archive.org, 1 connection, its choice of cipher");
@@ -591,11 +599,16 @@ static void AppendRate(std::string &out, const char *label, double rate)
 {
     char line[128];
     if (rate >= 0.0)
-        _snprintf(line, sizeof(line), "%s: %.1f MB/s\n", label, rate);
+    {
+        char mbs[16];
+        _snprintf(mbs, sizeof(mbs), "%.1f", rate);
+        mbs[sizeof(mbs) - 1] = '\0';
+        TrFormat(line, sizeof(line), STR_SPEED_RATE, label, mbs);
+    }
     else
-        _snprintf(line, sizeof(line), "%s: couldn't be checked\n", label);
-    line[sizeof(line) - 1] = '\0';
+        TrFormat(line, sizeof(line), STR_SPEED_UNCHECKED, label);
     out += line;
+    out += "\n";
 }
 
 // The fastest archive.org run, or -1 if none worked.
@@ -614,8 +627,7 @@ static std::string Verdict(const SpeedResults &r)
 {
     const double archive = BestArchive(r);
     if (archive < 0.0)
-        return g_auth == NULL ? "Add your archive.org keys in Settings to check archive.org too."
-                              : "archive.org couldn't be reached. Try again later.";
+        return Tr(g_auth == NULL ? STR_SPEED_ADD_KEYS : STR_SPEED_ARCHIVE_UNREACHABLE);
 
     const double internet = r.plain, console = r.chacha;
     double others = -1.0; // the slower of your internet and console that were measured
@@ -629,14 +641,12 @@ static std::string Verdict(const SpeedResults &r)
     // limitations), which tells over a long way. Said without the why.
     const double farAway = r.plainFar; // not "far": windows.h defines that away
     if (farAway > 0.0 && internet > 0.0 && farAway < internet * 0.6 && archive >= farAway * 0.7)
-        return "Your internet and console are fine. The Xbox 360 just can't download as fast from far-away "
-               "servers as a PC can, and archive.org's are a long way off - so this is as fast as it gets.";
+        return Tr(STR_SPEED_FAR_AWAY);
     if (others < 0.0 || archive < others * 0.8)
-        return "Your internet and console are fine. archive.org doesn't send any faster to your console, "
-               "so this is as fast as it gets.";
+        return Tr(STR_SPEED_ARCHIVE_LIMIT);
     if (internet > 0.0 && internet <= console)
-        return "Your internet connection is the slowest part, so downloads can't get any quicker than it.";
-    return "Your console is the slowest part: it can't keep up with any more than this.";
+        return Tr(STR_SPEED_INTERNET_LIMIT);
+    return Tr(STR_SPEED_CONSOLE_LIMIT);
 }
 
 void RunSpeedTestUI(const char *authHeader, const char *scratchPath)
@@ -682,7 +692,7 @@ void RunSpeedTestUI(const char *authHeader, const char *scratchPath)
     HANDLE worker = CreateThread(NULL, 256 * 1024, SpeedTestEntry, NULL, CREATE_SUSPENDED, NULL);
     if (worker == NULL)
     {
-        ShowNotesUI("Speed test", "Couldn't start", "The test couldn't be started.", NULL, NULL);
+        ShowNotesUI(Tr(STR_SPEED_TEST), Tr(STR_COULDNT_START), Tr(STR_THE_TEST_COULDNT_BE_STARTED), NULL, NULL);
         return;
     }
     XSetThreadProcessor(worker, 4); // a download connection's core, for the decryption test
@@ -700,18 +710,25 @@ void RunSpeedTestUI(const char *authHeader, const char *scratchPath)
 
         char phase[96], detail[96];
         EnterCriticalSection(&g_lock);
-        _snprintf(phase, sizeof(phase), "%s", g_phase[0] != '\0' ? g_phase : "Starting");
+        _snprintf(phase, sizeof(phase), "%s", g_phase[0] != '\0' ? g_phase : Tr(STR_STARTING));
         if (Cancelled())
-            _snprintf(detail, sizeof(detail), "Stopping...");
-        else if (g_live > 0.0)
-            _snprintf(detail, sizeof(detail), "Step %d of %d  -  %.1f MB/s", g_step, g_steps, g_live);
+            TrFormat(detail, sizeof(detail), STR_STOPPING_ELLIPSIS);
         else
-            _snprintf(detail, sizeof(detail), "Step %d of %d  -  B stops it", g_step, g_steps);
+        {
+            char n1[16], n2[16], mbs[16];
+            _snprintf(n1, sizeof(n1), "%d", g_step);
+            n1[sizeof(n1) - 1] = '\0';
+            _snprintf(n2, sizeof(n2), "%d", g_steps);
+            n2[sizeof(n2) - 1] = '\0';
+            _snprintf(mbs, sizeof(mbs), "%.1f", g_live);
+            mbs[sizeof(mbs) - 1] = '\0';
+            TrFormat(detail, sizeof(detail), g_live > 0.0 ? STR_SPEED_STEP_RATE : STR_SPEED_STEP_STOP, n1, n2, mbs);
+        }
         LeaveCriticalSection(&g_lock);
         phase[sizeof(phase) - 1] = '\0';
         detail[sizeof(detail) - 1] = '\0';
 
-        RenderStatusFrame("Speed test", phase, detail);
+        RenderStatusFrame(Tr(STR_SPEED_TEST), phase, detail);
         Sleep(16);
     }
     WaitForSingleObject(worker, INFINITE);
@@ -728,14 +745,14 @@ void RunSpeedTestUI(const char *authHeader, const char *scratchPath)
     std::string body;
     // The far-away server's speed is for the verdict and the log, not here:
     // a second internet number only puzzles.
-    AppendRate(body, "Your internet connection", g_results.plain);
-    AppendRate(body, "What your console can keep up with", g_results.chacha);
+    AppendRate(body, Tr(STR_YOUR_INTERNET_CONNECTION), g_results.plain);
+    AppendRate(body, Tr(STR_WHAT_YOUR_CONSOLE_CAN_KEEP), g_results.chacha);
     if (authHeader != NULL)
-        AppendRate(body, "archive.org", BestArchive(g_results));
+        AppendRate(body, Tr(STR_ARCHIVE_ORG), BestArchive(g_results));
     const std::string verdict = Verdict(g_results);
     body += "\n";
     body += verdict;
     dprintf("[speedtest] %s\n", verdict.c_str());
 
-    ShowNotesUI("Speed test", "Results", body.c_str(), "The details are in DebugInfo.txt", NULL);
+    ShowNotesUI(Tr(STR_SPEED_TEST), Tr(STR_RESULTS), body.c_str(), Tr(STR_THE_DETAILS_ARE_IN_DEBUGINFO), NULL);
 }

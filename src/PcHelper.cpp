@@ -1,4 +1,5 @@
 #include "PcHelper.h"
+#include "Strings.h" // Tr() - every string the UI shows
 #include "HttpPlain.h"
 #include "OutputConsole.h"
 #include "parsing.h" // LogEscapePercent, UrlEncodeFormValue
@@ -246,7 +247,7 @@ bool PcHelperRequestPair(char *requestId, unsigned int requestIdSize, char *code
     LeaveCriticalSection(&g_helperLock);
     if (!fresh)
     {
-        CopyOut(message, messageSize, "The helper isn't running on your PC - start it and try again.");
+        CopyOut(message, messageSize, Tr(STR_THE_HELPER_ISNT_RUNNING_ON));
         return false;
     }
 
@@ -264,8 +265,8 @@ bool PcHelperRequestPair(char *requestId, unsigned int requestIdSize, char *code
         return true;
     }
     dprintf("[helper] pairing request failed: HTTP %d\n", status);
-    CopyOut(message, messageSize, status == 404 ? "Your PC's helper is out of date - download the latest one."
-                                                : "Couldn't reach the helper. Check your PC's firewall allows it.");
+    CopyOut(message, messageSize, status == 404 ? Tr(STR_YOUR_PCS_HELPER_IS_OUT)
+                                                : Tr(STR_COULDNT_REACH_THE_HELPER_CHECK));
     return false;
 }
 
@@ -289,8 +290,8 @@ PcHelperPairResult PcHelperWaitPair(const char *requestId, char *token, unsigned
     if (status == 408)
         return PAIR_WAITING;
     dprintf("[helper] pairing ended: HTTP %d\n", status);
-    CopyOut(message, messageSize, status == 403 ? "Pairing wasn't allowed on your PC."
-                                                : "Lost touch with the helper. Try pairing again.");
+    CopyOut(message, messageSize, status == 403 ? Tr(STR_PAIRING_WASNT_ALLOWED_ON_YOUR)
+                                                : Tr(STR_LOST_TOUCH_WITH_THE_HELPER));
     return PAIR_FAILED;
 }
 

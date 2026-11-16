@@ -7,6 +7,7 @@ DESCRIPTION : the download queue - DLC packs and title updates, installed one
 */
 
 #include "DownloadQueue.h"
+#include "Strings.h" // Tr() - every string the UI shows
 #include "PcHelper.h" // a cancelled pack dropped from the PC, and its progress there
 #include "downloadFile.h" // FormatBytes, DownloadProgressFn
 #include "HttpPlain.h"    // HttpDownloadPlain, for a homebrew mirror
@@ -120,7 +121,7 @@ static void NoSpaceDetail(char *out, size_t outSize, unsigned long long needed, 
     FormatBytes(needed, neededText, sizeof(neededText));
     FormatBytes(freeSpace, freeText, sizeof(freeText));
 
-    _snprintf(out, outSize, "This needs %s, but %s has %s free.", neededText, drive, freeText);
+    TrFormat(out, outSize, STR_NEEDS_SPACE, neededText, drive, freeText);
     out[outSize - 1] = '\0';
 }
 
@@ -345,7 +346,7 @@ static void SetActivePhase(const char *phase, int step, int stepCount, int fileI
         // yet. Say so, rather than go on reporting a download the user has
         // already stopped.
         CopyText(job.view.phase, sizeof(job.view.phase),
-                 (job.pauseRequested && !job.cancelRequested) ? "Pausing" : phase);
+                 (job.pauseRequested && !job.cancelRequested) ? Tr(STR_PAUSING) : phase);
         job.view.bytesDone = 0;
         job.view.bytesTotal = 0;
         job.view.bytesPerSec = 0;
@@ -444,8 +445,8 @@ static void SetKeysRejected(JobResult &result)
 {
     // Not "could not read the pack" or "the file failed" - those send someone
     // to try a different one, which will be refused the same way.
-    SetResult(result, QUEUE_OUTCOME_KEYS_REJECTED, "Keys not accepted",
-              "archive.org turned down your keys. Check them in Settings.");
+    SetResult(result, QUEUE_OUTCOME_KEYS_REJECTED, Tr(STR_KEYS_NOT_ACCEPTED),
+              Tr(STR_ARCHIVE_ORG_TURNED_DOWN_YOUR));
 }
 
 // Every file inside one pack. What DownloadOnePack in main.cpp used to do on
@@ -455,13 +456,13 @@ static void RunDlcPack(const QueueJob &job, JobResult &result)
     const DlcRarMatch &pack = job.pack;
     const char *auth = job.authHeader;
 
-    SetActivePhase("Reading the file list", PACK_STEP_LISTING, PACK_STEP_COUNT, 0, 0, -1.0f);
+    SetActivePhase(Tr(STR_READING_THE_FILE_LIST), PACK_STEP_LISTING, PACK_STEP_COUNT, 0, 0, -1.0f);
 
     int memberCount = ListDlcMembers(pack, g_members, MAX_DLC_MEMBERS, auth, dprintf, WorkerListProgress);
 
     if (ActiveJobCancelled())
     {
-        SetResult(result, QUEUE_OUTCOME_CANCELLED, "Cancelled", "Nothing was installed.");
+        SetResult(result, QUEUE_OUTCOME_CANCELLED, Tr(STR_CANCELLED), Tr(STR_NOTHING_WAS_INSTALLED));
         return;
     }
 
@@ -489,8 +490,8 @@ static void RunDlcPack(const QueueJob &job, JobResult &result)
         if (ArchiveOrgKeysRejected())
             SetKeysRejected(result);
         else
-            SetResult(result, QUEUE_OUTCOME_FAILED, "Couldn't read the pack",
-                      "The file list for this pack could not be read.");
+            SetResult(result, QUEUE_OUTCOME_FAILED, Tr(STR_COULDNT_READ_THE_PACK),
+                      Tr(STR_THE_FILE_LIST_FOR_THIS));
         return;
     }
 
@@ -517,7 +518,7 @@ static void RunDlcPack(const QueueJob &job, JobResult &result)
         dprintf("Not enough space for %s: needs %I64u bytes, %I64u free\n", pack.filename, needed, freeSpace);
         char detail[160];
         NoSpaceDetail(detail, sizeof(detail), needed, freeSpace);
-        SetResult(result, QUEUE_OUTCOME_NO_SPACE, "Not enough space", detail);
+        SetResult(result, QUEUE_OUTCOME_NO_SPACE, Tr(STR_NOT_ENOUGH_SPACE), detail);
         return;
     }
 
@@ -540,7 +541,12 @@ static void RunDlcPack(const QueueJob &job, JobResult &result)
         }
 
         char phase[64];
-        _snprintf(phase, sizeof(phase), "File %d of %d", f + 1, memberCount);
+        char n1[16], n2[16];
+        _snprintf(n1, sizeof(n1), "%d", f + 1);
+        n1[sizeof(n1) - 1] = '\0';
+        _snprintf(n2, sizeof(n2), "%d", memberCount);
+        n2[sizeof(n2) - 1] = '\0';
+        TrFormat(phase, sizeof(phase), STR_FILE_OF, n1, n2);
         phase[sizeof(phase) - 1] = '\0';
         SetActivePhase(phase, PACK_STEP_FILES, PACK_STEP_COUNT, f, memberCount, (float)f / (float)memberCount);
 
@@ -553,8 +559,8 @@ static void RunDlcPack(const QueueJob &job, JobResult &result)
 
         if (ActiveJobCancelled())
         {
-            SetResult(result, QUEUE_OUTCOME_CANCELLED, "Cancelled",
-                      installedNow > 0 ? "Files that already finished stay installed." : "Nothing was installed.");
+            SetResult(result, QUEUE_OUTCOME_CANCELLED, Tr(STR_CANCELLED),
+                      installedNow > 0 ? Tr(STR_FILES_THAT_ALREADY_FINISHED_STAY) : Tr(STR_NOTHING_WAS_INSTALLED));
             return;
         }
 
@@ -574,7 +580,7 @@ static void RunDlcPack(const QueueJob &job, JobResult &result)
         {
             char detail[160];
             NoSpaceDetail(detail, sizeof(detail), fileNeeded, fileFree);
-            SetResult(result, QUEUE_OUTCOME_NO_SPACE, "Not enough space", detail);
+            SetResult(result, QUEUE_OUTCOME_NO_SPACE, Tr(STR_NOT_ENOUGH_SPACE), detail);
             return;
         }
 
@@ -593,40 +599,49 @@ static void RunDlcPack(const QueueJob &job, JobResult &result)
     {
         // Nothing was transferred. "Installed" would be true but misleading -
         // it reads as though work happened.
-        SetResult(result, QUEUE_OUTCOME_ALREADY_INSTALLED, "Already installed",
-                  "Every file in this pack was already on the console.");
+        SetResult(result, QUEUE_OUTCOME_ALREADY_INSTALLED, Tr(STR_ALREADY_INSTALLED),
+                  Tr(STR_EVERY_FILE_IN_THIS_PACK));
     }
     else if (failures == 0)
     {
         // An arcade game shows up in the library straight away, and an indie
         // game is ready to play; DLC needs the game to be started again.
-        const char *detail = "Restart your dashboard to pick up the new content.";
+        const char *detail = Tr(STR_DLC_RESTART_DASHBOARD);
         if (strncmp(pack.item, "XBOX_360_XBLIG", 14) == 0)
-            detail = "It's on the hard drive, ready to play.";
+            detail = Tr(STR_INDIE_READY_TO_PLAY);
         else if (pack.item[0] != '\0')
-            detail = "It's in your library now.";
-        SetResult(result, QUEUE_OUTCOME_INSTALLED, "Installed", detail);
+            detail = Tr(STR_IN_YOUR_LIBRARY_NOW);
+        SetResult(result, QUEUE_OUTCOME_INSTALLED, Tr(STR_INSTALLED), detail);
     }
     else if (tooLarge == failures)
     {
         // Every failure was a file over 1 GiB that archive.org only serves
         // unpacked, and its unpacking gives out at 1 GiB for a console.
         char detail[160];
+        char n1[16], n2[16];
+        _snprintf(n1, sizeof(n1), "%d", failures);
+        n1[sizeof(n1) - 1] = '\0';
+        _snprintf(n2, sizeof(n2), "%d", memberCount);
+        n2[sizeof(n2) - 1] = '\0';
         if (failures == memberCount)
-            _snprintf(detail, sizeof(detail), "This DLC is over 1 GB, too big for archive.org to send to a console.");
+            TrFormat(detail, sizeof(detail), STR_DLC_TOO_BIG);
         else
-            _snprintf(detail, sizeof(detail), "%d of %d files are over 1 GB, too big for archive.org to send to a console.",
-                      failures, memberCount);
+            TrFormat(detail, sizeof(detail), STR_DLC_FILES_TOO_BIG, n1, n2);
         detail[sizeof(detail) - 1] = '\0';
         SetResult(result, failures == memberCount ? QUEUE_OUTCOME_FAILED : QUEUE_OUTCOME_PARTIAL,
-                  failures == memberCount ? "Too big to download" : "Finished with errors", detail);
+                  failures == memberCount ? Tr(STR_TOO_BIG_TO_DOWNLOAD) : Tr(STR_FINISHED_WITH_ERRORS), detail);
     }
     else
     {
         char detail[160];
-        _snprintf(detail, sizeof(detail), "%d of %d files failed to download. See the log.", failures, memberCount);
+        char n1[16], n2[16];
+        _snprintf(n1, sizeof(n1), "%d", failures);
+        n1[sizeof(n1) - 1] = '\0';
+        _snprintf(n2, sizeof(n2), "%d", memberCount);
+        n2[sizeof(n2) - 1] = '\0';
+        TrFormat(detail, sizeof(detail), STR_DLC_FILES_FAILED, n1, n2);
         detail[sizeof(detail) - 1] = '\0';
-        SetResult(result, QUEUE_OUTCOME_PARTIAL, "Finished with errors", detail);
+        SetResult(result, QUEUE_OUTCOME_PARTIAL, Tr(STR_FINISHED_WITH_ERRORS), detail);
     }
 }
 
@@ -644,7 +659,7 @@ static bool TitleUpdateProgress(unsigned long long bytesDone, unsigned long long
     if (step != g_updateStep)
     {
         g_updateStep = step;
-        SetActivePhase(step == 1 ? "Unpacking" : "Downloading", step, 2, step, 2, (float)step / 2.0f);
+        SetActivePhase(step == 1 ? Tr(STR_UNPACKING) : Tr(STR_LIB_DOWNLOADING), step, 2, step, 2, (float)step / 2.0f);
     }
 
     return WorkerDownloadProgress(bytesDone, bytesTotal, bytesPerSec, secondsRemaining);
@@ -655,13 +670,13 @@ static void RunTitleUpdate(const QueueJob &job, JobResult &result)
     // The phase becomes "Downloading" with the first progress report, once
     // DownloadTitleUpdate has read the update's own file list.
     g_updateStep = -1;
-    SetActivePhase("Reading the update", 0, 2, 0, 2, -1.0f);
+    SetActivePhase(Tr(STR_READING_THE_UPDATE), 0, 2, 0, 2, -1.0f);
 
     if (DownloadTitleUpdate(job.update, job.view.titleId, g_contentBasePath, job.authHeader, dprintf,
                             TitleUpdateProgress))
     {
-        SetResult(result, QUEUE_OUTCOME_INSTALLED, "Installed",
-                  "Restart your dashboard to pick up the update.");
+        SetResult(result, QUEUE_OUTCOME_INSTALLED, Tr(STR_INSTALLED),
+                  Tr(STR_RESTART_YOUR_DASHBOARD_TO_PICK));
         return;
     }
 
@@ -669,7 +684,7 @@ static void RunTitleUpdate(const QueueJob &job, JobResult &result)
 
     if (ActiveJobCancelled())
     {
-        SetResult(result, QUEUE_OUTCOME_CANCELLED, "Cancelled", "Nothing was installed.");
+        SetResult(result, QUEUE_OUTCOME_CANCELLED, Tr(STR_CANCELLED), Tr(STR_NOTHING_WAS_INSTALLED));
     }
     else if (ArchiveOrgKeysRejected())
     {
@@ -679,12 +694,12 @@ static void RunTitleUpdate(const QueueJob &job, JobResult &result)
     {
         char detail[160];
         NoSpaceDetail(detail, sizeof(detail), needed, freeSpace);
-        SetResult(result, QUEUE_OUTCOME_NO_SPACE, "Not enough space", detail);
+        SetResult(result, QUEUE_OUTCOME_NO_SPACE, Tr(STR_NOT_ENOUGH_SPACE), detail);
     }
     else
     {
-        SetResult(result, QUEUE_OUTCOME_FAILED, "Failed",
-                  "See the log - archive.org may not serve this file directly.");
+        SetResult(result, QUEUE_OUTCOME_FAILED, Tr(STR_FAILED),
+                  Tr(STR_SEE_THE_LOG_ARCHIVE_ORG));
     }
 }
 
@@ -763,9 +778,16 @@ static void RunHomebrew(const QueueJob &job, JobResult &result)
 
         char phase[64];
         if (hb.urlCount > 1)
-            _snprintf(phase, sizeof(phase), "Downloading part %d of %d", i + 1, hb.urlCount);
+        {
+            char n1[16], n2[16];
+            _snprintf(n1, sizeof(n1), "%d", i + 1);
+            n1[sizeof(n1) - 1] = '\0';
+            _snprintf(n2, sizeof(n2), "%d", hb.urlCount);
+            n2[sizeof(n2) - 1] = '\0';
+            TrFormat(phase, sizeof(phase), STR_DOWNLOADING_PART_OF, n1, n2);
+        }
         else
-            _snprintf(phase, sizeof(phase), "Downloading");
+            TrFormat(phase, sizeof(phase), STR_LIB_DOWNLOADING);
         phase[sizeof(phase) - 1] = '\0';
         SetActivePhase(phase, 0, 1, i, hb.urlCount, (float)i / (float)hb.urlCount);
 
@@ -834,29 +856,31 @@ static void RunHomebrew(const QueueJob &job, JobResult &result)
 
             if (cancelled)
             {
-                SetResult(result, QUEUE_OUTCOME_CANCELLED, "Cancelled",
-                          i == 0 ? "Nothing was installed." : "Its first parts are installed.");
+                SetResult(result, QUEUE_OUTCOME_CANCELLED, Tr(STR_CANCELLED),
+                          i == 0 ? Tr(STR_NOTHING_WAS_INSTALLED) : Tr(STR_ITS_FIRST_PARTS_ARE_INSTALLED));
             }
             else if (status == 403 && hb.mirror[0] == '\0')
             {
                 // Omni360 is allowed through the bot protection by its user
                 // agent, so a 403 now means that arrangement has lapsed
                 // rather than that it was never there.
-                SetResult(result, QUEUE_OUTCOME_FAILED, "Refused by ConsoleMods",
-                          "consolemods.org turned this download away. Please report it.");
+                SetResult(result, QUEUE_OUTCOME_FAILED, Tr(STR_REFUSED_BY_CONSOLEMODS),
+                          Tr(STR_CONSOLEMODS_ORG_TURNED_THIS_DOWNLOAD));
             }
             else
             {
                 char detail[160];
-                _snprintf(detail, sizeof(detail), "%s - %s %d. See the log.", UrlFileName(url),
-                          status > 0 ? "the server said" : "error", status);
+                char code[16];
+                _snprintf(code, sizeof(code), "%d", status);
+                code[sizeof(code) - 1] = '\0';
+                TrFormat(detail, sizeof(detail), status > 0 ? STR_SERVER_SAID : STR_SERVER_ERROR, UrlFileName(url), code);
                 detail[sizeof(detail) - 1] = '\0';
-                SetResult(result, QUEUE_OUTCOME_FAILED, "Download failed", detail);
+                SetResult(result, QUEUE_OUTCOME_FAILED, Tr(STR_DOWNLOAD_FAILED), detail);
             }
             return;
         }
 
-        SetActivePhase("Unpacking", 0, 1, i + 1, hb.urlCount, (float)(i + 1) / (float)hb.urlCount);
+        SetActivePhase(Tr(STR_UNPACKING), 0, 1, i + 1, hb.urlCount, (float)(i + 1) / (float)hb.urlCount);
         int leftOut = 0;
         // The ConsoleMods wiki's own uploads, the xefu packs among them, are
         // zips rather than the repo's .7z archives.
@@ -876,7 +900,7 @@ static void RunHomebrew(const QueueJob &job, JobResult &result)
             // already here without fetching any of it again.
             if (!ActiveJobStoppingForNow())
                 remove(archive);
-            SetResult(result, QUEUE_OUTCOME_CANCELLED, "Cancelled", "Some of its files may already be there.");
+            SetResult(result, QUEUE_OUTCOME_CANCELLED, Tr(STR_CANCELLED), Tr(STR_SOME_OF_ITS_FILES_MAY));
             return;
         }
 
@@ -887,7 +911,7 @@ static void RunHomebrew(const QueueJob &job, JobResult &result)
             _snprintf(detail, sizeof(detail), "%s: %s.", UrlFileName(url),
                       isZip ? ZipResultText(zipped) : SevenZipResultText(unpacked));
             detail[sizeof(detail) - 1] = '\0';
-            SetResult(result, QUEUE_OUTCOME_FAILED, "Couldn't unpack it", detail);
+            SetResult(result, QUEUE_OUTCOME_FAILED, Tr(STR_COULDNT_UNPACK_IT), detail);
             return;
         }
     }
@@ -896,13 +920,15 @@ static void RunHomebrew(const QueueJob &job, JobResult &result)
     {
         // Names longer than FATX's 42 characters, usually sample ROMs.
         char detail[160];
-        _snprintf(detail, sizeof(detail), "%s - %d file%s left out, as the drive can't hold their names.", dest,
-                  skippedNames, skippedNames == 1 ? "" : "s");
+        char count[16];
+        _snprintf(count, sizeof(count), "%d", skippedNames);
+        count[sizeof(count) - 1] = '\0';
+        TrFormat(detail, sizeof(detail), skippedNames == 1 ? STR_FILES_LEFT_OUT_ONE : STR_FILES_LEFT_OUT, count, dest);
         detail[sizeof(detail) - 1] = '\0';
-        SetResult(result, QUEUE_OUTCOME_INSTALLED, "Installed", detail);
+        SetResult(result, QUEUE_OUTCOME_INSTALLED, Tr(STR_INSTALLED), detail);
         return;
     }
-    SetResult(result, QUEUE_OUTCOME_INSTALLED, "Installed", dest);
+    SetResult(result, QUEUE_OUTCOME_INSTALLED, Tr(STR_INSTALLED), dest);
 }
 
 // Under the lock. The job's slot stays put while it's active - RemoveQueueJob
@@ -989,7 +1015,7 @@ static DWORD WINAPI WorkerEntry(LPVOID)
         dprintf("[queue] starting job %d: %s\n", work.id, work.view.title);
 
         JobResult result;
-        SetResult(result, QUEUE_OUTCOME_FAILED, "Failed", "");
+        SetResult(result, QUEUE_OUTCOME_FAILED, Tr(STR_FAILED), "");
 
         if (work.kind == QUEUE_JOB_DLC_PACK)
             RunDlcPack(work, result);
@@ -1609,7 +1635,7 @@ void CancelQueueJob(int id)
 
             // Never started, or not running now, so it can finish right here.
             JobResult result;
-            SetResult(result, QUEUE_OUTCOME_CANCELLED, "Cancelled", "Nothing was installed.");
+            SetResult(result, QUEUE_OUTCOME_CANCELLED, Tr(STR_CANCELLED), Tr(STR_NOTHING_WAS_INSTALLED));
             FinishJob(job, result, false);
         }
         break; // an active job's worker finishes it
@@ -1644,7 +1670,7 @@ void PauseQueueJob(int id)
             // The transfer stops at its next progress report; until then it
             // is still downloading, and the row says so rather than claiming
             // a pause that hasn't happened yet. FinishJob sets the state.
-            CopyText(job.view.phase, sizeof(job.view.phase), "Pausing");
+            CopyText(job.view.phase, sizeof(job.view.phase), Tr(STR_PAUSING));
             SaveQueueStateLocked(); // saved as paused in case the app closes meanwhile
         }
         break;

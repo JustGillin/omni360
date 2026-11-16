@@ -6,6 +6,7 @@ DESCRIPTION : Watches the disc drive and installs discs as Games on Demand, on
 */
 
 #include "DiscWorker.h"
+#include "Strings.h" // Tr() - every string the UI shows
 #include "DiscSource.h"
 #include "GodConvert.h"
 #include "ReadAhead.h"
@@ -270,7 +271,7 @@ static bool ProbeDisc(bool lastChance)
         g_disc.mediaId = 0;
         g_disc.name[0] = '\0';
         _snprintf(g_disc.reason, sizeof(g_disc.reason), "%s",
-                  result == GOD_NOT_A_DISC_IMAGE ? "Not an Xbox 360 game disc" : GodResultText(result));
+                  result == GOD_NOT_A_DISC_IMAGE ? Tr(STR_NOT_A_360_GAME_DISC) : GodResultText(result));
         g_disc.reason[sizeof(g_disc.reason) - 1] = '\0';
         SetDiscState(DISC_UNREADABLE);
     }
@@ -431,8 +432,8 @@ static void RunInstall(DiscJob *job, const char *gamesPath)
         if (opened)
             disc.Close();
         EnterCriticalSection(&g_lock);
-        FinishJob(job, QUEUE_OUTCOME_FAILED, "Couldn't install",
-                  "The disc in the drive changed, or couldn't be read.", true);
+        FinishJob(job, QUEUE_OUTCOME_FAILED, Tr(STR_COULDNT_INSTALL),
+                  Tr(STR_THE_DISC_IN_THE_DRIVE_2), true);
         LeaveCriticalSection(&g_lock);
         return;
     }
@@ -453,11 +454,11 @@ static void RunInstall(DiscJob *job, const char *gamesPath)
         char needText[64] = "", freeText[64] = "", detail[160];
         FormatBytes(installSize, needText, sizeof(needText));
         FormatBytes(freeSpace, freeText, sizeof(freeText));
-        _snprintf(detail, sizeof(detail), "It needs %s, and %s is free.", needText, freeText);
+        TrFormat(detail, sizeof(detail), STR_NEEDS_AND_FREE, needText, freeText);
         detail[sizeof(detail) - 1] = '\0';
 
         EnterCriticalSection(&g_lock);
-        FinishJob(job, QUEUE_OUTCOME_NO_SPACE, "Not enough space", detail, true);
+        FinishJob(job, QUEUE_OUTCOME_NO_SPACE, Tr(STR_NOT_ENOUGH_SPACE), detail, true);
         LeaveCriticalSection(&g_lock);
         return;
     }
@@ -474,7 +475,7 @@ static void RunInstall(DiscJob *job, const char *gamesPath)
 
     EnterCriticalSection(&g_lock);
     job->snap.bytesTotal = info.usedSize;
-    _snprintf(job->snap.phase, sizeof(job->snap.phase), "Copying from the disc");
+    _snprintf(job->snap.phase, sizeof(job->snap.phase), "%s", Tr(STR_COPYING_FROM_THE_DISC));
     LeaveCriticalSection(&g_lock);
 
     InstallProgress progress;
@@ -588,37 +589,44 @@ static void RunInstall(DiscJob *job, const char *gamesPath)
     switch (result)
     {
     case GOD_OK:
+    {
+        char n1[16], n2[16], n3[16];
+        _snprintf(n1, sizeof(n1), "%u", compilationPackages > 0 ? (unsigned)compilationPackages
+                                                                : (unsigned)info.title.discNumber);
+        n1[sizeof(n1) - 1] = '\0';
+        _snprintf(n2, sizeof(n2), "%u", (unsigned)info.title.discCount);
+        n2[sizeof(n2) - 1] = '\0';
+        _snprintf(n3, sizeof(n3), "%u", (unsigned)info.title.discNumber + 1);
+        n3[sizeof(n3) - 1] = '\0';
         if (compilationPackages > 0)
-            _snprintf(detail, sizeof(detail), "%d Arcade game%s, each in the library on its own.",
-                      compilationPackages, compilationPackages == 1 ? "" : "s");
+            TrFormat(detail, sizeof(detail),
+                     compilationPackages == 1 ? STR_ARCADE_GAMES_SEPARATE_ONE : STR_ARCADE_GAMES_SEPARATE, n1);
         else if (info.title.discCount > 1 && info.title.discNumber < info.title.discCount)
-            _snprintf(detail, sizeof(detail), "That was disc %u of %u - put in disc %u to install it.",
-                      (unsigned)info.title.discNumber, (unsigned)info.title.discCount,
-                      (unsigned)info.title.discNumber + 1);
+            TrFormat(detail, sizeof(detail), STR_PUT_IN_NEXT_DISC, n1, n2, n3);
         else
-            _snprintf(detail, sizeof(detail), asFolder ? "Play it from Omni360 or Aurora - the disc isn't needed."
-                                                       : "Play it from the dashboard or Aurora - the disc isn't needed.");
+            TrFormat(detail, sizeof(detail), asFolder ? STR_DISC_NOT_NEEDED_FOLDER : STR_DISC_NOT_NEEDED);
+    }
         detail[sizeof(detail) - 1] = '\0';
-        FinishJob(job, QUEUE_OUTCOME_INSTALLED, "Installed", detail, true);
+        FinishJob(job, QUEUE_OUTCOME_INSTALLED, Tr(STR_INSTALLED), detail, true);
         break;
 
     case GOD_CANCELLED:
         // The user did it, so no popup.
-        FinishJob(job, QUEUE_OUTCOME_CANCELLED, "Stopped", "Nothing was installed.", false);
+        FinishJob(job, QUEUE_OUTCOME_CANCELLED, Tr(STR_STOPPED), Tr(STR_NOTHING_WAS_INSTALLED), false);
         break;
 
     case GOD_READ_FAILED:
-        FinishJob(job, QUEUE_OUTCOME_FAILED, "Couldn't read the disc",
-                  "It may be dirty or scratched - clean it and try again.", true);
+        FinishJob(job, QUEUE_OUTCOME_FAILED, Tr(STR_COULDNT_READ_THE_DISC),
+                  Tr(STR_IT_MAY_BE_DIRTY_OR), true);
         break;
 
     case GOD_WRITE_FAILED:
-        FinishJob(job, QUEUE_OUTCOME_FAILED, "Couldn't write the game",
-                  "Check the drive the games folder is on, then try again.", true);
+        FinishJob(job, QUEUE_OUTCOME_FAILED, Tr(STR_COULDNT_WRITE_THE_GAME),
+                  Tr(STR_CHECK_THE_DRIVE_THE_GAMES), true);
         break;
 
     default:
-        FinishJob(job, QUEUE_OUTCOME_FAILED, "Couldn't install", GodResultText(result), true);
+        FinishJob(job, QUEUE_OUTCOME_FAILED, Tr(STR_COULDNT_INSTALL), GodResultText(result), true);
         break;
     }
     LeaveCriticalSection(&g_lock);
@@ -673,7 +681,7 @@ static DWORD WINAPI DiscEntry(LPVOID)
             if (install->cancel)
             {
                 EnterCriticalSection(&g_lock);
-                FinishJob(install, QUEUE_OUTCOME_CANCELLED, "Stopped", "Nothing was installed.", false);
+                FinishJob(install, QUEUE_OUTCOME_CANCELLED, Tr(STR_STOPPED), Tr(STR_NOTHING_WAS_INSTALLED), false);
                 LeaveCriticalSection(&g_lock);
             }
             else
@@ -986,10 +994,16 @@ DiscInstallResult QueueDiscInstall(unsigned long titleId, unsigned long mediaId,
         job.snap.gameName[sizeof(job.snap.gameName) - 1] = '\0';
 
         if (g_disc.discCount > 1)
-            _snprintf(job.snap.title, sizeof(job.snap.title), "Installing disc %u of %u",
-                      g_disc.discNumber, g_disc.discCount);
+        {
+            char n1[16], n2[16];
+            _snprintf(n1, sizeof(n1), "%u", (unsigned)g_disc.discNumber);
+            n1[sizeof(n1) - 1] = '\0';
+            _snprintf(n2, sizeof(n2), "%u", (unsigned)g_disc.discCount);
+            n2[sizeof(n2) - 1] = '\0';
+            TrFormat(job.snap.title, sizeof(job.snap.title), STR_INSTALLING_DISC_OF, n1, n2);
+        }
         else
-            _snprintf(job.snap.title, sizeof(job.snap.title), "Installing from the disc");
+            TrFormat(job.snap.title, sizeof(job.snap.title), STR_INSTALLING_FROM_THE_DISC);
         job.snap.title[sizeof(job.snap.title) - 1] = '\0';
 
         job.mediaId = mediaId;

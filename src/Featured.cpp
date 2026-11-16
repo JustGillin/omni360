@@ -6,6 +6,7 @@ DESCRIPTION : The Store's featured games, from featured.json in the
 */
 
 #include "Featured.h"
+#include "Strings.h" // Tr() - every string the UI shows
 #include "StoreCatalog.h" // StoreGameByTitleId: only games the Store has
 #include "ServiceCheck.h" // GetProbeNotice, when the file hasn't set one
 #include "downloadFile.h" // HttpsSession
@@ -218,7 +219,7 @@ static bool Choose(const char *text, size_t len, const Today &today, FeaturedSet
             const int pick = (int)((week + tried) % sets);
             if (ReadGames(cJSON_GetArrayItem(rotation, pick), out))
             {
-                _snprintf(out->label, sizeof(out->label), "Featured");
+                _snprintf(out->label, sizeof(out->label), "%s", Tr(STR_STORE_FEATURED));
                 dprintf("[featured] week %ld: set %d of %d\n", week, pick + 1, sets);
                 chosen = true;
             }
@@ -328,7 +329,7 @@ void StartFeatured()
     memset(&set, 0, sizeof(set));
     memcpy(set.titleIds, kBuiltIn, sizeof(kBuiltIn));
     set.count = sizeof(kBuiltIn) / sizeof(kBuiltIn[0]);
-    _snprintf(set.label, sizeof(set.label), "Featured");
+    _snprintf(set.label, sizeof(set.label), "%s", Tr(STR_STORE_FEATURED));
 
     FILE *in = fopen(FEATURED_CACHE, "rb");
     if (in != NULL)
@@ -363,7 +364,7 @@ void GetFeatured(FeaturedSet *out, unsigned long *changeCount)
         memset(out, 0, sizeof(*out));
         memcpy(out->titleIds, kBuiltIn, sizeof(kBuiltIn));
         out->count = sizeof(kBuiltIn) / sizeof(kBuiltIn[0]);
-        _snprintf(out->label, sizeof(out->label), "Featured");
+        _snprintf(out->label, sizeof(out->label), "%s", Tr(STR_STORE_FEATURED));
         if (changeCount != NULL)
             *changeCount = 0;
         return;

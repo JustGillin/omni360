@@ -382,6 +382,8 @@ struct SettingsRowView
     bool locked;          // a folder's box can't change - dimmed
     bool missing;         // a folder that isn't there: its path dimmed
     const char *help;     // a folder's, for the help line
+    const char *flag;     // a line's flag before its label - a code from Flags.h - or NULL. With one, the
+                          // status sits at the right, by the controls, as Aurora credits translators
     int controlCount;
     SettingsControlView controls[SETTINGS_MAX_CONTROLS];
 };

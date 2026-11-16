@@ -5,6 +5,7 @@ DESCRIPTION : Asks GitHub whether there's a newer release. See UpdateCheck.h.
 */
 
 #include "UpdateCheck.h"
+#include "Strings.h" // Tr() - every string the UI shows
 #include "UpdateKey.h"    // kUpdatePublicKey
 #include "settings.h"     // CURRENT_VERSION
 #include "downloadFile.h" // httpRequestHTTPS
@@ -611,14 +612,14 @@ const char *UpdateInstallResultText(UpdateInstallResult result)
 {
     switch (result)
     {
-    case UPDATE_INSTALL_OK:              return "Installed.";
-    case UPDATE_INSTALL_NOT_SIGNED:      return "This release isn't signed, so it can't be installed from here.";
-    case UPDATE_INSTALL_DOWNLOAD_FAILED: return "It couldn't be downloaded from GitHub. Try again later.";
-    case UPDATE_INSTALL_BAD_SIGNATURE:   return "Its signature doesn't match - it may not be a genuine release. Not installed.";
-    case UPDATE_INSTALL_NOT_AN_XEX:      return "What GitHub sent isn't an Xbox 360 program. Not installed.";
-    case UPDATE_INSTALL_NO_RUNNING_XEX:  return "Couldn't tell which file in Omni360's folder is the app.";
-    case UPDATE_INSTALL_WRITE_FAILED:    return "There wasn't room to save it beside the current version.";
-    case UPDATE_INSTALL_SWAP_FAILED:     return "It couldn't replace the current version, which is unchanged.";
+    case UPDATE_INSTALL_OK:              return Tr(STR_UPDATE_RESULT_OK);
+    case UPDATE_INSTALL_NOT_SIGNED:      return Tr(STR_UPDATE_RESULT_NOT_SIGNED);
+    case UPDATE_INSTALL_DOWNLOAD_FAILED: return Tr(STR_UPDATE_RESULT_DOWNLOAD);
+    case UPDATE_INSTALL_BAD_SIGNATURE:   return Tr(STR_UPDATE_RESULT_BAD_SIGNATURE);
+    case UPDATE_INSTALL_NOT_AN_XEX:      return Tr(STR_UPDATE_RESULT_NOT_XEX);
+    case UPDATE_INSTALL_NO_RUNNING_XEX:  return Tr(STR_UPDATE_RESULT_NO_XEX);
+    case UPDATE_INSTALL_WRITE_FAILED:    return Tr(STR_UPDATE_RESULT_WRITE);
+    case UPDATE_INSTALL_SWAP_FAILED:     return Tr(STR_UPDATE_RESULT_SWAP);
     }
-    return "Something went wrong.";
+    return Tr(STR_SOMETHING_WENT_WRONG);
 }

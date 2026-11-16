@@ -88,6 +88,11 @@ enum StoreDetailsState
 // Asks for a game's details, ahead of any images waiting.
 void RequestStoreDetails(unsigned long titleId);
 
+// The language game pages' details are asked for in, as an Xbox Live locale
+// ("fr-FR"); see XboxLocaleForLanguage in Strings.h. Details already fetched
+// are forgotten, and each language is cached on its own.
+void SetStoreLocale(const char *locale);
+
 // Where a game's details have got to; out is filled in when they're ready.
 StoreDetailsState GetStoreDetails(unsigned long titleId, StoreDetails *out);
 
