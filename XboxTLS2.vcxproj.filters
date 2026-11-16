@@ -1302,6 +1302,9 @@
     <ClInclude Include="src\XboxCompat.h">
       <Filter>Source Files\Network</Filter>
     </ClInclude>
+    <ClInclude Include="src\XefuChoices.h">
+      <Filter>Source Files\Network</Filter>
+    </ClInclude>
     <ClInclude Include="src\ZipExtract.h">
       <Filter>Source Files\Network</Filter>
     </ClInclude>

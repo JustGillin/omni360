@@ -4792,46 +4792,71 @@ static D3DCOLOR Faded(D3DCOLOR color, float a)
     return (color & 0x00FFFFFF) | (alpha << 24);
 }
 
-bool ShowAlertUI(const char *heading, const char *message, const char *detailLine, const char *confirmLabel,
-                 const char *cancelLabel)
+#define ALERT_MAX_BUTTONS 3
+#define ALERT_LIST_ROW_H  52.0f
+#define ALERT_LIST_ROWS   6     // shown at once; the rest scroll
+
+// Every alert: the card, its text, and either buttons or - with listCount -
+// a list of rows to pick from inside the card, as the emulator chooser has.
+// Returns the button or row pressed, or -1 for B (0 for a lone OK).
+static int RunAlert(const char *heading, const char *message, const char *detailLine, int maxMessageLines,
+                    const char **labels, int count, const char **rowLabels, const char **rowNotes, int listCount,
+                    int listFocus)
 {
     if (!g_Initialized)
-        return false;
+        return -1;
+    const bool list = (listCount > 0);
+    if (!list && count < 1)
+        return -1;
+    if (count > ALERT_MAX_BUTTONS)
+        count = ALERT_MAX_BUTTONS;
+    if (list)
+        count = 0;
 
-    const char *confirm = (confirmLabel != NULL) ? confirmLabel : Tr(STR_BUTTON_OK);
-    const bool twoButtons = (cancelLabel != NULL);
+    const bool hasMessage = (message != NULL && message[0] != '\0');
     const bool hasDetail = (detailLine != NULL && detailLine[0] != '\0');
 
     D3DTexture *backdrop = SnapshotFrontBuffer();
 
-    // The card's size, from how much its text needs.
-    const float cardW = S(ALERT_W), pad = S(ALERT_PAD);
+    // The card's size, from how much its text needs. A long message - a
+    // game's known issues - makes it wider before it makes it taller.
+    const float wide = (maxMessageLines > 5) ? S(840.0f) : S(ALERT_W);
+    const float cardW = (wide < g_M.screenW - S(80.0f)) ? wide : g_M.screenW - S(80.0f);
+    const float pad = S(ALERT_PAD);
     const float textW = cardW - pad * 2.0f;
     const float titleH = LineHeight(1.15f);
     const float messageLineH = LineHeight(0.9f) * 1.15f;
     const float detailLineH = LineHeight(0.76f) * 1.15f;
-    const int messageLines = TextWrappedLines(message, textW, 0.9f, 5);
+    const int messageLines = hasMessage ? TextWrappedLines(message, textW, 0.9f, maxMessageLines) : 0;
     const int detailLines = hasDetail ? TextWrappedLines(detailLine, textW, 0.76f, 4) : 0;
     const float buttonH = S(ALERT_BUTTON_H);
+    const float rowH = S(ALERT_LIST_ROW_H);
+    const int rowsShown = list ? (listCount < ALERT_LIST_ROWS ? listCount : ALERT_LIST_ROWS) : 0;
+    const float footH = list ? rowsShown * rowH : buttonH;
     const float cardH = pad + titleH + S(12.0f) + messageLines * messageLineH +
-                        (hasDetail ? S(8.0f) + detailLines * detailLineH : 0.0f) + S(24.0f) + buttonH + pad;
+                        (hasDetail ? S(8.0f) + detailLines * detailLineH : 0.0f) + S(24.0f) + footH + pad;
     const float cardX = (g_M.screenW - cardW) * 0.5f;
     const float restY = (g_M.screenH - cardH) * 0.5f;
 
-    // The buttons, at the card's foot on the right: confirm last, as the
-    // 360's own dialogs and the web's put it.
-    float confirmW = TextWidth(confirm, 0.85f, true) + S(48.0f);
-    if (confirmW < S(ALERT_BUTTON_W))
-        confirmW = S(ALERT_BUTTON_W);
-    float cancelW = twoButtons ? TextWidth(cancelLabel, 0.85f, true) + S(48.0f) : 0.0f;
-    if (twoButtons && cancelW < S(ALERT_BUTTON_W))
-        cancelW = S(ALERT_BUTTON_W);
+    // The buttons, at the card's foot on the right, labels[0] - the one that
+    // goes ahead - rightmost, as the 360's own dialogs and the web's put it.
     const float gap = S(14.0f);
-    const float confirmX = cardX + cardW - pad - confirmW;
-    const float cancelX = confirmX - gap - cancelW;
+    float buttonX[ALERT_MAX_BUTTONS], buttonW[ALERT_MAX_BUTTONS];
+    float right = cardX + cardW - pad;
+    for (int i = 0; i < count; ++i)
+    {
+        buttonW[i] = TextWidth(labels[i], 0.85f, true) + S(48.0f);
+        if (buttonW[i] < S(ALERT_BUTTON_W))
+            buttonW[i] = S(ALERT_BUTTON_W);
+        buttonX[i] = right - buttonW[i];
+        right = buttonX[i] - gap;
+    }
 
-    bool onConfirm = true;
-    bool result = false;
+    int focus = list ? (listFocus >= 0 && listFocus < listCount ? listFocus : 0) : 0;
+    int scroll = 0;
+    if (list && focus >= rowsShown)
+        scroll = focus - rowsShown + 1;
+    int result = -1;
     const DWORD opened = GetTickCount();
 
     // As every screen here, so the press that opened it can't also answer it.
@@ -4841,24 +4866,37 @@ bool ShowAlertUI(const char *heading, const char *message, const char *detailLin
         const UiInput input = PollUiInput();
         if (input.pressed & XINPUT_GAMEPAD_A)
         {
-            PlayUiSound(onConfirm ? UI_SOUND_SELECT : UI_SOUND_BACK);
-            result = onConfirm;
+            PlayUiSound(list || focus == 0 ? UI_SOUND_SELECT : UI_SOUND_BACK);
+            result = focus;
             break;
         }
         if (input.pressed & XINPUT_GAMEPAD_B)
         {
             PlayUiSound(UI_SOUND_BACK);
-            result = !twoButtons; // a lone OK is all B can mean
+            result = (!list && count == 1) ? 0 : -1; // a lone OK is all B can mean
             break;
         }
-        if (twoButtons && (input.nav == XINPUT_GAMEPAD_DPAD_LEFT || input.nav == XINPUT_GAMEPAD_DPAD_RIGHT))
+        int to = focus;
+        if (list)
         {
-            const bool toConfirm = (input.nav == XINPUT_GAMEPAD_DPAD_RIGHT);
-            if (toConfirm != onConfirm)
-            {
-                onConfirm = toConfirm;
-                PlayUiSound(UI_SOUND_MOVE);
-            }
+            if (input.nav == XINPUT_GAMEPAD_DPAD_UP && focus > 0)
+                to = focus - 1;
+            else if (input.nav == XINPUT_GAMEPAD_DPAD_DOWN && focus + 1 < listCount)
+                to = focus + 1;
+        }
+        // Left is further from labels[0], right nearer.
+        else if (input.nav == XINPUT_GAMEPAD_DPAD_LEFT && focus + 1 < count)
+            to = focus + 1;
+        else if (input.nav == XINPUT_GAMEPAD_DPAD_RIGHT && focus > 0)
+            to = focus - 1;
+        if (to != focus)
+        {
+            focus = to;
+            PlayUiSound(UI_SOUND_MOVE);
+            if (focus < scroll)
+                scroll = focus;
+            else if (focus >= scroll + rowsShown)
+                scroll = focus - rowsShown + 1;
         }
 
         // Opening: the page dims and the card rises a little into place.
@@ -4878,38 +4916,77 @@ bool ShowAlertUI(const char *heading, const char *message, const char *detailLin
         ShadowRound(cardX, cardY + S(6.0f), cardW, cardH, g_M.radius, S(28.0f), Faded(COL_SHADOW, a));
         FillRound(cardX, cardY, cardW, cardH, g_M.radius, Faded(COL_SURFACE, a));
 
-        const float buttonY = cardY + cardH - pad - buttonH;
-        if (onConfirm)
-            FillRoundGradient(confirmX, buttonY, confirmW, buttonH, buttonH * 0.5f, Faded(COL_GREEN_HI, a),
-                              Faded(COL_GREEN, a), true);
-        else
-            FillRound(confirmX, buttonY, confirmW, buttonH, buttonH * 0.5f, Faded(COL_ALERT_BTN, a));
-        if (twoButtons)
-            FillRound(cancelX, buttonY, cancelW, buttonH, buttonH * 0.5f,
-                      Faded(onConfirm ? COL_ALERT_BTN : COL_ALERT_BTN_HI, a));
-        if (t >= 1.0f)
+        const float footY = cardY + cardH - pad - footH;
+        const float innerX = cardX + pad;
+        if (list)
         {
-            if (onConfirm)
-                FocusRing(confirmX, buttonY, confirmW, buttonH, buttonH * 0.5f);
-            else
-                FocusRing(cancelX, buttonY, cancelW, buttonH, buttonH * 0.5f);
+            const float plateH = rowH - S(6.0f);
+            for (int r = 0; r < rowsShown; ++r)
+            {
+                const int i = scroll + r;
+                const float y = footY + r * rowH;
+                if (i == focus)
+                {
+                    FillRound(innerX, y, textW, plateH, plateH * 0.5f, Faded(COL_ALERT_BTN_HI, a));
+                    if (t >= 1.0f)
+                        FocusRing(innerX, y, textW, plateH, plateH * 0.5f);
+                }
+                else
+                    FillRound(innerX, y, textW, plateH, plateH * 0.5f, Faded(COL_ALERT_BTN, a));
+            }
+        }
+        else
+        {
+            for (int i = 0; i < count; ++i)
+            {
+                if (i == 0 && focus == 0)
+                    FillRoundGradient(buttonX[i], footY, buttonW[i], buttonH, buttonH * 0.5f, Faded(COL_GREEN_HI, a),
+                                      Faded(COL_GREEN, a), true);
+                else
+                    FillRound(buttonX[i], footY, buttonW[i], buttonH, buttonH * 0.5f,
+                              Faded(i != 0 && i == focus ? COL_ALERT_BTN_HI : COL_ALERT_BTN, a));
+            }
+            if (t >= 1.0f)
+                FocusRing(buttonX[focus], footY, buttonW[focus], buttonH, buttonH * 0.5f);
         }
 
         TextBegin();
-        const float innerX = cardX + pad;
         float y = cardY + pad;
         Text(innerX, y, 1.15f, Faded(COL_TEXT, a), heading, ATGFONT_TRUNCATED, textW, true);
         y += titleH + S(12.0f);
-        TextWrapped(innerX, y, 0.9f, Faded(COL_TEXT, a), message, textW, messageLineH, 5);
+        if (hasMessage)
+            TextWrapped(innerX, y, 0.9f, Faded(COL_TEXT, a), message, textW, messageLineH, maxMessageLines);
         y += messageLines * messageLineH;
         if (hasDetail)
             TextWrapped(innerX, y + S(8.0f), 0.76f, Faded(COL_DIM, a), detailLine, textW, detailLineH, 4);
 
-        TextMid(confirmX + confirmW * 0.5f, buttonY + buttonH * 0.5f, 0.85f, Faded(COL_TEXT, a), confirm,
-                ATGFONT_CENTER_X, 0.0f, true);
-        if (twoButtons)
-            TextMid(cancelX + cancelW * 0.5f, buttonY + buttonH * 0.5f, 0.85f,
-                    Faded(onConfirm ? COL_TEXT2 : COL_TEXT, a), cancelLabel, ATGFONT_CENTER_X, 0.0f, true);
+        if (list)
+        {
+            const float plateH = rowH - S(6.0f);
+            for (int r = 0; r < rowsShown; ++r)
+            {
+                const int i = scroll + r;
+                const float cy = footY + r * rowH + plateH * 0.5f;
+                TextMid(innerX + S(22.0f), cy, 0.85f, Faded(COL_TEXT, a), rowLabels[i], 0, 0.0f, true);
+                if (rowNotes != NULL && rowNotes[i] != NULL)
+                    TextMid(innerX + textW - S(22.0f), cy, 0.76f, Faded(i == focus ? COL_TEXT : COL_TEXT2, a),
+                            rowNotes[i], ATGFONT_RIGHT);
+            }
+            // More above or below: a chevron at the list's edge.
+            if (scroll > 0)
+                TextMid(cardX + cardW * 0.5f, footY - S(12.0f), 0.7f, Faded(COL_DIM, a), "\xE2\x96\xB2",
+                        ATGFONT_CENTER_X);
+            if (scroll + rowsShown < listCount)
+                TextMid(cardX + cardW * 0.5f, footY + footH + S(10.0f), 0.7f, Faded(COL_DIM, a), "\xE2\x96\xBC",
+                        ATGFONT_CENTER_X);
+        }
+        else
+        {
+            for (int i = 0; i < count; ++i)
+                TextMid(buttonX[i] + buttonW[i] * 0.5f, footY + buttonH * 0.5f, 0.85f,
+                        Faded(i == 0 || i == focus ? COL_TEXT : COL_TEXT2, a), labels[i], ATGFONT_CENTER_X, 0.0f,
+                        true);
+        }
         TextEnd();
 
         EndFrame();
@@ -4920,6 +4997,27 @@ bool ShowAlertUI(const char *heading, const char *message, const char *detailLin
         backdrop->Release();
     ResyncUiInput();
     return result;
+}
+
+int ShowAlertButtonsUI(const char *heading, const char *message, const char *detailLine, const char **labels,
+                       int count, int maxMessageLines)
+{
+    return RunAlert(heading, message, detailLine, maxMessageLines, labels, count, NULL, NULL, 0, 0);
+}
+
+int ShowAlertListUI(const char *heading, const char *message, const char **labels, const char **notes, int count,
+                    int focus)
+{
+    return RunAlert(heading, message, NULL, 5, NULL, 0, labels, notes, count, focus);
+}
+
+bool ShowAlertUI(const char *heading, const char *message, const char *detailLine, const char *confirmLabel,
+                 const char *cancelLabel)
+{
+    const char *labels[2];
+    labels[0] = (confirmLabel != NULL) ? confirmLabel : Tr(STR_BUTTON_OK);
+    labels[1] = cancelLabel;
+    return ShowAlertButtonsUI(heading, message, detailLine, labels, cancelLabel != NULL ? 2 : 1) == 0;
 }
 
 bool ShowConfirmUI(const char *heading, const char *message, const char *detailLine,

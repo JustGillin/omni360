@@ -905,6 +905,20 @@ bool ShowNotesUI(const char *heading, const char *title, const char *body, const
 bool ShowAlertUI(const char *heading, const char *message, const char *detailLine, const char *confirmLabel,
                  const char *cancelLabel);
 
+// ShowAlertUI with up to three buttons: labels[0] - the one that goes
+// ahead - on the right, the rest leftward in order. Returns the index of
+// the one pressed, or -1 for B (0 when there's only the one). Past five
+// lines of message - a game's known issues - the card widens to fit more.
+int ShowAlertButtonsUI(const char *heading, const char *message, const char *detailLine, const char **labels,
+                       int count, int maxMessageLines = 5);
+
+// The same card holding a list to pick from: up and down move, the rest
+// scroll, A picks - returning the row - and B returns -1. Each row is a bold
+// label with a note on its right; notes may be NULL. focus is the row
+// focused first.
+int ShowAlertListUI(const char *heading, const char *message, const char **labels, const char **notes, int count,
+                    int focus);
+
 // An alert asking to go ahead - confirmLabel names what that does, e.g.
 // "Remove" - or Cancel. For actions that take long or can't be undone.
 bool ShowConfirmUI(const char *heading, const char *message, const char *detailLine,

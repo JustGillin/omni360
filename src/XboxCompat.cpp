@@ -110,6 +110,178 @@ XboxCompatState CheckXboxCompat(char *missing, int missingSize)
     return XBOX_COMPAT_READY;
 }
 
+// In the Hacked Xefu Pack and never on a retail drive.
+static const char *const kHackedOnlyFiles[] = {
+    "xefu2019.xex", "xefu2021a.xex", "xefu2021b.xex", "xefu2021c.xex",
+};
+
+bool XboxEmulatorIsHacked()
+{
+    if (CheckXboxCompat(NULL, 0) != XBOX_COMPAT_READY)
+        return false;
+    for (int i = 0; i < sizeof(kHackedOnlyFiles) / sizeof(kHackedOnlyFiles[0]); ++i)
+    {
+        char path[64];
+        _snprintf(path, sizeof(path), "HddX:\\Compatibility\\%s", kHackedOnlyFiles[i]);
+        path[sizeof(path) - 1] = '\0';
+        if (!Exists(path))
+        {
+            dprintf("[xbox] only the retail emulator: no %s\n", path);
+            return false;
+        }
+    }
+    return true;
+}
+
+#define XEFU_CHOICES_DATA
+#include "XefuChoices.h"
+
+#define COMPAT_DIR   "HddX:\\Compatibility\\"
+#define BACKUP_DIR   COMPAT_DIR "Omni360Backup\\"
+#define SWAPPED_PATH COMPAT_DIR "Omni360-emulator.txt"
+
+// Each emulator's file, and the xefutitle that goes with it ("" for the
+// four oldest, which have none).
+static const char *const kXefuFiles[XEFU_COUNT] = {
+    "xefu.xex", "xefu2.xex", "xefu3.xex", "xefu5.xex", "xefu1_1.xex", "xefu6.xex", "xefu7.xex", "xefu7b.xex",
+    "xefu2019.xex", "xefu2021a.xex", "xefu2021b.xex", "xefu2021c.xex",
+};
+static const char *const kXefuTitles[XEFU_COUNT] = {
+    "", "", "", "xefutitle5.xex", "", "xefutitle6.xex", "xefutitle7.xex", "xefutitle7b.xex",
+    "xefutitle2019.xex", "xefutitle2021.xex", "xefutitle2021.xex", "xefutitle2021.xex",
+};
+// The names xbox.xex starts - what a swap writes over, and the backup keeps.
+static const char *const kSlotFiles[] = {
+    "xefu.xex", "xefu2.xex", "xefu3.xex", "xefu5.xex", "xefu1_1.xex", "xefu6.xex", "xefu7.xex", "xefu7b.xex",
+};
+static const char *const kSlotTitles[] = {
+    "xefutitle5.xex", "xefutitle6.xex", "xefutitle7.xex", "xefutitle7b.xex",
+};
+#define COUNT(a) (sizeof(a) / sizeof((a)[0]))
+
+bool XefuChoiceFor(unsigned long titleId, int *emulator, bool *config, char ratings[XEFU_COUNT + 1])
+{
+    for (int i = 0; titleId != 0 && i < COUNT(kXefuChoices); ++i)
+    {
+        if (kXefuChoices[i].titleId != titleId)
+            continue;
+        if (kXefuChoices[i].emulator == XEFU_NO_PICK)
+            return false; // only its issues are known
+        if (emulator != NULL)
+            *emulator = kXefuChoices[i].emulator;
+        if (config != NULL)
+            *config = kXefuChoices[i].config != 0;
+        if (ratings != NULL)
+            memcpy(ratings, kXefuChoices[i].ratings, XEFU_COUNT + 1);
+        return true;
+    }
+    return false;
+}
+
+const char *XefuKnownIssues(unsigned long titleId)
+{
+    for (int i = 0; titleId != 0 && i < COUNT(kXefuChoices); ++i)
+    {
+        if (kXefuChoices[i].titleId == titleId)
+            return kXefuChoices[i].issues[0] != '\0' ? kXefuChoices[i].issues : NULL;
+    }
+    return NULL;
+}
+
+static bool Copy(const char *fromDir, const char *name, const char *toDir, const char *toName)
+{
+    char from[96], to[96];
+    _snprintf(from, sizeof(from), "%s%s", fromDir, name);
+    from[sizeof(from) - 1] = '\0';
+    _snprintf(to, sizeof(to), "%s%s", toDir, toName);
+    to[sizeof(to) - 1] = '\0';
+    if (CopyFileA(from, to, FALSE))
+        return true;
+    dprintf("[xbox] couldn't copy %s to %s: %lu\n", from, to, GetLastError());
+    return false;
+}
+
+bool RestoreXboxEmulator()
+{
+    if (!MountCompatPartition() || !Exists(SWAPPED_PATH))
+        return false;
+    bool ok = true;
+    for (int i = 0; i < COUNT(kSlotFiles); ++i)
+        ok = Copy(BACKUP_DIR, kSlotFiles[i], COMPAT_DIR, kSlotFiles[i]) && ok;
+    for (int i = 0; i < COUNT(kSlotTitles); ++i)
+    {
+        char backup[96];
+        _snprintf(backup, sizeof(backup), "%s%s", BACKUP_DIR, kSlotTitles[i]);
+        backup[sizeof(backup) - 1] = '\0';
+        if (Exists(backup))
+            ok = Copy(BACKUP_DIR, kSlotTitles[i], COMPAT_DIR, kSlotTitles[i]) && ok;
+    }
+    remove(COMPAT_DIR "xefutitle.xex"); // only ever a swap's
+    if (ok)
+        remove(SWAPPED_PATH); // else tried again at the next start
+    dprintf("[xbox] put the usual emulator back%s\n", ok ? "" : " - not all of it");
+    return true;
+}
+
+bool SetXboxEmulator(int emulator, bool config)
+{
+    if (emulator < 0 || emulator >= XEFU_COUNT || !MountCompatPartition())
+        return false;
+
+    // The originals, kept once per swap: while one is in place, what's in
+    // the slots isn't them, and the backup from before it is.
+    if (!Exists(SWAPPED_PATH))
+    {
+        CreateDirectoryA(BACKUP_DIR, NULL);
+        for (int i = 0; i < COUNT(kSlotFiles); ++i)
+        {
+            if (!Copy(COMPAT_DIR, kSlotFiles[i], BACKUP_DIR, kSlotFiles[i]))
+                return false;
+        }
+        for (int i = 0; i < COUNT(kSlotTitles); ++i)
+        {
+            char path[96];
+            _snprintf(path, sizeof(path), "%s%s", COMPAT_DIR, kSlotTitles[i]);
+            path[sizeof(path) - 1] = '\0';
+            if (Exists(path) && !Copy(COMPAT_DIR, kSlotTitles[i], BACKUP_DIR, kSlotTitles[i]))
+                return false;
+        }
+        FILE *f = fopen(SWAPPED_PATH, "w");
+        if (f == NULL)
+            return false;
+        fputs("Omni360 changed the emulator files for one game. The originals are in Omni360Backup, "
+              "and Omni360 puts them back when it next starts.\n", f);
+        fclose(f);
+    }
+
+    // The source: one of the eight from the backup, as the slot itself may
+    // hold another; the newer ones and the config loader are never written over.
+    const char *file = config && emulator == XEFU_7 ? "config_loader_xefu7.xex" : kXefuFiles[emulator];
+    const bool inSlot = !config && emulator <= XEFU_7B;
+    const char *fileDir = inSlot ? BACKUP_DIR : COMPAT_DIR;
+    const char *title = kXefuTitles[emulator];
+    const bool titleInSlot = emulator == XEFU_5 || emulator == XEFU_6 || emulator == XEFU_7 || emulator == XEFU_7B;
+    const char *titleDir = titleInSlot ? BACKUP_DIR : COMPAT_DIR;
+
+    for (int i = 0; i < COUNT(kSlotFiles); ++i)
+    {
+        if (!Copy(fileDir, file, COMPAT_DIR, kSlotFiles[i]))
+            return false;
+    }
+    if (title[0] != '\0')
+    {
+        if (!Copy(titleDir, title, COMPAT_DIR, "xefutitle.xex"))
+            return false;
+        for (int i = 0; i < COUNT(kSlotTitles); ++i)
+        {
+            if (!Copy(titleDir, title, COMPAT_DIR, kSlotTitles[i]))
+                return false;
+        }
+    }
+    dprintf("[xbox] emulator for the next game: %s\n", file);
+    return true;
+}
+
 extern "C" NTSTATUS NtReadFile(HANDLE FileHandle, HANDLE Event, PIO_APC_ROUTINE ApcRoutine, PVOID ApcContext,
                                PIO_STATUS_BLOCK IoStatusBlock, PVOID Buffer, DWORD Length,
                                PLARGE_INTEGER ByteOffset);

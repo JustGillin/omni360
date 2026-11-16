@@ -141,6 +141,9 @@ bool CheckGameMounted()
     // files - see XboxCompat.h. A drive without one is fine until an
     // Original Xbox game is played.
     MountCompatPartition();
+    // The emulator files as they were, if the last game off Microsoft's
+    // list had them changed.
+    RestoreXboxEmulator();
 
     // The USB ports, by Aurora's names, for library folders and installs on
     // a USB drive formatted FAT32. A port with nothing in it just reads as
@@ -5251,15 +5254,107 @@ static bool ConfirmLeaving()
 
 static void ReportEnqueue(EnqueueResult result, const char *filename);
 
+// A game off Microsoft's list, once the hacked emulators are there: which
+// of them it runs on. ConsoleMods' list says which plays it best; asked
+// first, in plain words - "emulator", never xefu - as the change holds for
+// every Original Xbox game until Omni360 next starts. True to go ahead.
+static bool PickXboxEmulator(unsigned long titleId)
+{
+    int best = 0;
+    bool config = false;
+    char ratings[XEFU_COUNT + 1];
+    if (!IsUnlistedXboxTitleId(titleId) || !XefuChoiceFor(titleId, &best, &config, ratings))
+    {
+        // Listed, or nothing known to be better: the usual files.
+        RestoreXboxEmulator();
+        return true;
+    }
+
+    const char *buttons[3] = { Tr(STR_BUTTON_YES), Tr(STR_LET_ME_CHOOSE), Tr(STR_BUTTON_NO) };
+    const int answer = ShowAlertButtonsUI(Tr(STR_NOT_OFFICIALLY_SUPPORTED_ON_360), Tr(STR_FOR_THE_BEST_EXPERIENCE),
+                                          Tr(STR_THE_USUAL_EMULATOR_COMES_BACK), buttons, 3);
+    int emulator = best;
+    if (answer < 0)
+        return false;
+    if (answer == 2)
+    {
+        RestoreXboxEmulator();
+        return true;
+    }
+    if (answer == 1)
+    {
+        // Each one as "Emulator 7", with how well it ran this game.
+        static char names[XEFU_COUNT][32];
+        static char notes[XEFU_COUNT][96];
+        const char *labels[XEFU_COUNT], *sublabels[XEFU_COUNT];
+        static const int kRatingText[] = { STR_EMULATOR_NOT_TESTED, STR_EMULATOR_DOESNT_WORK,
+                                           STR_EMULATOR_STOPS_AT_INTRO, STR_EMULATOR_STOPS_AT_MENUS,
+                                           STR_EMULATOR_PLAYS_WITH_PROBLEMS, STR_EMULATOR_PLAYS_WELL };
+        for (int i = 0; i < XEFU_COUNT; ++i)
+        {
+            TrFormat(names[i], sizeof(names[i]), STR_EMULATOR_NUMBER, TrNum((long)(i + 1)));
+            const int r = (ratings[i] >= '0' && ratings[i] <= '5') ? ratings[i] - '0' : 0;
+            if (i == best)
+                TrFormat(notes[i], sizeof(notes[i]), STR_EMULATOR_RECOMMENDED, Tr((StringId)kRatingText[r]));
+            else
+                _snprintf(notes[i], sizeof(notes[i]), "%s", Tr((StringId)kRatingText[r]));
+            notes[i][sizeof(notes[i]) - 1] = '\0';
+            labels[i] = names[i];
+            sublabels[i] = notes[i];
+        }
+        emulator = ShowAlertListUI(Tr(STR_CHOOSE_AN_EMULATOR), Tr(STR_HOW_WELL_EACH_RAN), labels, sublabels,
+                                   XEFU_COUNT, best);
+        if (emulator < 0)
+            return false;
+    }
+
+    // ConsoleMods' config for the game only goes with its own pick.
+    if (!SetXboxEmulator(emulator, config && emulator == best))
+    {
+        RestoreXboxEmulator();
+        ShowMessageUI(Tr(STR_COULDNT_FIX_IT), Tr(STR_THE_EMULATOR_COULDNT_BE_CHANGED),
+                      Tr(STR_NOTHING_WAS_CHANGED_THE_LOG));
+        return false;
+    }
+    return true;
+}
+
+// The emulator, then what players have reported going wrong with the game
+// - from the same list, in English - so a glitch isn't taken for a bad
+// download. A to play, B not to.
+static bool ChooseXboxEmulator(unsigned long titleId)
+{
+    if (!PickXboxEmulator(titleId))
+        return false;
+    const char *issues = IsUnlistedXboxTitleId(titleId) ? XefuKnownIssues(titleId) : NULL;
+    if (issues == NULL)
+        return true;
+    const char *buttons[2] = { Tr(STR_PLAY), Tr(STR_BUTTON_BACK) };
+    if (ShowAlertButtonsUI(Tr(STR_KNOWN_ISSUES), issues, Tr(STR_SOME_MAY_DEPEND_ON_THE_EMULATOR), buttons, 2,
+                           10) == 0)
+        return true;
+    RestoreXboxEmulator(); // not playing after all
+    return false;
+}
+
 // Before an Original Xbox game: whether the 360's emulator is set up, and
 // if it isn't, saying so and offering to set it up rather than letting the
-// game fail to start with no reason given. True to go ahead.
-static bool XboxEmulatorReady()
+// game fail to start with no reason given. True to go ahead. A game off
+// Microsoft's list needs the hacked emulators too: the retail ones refuse it.
+static bool XboxEmulatorReady(unsigned long titleId)
 {
     char missing[32];
     const XboxCompatState state = CheckXboxCompat(missing, sizeof(missing));
     if (state == XBOX_COMPAT_READY)
-        return true;
+    {
+        if (!IsUnlistedXboxTitleId(titleId) || XboxEmulatorIsHacked())
+            return ChooseXboxEmulator(titleId);
+        // The retail emulator is there; the pack goes over it.
+        if (ShowConfirmUI(Tr(STR_EMULATOR_MISSING), Tr(STR_THIS_GAME_NEEDS_THE_UNLOCKED),
+                          Tr(STR_OMNI360_CAN_DOWNLOAD_AND_INSTALL), Tr(STR_FIX_IT)))
+            ReportEnqueue((EnqueueResult)QueueXefuPack(), Tr(STR_ORIGINAL_XBOX_EMULATOR));
+        return false;
+    }
 
     // Plain words throughout: no partitions, file names or sites. What was
     // missing is in the log.
@@ -5313,7 +5408,7 @@ static bool XboxEmulatorReady()
 // having said so.
 static void PlayLibraryGame(const InstalledGame &game)
 {
-    if (game.contentType == GOD_CONTENT_XBOX_ORIGINAL && !XboxEmulatorReady())
+    if (game.contentType == GOD_CONTENT_XBOX_ORIGINAL && !XboxEmulatorReady(game.titleId))
         return;
     if (!ConfirmLeaving())
         return;
@@ -5442,7 +5537,8 @@ static StoreGameView MakeStoreGameView(Shell &shell, const Library &lib)
         // The archive's DLC and title updates are the 360's.
         view.buttonDisabled[1] = view.buttonDisabled[2] = true;
         view.loading = false;
-        view.description = Tr(STR_XBOX_DESCRIPTION);
+        view.description = Tr(IsUnlistedXboxTitleId(g_storeGame.titleId) ? STR_XBOX_UNLISTED_DESCRIPTION
+                                                                          : STR_XBOX_DESCRIPTION);
     }
     else if (g_storeArcade == NULL && StoreGameMissing(g_storeGame))
     {
@@ -5623,6 +5719,19 @@ static bool InstallStoreVersion(const Shell &shell, const Library &lib, const ch
     }
     if (compilation && !ConfirmCompilationInstall())
         return true;
+
+    // An Original Xbox game off Microsoft's list, on a console without the
+    // hacked emulators: it installs, but won't start until they're there -
+    // said now, not after a 6GB download. Play offers to set them up.
+    if (StoreGameIsXbox() && IsUnlistedXboxTitleId(g_storeGame.titleId) && !XboxEmulatorIsHacked())
+    {
+        char message[192];
+        TrFormat(message, sizeof(message), STR_NOT_ON_MICROSOFTS_LIST, g_storeGame.name);
+        message[sizeof(message) - 1] = '\0';
+        if (!ShowConfirmUI(Tr(STR_NEEDS_THE_UNLOCKED_EMULATOR), message,
+                           Tr(STR_INSTALL_IT_NOW_AND_OMNI360), Tr(STR_INSTALL)))
+            return true;
+    }
 
     const bool unpacks = ReleaseUnpacks(release);
     if (unpacks)
@@ -6608,7 +6717,7 @@ static bool DiscTileAction(Shell &shell, const Library &lib, const char *gamesPa
     // installs it, or installs it again.
     if (pressed & XINPUT_GAMEPAD_A)
     {
-        if ((!disc.original || XboxEmulatorReady()) && ConfirmLeaving())
+        if ((!disc.original || XboxEmulatorReady(disc.titleId)) && ConfirmLeaving())
         {
             dprintf("Playing the disc: %s (Title ID %08lX)\n", shell.discName, disc.titleId);
             // Recorded like any other game: it shows on Home if the same

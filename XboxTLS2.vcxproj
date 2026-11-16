@@ -415,6 +415,7 @@
     <ClInclude Include="src\Featured.h" />
     <ClInclude Include="src\ServiceCheck.h" />
     <ClInclude Include="src\XboxCompat.h" />
+    <ClInclude Include="src\XefuChoices.h" />
     <ClInclude Include="src\ZipExtract.h" />
     <ClInclude Include="src\TrustAnchors.h" />
     <ClInclude Include="src\Flags.h" />

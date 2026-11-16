@@ -1,0 +1,1032 @@
+# ConsoleMods' Original Xbox compatibility list, the hacked emulators' table:
+# https://consolemods.org/wiki/index.php?title=Xbox_360:Original_Xbox_Games_Compatibility_List&action=raw
+# A game's name, then its rating on each of xefu, xefu2, xefu3, xefu5, xefu1_1, xefu6, xefu7, xefu7b, xefu2019, xefu2021a, xefu2021b, xefu2021c.
+# 0 untested, 1 doesn't work, 2 stops at the intro, 3 menus, 4 in-game, 5 playable;
+# a 'c' after it: one of ConsoleMods' per-game configs, for xefu7's config loader.
+# Last, the list's known issues, cleaned up for players (see clean_issues).
+# Written by tools/make_xefu_choices.py --fetch - don't edit by hand.
+007: NightFire	4	4	4	4	4	4	5	4	4	2	0	4	Some slowdown and freezes on loading screens, recommended to use a 100% save file to play each mission on NTSC version. Seemingly no issues on PAL.
+100 Bullets (Proto)	0	0	0	0	0	0	5	0	0	0	0	0	
+187 Ride or Die	3	3	3	3	3	3	5c	3	3	3	3	3	Use Emulator 7 to fix freeze when creating a player profile and music not playing.
+2002 FIFA World Cup	0	0	0	0	0	0	0	0	0	0	0	5	Very minor graphical glitches
+25 to Life	0	0	0	0	0	0	5	0	0	0	0	1	Game plays in 4:3 in 480p even in widescreen, use 720p or 1080p for true widescreen
+4x4 EVO 2	0	0	5	0	0	0	5	0	0	0	0	5	None, On Emulator 12 the game can sometime freeze for a few frame during a race, saving and loading a replay can take a long time up to 2 minutes.
+50 Cent: Bulletproof	0	5	0	0	4	0	0	0	0	0	0	5	in Emulator 5, going into the menu after the title screen crashes back to the dashboard, making it impossible to progress further into the game. Emulator 2 and Emulator 12 work well
+Advent Rising	0	0	4	0	0	0	5	4	0	0	0	5	Many framedrops throughout gameplay and Very low FPS after getting on the first planet
+Aeon Flux	0	0	0	0	0	0	0	0	0	0	0	5	
+AFL Live 2003	0	0	0	0	0	0	5	0	0	0	0	0	
+AFL Live 2004	0	0	0	0	0	0	5	0	0	0	0	0	
+AFL Live Premiership Edition	0	0	0	0	0	0	5	0	0	0	0	0	
+AFL Premiership 2005	0	0	0	0	0	0	5	0	0	0	0	0	
+Aggressive Inline	0	0	5	0	0	0	0	0	0	0	0	5	
+AirForce Delta Storm	5	0	0	0	0	0	0	0	0	0	0	5	Scanlines in cutscenes and replays
+Alias	5	0	0	0	0	0	0	0	0	0	0	1	
+Alien Hominid	0	0	0	0	0	0	5	0	0	0	0	5	
+Aliens Versus Predator: Extinction	5	0	0	0	0	0	0	0	0	0	0	1	
+All-Star Baseball 2003	0	0	0	5	0	0	0	0	0	0	0	5	
+All-Star Baseball 2004	0	0	5	0	0	0	0	4	0	0	0	1	Glitchy Players and unable to see baseball pitches
+All-Star Baseball 2005	0	0	0	0	0	0	0	0	0	0	0	1	
+Alter Echo	1	1	1	1	1	1	0	1	0	0	0	1	crashes after short splash screen
+American Chopper	0	0	0	0	0	0	0	0	0	0	0	5	
+American Chopper 2: Full Throttle	1	1	1	1	1	1	5c	1	0	0	0	1	Use Emulator 7 to fix black screen while game is running.
+American Idol (prototype)	0	0	0	0	0	0	5	0	0	0	0	0	
+America’s Army: Rise of a Soldier	0	0	0	0	0	0	5	0	0	0	0	5	
+AMF Bowling 2004	0	0	0	0	0	0	5	0	0	0	0	1	
+AMF Xtreme Bowling 2006	0	0	0	0	0	0	0	0	0	0	0	2	
+Amped 2	0	0	0	0	0	5	5	0	0	0	0	1	DVD2Xbox HDD patch available, but is not needed.
+Amped: Freestyle Snowboarding	5	0	0	0	0	0	0	0	0	0	0	5	Choppy framerate and slowdowns
+And 1 Streetball	0	0	0	0	0	0	5	0	0	0	0	0	
+Angelic Concert	0	0	0	0	0	0	5	0	0	0	0	4	Playable with minor artifacts on some character portraits and black tiling causing some non-dialogue text to display incorrectly (albeit still legible).
+Animaniacs: The Great Edgar Hunt	0	0	0	0	0	0	5	0	0	0	0	5	
+Aoi Namida	0	0	0	0	0	0	1	0	0	0	4	1	Hangs to black screen, on 2021c shows disk error, works on 2021b with corrupted text
+Antz: Extreme Racing	3	4	4	4	3	4	4	4	0	0	0	5	Menus are broken with the hud over a black screen, issues seem to be fixed on Emulator 12
+Apex	0	0	0	0	0	0	5	0	0	0	0	5	
+Aquaman: Battle for Atlantis	0	0	5	0	0	0	0	0	0	0	0	1	
+Arctic Thunder	0	0	0	0	0	0	5c	0	0	0	0	3	Use Emulator 7 to fix game crashing at Xbox logo.
+Area 51	4	4	4	4	4	4	5c	4	0	0	0	4	Use Emulator 7 to fix severe texture issues
+Arena Football	0	0	0	0	0	0	5	0	0	0	0	5	
+Armed and Dangerous	4	0	0	0	0	0	5	0	0	0	0	1	Emulator 1 has very stuttery fmvs and less stuttery fmvs on Emulator 7, completely broken graphics and crashes the game shortly in gameplay, frame rate dips when a lot is happening on Emulator 7
+Army Men: Major Malfunction	4	4	4	4	4	4	5c	4	0	0	0	0	Use Emulator 7 to fix severe texture issues with black sections covering the screen
+Army Men: Sarge’s War	5	0	0	0	0	0	0	0	0	0	0	5	
+Arx Fatalis	0	0	0	0	0	0	5	0	0	0	0	1	None. On Emulator 12 game crashes to dashboard on launch.
+Atari Anthology	5	0	0	0	0	0	0	0	0	0	0	0	
+ATV Quad Power Racing 2	5	0	0	0	0	0	0	0	0	0	0	5	
+ATV3: Lawless	0	0	0	0	0	0	1	0	0	0	0	0	Crashes on Xbox logo
+Auto Modellista	5	5	5	5	5	5	5	0	0	0	0	1	
+Avatar: The Last Airbender	0	0	0	0	0	0	5	0	0	0	0	5	None. On Emulator 12 Snow particles are broken in cutscenes and don't render in game, fire effects don't render correctly.
+Azurik: Rise of Perathia	0	0	0	0	0	0	5c	0	0	0	0	3	Use the emulator to fix freeze on black screen after pressing new game.
+Backyard Wrestling 2: There Goes the Neighborhood	0	0	0	0	0	0	5	0	0	0	0	5	None. playable, using Emulator 7
+Backyard Wrestling: Don’t Try This at Home	0	0	0	0	0	0	5	0	0	0	0	1	None. playable, using Emulator 7
+Bad Boys: Miami Takedown	0	0	5	0	0	0	0	0	0	0	0	5	
+Baldur’s Gate: Dark Alliance	0	0	0	0	0	0	5	0	0	0	0	5	Pal version works fine despite being unsupported, FPS slowdowns in some areas
+Baldur’s Gate: Dark Alliance II	5	0	0	0	0	0	0	0	0	0	0	1	Will freeze to black screen if you skip initial FMV too quickly
+Barbarian	0	0	0	0	0	0	5	0	0	0	0	0	
+Barbie Horse Adventures: Wild Horse Rescue	5	0	0	0	0	0	0	0	0	0	0	1	
+Bass Pro Shops: Trophy Bass 2007	0	0	0	0	0	0	5	0	0	0	0	5	
+Bass Pro Shops: Trophy Hunter 2007	0	0	0	0	0	0	5	0	0	0	0	5	
+Batman Begins	5	0	0	0	0	0	0	0	0	0	0	5	
+Batman: Dark Tomorrow	0	0	0	0	0	0	5c	0	0	0	0	4	Use Emulator 7 to fix game running too fast.
+Batman: Rise of Sin Tzu	0	0	0	0	0	0	5	0	0	0	0	1	Framerate issues
+Batman: Vengeance	1	1	1	1	1	1	5c	1	0	0	0	1	Use Emulator 7 to fix crash when starting game.
+Battle Engine Aquila	5	0	0	0	0	0	0	0	0	0	0	5	
+Battlefield 2: Modern Combat	0	0	0	0	0	0	0	0	0	0	0	5	
+Battlestar Galactica (2003)	5	0	0	0	0	0	0	0	0	0	0	1	
+Beat Down: Fists of Vengeance	0	0	0	0	0	0	5	0	0	0	0	5	
+Beyond Good & Evil	1	1	1	1	1	1	5c	4	1	1	1	1	Use Emulator 7 to fix graphics, freeze during gameplay, and flickering black screen fixed. Game has performance issues, noticeable in the prologue, when there's fog and many NPCs on screen.
+Bicycle Casino	0	0	0	0	0	0	0	0	0	0	0	2	Xbox encountered error
+Big Bumpin’	0	0	0	0	0	0	0	0	0	0	0	5	Broken graphics
+Big Mutha Truckers	0	0	5	5	0	0	0	0	0	0	0	1	Slow loading
+Big Mutha Truckers 2	0	0	0	5	0	0	0	0	0	0	0	5	Playable on Emulator 4. No music on Emulator 12.
+Bionicle	0	0	0	0	0	0	5	0	0	0	0	1	
+Bistro Cupid	0	0	5	0	0	0	0	0	0	0	0	5	
+Bistro Cupid 2	0	0	0	0	0	0	5	0	0	0	0	4	Severe drop shadow corruption causing character portraits to be isolated in black boxes. Additional black corruption appears on various portions of characters animations and still frames. Almost always present, technically playable but with overall major rendering issues for most of the game.
+Black	4	4	5	5	4	5	5	5	0	0	0	5	
+Black Stone: Magic &amp; Steel	0	0	0	0	0	0	0	0	0	0	0	5	
+Blade II	0	0	0	0	0	0	5	0	0	0	0	5	
+Blazing Angels: Squadrons of WWII	0	0	0	0	0	0	5	0	0	0	0	0	Split screen does not work and has major graphical issues
+Blinx 2: Masters of Time &amp; Space	5	5	5	5	5	5	5	5	5	5	5	5	
+Blinx: The Time Sweeper	4	4	4	4	4	4	5	4	5	5	5	5	With Emulator 8 and earlier, the game is playable with low framerate and screen tearing in various areas of the game.
+Blitz: The League	0	0	0	0	0	0	5	0	0	0	0	5	
+Blood Omen 2	0	0	0	0	0	0	5	5	0	0	0	5	Characters may spin in different directions randomly during cut scenes. When gaining a new ability, graphical effects do not display correctly.
+Blood Wake	0	0	0	5	0	0	0	0	0	0	0	5	Some reports that Emulator 7 will not work and you must use Emulator 3. Gun sound effects have low volume after some time and you must restart the game after each mission to progress as it frequently freezes during next mission loading screens.
+BloodRayne	0	0	0	0	0	0	0	0	0	0	0	5	
+BloodRayne 2	0	0	0	0	0	0	5	0	0	0	0	5	
+Bloody Roar Extreme	4	0	0	4	4	0	0	4	0	0	0	1	Game runs slow
+BlowOut	5	5	5	5	5	5	5	5	1	0	0	1	
+BMX XXX	5	0	0	0	0	0	0	0	0	0	0	5	
+Bookworm	2	2	2	2	2	2	2	2	2	2	2	2	Crashes after logos when attempting to load main menu.
+Braveknight	0	0	0	0	0	0	5	0	0	0	0	0	Korean version playable. Japanese version stays in game for a couple of minutes, specifically with save data in Japanese characters, but eventually gives disc error.
+Breakdown	0	0	0	0	0	0	5	5	0	0	0	1	
+Breeders’ Cup World Thoroughbred Championships	0	0	0	0	0	0	5	0	0	0	0	0	
+Brian Lara International Cricket 2005	0	0	0	0	0	0	5	0	0	0	0	0	
+Broken Sword: The Sleeping Dragon	5	5	5	5	5	5	5	5	1	0	0	1	
+Brothers in Arms: Earned in Blood	0	0	0	0	0	0	0	0	0	0	0	2	Freezes at new game loading screen (music keeps playing).
+Brothers in Arms: Road to Hill 30	0	0	0	0	0	0	0	0	0	0	0	2	Remove media folder to get to the menus. Black screen after starting new game.
+Bruce Lee: Quest of the Dragon	0	0	0	0	0	0	5c	0	0	0	0	2	Use Emulator 7 to fix freeze at loading screen
+Brute Force	5	0	0	0	0	0	5	0	0	0	0	1	
+Buffy the Vampire Slayer	0	0	5	0	0	0	5	0	0	0	0	5	
+Buffy the Vampire Slayer: Chaos Bleeds	5	0	0	0	0	0	0	0	0	0	0	1	
+Burnout	5	5	5	5	5	5	5	5	5	5	5	5	The game may slow down a little in some areas of a race
+Burnout 2: Point of Impact	0	0	0	0	0	0	5	0	0	0	0	5	PAL version is playable on Emulator 12.
+Burnout 3: Takedown	0	0	0	0	0	5	0	0	0	0	0	5	Those using an incomplete rip will find the game freezes on load. "Burnout 3: Takedown (USA) hang fix" contains the missing data.
+Burnout Revenge	4	4	4	4	4	4	5c	4	0	0	0	1	Use Emulator 7 to fix freeze at first race.
+Cabela’s Big Game Hunter 2005 Adventures	4	5	5	5	4	5	5	5	5	5	5	5	Low framerate with the emulator and Emulator 5
+Cabela’s Dangerous Hunts	0	0	0	0	0	0	0	0	0	0	0	1	
+Cabela’s Dangerous Hunts 2	0	0	0	0	0	0	0	0	0	0	0	5	
+Cabela’s Deer Hunt 2005 Season	0	0	0	0	0	0	0	0	0	0	0	5	
+Cabela’s Deer Hunt: 2004 Season	0	0	0	0	0	0	0	0	0	0	0	1	
+Cabela’s Outdoor Adventures	0	0	0	0	0	0	0	0	0	0	0	5	
+Call of Cthulhu: Dark Corners of the Earth	5	5	5	5	5	5	5	5	5	5	5	5	No video in opening or closing scenes for the emulator or Emulator 5. All other emulators are missing background music but have better graphics quality. On all emulators, water and mercury do not appear in certain areas of the game.
+Call of Duty 2: Big Red One	0	0	0	0	0	0	5	5	0	0	0	1	When playing multiplayer, dots representing the enemy do not appear in the HUD.
+Call of Duty 3	0	0	0	0	0	0	5	0	0	0	0	5	Some frame drops
+Call of Duty: Finest Hour	5	0	0	0	0	0	0	5	0	0	0	5	Prone to potentially game breaking freezing late in the Soviet campaign, very occasional minor texture flickering.
+Capcom Classics Collection	0	0	0	0	0	0	0	0	0	0	0	5	Exed Exes, Ghouls 'n Ghosts and Street Fighter II (all versions) crash to dashboard after controls screen
+Capcom Classics Collection Vol. 2	0	0	0	0	0	0	0	0	0	0	0	5	
+Capcom Fighting Evolution	3	0	0	4	3	4	4	4	0	0	0	4	Sprites glitch and slow movement pretty much the same as CvS 2
+Capcom vs. SNK 2 EO	4	4	4	4	4	4	5c	4	4	4	4	4	Use Emulator 7 to fix sprite glitches and slow movement when starting a fight.
+Carmen Sandiego: The Secret of the Stolen Drums	1	1	1	1	1	1	2c	1	1	1	1	1	Use Emulator 7 to fix crash when starting game. The loading screen takes almost 2 minutes to finish and eventually once it’s done, you will be met with a “Fatal Crash Intercepted” message after the loading screen.
+Cars	0	0	0	0	0	0	5	0	0	0	0	4	Xbox 360 version is also available. On Emulator 12 Mater's Tractor Tipping mini game can lock up the console, Frank the harvester will also not render in the minigame sometimes, Dirt particles kicked up from cars don't render.
+Carve	0	0	0	0	0	0	5	0	0	0	0	1	
+Castlevania: Curse of Darkness	4	4	4	4	4	4	5c	4	4	4	4	4	Use Emulator 7 to fix falling through walls, objects, and doors.
+C.A.T. Cyber Attack Team	0	0	0	0	0	0	5	0	0	0	0	0	
+Catwoman	0	0	5	0	0	0	0	0	0	0	0	5	
+Cel Damage	4	4	0	4	4	0	0	4	0	0	0	4	Framerate slows down often
+Celebrity Deathmatch	3	3	3	3	3	3	5c	3	0	0	0	0	Use Emulator 7 to fix freeze flickering 3D models, speed issues, and freezing.
+Championship Bowling	0	0	0	0	0	0	0	0	0	0	0	5	
+Championship Manager 2006	0	0	0	0	0	0	5	0	0	0	0	0	Minor text artifacts.
+Championship Manager 5	0	0	0	0	0	0	5	0	0	0	0	0	
+Championship Manager Season 01/02	0	0	0	0	0	0	1	0	0	0	0	0	Resets/turns off console
+Championship Manager Season: 02/03	0	0	0	0	0	0	1	0	0	0	0	0	Resets/turns off console
+Charlie and the Chocolate Factory	0	0	0	0	0	0	0	0	0	0	0	5	
+Chase: Hollywood Stunt Driver	3	3	3	3	3	3	3	3	0	0	0	3	Fatal crash after main menu when loading to gameplay
+Chessmaster	0	0	0	0	0	0	0	0	0	0	0	5	
+Chicago Enforcer	5	0	0	0	0	0	0	0	0	0	0	5	
+Circus Maximus: Chariot Wars	5	0	0	0	0	0	0	0	0	0	0	5	
+Classified: The Sentinel Crisis	0	0	0	0	0	0	5	0	0	0	0	4	No issues noticed? Report before said no sfx when shooting
+Close Combat: First to Fight	5	0	0	0	0	0	0	0	0	0	0	5	
+Club Football	0	0	0	0	0	0	5	0	0	0	0	0	Hangs on Xbox logo on NTSC console, plays fine on PAL console (tested AC Milan version)
+Club Football 2005	0	0	0	0	0	0	5	0	0	0	0	0	Hangs on Xbox logo on NTSC console, plays fine on PAL console (tested AC Milan version)
+Codename: Kids Next Door: Operation V.I.D.E.O.G.A.M.E.	0	0	0	0	0	0	0	0	0	0	0	5	Shows error message at save, but saves fine, may freeze at save screen, press retry option to continue, plays perfectly
+Cold Fear	0	4	4	4	4	4	5c	4	0	0	0	4	Use Emulator 7 to fix all issues. If not using config loader: Crashes on first level when pulling LT. Using a saved game from the original Xbox can prevent the fatal crash when aiming with LT, because the error occurs with any weapon except the shotgun and flamethrower. It's only playable with those two. Additionally, the game has minor graphical glitches such as shadows or black lines.
+Cold War	3	3	3	3	3	3	5c	3	3	3	3	3	Use Emulator 7 to fix black screen after loading into game.
+Colin McRae Rally 04	5	0	0	0	0	0	5	0	0	0	0	1	Frametiming issues during racing. Slowdown during corners on some tracks. Race timer is unaffected, leading to overall increased difficulty. Playing in bumper camera resolves this. Letters and characters such as ingame text and menus have graphical artifacts. (Use Psychonauts config (4D4A0012), rename it to 434D0010 to fix graphical artifacts (works with both NTSC and PAL). Still need to check if it helps with slowdown.)
+Colin McRae Rally 2005	0	0	0	0	0	0	5	0	0	0	0	5	While on the main menu there is some texture flickering in the background image. Before the start of a race, graphical artifacts appear on text on screen. During single and multiplayer races there are severe fluidity issues, inconstant frame rate and screen tearing.
+Colin McRae Rally 3	0	0	0	0	0	0	0	0	0	0	0	5	
+College Hoops 2K6	1	1	1	1	1	1	5c	1	0	0	0	1	Use Emulator 7 to fix game crashing at the Visual Concepts logo. Very minor glitch in main menu. Game may take up to 30 seconds to start.
+College Hoops 2K7	0	0	0	0	0	0	5	0	1	0	0	1	40 second long black screen before intro video starts on Emulator 7. Emulator 9 and Emulator 12 crash immediately on Xbox screen.
+Combat Elite: WWII Paratroopers	5	0	0	0	0	0	0	0	0	0	0	5	
+Combat: Task Force 121	0	0	0	0	0	0	0	0	0	0	0	2	
+Commandos 2: Men of Courage	5	0	0	0	0	0	0	0	0	0	0	5	
+Commandos Strike Force	4	4	4	4	4	4	5c	4	4	4	4	4	Use Emulator 7 to fix issues with objectives and cutscenes not triggering, swimming animation being broken, enemies not spawning, and locked doors being opened — all of which prevent mission completion. Some framerate issues when many NPCs are on screen.
+Conan	0	0	0	0	0	0	5	0	0	0	0	0	
+Conflict: Desert Storm	5	0	0	0	0	0	0	5	0	0	0	5	
+Conflict: Desert Storm II - Back to Baghdad	0	0	0	0	0	0	0	5	0	0	0	1	
+Conflict: Global Terror	0	0	0	0	0	0	0	0	0	0	0	4	Disc Read Error
+Conflict: Vietnam	0	0	0	0	0	0	0	0	0	0	0	4	ntsc version work with default the emulator. PAL versión work with the emulator 2021
+Conker: Live &amp; Reloaded	4	4	5	5	4	5	5	5	5	5	5	5	the emulator, Emulator 2 and Emulator 5: FMVs may lag a little, low framerate with a lot of players on screen. PAL version FMVs lag on Emulator 6.
+Conspiracy: Weapons of Mass Destruction	0	0	0	0	0	0	5	0	0	0	0	0	
+Constantine	5	0	0	0	0	0	0	5	0	0	0	5	
+Corvette	1	1	1	1	1	1	5c	1	1	1	1	1	Use Emulator 7 to fix black screen on boot. Skipping the splashscreen before the TDK logo ends will crash the game, audience flickers on the side of the road.
+Counter Terrorist Special Forces - Fire for Effect works	0	0	0	0	0	0	0	0	0	0	0	5	
+Counter-Strike	5	5	5	5	5	5	5	5	5	5	5	5	Runs smoothly. Upon loading screen, black screen is displayed for a few seconds but eventually loads.
+Crash Bandicoot: The Wrath of Cortex	3	5	5	5	3	5	5	5	5	5	5	5	Levels fail to load on the emulator and Emulator 5. Framerate is a little choppy across all emulators when compared to real hardware, but its minor and overall still a good and complete experience. More stable on Emulator 9 to Emulator 12.
+Crash ‘N’ Burn	0	0	0	0	5	4	4	4	0	0	0	4	None. On Emulator 12 only the top left corner of the screen renders correctly and the rest a variety of effect happen from objects not rendering to them render at the wrong depth
+Crash Nitro Kart	5	5	5	5	5	5	5	5	1	1	1	1	Framerate is all over the place. A little choppy on some levels while smooth 60 on others. Lowering the resolution to 480p will not improve performance however, so feel free to enjoy the HD. (Use Emulator 6 for best performance, beaten to 100%).
+Crash Tag Team Racing	2	2	2	2	2	2	5c	2	2	2	2	2	Use xef7 to fix black screen after intro screens. Noticeable screen tearing near the top of the screen, similar to Simpsons: Hit & Run (also developed by Radical)
+Crash Twinsanity	5	5	5	5	5	5	5	5	5	5	5	5	Has FPS drops in some areas and occasional crashes. More stable with Emulator 9 to Emulator 12. (Important note, some emulators will freezes if you skip the universal interactive intro, let it finish. Skipping the Travelers Tales intro is fine tho.)
+Crazy Taxi 3: High Roller	0	0	0	0	0	0	4	0	0	0	0	4	Runs at half framerate.
+Cricket 2005	0	0	0	0	0	0	5	0	0	0	0	0	
+Crime Life: Gang Wars	0	0	0	0	0	0	5	0	0	0	0	5	Random cut scenes display a static image while audio plays normally. There is an occasional crash during the loading screen.
+Crimson Sea	0	0	0	0	0	0	0	0	0	0	0	5	Sometimes freezes in inventory menu while in hub area
+Crimson Skies: High Road to Revenge	5	4	4	5	5	5	5	5	1	1	1	1	Came with Emulator 12 on Xbox One. Doesn't boot on 2019-2021c
+Crouching Tiger, Hidden Dragon	5	0	0	0	0	0	0	0	0	0	0	1	
+Crusty Demons	0	0	0	0	0	0	0	0	0	0	0	5	
+CSI: Crime Scene Investigation	0	0	0	0	0	0	5	0	0	0	0	5	Only plays on NTSC console if it's set to 480p/i. Plays on PAL console without switching to 480p. Some glitched animations. On original NTSC Xbox game can only be played in 480p/i
+Curious George	1	1	1	1	1	1	1	1	1	1	1	1	Crashes to black screen xbox needs hard restart although you can also use the eject button to get out of the game.
+Curse: The Eye of Isis	5	5	5	5	5	5	5	5	1	1	1	1	Error on Xbox logo with Emulator 9/2021a/2021b/2021c.
+Daemon Vector	0	0	0	0	0	0	3	0	0	0	0	0	Display doesn’t fill the screen and hard crash when choosing a character.
+Dai Senryaku VII: Modern Military Tactics	0	0	0	0	0	0	5	0	0	0	0	0	
+Dakar 2: The World’s Ultimate Rally	0	0	0	0	0	0	5	0	0	0	0	0	
+Dance Dance Revolution Ultramix	4	4	4	1	4	1	5c	5	4	4	4	4	Use Emulator 7 to fix all issues. Emulator 4 and Emulator 6: The game runs but there is a black screen after the Xbox logo, gameplay is not possible. The models do not render properly in the emulator versions (the emulator, Emulator 2, Emulator 3, Emulator 5) in Emulator 7 and 7b, they do render properly but the shadows do not, in game looks darker in Emulator 9 and 2021’s. All other the emulator versions (7, 7b, 2019, 2021a, 2021b, 2021c) gameplay is possible but the game randomly hangs in the middle of a song, the screen stops updating and the last 5 seconds of audio repeat.
+Dance Dance Revolution Ultramix 2	0	0	0	0	0	0	5	0	0	0	0	0	
+Dance Dance Revolution Ultramix 3	0	0	0	0	0	0	5	0	0	0	0	0	
+Dance Dance Revolution Ultramix 4	0	0	0	0	0	0	5	0	0	0	0	0	
+Dance: UK	0	0	0	0	0	0	4	0	0	0	0	0	Notes very often don't appear at all
+Dark Summit	3	3	3	3	3	3	5c	3	3	3	3	3	Use Emulator 7 to fix black screen and looping music when starting a race
+Darkwatch	5	5	5	5	5	5	5	5	5	5	5	5	FMVs lag a little sometimes
+Dave Mirra Freestyle BMX 2	0	0	0	0	0	0	0	5	0	0	0	0	Fully playable.
+Dave Mirra Freestyle BMX 4	0	0	0	0	0	0	1	0	0	0	0	0	Crashes on Xbox logo
+David Beckham Soccer	0	0	0	0	0	0	5	0	0	0	0	0	
+Dead Man’s Hand	0	0	0	0	0	0	5	0	0	0	0	0	NTSC Version freezes at loading screen, PAL Version is playable
+Dead or Alive Ultimate (DoA 1 Disc)	0	0	5	0	0	0	5	0	0	0	0	5	
+Dead or Alive Ultimate (DoA 2 Disc)	0	5	2	0	0	0	4	0	0	0	0	4	In Emulator 7 and Emulator 12, the game will suffer hair glitches for some characters. In Emulator 3 it runs without graphical errors.
+Dead or Alive 3	0	5	0	0	0	0	5	0	0	0	0	5	None. On Emulator 12 graphic glitches on sceen change.
+Dead or Alive Xtreme Beach Volleyball	0	5	0	0	0	0	4	0	0	0	0	4	Emulator 7 and Emulator 12: Hangs on choosing joker in poker minigame. Emulator 2: Poker minigame works. Needs more overall tests. On Emulator 12 there is screen tearing during volley ball games and graphical glitches on scene change.
+Dead to Rights	0	0	0	5	0	0	5	0	0	0	0	0	
+Dead to Rights II	0	0	0	0	0	0	5	0	0	0	0	0	
+Deathrow	5	0	0	0	0	0	5	0	0	0	0	0	
+Def Jam: Fight for NY	2	2	2	2	2	2	5c	2	2	2	2	2	Use Emulator 7 to fix infinite loading screen.
+Defender	0	0	0	0	0	0	5	0	0	0	0	0	
+Delta Force: Black Hawk Down	3	3	3	3	3	4	4	5	5	5	5	5	The menu is a black screen but can be navigated blindly, and actual gameplay is fine. Emulator 1/1_1/2/3/5 freezes after starting a mission. Emulator 6/7 has water texture issues. Emulator 8 has no graphics issues and the best performance. Emulator 9/2021abc has no graphics issues.
+Destroy All Humans!	0	0	0	5	0	0	5	5	0	0	0	1	
+Destroy All Humans! 2	0	0	0	0	0	0	5c	0	0	0	0	0	Use Emulator 7 to fix freeze when starting the game.
+Deus Ex: Invisible War	0	0	0	0	0	0	4	0	0	0	0	0	Low FPS
+Die Hard: Vendetta	0	0	0	0	0	0	5	0	0	0	0	0	
+Digimon Rumble Arena 2	0	0	0	5	0	0	5	0	0	0	0	1	None, On Emulator 12 crashes to dashboard on launch.
+Digimon World 4	4	4	4	4	4	4	5c	4	4	4	4	4	Use Emulator 7 to fix music, audio, graphics, and FMVs.
+Dino Crisis 3	0	0	0	0	0	0	5	0	0	0	0	0	Playable but occasionally freezes. If freezing during intro cinematic, you must start game using previous save file.
+Dinosaur Hunting (JAP)	0	0	0	0	0	0	5	0	0	0	0	0	English prototype tested
+Dinotopia: The Sunstone Odyssey	0	0	0	0	0	0	5	0	0	0	0	0	Subtitles are a bit fuzzy, skipping intro movies and cutscenes needs a double A tap, otherwise very playable
+Disney/Pixar Finding Nemo	0	0	0	0	0	0	5c	0	0	0	0	0	Use Emulator 7 to fix English PAL version crashing due to "Disc Damaged or Dirty", but skipping the intro cutscenes will cause it to crash. NTSC versions and Korean and multilingual PAL versions play fine regardless.
+Disney/Pixar Ratatouille	5	5	5	5	5	5	5	5	5	5	5	5	Very playable although the framerate does drop in the emulator, Emulator 3 and Emulator 6 a little.
+Disney’s Extreme Skate Adventure	2	0	0	2	2	2	2	0	1	0	0	1	Plays the intro video and splash screen, then turns off the Xbox 360, Gets stuck on xbox logo on Emulator 12 and Emulator 9, black screen on Emulator 4 with audio.
+Disney’s Chicken Little	2	2	2	2	2	2	5c	2	2	2	2	2	Playable using Emulator 7 (NTSC and PAL). Crashes when trying to save the game after completing the Space Simulator II level, but you can select "Continue without saving" to move on to the next level and save the game. For all other emulators, shows 2005 Disney logo for a few seconds, then crashes. Came bundled with Emulator 11 on Xbox One.
+Doom 3	5	5	5	5	5	5	5	5	5	5	5	5	Doom 1 and 2 included with collector's edition work fine
+Doom 3: Resurrection of Evil	0	0	0	0	0	0	5	0	0	0	0	0	Doom 1 and 2 included with the game work fine
+Double S.T.E.A.L. The Second Clash	0	0	0	0	0	0	1	0	0	0	0	0	Fatal crash
+Dr. Muto	0	0	5	0	3	0	3	0	0	0	0	3	Freeze at loading screen after pressing start on Emulator 12 and Emulator 7, crashes at title screen on Emulator 5, Emulator 3 seemingly playable, cutscenes have very minor screen tear/blur on the right side of the screen besides that the game runs good.
+Dr. Seuss' The Cat in the Hat	5	5	4	4	5	4	4	4	0	0	0	0	
+Dragon Ball Z: Sagas	1	1	1	1	1	1	5c	1	1	1	1	1	Use Emulator 7 to fix freeze at Xbox logo. Other emulators are unplayable, game will freeze when trying to save after finishing "Saiyans Duel" and "The Time Chamber", just press no to continue without saving, outside of that, everything is playable
+Dragon’s Lair 3D	4	5	5	5	4	5	5	5	1	1	1	1	the emulator and Emulator 5 have graphical issues. PAL version runs very slow across all emulators.
+Drake of the 99 Dragons	5	0	0	0	0	0	0	0	0	0	0	0	
+Dreamfall: The Longest Journey	0	0	5	0	0	0	0	0	0	0	0	0	
+Drihoo	0	0	0	0	0	0	1	0	0	0	0	0	Console turns off after the initial cutscene as the game is about to begin
+DRIV3R	1	1	4	4	1	4	4	4	4	4	4	4	Can freeze on Atari logo if you try and skip the intro. Music works correctly on Emulator 9 and 2021, may be missing with other versions. Framerate is a little laggy. Progress past Mission 3 "The Seige" is impossible due to broken NPC pathing, Baccus gets stuck in scenery no matter what route is taken. Occasional minor graphical glitches when driving/walking around. Freezes at Xbox logo with the emulator/Emulator 2/Emulator 5.
+Driver: Parallel Lines	0	0	0	0	0	0	5c	5	0	0	0	5	Use Emulator 7 to fix graphical issues with blurring lighting. Radio does not work on any the emulator except Emulator 12.
+Drome Racers	0	0	0	0	0	0	1	0	0	0	0	0	Game crashes during loading screen after selecting the language
+DroneZ	0	0	0	0	0	0	5	0	0	0	0	0	
+Dungeons & Dragons: Heroes	0	0	0	0	0	0	5	0	0	0	0	0	
+Dynasty Warriors 3	0	0	0	0	0	0	5	0	0	0	0	0	Slowdown at times and some cutscenes glitch
+Dynasty Warriors 4	0	0	0	5	0	0	5	0	0	0	0	0	Game progress may not save correctly. Severe frame rate drops when many characters are on-screen. Minor visual artifacts on some menus.
+Dynasty Warriors 5	0	0	0	0	0	0	5	0	0	0	0	0	Dirty disc error, game still plays perfectly.
+Ed, Edd n Eddy: The Mis-Edventures	1	1	1	1	1	1	1	1	0	0	0	0	Crashes with a message: This original Xbox game has encountered a problem and can't continue
+Egg Mania: Eggstreme Madness	5	0	0	0	0	0	5	0	0	0	0	0	
+Enclave	1	1	1	4	1	4	4	4	0	0	0	0	
+England International Football	0	0	0	0	0	0	5	0	0	0	0	0	Hangs on Xbox logo on NTSC console, plays fine on PAL console
+Enter the Matrix	4	4	4	4	4	4	5c	4	1	1	1	1	Use Emulator 7 to fix shadows, visual ghosting issues, and other graphical effects (some FMVs still laggy and it will crash if you fail the Control Tower 2 checkpoint). Without config, gets in-game and plays somewhat normally from the emulator to 7b. Some graphical effects such as shadows are inconsistent and occasional visual ghosting occurs similar to Halo 2. Some FMVs are laggy with audio glitches, with lag getting worse for the emulator to 3 and 1_1. Does not get past Xbox logo from Emulator 9 to 2021c.
+Eragon	0	0	0	0	0	0	5	0	0	0	0	0	
+ESPN College Hoops	0	0	0	0	0	5	5	0	0	0	0	0	
+ESPN College Hoops 2K5	0	0	0	0	0	0	5	0	0	0	0	0	Works, but takes forever to start up.
+ESPN International Winter Sports 2002	0	0	0	0	0	0	5	0	0	0	0	0	
+ESPN Major League Baseball	0	0	5	0	0	0	5	0	0	0	0	0	
+ESPN MLS ExtraTime 2002	5	0	0	0	0	0	5	0	0	0	0	0	
+ESPN NBA 2K5	0	0	0	0	0	0	5	0	0	0	5	5	Slow FPS at cutscenes, replays on Emulator 7; Emulator 11/Emulator 12 have more FPS on cutscenes/replays.
+ESPN NBA 2Night 2002	0	0	0	0	0	0	1	0	0	0	0	0	Freezes to black screen after Xbox logo
+ESPN NBA Basketball	3	4	2	2	3	4	5	4	4	2	2	2	Emulator 7 is best option. 2 and 6 have graphical and lag issues, 7b has audio and lag issues, 2019 has audio issues, 2 has graphical issues
+ESPN NFL 2K5	0	0	0	0	0	0	5	0	0	0	0	0	
+ESPN NFL Football '06	0	0	0	0	0	5	5	0	0	0	0	0	PAL version is playable but may freeze if you try to skip past the initial ESPN or Visual Concepts intros. NTSC version gives you a black screen (when you press home button, you can see a game)
+ESPN NFL PrimeTime 2002	0	0	0	0	0	0	5	0	4	0	0	0	in Emulator 7, the top screen does not display correctly in some parts like when the camera faces the crowd or in the intro but it’s mostly playable at least. In Emulator 9, the floor is missing and you can see though some of the players
+ESPN NHL 2K5	0	0	0	0	0	0	5	0	0	0	0	0	Works fine.
+ESPN NHL Hockey	0	0	0	0	0	0	5	0	0	0	0	0	
+ESPN Winter X-Games Snowboarding 2002	0	0	0	0	0	0	1	0	0	0	0	0	Black screen
+Evil Dead: A Fistful of Boomstick	0	0	0	5	0	0	5	0	0	0	0	0	Some oddball glitching. First biker is duplicated. Minor cutscene graphical glitches.
+Evil Dead: Regeneration	1	1	1	1	1	1	5	5	5	5	5	5	Game region must match console's video standard e.g. USA version crashes on PAL consoles. the emulator/2/3/5/1_1/6 show no video output. Lighting has excessive bloom.
+ExaSkeleton	5	5	0	5	5	0	0	0	1	0	0	1	At first, it may seem to freeze at the splash screen, but in reality it just takes a pretty long time to load (roughly a minute to reach the title screen). Seems to play fine after reaching the title screen though, apart from some noticeable input lag with the start button specifically, making it a bit hard to pause the game at times. Haven't beaten the whole game, so further testing is still needed to make sure it's fully beatable, but it seems to run best overall with the original the emulator file (the emulator.xex). Emulator 9 and Emulator 12 both freeze at the Xbox logo. All tests were done on an NTSC console.
+F1 2001	0	0	0	0	0	0	5	0	0	0	0	0	
+F1 2002	0	0	0	0	0	0	5c	0	0	0	0	0	Use xef7 to fix black screen with audio loop.
+F1 Career Challenge	0	0	0	0	0	0	5	0	0	0	0	0	
+Fable	4	4	5	5	4	4	5	4	1	1	1	1	
+Fable: The Lost Chapters	0	0	5	0	0	0	0	0	0	0	0	0	
+Fallout: Brotherhood of Steel	1	1	1	1	1	1	5c	1	1	1	1	1	Use Emulator 7 to fix disc read issue.
+Family Guy	0	0	0	5	0	0	5	0	0	0	0	0	
+Fantastic 4	0	0	0	0	0	0	5	0	0	0	0	0	
+Far Cry Instincts	0	0	0	0	0	5	5	0	0	0	0	0	
+Far Cry Instincts: Evolution	0	0	0	0	0	0	5c	0	0	0	0	0	Use Emulator 7 to fix freeze at first level. Otherwise, use cheat code `GiveMeTheMaps` to skip first level
+Fatal Frame II: Crimson Butterfly Director’s Cut	0	0	0	5	0	0	5	0	0	0	0	0	
+Fatal Frame: Special Edition	5	0	5	0	0	0	5	0	0	0	0	5	The pal version "Project Zero" works fine despite being unsupported (Unknown if the japanese or korean versions are supported or not) when a ghost introduction cutscene plays the game goes to a black screen but they can be skipped possibly more issues.
+FIFA Soccer 07	0	0	0	0	0	0	5	0	0	0	0	0	Blue bars on HUD, laggy at 720p. Play on 480p.
+FIFA Soccer 06	0	0	0	0	0	0	5	0	0	0	0	0	
+FIFA Soccer 2003	5	0	0	0	0	0	5	0	0	0	0	0	Choppy sound
+FIFA Soccer 2004	5	0	0	0	0	0	5	0	0	0	0	0	
+FIFA Soccer 2005	0	0	0	0	0	0	5	0	0	0	0	0	
+FIFA Street	5	0	0	5	0	0	5	0	0	0	0	0	FMVs and loading screens are a little squished, game still plays perfectly.
+FIFA Street 2	0	0	0	0	0	0	5	0	0	0	0	0	
+FIFA World Cup: Germany 2006	0	0	0	5	0	0	5	0	0	0	0	0	
+Fight Club	0	0	0	0	0	0	5	0	0	0	0	0	
+Fight Night 2004	0	0	0	5	0	0	5	0	0	0	0	0	Tested with a NTSC copy on a NTSC console. Plays great.
+Fight Night Round 2	0	0	0	0	0	0	5	0	0	0	0	0	Folder format works, disc does not. Playable with slight audio stutter. Emulator 4 may fix audio stutter.
+Fight Night Round 3	0	0	0	0	0	5	5	0	0	0	0	0	
+FILA World Tour Tennis	0	0	0	0	0	0	5	0	0	0	0	0	
+Final Fight: Streetwise	0	0	0	0	0	0	5	0	0	0	0	0	
+Fire Blade	4	4	4	4	4	4	5c	4	4	4	4	4	Use Emulator 7 to fix framerate issues and most graphical issues. Shadow issues on trees exist, buildings don't have shadows, and image freezes while using thermal vision or speed boost until you stop using it. Emulator 9/2021a/2021b/2021c do not have framerate issues.
+FlatOut	0	0	5	0	0	0	0	0	0	0	0	5	
+FlatOut 2	0	0	0	0	0	0	4	0	0	0	0	0	Game sometimes crashes on Start-Up. Some stunt games freezing after first attempt.
+Flight Academy	0	0	0	0	0	0	5	0	0	0	0	0	
+Ford Bold Moves Street Racing	0	0	0	0	0	0	5	0	0	0	0	0	Game crashes if you try to skip the Empire intro. It will run fine after it plays out
+Ford Mustang: The Legend Lives	5	0	0	0	0	0	0	0	0	0	0	0	
+Ford Racing 2	4	4	4	4	4	4	5c	4	1	1	1	1	Use Emulator 7 to fix black screen with only HUD visible. Error on Xbox logo with Emulator 9/2021a/2021b/2021c.
+Ford Racing 3	0	0	0	0	0	0	5	0	0	0	0	0	Game crashes if you try to skip the Empire intro. It will run fine after it plays out
+Ford vs. Chevy	0	0	0	5	0	0	0	0	0	0	0	0	
+Forgotten Realms: Demon Stone	0	0	0	0	0	0	5	0	0	0	0	0	
+Forza Motorsport	5	5	5	5	5	5	5	5	5	5	5	5	Occasional audio glitches. Saves must be re-signed if used on a different console.
+Frankie Dettori Racing	0	0	0	0	0	0	5	0	0	0	0	0	
+Freaky Flyers	0	0	5	0	0	0	0	0	0	0	0	0	Frame rate drops here and there.
+Free Fall 3050 AD (Unreleased)	4	4	4	5	4	5	1	1	5	5	5	5	In Emulator 1, 2, 3, and 1_1, the game's sound is glitched. FMVs lag in Emulator 1 and 1_1. Game crashes on startup with Emulator 7/7b.
+Freedom Fighters	0	0	0	0	0	0	5c	0	0	0	0	1	Use Emulator 7 to fix missing shadows.
+Freestyle Metal X	0	0	0	0	0	0	5	0	0	0	0	0	
+Freestyle Street Soccer	0	0	0	0	0	0	5	0	0	0	0	0	Sound issues
+Frogger Beyond	5	0	0	0	0	0	0	0	0	0	0	0	
+Frogger: Ancient Shadow	5	0	0	0	0	0	5	0	0	0	0	0	
+From Russia With Love : 007	0	0	0	0	0	0	4	0	0	0	0	5	Major slowdown making it unplayable graphical issue covering half of the screen too
+Fuel	0	0	0	0	0	0	3	0	0	0	0	0	Hangs after picking quick race or tournament
+Full Spectrum Warrior	0	0	0	0	0	0	5	0	0	0	0	0	
+Full Spectrum Warrior: Ten Hammers	0	0	0	0	0	0	5	0	0	0	0	0	
+Furious Karting	0	0	0	0	0	0	5	0	0	0	0	0	It only works with the Xbox 360 set to 480p resolution, otherwise the game will be left with a black screen after the initial cutscene.
+Futurama	5	0	0	0	0	0	5	0	0	0	0	0	
+Future Tactics: The Uprising	0	0	0	0	0	0	5	0	0	0	0	0	
+Fuzion Frenzy	0	0	0	0	0	0	5	0	0	0	0	0	
+Galaxy Angel	0	0	0	0	0	0	5	0	0	0	0	0	
+Galleon	0	0	0	0	0	0	4	0	0	0	0	0	Text keeps getting duplicated other than that seems fine leaving it as in-game
+Gauntlet Dark Legacy	0	0	0	0	0	0	0	0	0	0	0	5	Deleting the .wmv files in the MOVIES folder fixes the screen glitches during gameplay. While the game still lags in the main tower area, as it always has, it otherwise runs flawlessly on Emulator 12.
+Gauntlet: Seven Sorrows	0	0	5	0	0	0	0	0	0	0	0	0	
+Gene Troopers	0	0	0	0	0	0	5c	0	0	0	0	0	Use Emulator 7 to fix graphical issues.
+Genma Onimusha	5	5	5	5	5	5	5	0	0	0	0	0	
+Ghost Master: The Gravenville Chronicles	0	0	0	0	0	0	5	0	0	0	0	0	
+Gladiator: Sword of Vengeance	4	4	4	4	4	4	5c	4	4	4	4	4	Use Emulator 7 to fix freeze after tutorial mission, shadow/blood issues, and various graphics issues in menus.
+Gladius	2	2	2	2	2	2	5c	2	1	1	1	1	Use Emulator 7 to fix infinite spinning sword loading screen at start. Stuck at Xbox logo for Emulator 9 and newer. Game came bundled with Emulator 11 on Xbox One. The pre release demo included with armed and dangerous works fine without issue when running it from the XBE.
+Goblin Commander: Unleash the Horde	5	0	0	0	0	0	0	0	0	0	0	0	
+Godzilla: Destroy All Monsters Melee	0	0	0	0	0	0	5	0	0	0	0	0	Emulator 7 is supported, but has framerate issues.
+Godzilla: Save the Earth	0	0	0	0	0	0	5	5	1	1	1	1	
+GoldenEye: Rogue Agent	0	0	0	0	0	0	5	0	0	0	0	0	
+Gotcha!	0	0	0	0	0	0	5	0	0	0	0	0	Cosmetic glitch in the menu when choosing a New League.
+Grabbed by the Ghoulies	0	0	5	0	0	0	5	0	2	0	0	2	
+Grand Theft Auto III	5	5	5	5	5	5	5	5	5	5	5	5	Low framerate in heavy traffic areas. Resolutions higher than 480p are distorted and game runs slower than intended. Custom radio is not supported. Game runs flawlessly on Emulator 12. On Emulator 12 only extracted XEX format from ISO is compatible, not compatible with GOD or extracted from XISO, otherwise freezes with code [54540073] on Xbox logo with error popup.
+Grand Theft Auto: San Andreas	5	5	5	5	5	5	5	5	5	5	5	5	Graphical glitches and artifacts in several areas and cutscenes. Audio issues including sound becoming lower or entirely silent (except for the menu) when in certain areas or during explosions, gunfire has sound issues which is noticeable with automatic weapons, and sound can sometimes skip with lip sync being off during cutscenes. Custom radio is supported by editing st.db in Hdd1:\Compatibility\Xbox1\TDATA\FFFE0000 with LoicBersier's XBST or any program that supports it. Audio issues are gone and game runs flawlessly on Emulator 12.
+Grand Theft Auto: Vice City	5	5	5	5	5	5	5	5	1	1	1	5	Low framerate in heavy traffic areas. Resolutions higher than 480p are distorted and game runs slower than intended. Custom radio is not supported. Better framerate in Emulator 4. Game runs flawlessly on Emulator 12. Some conflicting reports of Emulator 12 only working with extracted XEX format from ISO, not compatible with GOD or extracted from XISO, otherwise freezes with code [54540073] on Xbox logo with error popup.
+Gravity Games Bike: Street Vert Dirt	5	0	0	0	0	0	0	0	0	0	0	0	
+Greg Hastings’ Tournament Paintball	5	0	0	0	0	0	5	0	0	0	0	0	
+Greg Hastings’ Tournament Paintball Max’d	0	0	0	0	0	0	5	0	0	0	0	0	
+Grooverider Slot Car Thunder	5	0	0	0	0	0	0	0	0	0	0	0	
+Group S Challenge	4	3	3	3	4	3	3	3	0	0	0	0	[PAL] In Emulator 1 and 1_1, game is playable, but with severe and consistent texture display issues, no shadows, broken reflections and significant slowdown when opponents are on screen. Enabling mirrors freezes all other cameras, including the main camera. Game sometimes freezes during race, most commonly on Monaco, likely has something to do with issues loading track sections. To avoid freezes, wait until all opponent cards are loaded in before starting race, save often, avoid restarting race more than 2 times. Game can be completed 100% despite issues. In other versions of the emulator game freezes console when starting a race. Emulator 9 onwards do not work with PAL version by refusing...
+Guilty Gear Isuka	0	0	0	0	0	0	5	0	0	0	0	0	
+Guilty Gear X2 #Reload	0	0	0	0	0	0	5	0	0	0	0	0	
+Gun	0	0	0	0	0	0	5c	0	0	0	0	0	Use Emulator 7 to fix animal animations and other late game bugs.
+Gunvalkyrie	0	4	0	0	0	4	5c	0	4	4	0	4	Use Emulator 7 to fix all issues. In Emulator 2 and Emulator 6, everything seems normal until you actually get into the game, a very loud buzzing noise plays the moment you get into the tutorial. In Emulator 7, The game starts up fine, and plays great until the point in the tutorial where you must boost dash with L3, which doesn't work. You can use an existing save file to skip the tutorial. Same issue on Emulator 9 and Emulator 10. Emulator 12 sort of works - you CAN boost dash with L3, but the entire screen turns solid red while you're dashing forward, making it far from ideal for playing; happens both on the NTSC and PAL versions. Came with Emulator 10 on Xbox One. USA version save
+Gun Metal	0	0	0	0	0	0	4	0	0	0	0	0	Low FPS
+GunGriffon: Allied Strike	2	2	2	2	2	2	5c	2	2	2	2	2	Use Emulator 7 to fix black screen after Tecmo intro.
+Half-LifeX Xash3D Port 0.90	3	3	3	3	3	3	2	2	3	3	3	3	The version for consoles with 64MB of RAM starts the game, but when it gets to the loading screen for a new area, it never finishes loading.
+Half-Life 2	5	0	0	5	5	5	5	5	1	1	1	1	This game does not play on PAL-60 televisions with composite cabling. This does not affect PAL-50 televisions. Screen corruption in attract mode will occur after the console has been idle for a long period of time. Game launches but has horrible fps drops in certain places so far i have played a little like 2 mins into point insertion and have experienced a couple of fps drops right after getting of the train and in the vending machine section but is deffinetly playeble if you can take 15fps 1% lows every 10secs.
+Halo 2	5	5	5	5	5	5	5	5	5	5	5	5	Performance problems while playing on the Backwash map. Occasionally the player may observe "ghost" images displayed on the screen; a workaround for this issue is to return to the Dashboard and restart the game.
+Halo 2 Multiplayer Map Pack	5	5	5	5	5	5	5	5	5	5	5	5	
+Halo: Combat Evolved	5	5	5	5	5	5	5	5	5	5	5	5	
+Hamsterball (Xbox Live Arcade)	4	4	4	4	4	4	4	4	4	4	4	4	If launching from the Xbox Live Arcade menu, you may get a content package error. You can run the game from the individual xbe (default.bin renamed to default.xbe).
+Harry Potter and the Goblet of Fire	5	0	0	0	0	0	5	0	0	0	0	0	
+Harry Potter and the Chamber of Secrets	0	0	0	0	0	0	5	0	0	0	0	0	Emulator 7 is officially supported, but game runs at very low framerate.
+Harry Potter and the Prisoner of Azkaban	0	0	0	0	0	0	5	0	0	0	0	0	An occasional hard lock occurs when switching to cut scenes. Occasionally, enemies will become stuck in a loop or just stuck to the environment.
+Harry Potter and the Sorcerer’s Stone	5	0	0	0	0	0	5	0	0	0	0	0	
+Harry Potter: Quidditch World Cup	0	0	0	0	0	0	5	0	0	0	0	0	Delete all .tgq Movie files to play
+Headhunter: Redemption	3	3	3	3	3	3	5c	3	3	3	3	3	Use Emulator 7 to fix fatal crash after loading first level and screen flickering in the intro/in-game cutscenes.
+Hello Kitty: Roller Rescue	0	0	0	0	0	0	5	0	0	0	0	0	Hud issues in 16:9, properly working in 480p 4:3
+He-Man Defender of Grayskull (proto)	5	0	0	0	0	0	1	0	0	0	0	0	the emulator freezes at Xbox logo but a fix would be to set the resolution to 480p, the game has some graphical issues but it’s playable. In Emulator 7, Fatal Crash intercepts repeatedly. You need to turn off console to go back to dashboard
+Heroes of the Pacific	0	0	0	0	0	0	5	0	0	0	0	0	Low FPS at cutscenes and in game at some areas
+High Heat Major League Baseball 2004	0	0	0	5	0	0	0	0	0	0	0	0	
+High Rollers Casino	5	0	0	0	0	0	0	0	0	0	0	0	
+Hitman 2: Silent Assassin	0	0	0	0	0	0	4	0	0	0	0	5	Textures fail to load at times displaying as pitch black, On Emulator 12 texture issue seems to be fixed
+Hitman: Blood Money	3	3	0	0	3	0	3	0	0	0	0	3	Stuttering fmvs except Emulator 9, models in the main menu are glitched, crashes to xbox logo for some emulators and for some on a black screen
+Hitman: Contracts	5	0	0	0	0	0	5	0	0	0	0	0	
+Hot Wheels: Stunt Track Challenge	0	0	0	0	0	0	5	0	0	0	0	5	None. On Emulator 12 video can stutter and some long load times, Systemlink play doesn't work to original xbox
+Hulk	5	0	0	0	0	0	0	0	0	0	0	0	
+Hummer Badlands	0	0	0	0	0	0	5	0	0	0	0	0	
+Hunter: The Reckoning	0	0	0	0	0	0	5	0	0	0	0	0	
+Hunter: The Reckoning Redeemer	3	3	3	3	3	3	5c	3	3	3	3	3	Use Emulator 7 to fix disc read error when starting a new game. Game plays fine, just a shadow issue with the color of the main characters and NPCs being wrong.
+Ice Age 2: The Meltdown	0	0	0	0	5	0	5	0	0	0	0	0	
+IHRA Drag Racing 2004	0	0	0	0	0	0	4	0	0	0	0	0	Low framerate during races
+IHRA Drag Racing: Sportsman Edition	5	0	0	0	0	0	5	0	0	0	0	0	
+IHRA Professional Drag Racing 2005	5	0	0	0	0	0	5	0	0	0	0	0	
+Indiana Jones and the Emperor’s Tomb	0	0	0	0	0	0	5	0	0	0	0	0	
+Indigo Prophecy	0	0	0	5	0	0	5	0	5	0	0	1	Game is highly playable and will actually hold 60FPS in a lot of sections, even with the Xbox 360 set to output 1080p, and the game defaults to about a 14:9 widescreen presentation. PS2 version, by comparison, struggles to maintain 30FPS and has a much more awkward tank controls setup so this is the better version.
+IndyCar Series	0	0	0	0	0	0	5	0	0	0	0	0	
+IndyCar Series 2005	2	5	5	5	2	5	5	5	5	5	5	5	Requires conversion to a Game on Demand with padding intact (although partial trim still works fine) in order to not have a "dirty disc" error. Tools like iso2god-rs allow for this. Original the emulator and Emulator 5 will freeze the console after the game's intro if you try to start it, but all other emulators appear to be playable with no noticible flaws.
+I-Ninja	0	0	0	5	0	0	0	0	0	0	0	0	
+Innocent Tears	0	0	0	0	0	0	5	0	0	0	0	5	
+Inside Pitch 2003	0	0	0	0	0	0	5	0	0	0	0	0	
+Intellivision Lives!	0	0	5	0	0	0	0	0	0	0	0	0	
+International Superstar Soccer 2	0	0	0	0	0	0	5	0	0	0	0	0	
+Iron Phoenix	0	0	0	0	2	0	5c	0	0	0	0	2	Use Emulator 7 to fix crash after opening intros. Character models and weapons don't render correctly.
+Jacked	0	0	0	0	0	0	5	0	0	0	0	0	
+Jade Empire	5	0	0	0	0	0	0	0	0	0	0	0	
+James Bond 007: Agent Under Fire	5	5	4	4	5	4	4	4	0	0	0	5	Game speed issue is fixed using the emulator,Emulator 2 or Emulator 5. Driving and Rail Shooting levels have missing audio. Mediterranean Crisis level doesn't work.
+James Bond 007: Everything or Nothing	0	0	0	0	0	0	5c	0	0	0	0	5	Gets stuck loading some missions. Using 100% save file and choosing a level, all levels work with occasional slow downs and minor texture issues. Driving levels physics are bugged causing high driving speeds with easy civilian crashes or vehicle damage. Use Emulator 7 to fix these issues on PAL.
+James Cameron’s Dark Angel	5	0	0	0	0	0	5	0	0	0	0	0	
+Jaws Unleashed	0	0	0	0	0	0	5	0	0	0	0	0	
+Jikkyou World Soccer 2002	0	0	0	0	0	0	5	0	0	0	0	0	
+Jockey’s Road	0	0	0	0	0	0	1	0	0	0	0	0	Freezes at title screen
+JSRF: Jet Set Radio Future	3	3	3	3	3	3	5	5	5	5	5	5	Emulator 6 and earlier: Glitched audio and black screen when in-game. Emulator 7 and newer: Big slowdowns in a few areas, otherwise very playable.
+Judge Dredd: Dredd VS Death	5	0	0	0	0	0	0	0	0	0	0	0	Slowdowns and slightly distracting ground and wall flickering during gameplay.
+Juiced	0	0	0	0	0	0	5	0	0	0	0	0	
+Jurassic Park: Operation Genesis	0	0	0	0	0	0	5	0	0	0	0	0	
+Just Cause	0	0	0	0	0	0	5	0	0	0	0	5	Works fine on Emulator 7 with a unofficial controller? also works with normal controller on Emulator 12
+Justice League Heroes	0	0	0	0	0	5	5c	0	0	0	0	0	Use Emulator 7 to fix text display issues in upgrade menu screen, performance drops, and texture issues.
+Kabuki Warriors	0	0	0	5	0	0	0	0	0	0	0	0	
+Kakuto Chojin	0	0	0	0	0	0	4	0	0	0	0	5	Runs at half framerate in some stages. Crashes the console after around 10 minutes of gameplay, issues seen to be fixed on Emulator 12
+Kameo - Elements of Power	0	0	0	0	0	0	4	0	0	0	0	0	04-04-29 proto fatal crashes constantly on the Xbox logo. 04-10-01 proto starts fine but freezes when the inner door in the cave opens.
+Kao the Kangaroo Round 2	0	0	0	0	0	0	5	0	0	0	0	0	
+Karaoke Revolution	0	0	0	0	0	0	5	0	0	0	0	0	Smooth gameplay, doesn't stutter as opposed to Karaoke Revolution Party
+Karaoke Revolution Party	0	0	0	0	0	0	4	0	0	0	0	0	Stutters terribly, ruining the game experience, but technically playable
+Kelly Slater’s Pro Surfer	5	0	0	0	0	0	0	0	0	0	0	0	
+Kikou Heidan J-Phoenis Plus	0	0	0	0	0	0	5	0	0	0	0	0	
+kill.switch	0	0	5	0	0	0	0	0	0	0	0	0	
+King Arthur	0	0	0	0	0	5	0	0	0	0	0	0	Minor video stuttering occurs during FMVs.
+King of Fighters: Maximum Impact: Maniax	0	0	0	0	0	0	5	0	0	0	0	1	Game plays normally. On Emulator 12 freezes on xbox logo.
+Kingdom Under Fire: Heroes	0	0	0	0	0	0	5	0	0	0	0	0	
+Kingdom Under Fire: The Crusaders	0	0	0	0	0	0	5	0	0	0	0	0	
+Knight's Apprentice: Memorick's Adventures	2	2	2	2	2	2	5c	2	2	2	2	2	Use Emulator 7 to fix hard crash on loading screen after Microids logo.
+Knights of the Temple II	0	0	0	0	0	0	5	0	0	0	0	0	
+Knights of the Temple: Infernal Crusade	0	0	0	0	0	0	5	0	0	0	0	0	
+Knockout Kings 2002	0	0	0	0	0	0	5	0	0	0	0	0	
+Kung Fu Chaos	0	0	0	0	0	0	5c	4	5	0	0	5	Screen is displayed twice side-by-side unless using Emulator 9, Emulator 12, or Emulator 7.
+L.A. Rush	0	0	0	0	0	0	4	0	0	0	0	0	Low FPS
+Lamborghini (Unreleased)	0	0	0	0	0	0	0	5	0	0	0	1	On Emulator 12 an error shows up for a second and then freezes on xbox logo. Works perfectly on Emulator 8
+Land of the Dead: Road to Fiddler’s Green	0	0	0	0	0	0	5	0	0	0	0	0	
+Largo Winch: Empire Under Threat	0	0	0	0	0	0	2	0	0	0	0	5	On Emulator 7, black screen upon entering gameplay, only some HUD elements are visible. No issues on Emulator 12.
+Legacy of Kain: Defiance	2	2	2	2	2	2	2	2	2	2	2	2	Crashes after copyright screen on a black screen, with the newest the emulator version's aka Emulator 9, Emulator 10-b-c, at the Xbox logo an error message show's up, then freeze the process. Tested on both EU and US versions.
+Legends of Wrestling	0	0	0	0	0	0	1	0	0	0	0	0	Fatal crash
+Legends of Wrestling II	0	0	0	0	0	0	5	0	0	0	0	0	
+LEGO Star Wars: The Video Game	0	0	5	0	0	0	5	0	0	0	0	0	Some sound effects are too low.
+LEGO Star Wars II: The Original Trilogy	0	0	0	5	0	0	5	0	0	0	0	0	
+Leisure Suit Larry: Magna Cum Laude	0	0	0	5	0	0	0	0	0	0	0	0	
+Lemony Snicket’s A Series of Unfortunate Events	5	0	0	0	0	0	0	0	0	0	0	0	
+Links 2004	0	0	0	0	0	0	5	0	0	0	0	0	
+LMA Manager 2003	0	0	0	0	0	0	5c	0	0	0	0	0	Use Emulator 7 to fix freeze at Xbox logo.
+LMA Manager 2004	0	0	0	0	0	0	5	0	0	0	0	0	Hangs on Xbox logo on NTSC console. Playable on PAL console (match view is at low framerate if you watch at regular speed; press X to speed it up)
+LMA Manager 2005	0	0	0	0	0	0	5	0	0	0	0	0	Hangs on Xbox logo on NTSC console. Playable on PAL console (match view is at low framerate if you watch at regular speed; press X to speed it up)
+LMA Manager 2006	0	0	0	0	0	0	5	0	0	0	0	0	Hangs on Xbox logo on NTSC console. Playable on PAL console (match view is at low framerate if you watch at regular speed; press X to speed it up)
+Loons: The Fight for Fame	5	0	0	0	0	0	0	0	0	0	0	0	
+Mace Griffin Bounty Hunter	0	0	0	0	0	0	5c	0	0	0	0	0	Use Emulator 7 to fix main menu graphics issues and high brightness when getting hit or pausing the game fixed. Config introduces issue with long load times and freezing when reaching a checkpoint sometimes, but the game autosaves correctly at checkopints, so you can press Eject and boot the game and continue where you left off.
+Mad Dash Racing	0	0	0	0	0	0	5	0	0	0	0	0	NTSC versions freeze shortly into the race. PAL version plays normally
+Madagascar	0	0	0	0	0	0	5c	0	0	0	0	0	Use Emulator 7 to fix being unable to save or load and to fix Italian version issues (serious audio problems, freezing cutscenes, menu freezes). Multiple language configs available, must be renamed to 4156003b.bin. In rare cases, if you get hit and vibration is on, the controller will always vibrate until you quit the game, and in other cases you may get hit often and no vibrations happen.
+Madden NFL 06	0	0	0	0	0	0	4	0	0	0	0	0	FPS issues. Causes game to often run in slow-mo.
+Madden NFL 07	0	0	0	0	0	0	4	0	0	0	0	0	Low FPS (~15fps) when all players on the field
+Madden NFL 08	0	0	0	0	0	0	4	0	0	0	0	0	Low FPS, slow downs in-game.
+Madden NFL 09	0	0	0	0	4	0	5	0	4	0	0	4	Very slight stutter on the EA sports logo on all emulators, Emulator 7 lags a little when teams get into formation, Emulator 12 plays slightly worse, Emulator 9 commentary is garbled, Emulator 5 audio is fine but has major lag in menus and flickers on loading screen.
+Madden NFL 2002	0	0	0	0	0	0	5	0	0	0	0	0	
+Madden NFL 2003	0	0	0	0	0	0	5	0	0	0	0	0	
+Madden NFL 2004	0	0	0	0	0	0	5	0	0	0	0	0	
+Madden NFL 2005	0	0	0	0	0	0	5	0	0	0	0	0	
+Mafia	0	0	0	0	0	0	3	0	3	0	0	3	Manages to reach the main menu fine and manages to play the opening cutscene after starting a new game but freezes on a black screen after loading screen
+Magatama	0	0	0	5	0	0	5	0	0	0	0	0	
+MageWar	0	0	0	0	0	0	1	0	0	0	0	0	Hangs on Xbox logo
+Magi Death Fight: Mahou Gakuen	0	0	0	0	0	0	1	0	0	0	0	0	Crashes to dashboard
+Magic: The Gathering - Battlegrounds	0	0	0	0	0	0	5	0	0	0	0	0	
+Major League Baseball 2K5	0	0	0	0	0	0	5	0	1	0	0	5	Emulator 12 works fine besides some text being distorted. Emulator 7 works but has texture glitches. On Emulator 9, the game takes a while just to start and even though the legal screens look perfectly fine, the 2K logo freezes but you can still skip it but after that, the game is just a black screen.
+Major League Baseball 2K5: World Series Edition	0	0	0	0	0	0	1	0	1	0	0	0	
+Major League Baseball 2K6	0	0	0	0	0	0	5c	0	0	0	0	0	Use Emulator 7 to fix game crashing at the 2K logo. Game may take up to 30 seconds to start.
+Major League Baseball 2K7	0	0	0	0	0	0	5c	0	0	0	0	0	Use Emulator 7 to fix game crashing at the 2K logo. Game may take up to 30 seconds to start.
+Malice	0	0	0	0	0	0	4	0	5	0	0	5	After the intro cinematics the game responds, but the screen is corrupted, making it unplayable. Now working on Emulator 12. Also works in Emulator 9 but the dialogue box is glitched although text is still readable
+Manhunt	5	5	5	5	5	5	5	0	0	0	0	0	Starkweather voice's not working, audio delay in cutscenes.
+Marc Ecko’s Getting Up: Contents Under Pressure	0	0	0	0	0	0	5	0	0	0	0	0	
+Marvel Nemesis: Rise of the Imperfects	0	0	0	0	0	5	0	0	0	0	0	0	
+Marvel vs. Capcom 2	0	0	0	0	0	0	5	0	0	0	0	0	Game crashes on a black screen after the xbox logo but seems to depend on the model of xbox 360 you are using? works fine on e models when in gameplay there are sprites glitching and the game runs slow.
+Marvel: Ultimate Alliance	2	2	2	2	2	2	5c	2	2	2	2	2	Use Emulator 7 to fix sound and loading issues. Cutscenes play but are a bit laggy. Without config loader, makes a *VERY* high-pitched sound during the intro and at the "Press A to Start", and it never loads into the main menu.
+Mashed	0	0	0	0	0	0	5	0	0	0	0	0	Also known as Mashed: Drive to Survive or Mashed: Fully Loaded. No issues.
+Mat Hoffman’s Pro BMX 2	5	0	0	0	0	0	5	0	0	0	0	0	
+Max Payne	5	0	0	0	0	0	5	0	0	0	0	5	Frame rate issues during action, You can play using Emulator 12.
+Max Payne 2: The Fall of Max Payne	5	0	0	0	0	0	5	0	1	0	0	1	In the tests I did, it didn't work on Emulator 9 or Emulator 12
+Maximum Chase	0	0	0	5	0	0	0	0	0	0	0	0	
+MechAssault	5	5	5	1	5	1	1	1	1	1	1	1	Emulator 5 recommended. Unplayable versions have visual glitches due to missing textures in the menus, HUD and FMVs.
+MechAssault (Xbox Live Demo)	3	3	3	1	3	1	1	1	1	1	1	1	If playing from The Clone Wars / Tetris Worlds Online combo, the game will crash to dashboard after selecting it. It needs to be run from the individual .xbe. As there's no way of connecting to Insignia (Xbox Live) currently on the 360, no other testing can be done so the game has been set to "menus" for now. With all other emulators, you get a black screen or a single color screen while the sound plays in the background.
+MechAssault 2: Lone Wolf	4	4	3	5	4	5	5	5	5	5	5	5	FMVs lag. Low framerate and graphics may glitch during action with the emulator, Emulator 2 and Emulator 5. Game restarts when loading in-game with Emulator 3.
+Medal of Honor Frontline	5	0	0	0	0	0	0	0	0	0	0	1	Frame rate drops in some areas, split screen multiplayer is unplayable because the bottom part of the screen most enviroments do not render correctly, not playable with Emulator 12
+Medal of Honor: European Assault	0	0	0	0	0	0	5	0	0	0	0	5	The game itself has a small drop in frames running on the Xbox 360. using Emulator 12 the game remains very playable.
+Medal of Honor: Rising Sun	5	0	0	0	0	0	5	0	0	0	0	1	Frame rate issues with resolutions higher than 480p, not playable with Emulator 12
+Mega Man Anniversary Collection	5	0	0	0	0	0	5	0	0	0	0	0	Megaman 8 is playable with very minor graphical glitches on the characters, the other games work perfectly.
+Melee-X (Super Smash Bros. Melee)	0	0	0	0	0	0	1	0	0	0	0	0	Hard crashes on Xbox logo. You need to turn off console to go back to dashboard.
+Men of Valor	0	0	0	0	0	0	5	0	0	0	0	0	
+Mercenaries: Playground of Destruction	0	0	0	0	0	0	5	0	0	0	0	0	Issues when using HDMI, works better with VGA. Tends to crash after around an hour.
+Metal Arms: Glitch in the System	0	0	0	0	0	0	5	0	0	0	0	0	No issues found at all. minor lag can happen when too much enemies are on screen. More the emulator versions will be tested in the future.
+Metal Dungeon	0	0	0	0	0	0	5c	0	0	0	0	0	Use Emulator 7 to fix disc read error and visual issues.
+Metal Gear Solid 2: Substance	4	4	4	4	0	4	4	4	0	0	0	0	On 7 and 7b, the Tanker segment is playable without a hitch. All versions marked as ingame crash when entering Strut B, rendering the game uncompletable.
+Metal Slug 3	4	4	4	4	4	4	4	4	4	4	4	4	Black Screen but can blindly navigate from menus to gameplay, booting from stats.xbe presents a corrupted green screen instead
+Metal Slug 4	4	4	4	4	4	4	4	4	4	4	4	4	the emulator to Emulator 8: texture issues; Emulator 9 and up: no texture issues but the game will hang after a couple minutes
+Metal Slug 5	4	4	4	4	4	4	4	4	4	4	4	4	the emulator to Emulator 8: texture issues; Emulator 9 and up: no texture issues but the game will hang after a couple minutes
+Metal Wolf Chaos	3	3	3	3	3	3	3	3	3	3	3	3	Gives disc error trying to start first mission
+Miami Vice	0	0	0	0	0	0	5	0	0	0	0	0	Playable on PAL console. Crashes on Xbox logo on NTSC console.
+Micro Machines	5	0	0	0	0	0	5	0	0	0	0	0	
+Midnight Club 3: DUB Edition	0	0	0	0	0	0	5	0	0	0	0	0	Some FPS drops in 720p. Set console resolution to 480p for better performance. Playable from start to finish. Sometimes the music in gameplay can glitch if you skip through songs quickly, this is fixed by restarting the game or waiting for the glitching song to finish.
+Midnight Club 3: DUB Edition Remix	0	0	0	0	0	0	5	5	1	1	1	1	Some FPS drops in 720p. The game runs great in 480p. Tokyo Challenge is completely playable from start to end. Sometimes the music in gameplay can glitch if you skip through songs quickly, this is fixed by restarting the game or waiting for the glitching song to finish.
+Midnight Club II	0	0	0	0	0	0	5	0	0	0	0	0	The game takes a while to start up
+Midtown Madness 3	1	1	1	1	1	1	5c	1	1	1	1	1	Use Emulator 7 to fix freeze at Xbox logo. Using CFG, loading screens are black, but you can press A once loading completes (~10 seconds) to continue. Small lighting issues exist.
+Midway Arcade Treasures	0	0	0	0	0	0	5	0	0	0	0	0	Gauntlet and Toobin' do not launch, otherwise playable.
+Midway Arcade Treasures 2	0	0	0	0	0	0	5	0	0	0	0	0	Gauntlet II and Primal Rage have minor graphical glitches at the top of the screen, everything else works fine.
+Midway Arcade Treasures 3	0	0	0	0	0	0	1	0	0	0	0	0	Freezes at initial loading screen, but most games can be played from their individual .xbe's. Only Hydro Thunder and Super Off Road (3D version) hang during the pre-race loading screen
+Mike Tyson Heavyweight Boxing	5	0	0	0	0	0	0	0	0	0	0	0	
+Minority Report: Everybody Runs	0	0	5	0	0	0	0	0	0	0	0	0	
+Mission: Impossible: Operation Surma	0	0	0	0	0	0	5c	0	0	0	0	0	Use Emulator 7 to fix freeze at loading screen.
+MLB Slugfest 2003	0	0	0	0	0	0	5	0	0	0	0	0	All resolutions above 480i / 480p show no video. Reports of some text corruption throughout the game in the menu, gameplay, pause, and other screens (RollPlayStation) but not for others (joedirt).
+MLB Slugfest 2004	0	0	5	0	0	0	0	0	0	0	0	0	
+MLB SlugFest 2006	0	0	0	0	0	0	5	0	0	0	0	0	
+MLB SlugFest: Loaded	0	0	0	0	0	0	5	0	0	0	0	0	Shows error about Xbox Live compatibility for a split second but game loads fine
+Mojo!	0	0	0	0	0	0	5	0	0	0	0	0	
+Momma Can I Mow the Lawn?	0	0	0	0	0	0	1	0	0	0	0	0	Crashes on Xbox logo
+Monopoly Party!	0	0	0	0	0	0	5	0	0	0	0	0	Only plays on NTSC console if it's set to 480p. Plays on PAL console without switching to 480p.
+Monster 4X4: World Circuit	0	0	0	0	0	0	5	0	0	0	0	0	
+Monster Garage	5	0	0	0	0	0	0	0	0	0	0	0	
+Mortal Kombat: Armageddon	0	0	0	0	5	5	5	5	0	0	0	5	There is flickering on the title screen.
+Mortal Kombat: Deadly Alliance	0	0	0	0	0	0	5	0	0	0	0	0	Midway and intro cutscenes are glitched and are unwatchable but audio is working, bonus cutscenes seem to work without issue
+Mortal Kombat: Deception	0	0	0	0	0	5	5	0	0	0	0	0	Area 51 included demo isn't playable
+Mortal Kombat: Shaolin Monks	5	5	5	5	5	5	5c	5	5	5	5	5	Use Emulator 7 to fix the game not detecting a Fatality Attack (LB) during the tutorial. If not using CFG, you need to use a trainer, enable Infinite Fatality (LB + RB + X) and keep it on until you get the Brutality in order to finish. The screen after the Fatality tutorial turns black but can be restored by setting the camera to panoramic (RS). Alternatively, you can use an existing save file to skip the tutorial. Liu Kang save The game is beatable. Both Mortal Kombat II and The Suffering 2 Demo are playable as well. the emulator,Emulator 2,Emulator 5 low framerate. Emulator 4, Emulator 6 invisble menus, Emulator 8 some stuttering.
+Motocross Mania 3	0	0	0	0	0	0	5	0	0	0	0	0	
+MotoGP	4	4	4	4	4	5	5	5	5	5	5	5	With Emulator 5 and earlier, there is low framerate and some graphical glitches during a race. Game crashes while racing after a bit.
+MotoGP 2	4	4	4	4	4	5	5	5	1	1	1	1	With Emulator 5 and earlier, there is low framerate and some graphical glitches during a race. Game crashes while racing after a bit. Doesn't start with Emulator 9 and newer.
+MotoGP 3: Ultimate Racing Technology	0	0	0	0	0	0	5	0	0	0	0	0	No issues with performance, but impossible to assign control to the right trigger
+Motor Trend presents Lotus Challenge	4	4	4	4	4	4	5c	4	4	4	4	4	Use Emulator 7 to fix opening FMV and menu black screens. Minor issues still exist such as texture flickering on some clouds only on one track (Hethel), car lights have small black bars next to the lights while using/looking at it with the back camera (holding RB).
+MTV Music Generator 3: This Is the Remix	5	0	0	0	0	0	5	0	0	0	0	0	
+MTX Mototrax	0	0	0	0	0	0	5	5	0	0	0	1	
+Murakumo: Renegade Mech Pursuit	5	0	0	0	0	0	4	0	0	0	0	3	Audio issues and save data gets corrupted after first save. On Emulator 12 game crashes after first mission cutscene.
+Muzzle Flash	0	0	0	0	0	0	5	0	0	0	0	0	
+MVP 06 NCAA Baseball	0	0	0	0	0	0	5	0	0	0	0	0	
+MVP Baseball 2003	0	0	0	0	0	5	0	0	0	0	0	0	
+MVP Baseball 2004	0	0	0	0	0	5	5	0	0	0	0	0	Jersey textures are glitchy and some stadium music (eg. when hitting a home run) won't play. Everything else is fine.
+MVP Baseball 2005	0	0	0	0	0	0	5	0	0	0	0	0	Same as MVP Baseball 2004
+MX 2002 Featuring Ricky Carmichael	1	1	1	1	1	1	5c	1	1	1	1	1	Use Emulator 7 to fix Xbox logo crash.
+MX Superfly	3	3	1	1	3	1	1	5	1	1	1	1	Works fine on Emulator 8. Freezes in menu after selecting a race for Emulator 1, 1_1, and 2. Freezes at Xbox logo on emulators 3/5/6/7/2019/2021a/2021b/2021c.
+MX Unleashed	0	0	0	0	0	0	5	0	0	0	0	0	
+MX vs. ATV Unleashed	0	0	0	0	0	0	5	0	0	0	0	0	
+MX World Tour Featuring Jamie Little	0	0	0	0	0	0	5	0	0	0	0	0	Lower fps
+Myst III: Exile	0	0	0	0	0	0	5	0	0	0	0	0	
+Myst IV: Revelation	0	0	0	0	0	0	5	0	0	0	0	0	Choppy videos, animations
+Namco Museum	5	0	0	0	0	0	0	0	0	0	0	0	
+Namco Museum 50th Anniversary	0	0	0	5	0	0	0	0	0	0	0	0	Sometimes takes a while to go back to the main hub. Crashes when starting a 1 player game on Galaga.
+NARC	0	0	0	0	0	0	5	0	0	0	0	5	Music can occasionally break after taking LSD, pausing and unpausing fixes this. Original arcade game (separate xbe) works fine.
+NASCAR 06: Total Team Control	1	1	4	1	1	4	5	5	4	4	4	4	Audio problems in later versions of the emulator (2019-2021c). Game has voice recogniton, and immediately picks up the controller as having a headset connected, muting the spotter and sending out some sort of sound signal the game detects as either cursing or gibberish. (all) Loading bars are not present in menus. (all) Emulator 3 & 6 will show black screen on HUD when car finally appears on track. Emulator 4 will crash when trying to load a track. Minor lag on Emulator 8.
+NASCAR 07	0	0	0	0	0	0	5	0	0	0	0	0	
+NASCAR 2005: Chase for the Cup	0	0	0	0	0	0	5	5	5	5	0	0	Works fine. -Mitch1256. Emulator 7, Emulator 8, Emulator 9 or Emulator 10, works pretty good, without sound issues. -Axelcitrico
+NASCAR Heat 2002	0	0	0	0	0	0	5	0	0	0	0	0	
+NASCAR Thunder 2002	0	0	0	0	0	0	5	0	0	0	0	0	
+NASCAR Thunder 2003	0	0	0	0	0	0	5	0	0	0	0	0	
+NASCAR Thunder 2004	0	0	0	0	0	0	5	0	0	0	0	0	
+NBA 2K2	0	0	0	0	0	0	5	0	0	0	0	0	
+NBA 2K3	0	0	0	0	0	0	5	0	0	0	0	0	
+NBA 2K6	0	0	0	0	0	0	5c	0	0	0	0	0	Use Emulator 7 to fix game crashing at the 2K logo. Game may take up to 30 seconds to start.
+NBA 2K7	0	0	0	0	0	0	5c	0	0	0	0	0	Use Emulator 7 to fix game crashing at the 2K logo. Game may take up to 30 seconds to start.
+NBA Ballers	0	0	0	0	0	0	5	0	0	0	0	0	
+NBA Ballers: Phenom	0	0	0	0	0	0	5	0	0	0	0	0	
+NBA Inside Drive 2002	0	0	0	0	0	0	5	0	0	0	0	0	
+NBA Inside Drive 2003	0	0	0	0	0	0	5	0	0	0	0	0	
+NBA Inside Drive 2004	0	0	0	0	0	0	5	0	0	0	0	0	
+NBA Jam 2004	0	0	0	0	0	0	1	0	0	0	0	0	Freezes at loading screen
+NBA Live 06	0	0	0	5	0	0	5	0	0	0	0	0	
+NBA Live 07	5	5	5	5	5	5	1	1	1	1	1	1	Emulator 7/7b, 2019, 2021a/b/c all crash at startup attempting to switch the refresh rate from 50Hz to 60Hz, may only affect PAL consoles, needs testing on NTSC. GOD install recommended to avoid potential infinite loading bug.
+NBA Live 2002	0	0	0	0	0	0	5	0	0	0	0	0	
+NBA Live 2003	0	0	0	0	0	0	5	0	0	0	0	0	Regular games don't appear to run on any the emulator, but 1v1 does.
+NBA Live 2004	5	0	0	0	0	0	5	0	0	0	0	0	
+NBA Live 2005	0	0	0	0	0	0	5	0	0	0	0	0	
+NBA Starting Five	0	0	0	0	0	0	5	0	0	0	0	0	Low FPS in basket area
+NBA Street V3	0	0	0	0	0	0	5	0	0	0	0	0	Intro stutters but gameplay is normal.
+NBA Street Vol. 2	0	0	0	0	0	0	5	0	0	0	0	0	Tested with a NTSC copy on a NTSC console. A bit of stuttering on FMVs and Main Menu music. The game is very playable.
+NCAA College Basketball 2K3	0	0	0	0	0	0	5	0	0	0	0	0	
+NCAA College Football 2K3	0	0	0	0	0	0	5	0	0	0	0	0	
+NCAA Football 06	0	0	0	0	0	5	5	0	0	0	0	0	March Madness 2006 demo must be started from inside the game, the controller will auto-vibrate in the loading screen before the match
+NCAA Football 07	0	0	0	0	0	0	5	0	0	0	0	0	
+NCAA Football 08	0	0	0	0	0	0	5	0	0	0	0	0	
+NCAA Football 2003	0	0	0	0	0	0	3	0	0	0	0	0	Hangs at the pre-game loading screen
+NCAA Football 2004	0	0	0	0	0	0	5	0	0	0	0	0	
+NCAA Football 2005	4	0	0	4	4	4	5	5	0	0	0	5	stuttering during the intro music and framerate drops when many players are on screen on Emulator 7/Emulator 12. the emulator fixes intro music, but causes texture bugs.
+NCAA Football 2005/Topspin Combo	0	0	0	0	0	0	5	0	0	0	0	0	NCAA Football has stuttering during the intro music and framerate drops when many players are on screen. Top Spin must be run from its own xbe or game will crash to dashboard
+NCAA March Madness 06	0	0	0	0	0	0	5	0	0	0	0	0	NCAA Football 06 demo must be started from inside the game
+NCAA March Madness 2004	0	0	0	0	0	0	5	0	0	0	0	0	Commentator voices stutter during game
+NCAA March Madness 2005	0	0	0	0	0	0	5	0	0	0	0	0	
+Need for Speed Carbon	0	0	0	0	0	0	5	0	0	0	0	0	Minor graphical border issue at the top and small left of the screen
+Need for Speed Most Wanted (2005)	5	5	4	4	5	4	4	4	4	4	4	4	With the emulator, Emulator 2, and Emulator 5, FMVs lag and low framerate sometimes during a race, but the game is playable. With all other emulators, Xbox encountered error after some races in career. Audio sometimes pops/crackles.
+Need for Speed Underground	4	4	4	5	4	5	4	4	1	1	1	1	With Emulator 7 and Emulator 8, FMVs lags. With the emulator, Emulator 2, Emulator 3 and Emulator 5, the loading is slow. With all versions after completing 10 races, the game no longer loads. The problem occurs with NTSC and PAL. To fix this: disable autosave, after you finish a race press "Continue" and the game will ask if you wanna save the game, choose "No". After you finish playing the game, go back to "Underground Menu", go to "Save" and there you can save your progress.
+Need for Speed Underground 2	5	5	5	5	5	5	5	5	5	5	5	5	Main game a little laggy sometimes but plays fine. Burnout 3 demo freezes a few seconds into the race, fixable using Emulator 7.
+Need for Speed: Hot Pursuit 2	4	4	4	4	4	4	5c	4	4	4	4	4	Use Emulator 7 to fix black screen when in gameplay.
+Neighbours from Hell	5	0	0	0	0	0	4	0	0	0	0	0	Strong distortion of the Woody and Rottweiler sprites on Emulator 7. The game works perfectly on the emulator.
+New Legends	0	0	0	0	0	0	5	0	0	0	0	0	
+NFL 2K2	2	0	0	0	0	0	0	5	0	0	0	0	The game only plays the intro. After that, the game goes into the pre-game loading screen and causes a fatal crash.
+NFL 2K3	0	0	0	0	0	5	5	0	0	0	0	0	Takes a long time to boot to main menu. Fully playable.
+NFL Blitz 20-02	5	0	0	0	0	0	0	0	0	0	0	0	
+NFL Blitz 20-03	5	0	0	0	0	0	0	0	0	0	0	0	
+NFL Blitz Pro	5	0	0	0	0	0	0	0	0	0	0	0	
+NFL Fever 2002	0	0	0	0	0	0	3	5	1	1	1	1	Report of freezing as the match starts on Emulator 7, may be an issue with Emulator 8 on specific minigames? Fusion Frenzy demo is playable if started from its own .xbe. Crashes at Xbox logo on Emulator 9 through Emulator 12. Came with Emulator 9 on Xbox One.
+NFL Fever 2003	0	0	0	0	0	0	5	0	0	0	0	0	
+NFL Fever 2004	0	0	0	0	0	5	1	0	0	0	0	0	Hangs at the Xbox logo with Emulator 7. Emulator 6 is officially supported.
+NFL Head Coach	0	0	0	0	0	0	5	0	0	0	0	0	
+NFL Street	0	0	0	0	0	0	5	0	0	0	0	0	
+NFL Street 2	0	0	0	5	0	0	5	0	0	0	0	0	Only works if you do not have a save file for Need for speed underground 2, SSX 3, Nba live 2005, nba street vol 2, goldeneye rogue agent, NFL street 1 or Madden NFL 05 otherwise gets stuck on title screen after pressing start and checking the hard drive. Emulator 4 works no issue even with saves on other games
+NHL 06	0	0	0	0	0	0	5	0	0	0	0	0	
+NHL 07	1	1	1	1	1	1	5c	1	1	1	1	1	Use Emulator 7 to fix fatal crash when loading into a match and severe audio stutter issues. Game plays pretty much perfect tested different game modes and the mini games everything is fine. All other emulators crash or freeze on loading screen.
+NHL 2002	0	0	0	0	0	0	5	0	0	0	0	0	
+NHL 2003	0	0	0	0	0	0	5	0	0	0	0	0	Sound Issues
+NHL 2004	5	0	0	0	0	0	0	0	0	0	0	0	
+NHL 2005	0	0	0	0	0	0	5	0	0	0	0	0	
+NHL 2K3	0	0	0	0	0	0	5	0	0	0	0	0	
+NHL 2K6	0	0	0	0	0	0	5c	0	0	0	0	0	Use Emulator 7 to fix game crashing at the Visual Concepts logo. Game may take up to 30 seconds to start.
+NHL 2K7	0	0	0	0	0	0	5c	0	0	0	0	0	Use Emulator 7 to fix game crashing at the 2K logo. Game may take up to 30 seconds to start.
+NHL Hitz 20-02	4	4	4	4	4	4	4	4	4	4	4	4	Menu text is invisible because it renders off-screen, only the background video displays correctly. You can navigate it by blind, press A, Right or Left once then keep pressing A to enter an Exhibition Match. Gameplay and Demo Mode works normally. Affects USA and European versions.
+NHL Hitz 20-03	5	0	0	0	0	0	5	0	0	0	0	0	
+NHL Hitz Pro	0	0	0	0	0	0	5	0	0	0	0	0	
+NHL Rivals 2004	0	0	0	0	0	0	4	0	0	0	0	0	Crowd, puck texture issues (only white)
+Nickelodeon Party Blast	0	0	0	0	0	0	4	0	0	0	0	0	Sound problems in most minigames
+Nightcaster	0	0	0	0	0	0	5	0	0	0	0	0	
+Nightcaster II: Equinox	0	0	0	0	0	0	5	0	0	0	0	0	Synchrony
+Ninja Gaiden	0	0	5	0	0	0	5	0	0	0	0	0	
+Ninja Gaiden Black	4	0	5	0	0	0	5	0	1	0	0	1	Major graphical issues with blue flickering on Emulator 1, The unlockable NES game cannot be played, Doesn't leave the Xbox screen with Emulator 12
+Nobunaga no Yabou: Ranseiki	0	0	0	0	0	0	5	0	0	0	0	0	
+N.U.D.E. Natural Ultimate Digital Experience	0	0	0	0	0	0	3	0	0	0	0	0	Can't get past the menu without the included headset
+Obscure (2005)	0	0	0	0	0	0	5	5	2	0	0	2	The game runs pretty well and can be played through (on Emulator 7/7b). Brightness seetings cannot be changed, In the newest emulators, the game gets stuck in the Xbox logo before an error message pop up.
+Oddworld: Munch’s Oddysee	0	0	0	0	0	0	5	0	0	0	0	4	Emulator 7 officially supported, but most sounds apart from music are very distant or silent, the "backstory" fmv is glitchy while some others fmvs have frame drops, frame rate drops sometimes.
+Oddworld: Stranger’s Wrath	3	3	3	3	3	3	4c	3	3	3	3	3	Custom config with Emulator 7 fixes most text and allows gameplay. Some UI elements such as health bars and ammo select fail to render. Actor models render with incorrect shading. Shadows, skybox, and environment may flicker. Game may freeze if left idle for too long. Resets to Xbox logo after initial loading screen from the emulator to Emulator 9. Freezes after new game FMV on Emulator 10/b/c.
+Open Season	0	0	0	0	0	5	0	0	0	0	0	0	The camera is jittery when running uphill on the Beaver Damage Stage. Xbox 360 version is also available.
+Operation Flashpoint: Elite	0	0	0	0	0	0	5	0	0	0	0	0	
+Otogi 2: Immortal Warriors	0	0	0	0	0	0	5	0	0	0	0	0	
+Otogi: Myth of Demons	0	0	0	0	0	0	5	0	0	0	0	0	Cosmetic glitch in menus with ripple dissolve effect and some texture flickering.
+Outlaw Golf	2	2	2	2	2	2	2	2	2	2	2	2	Freeze after intro videos.
+Outlaw Golf 2	5	0	0	0	0	0	5	0	0	0	0	0	
+Outlaw Golf: Holiday Golf	0	0	0	0	0	0	1	0	0	0	0	0	Crashes on Xbox logo.
+Outlaw Golf: 9 Holes Of X-Mas	0	0	0	0	0	0	5	0	0	0	0	0	Executable in root folder crashes to dashboard but both demos can be played from their own .xbe's
+Outlaw Golf: 9 More Holes Of X-Mas	0	0	0	0	0	5	4	0	0	0	0	0	Framerate issues
+Outlaw Tennis	0	0	0	5	0	0	5	0	0	0	0	0	
+Outlaw Volleyball	4	4	4	4	4	4	5c	4	4	4	4	4	Use Emulator 7 to fix artifacting at top of screen and heavy framerate and stuttering issues. Still some slight frame drops on some stages.
+Outlaw Volleyball: Red Hot	0	0	0	0	0	0	5	0	0	0	0	0	
+OutRun 2006: Coast 2 Coast	4	4	4	4	4	4	4	4	4	4	4	5	Emulator 7 and most others are playable, however on "collect the coins” missions the coins aren’t rendered, only Emulator 12 does this. All cores have occasional slight FPS drops and don’t correctly render the road/assets ahead in higher detail, it’s always low poly textures in the player’s viewpoint. This can be considered a limitation of the emulator itself. Initial load into the first race is very slow (minutes) due to the game loading up the virtual X,Y,Z partitions with cache data.
+OutRun 2	0	0	0	0	0	5	5	0	0	0	0	0	Audio loops occasionally get stuck. Graphics do not always stream in time around checkpoints. Performance drops during game play.
+Over the Hedge	0	0	0	5	0	0	0	0	0	0	0	0	While on the official list, freezes for some after start on both PAL and NTSC.
+Pac-Man World 2	0	0	0	0	0	0	5	0	0	0	0	0	Game is playable. However, it can only be played if you transfer an already saved game from an Original Xbox to the Xbox 360 HDD as you will get the "Error encountered while attempting to save" error while trying to create new save file as you cannot save the game at all, but if save is transferred from OG Xbox to 360 it is playable. You can download a saved game here Pac-Man World 2 blank save.
+Pac-Man World 3	0	0	0	0	0	0	5	0	0	0	0	0	Random tearing in Pac-Man 3D Model, playable beyond that
+Pac-Man World Rally (prototype)	0	0	0	0	0	0	1	0	0	0	0	0	Fatal Crash Interception
+Painkiller: Hell Wars	0	0	0	0	0	0	5	5	1	1	0	0	NTSC and German versions playable on Emulator 8. General PAL version plays normally on Emulator 7.
+Panzer Dragoon Orta	0	0	0	0	0	0	5	5	0	0	0	0	Crashes on PAL at the start of Episode 4 unless you use Emulator 8.xex (official emulator fix).
+Panzer Elite Action: Fields of Glory	0	0	5	0	0	0	0	0	0	0	0	0	
+Pariah	0	0	0	0	0	5	0	0	0	0	0	0	There is a minor, but recurring, drop in performance during gameplay. The Loading bar does not display until it is almost full. There is a green line in the pre-game introduction video.
+Payout Poker &amp; Casino	0	0	0	0	0	0	1	0	0	0	0	0	Freezes on Xbox logo
+Peter Jackson’s King Kong: The Official Game of the Movie	0	0	0	0	0	0	5	0	0	0	0	0	Characters have black patches on them and frame rate jugs a lot when there are a lot of enemies present, leaving as playable but needs more testing
+Petit Copter	0	0	0	0	0	0	5	0	0	0	0	0	
+Phantasy Star Online Episode I &amp; II	0	0	0	0	0	0	4	0	0	0	0	0	Offline patch required to play as there's no way of connecting to Insignia (Xbox Live) on 360 for now. Freezes on entering the boss area in Caves in Episode 1
+Phantom Crash	5	0	0	0	0	0	0	0	0	0	0	0	the emulator is supported, but suffers from consistent audio problems and low FPS.
+Phantom Dust	0	0	0	0	0	0	5	0	0	0	0	0	Occasional frame drops
+Pilot Down: Behind Enemy Lines	0	0	0	0	0	0	5	0	0	0	0	0	
+Pinball Hall of Fame - The Gottlieb Collection	5	0	0	0	0	0	5	0	0	0	0	0	Plays well.
+Pirates of the Caribbean	0	0	0	0	0	0	5	0	0	0	0	0	Frame rate issues
+Pirates: The Legend of Black Kat	0	0	0	0	0	0	5	0	0	0	0	0	Fmvs are stuck to the left game slowdowns when a lot of enemies are on screen or a lot of particles
+Pitfall: The Lost Expedition	5	0	0	0	0	0	0	0	0	0	0	0	
+Playboy: The Mansion	0	0	0	0	0	0	5	0	0	0	0	0	
+Plus Plumb 2	0	0	0	0	0	0	5	0	0	0	0	0	
+Pocketbike Racer	0	0	0	0	0	0	5	0	0	0	0	0	
+Pool Shark 2	0	0	0	0	0	0	5	0	0	0	0	0	
+Powerdrome	0	0	0	0	0	0	5	0	0	0	0	0	Sky textures issues
+Predator: Concrete Jungle	5	0	0	0	0	0	0	0	0	0	0	0	
+Prince of Persia: The Sands of Time	5	0	0	0	0	0	5	0	5	0	0	5	Frame rate drops in some areas, Trying to launch Prince of Persia 1 and 2 gives a black screen with audio.
+Prince of Persia: The Two Thrones	4	4	2	4	4	5	5	5	5	5	5	5	Older emulators: FMV don't stutter, Prince's shadow it's a square, the VFX lights remain on screen. On Emulator 3, freezes on the first loading. On Emulator 4, shadow is fixed. Up to Emulator 8: All previous glitches are fixed, but FMV now stutter. Framerate drops when fighting larger groups of enemies with heavy light effects (glowing of Dark Prince's attacks). Newest emulators: All fixed, no framedrops (I believe maybe I'm insane). On widescreen mode, FMV's are zoomed in to fit the screen (Pan and Scan).
+Prince of Persia: Warrior Within	4	4	2	5	4	5	5c	4	1	1	1	1	Use Emulator 7 to fix black screen after the Ubisoft logo (or content disclaimer screen in the Japanese version) and framerate/VFX issues. If is not used, framerate issues are present on Emulator 4/6/7/7b and VFX show a white screen on the emulator/Emulator 2. Error at Xbox logo on Emulator 9, Emulator 10, Emulator 11, and Emulator 12.
+Prisoner of War	0	0	0	0	0	0	5	0	0	0	0	0	
+Pro Cast Sports Fishing	0	0	0	0	0	0	5	0	0	0	0	0	Lake texture issues
+Pro Evolution Soccer 4	0	0	0	0	0	0	0	0	0	0	0	5	
+Pro Evolution Soccer 5	0	0	0	0	0	0	0	0	0	0	0	5	
+Pro Fishing Challenge	0	0	0	0	0	0	5	0	0	0	0	0	
+Pro Race Driver	5	0	0	0	0	0	0	0	0	0	0	0	
+Project Gotham Racing	4	4	4	4	4	4	5	4	4	4	4	4	Game runs at slow speed during a race with the emulator, Emulator 2, and Emulator 5. Performance is better but does still run slightly slow in some areas during a race with Emulator 3 and newer, despite Emulator 7 being officially supported.
+Project Gotham Racing 2	4	4	4	5	4	5	5	5	5	5	5	5	With Emulator 3 and earlier, car select screen shows black screen, but can be worked around by flipping through cars. Transmission select screen is always black and in-game music does not play. In-game pause menu doesn't open on first try. There may be low framerate during a race.
+Project: Snowblind	3	3	3	3	3	3	4c	3	3	3	3	3	Use Emulator 7 to fix audio and crash when exiting main menu. Even with config, has heavy rendering issues, but game is completable.
+ProStroke Golf - World Tour 2007	0	0	0	0	0	0	5	0	0	0	0	0	
+Psi-Ops: The Mindgate Conspiracy	0	0	0	0	0	0	5	0	0	0	0	0	
+Psychonauts	1	1	1	5	1	5	5	5	5	0	0	5	You'll need to get a copy of the game that matches your console's region like `EU on Pal` or `USA on NTSC` This worked for Mr.SuS.60 and here are the results:
+Psyvariar 2: Extend Edition	0	0	0	0	0	0	5	0	0	0	0	0	
+Pulse Racer	0	0	0	0	0	0	1	0	0	0	0	0	Xbox logo
+Pump It Up: Exceed	5	0	0	0	0	0	5	0	0	0	0	0	
+Pure Pinball	5	0	0	0	0	0	5	0	0	0	0	0	
+Puyo Pop Fever	5	0	0	0	0	0	5	0	0	0	0	0	Japanese version officially supported. PAL works on modified console.
+Quantum Redshift	5	0	0	0	0	0	0	0	0	0	0	0	Runs very well.
+R: Racing Evolution	0	0	0	0	0	0	5	0	0	0	0	0	In the NTSC version there is a giant green circle blocking race intros and replays but they don't crash the game, while the PAL version plays normally. Framerate drops when many cars are on screen
+RalliSport Challenge	0	0	5	0	0	0	5	0	0	0	0	0	
+RalliSport Challenge 2	3	3	3	3	3	3	5c	4	4	4	4	4	Use Emulator 7 to fix flickering effects/shadows around cars and light issues mentioned later. Emulator 1/5/1_1/6 - freezes when trying to start race. Emulator 2/3 - freezes when trying to load race. Emulator 7/7b/19/21a/21b/21c - playable, but with glitched particle effects (flickering transparent triangles), replay camera ignores collisions. Freezes when trying to load penultimate race in amateur league, making the game incompletable. Emulator 7 may be less stable than later versions, as vehicle select sometimes freezes game - this bug could not be replicated in later versions, but may need more testing.
+Rally Fusion: Race of Champions	0	0	0	0	0	0	5	0	0	0	0	0	
+Rapala Pro Fishing	0	0	0	5	0	0	5	0	0	0	0	0	
+Rayman 3: Hoodlum Havoc	4	4	4	4	4	4	5c	4	4	4	4	4	Use Emulator 7 to fix missing voices and music and crash after completing a level.
+Rayman Arena	5	0	0	0	0	0	5	0	0	0	0	0	
+Raze’s Hell	5	0	0	0	0	0	5	0	0	0	0	5	Slight framerate issues, intro logo lags on default, seemingly fixed on 2021c?
+Real World Golf	0	0	0	0	0	0	4	0	0	0	0	0	Game loads fine but needs a special controller to start
+Rebellious Bullet	0	0	0	0	0	0	1	0	0	0	0	0	Crashes on Xbox logo
+Red Dead Revolver	5	5	5	0	0	0	5	0	0	0	0	0	Sometimes textures are missing in Emulator 7. But it runs fine in Emulator 2 & Emulator 3.
+Red Faction II	5	0	0	0	0	0	0	0	0	0	0	0	
+Red Ninja: End of Honor	4	4	4	4	4	4	5c	4	0	0	0	0	Use Emulator 7 to fix crash during gameplay or after first mission. There is a 3-4 sec lipsync delay during in-game cutscenes when using widescreen.
+RedCard 20-03	5	0	0	0	0	0	0	0	0	0	0	0	
+Reign of Fire	0	0	0	0	0	0	5	0	0	0	0	0	Shadow problems
+Rent a Hero No. 1	0	0	0	0	0	0	5	0	0	0	0	0	English prototype tested. Freezes after plugging the "Creamcast" on TV and trying to save
+Reservoir Dogs	0	0	0	0	0	0	5	0	0	0	0	0	
+Return to Castle Wolfenstein: Tides of War	4	4	5	5	4	5	5	4	5	5	5	5	Pretty poor framerate but that might be normal. -SlushieDX.
+Re-Volt (Beta)	2	2	2	2	2	2	5c	2	2	2	2	2	Playable with Emulator 7 using custom config. Otherwise console freezes on startup
+Richard Burns Rally	0	0	5	0	0	0	0	0	0	0	0	0	
+RLH: Run Like Hell	0	0	0	0	0	0	5	0	0	0	0	0	
+RoadKill	0	0	0	0	0	0	5	0	0	0	0	0	
+Robin Hood: Defender of the Crown	0	0	0	0	0	0	5	0	0	0	0	0	
+RoboCop	2	2	2	2	2	2	5c	2	2	0	0	2	Use Emulator 7 to fix crash to Xbox logo after intro
+Robot Wars: Extreme Destruction	0	0	0	0	0	0	5	0	0	0	0	0	
+Robotech: Battlecry	5	0	0	0	0	0	5	0	0	0	0	0	
+Robotech: Invasion	0	0	0	0	0	0	3	0	0	0	0	3	Major graphical issues in main menu unable to select anything.
+Robots	0	0	0	0	0	0	5	0	0	0	0	0	
+Robots Multi-Player Xbox® Racing Game	0	0	0	0	0	0	5	0	0	0	0	0	This game is a bonus on the 2005 "Robots" DVD. The only file that's needed is the "default.xbe" on the root of the disc.
+Rocky	0	0	0	0	0	0	5	5	0	0	0	0	
+Rocky: Legends	5	0	0	0	0	0	0	0	0	0	0	0	
+Rogue Ops	5	0	0	0	0	0	5	0	0	0	0	0	
+Rogue Trooper	0	0	5	0	0	0	0	0	0	0	0	0	
+RollerCoaster Tycoon	2	2	2	2	2	2	2	2	1	1	1	1	Hangs at title screen none of the the emulator files fix it. Emulator 9-2021c crash on Xbox logo.
+Rolling	0	0	0	0	0	0	3	0	0	0	0	0	Skipping intro video will freeze to black screen. After it plays out menus will show up but game will load to black screen
+Room Zoom: Race for Impact	0	0	0	0	0	0	3	0	0	0	0	0	Crashes after starting a race.
+Rugby 06	0	0	0	0	0	0	5	0	0	0	0	0	Plays well.
+Rugby 2005	0	0	0	0	0	0	5	0	0	0	0	0	
+Rugby Challenge 2006	0	0	0	0	0	0	5	0	0	0	0	0	
+Rugby League	0	0	0	0	0	0	5	0	0	0	0	0	Emulator 7 is supported, but crashes to dashboard.
+Rugby League 2	0	0	0	0	0	0	5	0	0	0	0	0	
+S.C.A.R. - Squadra Corse Alfa Romeo	0	0	0	0	0	0	5	0	0	0	0	5	Playable on PAL console. Hangs on Xbox logo in NTSC 360.
+Samurai Shodown V	0	0	0	0	0	0	4	0	0	0	0	0	Texture issues
+Samurai Warriors	5	0	0	0	0	0	5	0	0	0	0	0	
+Scaler	4	4	4	4	4	4	4	4	4	4	4	4	the emulator through Emulator 6 render the environments but not characters. Emulator 7 through 2021c do the opposite, rendering only the characters with glitchy levels.
+Scarface: The World Is Yours	5	5	5	5	5	5	5c	5	5	5	5	5	Use Emulator 7 to fix low framerate when driving especially when traffic or draw distance increase. Game is completeable.
+Scooby-Doo! Mystery Mayhem	0	4	0	0	0	0	4	0	0	0	4	4	Everything looks normal until you actually try to get into the game, where once you start a new game, you will instantly be met with a “This Original Xbox game has encountered a problem and can’t continue” message seconds after you started a new game.
+Scooby-Doo! Night of 100 Frights	5	0	0	0	0	0	0	0	0	0	0	0	Game crashes on the final boss, making it impossible to complete the game on this version.
+Scooby-Doo! Unmasked	0	0	0	0	0	0	4	0	0	0	0	0	Runs perfectly until you get into the first level. You can't move the character with the thumbstick or D-pad. Sliding around with B works but can make some parts very challenging.
+Scrapland	5	0	0	0	0	0	0	0	0	0	0	0	
+Sea World: Shamu’s Deep Sea Adventures	5	0	0	0	0	0	5	0	0	0	0	0	Runs fine.
+SeaBlade	0	0	0	0	0	0	5	0	0	0	0	0	
+Second Sight	4	4	4	4	4	4	5c	4	5	4	4	4	Use Emulator 7 to fix left analog stick not responding and the main menu being invisible. Emulator 9 fixes the menu issue, Emulator 12 fixes the controller issue.
+Secret Weapons Over Normandy	1	1	1	1	1	1	5c	1	1	1	1	1	Playable with Emulator 7 using backported config from xefutitle2021.xex. Hangs on Xbox logo in all other cases.
+Sega GT 2002	0	0	0	0	5	0	5	0	0	0	0	5	
+Sega GT Online	0	0	0	0	0	0	5	0	0	0	0	0	Local only
+Sega Soccer Slam	5	0	0	0	0	0	5	0	0	0	0	0	
+Sensible Soccer 2006	0	0	0	0	0	0	5	0	0	0	0	0	Hangs on Xbox logo on NTSC console, plays fine on PAL console (with minor graphical glitches in menus)
+Sentou Yousei Yukikaze: Yousei No Mau Sora	0	0	0	0	0	0	3	0	0	0	0	0	Long delays when loading menus. Freezes when mission starts
+Serious Sam	0	0	0	5	0	0	5	0	0	0	0	0	The effect used to teleport enemies to the map can glitch out, Sometimes when using a serious bomb the game crashes
+Serious Sam II	0	0	0	0	0	0	1	0	0	0	0	0	Corrupts the xbox logo then turns off xbox 360
+Shadow of Memories	0	0	0	0	0	0	5	0	0	0	0	0	
+Shadow Ops: Red Mercury	0	0	0	0	0	0	5	0	0	0	0	0	
+Shadow the Hedgehog	5	0	0	0	0	0	5	0	0	0	0	0	Game crashes randomly with a fatal crash intercepted error and takes you to the dashboard, levels like lost impact work without issue when replaying them via level replay.
+Shadowrun	0	0	0	0	0	0	1	0	0	0	0	0	Freezes on black screen after Xbox logo
+Shark Tale	0	0	0	0	0	5	0	0	0	0	0	0	
+Shattered Union	0	0	0	0	0	0	5	0	0	0	0	0	
+ShellShock: Nam ’67	5	0	0	0	0	0	5	0	0	0	0	0	
+Shenmue II	0	0	0	0	0	5	5	0	0	0	0	0	Trying to play space harrier and hang-on will crash the game
+Shikigami no Shiro	0	0	0	0	0	0	1	0	0	0	0	0	Freeze at Xbox start screen
+Shikigami no Shiro Evolution	1	1	1	1	1	1	1	1	1	0	0	1	Crashes to dashboard, "not supported" prompt briefly appears and hangs on Xbox logo with Emulator 9 and Emulator 12.
+Shikigami no Shiro II	1	1	1	1	1	1	5c	1	1	0	0	1	Use Emulator 7 to fix Xbox logo crash. "Not supported" prompt briefly appears and hangs on Xbox logo with Emulator 9 and Emulator 12.
+Shinchou Mahjong (Nobunaga Mahjong)	0	0	0	0	0	0	5	0	0	0	0	0	
+Shin Megami Tensei Nine	0	0	0	0	0	0	5	0	0	0	0	0	
+Showdown: Legends of Wrestling	0	0	0	0	0	0	5c	0	0	0	0	0	Use Emulator 7 to fix fatal Crash after Xbox logo. Heavy lags on opening/entrances when starting a game (can be skipped by pressing Start) and minor shadow glitch, but otherwise gameplay is fine. PAL and NTSC tested.
+Shrek	5	5	5	5	5	5	5c	4	5	5	5	5	Use Emulator 7 to fix texture issues and major slowdown (minor slowdowns still present). Without it, no matter which the emulator is used, the game suffers from major slowdown in various areas, and loading animation never shows. On Emulator 1, 1_1, 5, and 6, Shrek's character model has shadow glitches.
+Shrek 2	0	0	0	0	0	5	0	0	1	1	1	1	
+Shrek SuperSlam	0	0	0	0	0	0	5	0	0	0	0	0	Flickering intro video (NTSC), crashes at loading (PAL).
+Shrek: Super Party	0	0	0	0	0	0	5	0	0	0	0	0	
+Sid Meier’s Pirates!	0	0	0	5	0	0	0	0	0	0	0	0	While sailing on the world map, there are occasional choppy animations. The German version of the game has a bug that doesn't allow dividing the plunder, making the game unbeatable. 2K never fixed the bug on Xbox One. The game did not get sold as a Xbox Original in Germany.
+Silent Hill 2: Restless Dreams	5	5	5	5	5	5	5	5	5	5	5	5	PAL version will only display a Black Screen (tested on every the emulator). NTSC version is playable on every the emulator, but expect texture and graphical issues. James' flashlight will always shine through his back.
+Silent Hill 4: The Room	0	0	5	0	5	0	0	0	0	0	0	4	When characters face are moving visible black tears appear on their faces, Use Emulator 5 to fix the issue, Emulator 12: cutscenes are shaking and ín-game cutscenes are blurry. Emulator 5: has lags in pre-rendered cutscenes, the game also starts to slow down when too many enemies appear on screen at once.
+Silent Scope Complete	0	0	0	0	0	0	5	0	0	0	0	0	Silent Scope 1 and 3 are completely playable. Silent Scope 2 has textures missing and slow framerate.
+Ski Racing 2005 Featuring Hermann Maier	0	0	0	0	0	0	5	0	0	0	0	0	
+Ski Racing 2006	0	0	0	0	0	0	5	0	0	0	0	0	
+Slam Tennis	0	0	0	0	0	0	5	0	0	0	0	0	
+Smashing Drive	0	0	5	0	0	0	5	0	0	0	0	0	
+Sneak King	0	0	0	0	0	0	5	0	0	0	0	0	
+Sneakers	0	0	0	5	0	0	0	0	0	0	0	0	
+Sniper Elite	3	5	5	5	3	5	5	5	0	0	0	0	Reports of freezing at level select for pal while others don't have this issue, NTSC version works fine without issue
+Soldier of Fortune II: Double Helix	0	0	0	0	0	0	5	0	0	0	0	0	Trying to skip opening intros crashes the game, frame rate seems inconsistant but might be normal compared to real hardware.
+Sonic Heroes	5	0	0	0	0	0	4	5	1	1	1	1	The framerate will sometimes drop severely into the low 10s when lots of enemies are on screen, usually during boss battles. Numerous minor graphical glitches with the menus. Opening intro has audio issues. Cutscenes are sometimes choppy. Does not start with Emulator 9 and 2021.
+Sonic Mega Collection Plus	5	0	0	0	0	0	0	0	0	0	0	5	Minor audio issues in Emulator 1 and 21c, noticable lag in 21c. audio behaves strange sometimes.
+Sonic Riders	0	0	0	0	0	0	5	0	1	1	1	5	Shadows Render incorrectly (Grey Circles). The Start button in controller 1 is not recognized when trying to start a single race, forcing you to have the controller set to player 2, to fix this issue on Emulator 7 you must disable Nova Plugin on Aurora. Issue is fixed on Emulator 12, and framerate is more stable. Some users report error on the Xbox logo for a brief second on Emulator 9 through Emulator 12.
+Soulcalibur II	0	0	0	0	0	0	5	0	0	0	0	0	
+Spartan: Total Warrior	0	0	0	0	0	0	5c	0	0	0	0	0	Use Emulator 7 to fix glitching models in cutscene and freezes after cutscene as well as improve image quality.
+Spawn: Armageddon	0	0	5	0	0	0	5	0	0	0	0	0	
+Special Forces: Nemesis Strike	0	0	0	0	0	0	5	0	0	0	0	0	
+Speed Kings	5	0	0	0	0	0	0	0	0	0	0	0	
+Sphinx and the Cursed Mummy	5	0	0	0	0	0	5	0	0	0	0	0	
+Spider-Man	0	0	5	0	0	0	0	0	0	0	0	0	
+Spider-Man 2	0	0	0	0	0	0	5	0	0	0	0	0	Some buildings don't render properly, appearing smaller than intended, leaving visible gaps where you can see into the void. Collision is unchanged, so it doesn't affect gameplay.
+Spikeout: Battle Street	1	1	1	1	1	1	5c	1	1	1	1	1	Use Emulator 7 to fix crash at Xbox logo.
+Splashdown	0	0	0	0	0	0	5c	0	0	0	0	0	Use Emulator 7 to fix water texture issues
+Splat Renegade Paintball	5	0	0	0	0	0	5	0	0	0	0	0	Plays normally
+SpongeBob SquarePants: Battle for Bikini Bottom	5	0	0	0	0	0	0	0	0	0	0	0	Very rarely the sky turns bright colors, otherwise no issues.
+SpongeBob SquarePants: Lights, Camera, Pants!	0	0	0	0	0	5	5	0	0	0	0	0	
+Spy Hunter	0	0	0	0	0	0	4	0	0	0	0	0	Lower FPS and slowdowns
+Spy Hunter 2	5	0	0	0	0	0	0	0	0	0	0	0	
+Spy Hunter: Nowhere to Run	0	0	0	0	0	0	5	0	0	0	0	0	
+Spy vs. Spy	0	0	0	0	3	0	3	0	3	0	0	3	Major graphical issues can blindly navigate menus, freezes on profile menu
+Spyro: A Hero’s Tail	5	4	4	4	5	4	4	4	4	4	4	4	All emulators starting with Emulator 2 have extremely high brightness and bloom. It doesn't seem to happen for LazyIllusion on Emulator 7. For the emulator and Emulator 5, small glitches are seen in some UI elements, otherwise very playable, and have been beaten to 100% several times with zero issues. Credits are a black screen but music can be heard. The manual save screen is invisible, it is visible on Emulator 5 but I am unsure if 1_1 causes any glitches. It seems as stable as Emulator 1 from my testing so consider using it, but in case of encountering any issues remember that Emulator 1 shouldnt have any, barring the ui elements mentioned before.
+SSX 3	5	5	5	5	5	5	5	5	1	1	1	1	Gives an error on Emulator 9 and xefu2021, playable on Emulator 7 and earlier with no issues
+SSX On Tour	4	0	0	0	0	0	4	4	4	0	0	4	Unbearably slow with major audio issues. Technically playable but a very far from ideal way to play
+SSX Tricky	3	4	1	1	3	5	5c	5	0	0	0	5	Use Emulator 7 to fix not being able to save/load. Other testing (NTSC):
+Stacked with Daniel Negreanu	0	0	0	0	0	0	5	0	0	0	0	0	
+Stake: Fortune Fighters	5	0	0	0	0	0	5	0	0	0	0	0	
+StarCraft: Ghost (proto)	4	4	4	4	4	4	4	4	4	4	4	4	Cannot run Level 1, others work fine. Cannot save on Emulator 9 and later. Worse framerate in some areas with Emulator 8.
+Star Trek: Shattered Universe	1	5	5	5	1	5	5	5	1	1	1	1	Glitched menus and graphics. Videos play fine
+Star Wars Episode III: Revenge of the Sith	5	0	0	0	0	0	5	0	0	0	0	0	
+Star Wars Jedi Knight II: Jedi Outcast	4	4	4	4	4	4	5c	4	4	4	4	4	Use Emulator 7 to fix main menu glitch, game running too fast, and performance issues.
+Star Wars Jedi Knight: Jedi Academy	5	0	0	0	0	0	5	0	0	0	0	0	
+Star Wars: Starfighter Special Edition	0	0	0	0	0	0	5c	0	0	0	0	0	Use Emulator 7 to fix game freeze during first mission
+Star Wars: Battlefront	5	5	5	5	5	5	5	5	5	5	5	5	Sometimes grass flickers but that may be normal
+Star Wars: Battlefront II	0	0	5	0	0	0	5	0	0	0	0	0	
+Star Wars: Jedi Starfighter	0	0	0	0	0	0	5	0	0	0	0	0	No menu buttons text.
+Star Wars: Knights of the Old Republic	5	0	0	0	0	0	5	0	0	0	0	0	Slightly slower framerate
+Star Wars: Knights of the Old Republic II: The Sith Lords	5	0	0	0	0	0	5	0	0	0	0	4	slow framerate in many areas
+Star Wars: Obi-Wan	4	4	4	4	4	4	4	4	4	4	4	5	It works but the shadows are broken and performance can be poor, all emulators except Emulator 12 require a rockcandy controller to play due to inputs not being recognised.
+Star Wars: Republic Commando	0	0	0	0	0	0	5	0	0	0	0	0	
+Star Wars: The Clone Wars	5	5	5	5	5	5	5	5	5	5	5	5	If playing from The Clone Wars / Tetris Worlds Online Combo, the game will crash to dashboard after selecting it. It needs to be run from the individual .xbe.
+Starsky &amp; Hutch	0	0	0	0	0	0	5	0	0	0	0	0	
+State of Emergency	0	0	5	0	0	0	5	0	0	0	0	0	
+Steel Battalion	3	3	3	3	3	3	3	3	3	3	3	3	Can’t press main weapon button to start. If the Y: temporary partition can be accessed, it would likely be possible to watch Last Played replays (copied from an Original Xbox) with potentially serious graphical glitches, based on testing the "Tekki Store demo disk" which automatically plays replays. This could be used to test for graphical glitching on every mission without pressing the "main weapon" button.https://www.youtube.com/watch?v=vNJAdUjPecs&t=650s
+Steel Battalion: Line of Contact	3	3	3	3	3	3	3	3	1	1	1	1	Can't get past the title screen without the special controller. There are glitchy graphics in attract mode, but it seems to have the least graphical glitching in Emulator 6 and if there was support for the controller via a plug-in. There seems to be an issue where the skybox is teal coloured and some VTs also appear to be that same teal colour or invisible when watching the attract mode in Emulator 6.https://www.youtube.com/watch?v=9sPishIFAts&t=79s
+Still Life	0	0	0	0	0	0	4	0	0	0	0	0	Occasional graphical glitches
+Stolen	1	1	1	1	1	1	5c	1	1	1	1	1	Use Emulator 7 to fix freeze at Xbox logo.
+Street Fighter Anniversary Collection	0	0	0	0	0	0	5	0	0	0	0	0	Works with PAL60 only.
+Street Hoops	0	0	0	0	0	0	5c	0	0	0	0	0	Use Emulator 7 to fix freeze a few seconds into the match.
+Street Racing Syndicate	5	0	0	0	0	0	0	0	0	0	0	0	
+Strike Force Bowling	0	0	0	0	0	0	5	0	0	0	0	0	Only plays on NTSC console if it's set to 480p. Plays on PAL console without switching to 480p. Camera zooming at bowling pins is broken.
+Stubbs the Zombie in Rebel Without a Pulse	5	0	0	0	0	0	0	0	0	0	0	5	Sometimes text loads with missing letters on Emulator 12
+Sudeki	0	0	0	0	0	0	4	0	0	0	0	0	Major graphical bugs in some areas, like transparent roads and distorted character models
+Super Bubble Pop	5	0	0	0	0	0	5	0	0	0	0	0	
+Super Monkey Ball Deluxe	5	0	0	0	0	0	0	0	0	0	0	0	Game must match console region, or else it won't boot. The game emulates lag incorrectly, causing stages such as Warp and Speedy Jam to slow down much more than on an original Xbox. Monkey Fight DX has a serious graphical rendering issue rendering it unplayable. Monkey Soccer DX suffers from a glitch where the screen goes black with an infinite soccer ball kick sound effect playing repeatedly in a loop. The game also takes nearly a minute to start up.
+Superman Returns	0	0	0	0	0	0	5	0	0	0	0	0	Cutscenes are laggy
+Superman: The Man of Steel	4	4	4	4	4	4	4	4	4	0	0	4	Intro FMVs are laggy and glitched depending on emulator version. Text in menus is completely missing in Emulator 4 and 6. In-game text appears normal, doubled-up, or missing. Game lags in all versions except the emulator when too many objects are on screen, presenting graphical glitches in sky from the emulator to 7b. In-game character is playable in Emulator 12, freezing shortly after loading in all other versions.
+SVC Chaos: SNK vs. Capcom	4	4	4	4	4	4	4	4	4	4	4	4	Major graphical issues, main menu is glitched and has to be navigated blindly character select is also glitched and can only see the fighter your selecting once in fights backgrounds are glitched and character sprites are glitchy and dialogue is broken and unable to be read, the game seems to be running slow.
+SWAT: Global Strike Team	3	3	3	3	3	3	5c	3	3	3	3	3	Use Emulator 7 to fix crash to Xbox logo after loading a mission. No graphics issues or any glitches it has only some framerate issues depending on the situation in game.
+SX Superstar	5	0	0	0	0	0	0	0	0	0	0	0	
+Syberia	0	0	0	0	0	0	5	0	0	0	0	0	Minor glitched garbled graphical issues on the left in 720p, 480p is black graphical issue on the left instead.
+Syberia II	0	0	0	0	0	0	5	0	0	0	0	0	
+Taito Legends	0	0	0	0	0	0	1	0	0	0	0	0	Freezes when selecting a game
+Taito Legends 2	0	0	0	0	0	0	2	0	0	0	0	0	Freezes on menus.
+Tak: The Great Juju Challenge	2	2	2	2	2	2	5c	2	2	2	2	2	Playable on Emulator 7 (NTSC only). Freezes during intro videos otherwise.
+Tak 2: The Staff of Dreams	2	2	2	2	2	2	5c	2	2	2	2	2	Playable on Emulator 7 (NTSC only). Freezes during intro videos otherwise.
+Takahashi Junko no Mahjong Seminar	0	0	0	0	0	0	5	0	0	0	0	0	
+Tao Feng: Fist of the Lotus	0	0	0	0	0	0	1	0	0	0	0	0	Turns off Xbox 360
+Taz Wanted	0	0	0	5	0	0	5	0	0	0	0	0	During World 3, Stage 2: Haunted there is a partially mis-textured graphic. The reconnect controller screen is not displayed.
+TD Overdrive: The Brotherhood of Speed	0	0	0	0	0	0	5	0	0	0	0	0	
+Tecmo Classic Arcade	0	0	0	0	0	0	5	0	0	0	0	0	
+Teen Titans	0	0	0	0	0	0	4	0	0	0	0	4	Emulator 7 cutscenes get stuck after doing combo tutorial gets stuck on black screen with hud then freezes a few seconds later, Emulator 12 cutscenes play fine but still cannot get past combo tutorial
+Teenage Mutant Ninja Turtles	5	0	0	0	0	0	5	0	0	0	0	0	
+Teenage Mutant Ninja Turtles 2: Battle Nexus	0	0	0	0	0	0	5	0	0	0	0	0	
+Teenage Mutant Ninja Turtles 3: Mutant Nightmare	0	0	0	0	0	0	5	0	0	0	0	0	
+Tenchu: Return From Darkness	0	0	0	0	0	0	5c	0	0	0	0	0	Use Emulator 7 to fix cutscenes and executions, which disables postprocess for cutscenes and uses softfilter instead. Without config loader, in-game cutscenes are broken and show a black screen and or white square with subtitles. Item selection menu is darker than it should be compared to real hardware. The screen distorts when performing an execution and fixes itself after. Game seems to be darker than it should be compared to real hardware.
+Tenerezza	0	0	0	0	0	0	5	0	0	0	0	0	
+Tennis Masters Series 2003	0	0	0	0	0	0	5	0	0	0	0	0	
+Terminator 3: Rise of the Machines	0	0	0	0	0	0	5	0	0	0	0	0	
+Terminator 3: The Redemption	0	0	0	0	0	0	5c	0	0	0	0	0	Use Emulator 7 to fix freeze at game splash screen.
+Test Drive	0	0	0	0	0	0	5	0	0	0	0	0	
+Test Drive Off-Road Wide Open	0	0	0	0	0	0	5	0	0	0	0	0	
+Test Drive: Eve of Destruction	5	0	0	0	0	0	5	0	0	0	0	0	Plays well.
+Tetris Worlds	5	0	0	0	0	0	5	0	0	0	0	0	
+Tetris Worlds (Online Edition)	5	5	5	5	5	5	5	5	5	5	5	5	If playing from The Clone Wars / Tetris Worlds Online combo, the game will crash to dashboard after selecting it. It needs to be run from the individual .xbe.
+The Bard’s Tale	0	0	0	0	0	0	5	0	0	0	0	5	Plays well.
+The Bible Game	4	0	0	0	5	0	5	0	0	0	0	5	in the emulator, everything looks fine until you find out the inputs are unresponsive, making it impossible to progress further into the game. Emulator 7, 1_1 and 2021c work with no issues
+The Da Vinci Code	0	0	0	0	0	0	5	0	0	0	0	0	There are some environments that are transparent. There is some skipping during the cut scenes.
+The Dukes of Hazzard: Return of the General Lee	4	5	5	5	4	5	5	5	5	5	5	5	the emulator/Emulator 5 - Minor laggy intro
+The Elder Scrolls III: Morrowind	0	0	0	0	0	0	5	0	0	0	0	0	Framerate suffers more than is typical on OG Xbox
+The Elder Scrolls III: Morrowind - Game of the Year Edition	0	0	0	0	0	0	5	0	0	0	0	0	
+The Fairly OddParents! Breakin’ Da Rules	5	0	0	0	0	0	0	0	0	0	0	0	
+The Godfather	0	0	0	0	0	0	5c	0	0	0	0	0	Use Emulator 7 to fix picture burned in the screen and low FPS in some areas. You can see lights through walls.
+The Great Escape	5	0	0	0	0	0	0	0	0	0	0	0	
+The Guy Game	0	0	0	0	0	0	5	0	0	0	0	0	
+The Haunted Mansion	4	4	4	4	4	4	5c	4	4	4	4	4	Use Emulator 7 to fix freeze when saving
+The Hobbit	0	0	0	0	0	0	2	0	0	0	0	0	Freeze at loading screen after tutorial
+The House of the Dead III	5	0	0	0	0	0	5	0	0	0	0	0	HotD2 included playable too
+The Hustle: Detroit Streets	0	0	0	0	0	0	5	0	0	0	0	0	
+The Chronicles of Narnia: The Lion, The Witch and The Wardrobe	0	0	0	0	0	0	5	0	0	0	0	5	
+The Chronicles of Riddick: Escape From Butcher Bay	1	1	1	1	1	1	1	1	2	2	2	2	On Emulator 9 and later only shows black screen but opening logos can be heard (the previous versions don't launch at all)
+The Incredible Hulk: Ultimate Destruction	5	0	0	0	0	0	5	0	0	0	0	0	Emulator 7 seems to play the game perfectly, albeit with very minor choppiness. No need to switch to 480p.
+The Incredibles	0	0	0	5	0	0	5	0	0	0	0	0	A few minor slowdowns, This game sometimes incorrectly loads the wrong textures on the wrong entities.
+The Incredibles: Rise of the Underminer	0	0	5	0	0	0	5	0	0	0	0	0	
+The Italian Job	0	0	0	0	0	0	5c	0	0	0	0	0	Use Emulator 7 to fix invisible menu and text issues and crashes on some missions preventing progress.
+The King of Fighters 2002	0	0	0	0	0	0	5	0	0	0	0	0	Emulator 7 is supported, but suffers from texture issues.
+The King of Fighters 2003	0	0	0	0	0	0	4	0	0	0	0	0	Menus have no text and the game has some graphical glitching.
+The King of Fighters '94 Re-bout	0	0	0	0	0	0	5	0	0	0	0	0	Only blue boxes can be seen at character select screen. Very minor graphic corruption during fights
+The King of Fighters NeoWave	0	0	0	0	0	0	5	0	0	0	0	0	
+The Legend of Spyro: A New Beginning	0	0	0	5	0	0	5	0	0	0	0	0	
+The Lord of the Rings: The Fellowship of the Ring	0	0	0	0	0	0	5	0	0	0	0	0	NTSC version save fine. PAL version unable to save due to menu being inaccessible, but can be completed without saving.
+The Lord of the Rings: The Return of the King	5	0	0	0	0	0	5	0	0	0	0	0	NTSC version plays on both NTSC and PAL consoles. PAL version hangs on Xbox logo on NTSC console and plays fine on PAL console.
+The Lord of the Rings: The Third Age	5	0	0	0	0	0	5	5	5	5	5	5	NTSC version plays on both NTSC and PAL consoles. PAL version hangs on Xbox logo on NTSC console and plays fine on PAL console. Some stuck sound effects after playing a while without restarting in 21. In emulators 7b and older, the glow around chests fills the whole screen.
+The Lord of the Rings: The Two Towers	0	0	0	0	0	0	5c	0	0	0	0	0	Use Emulator 7 to fix orcs falling through environment preventing level progression. Blurry heat haze graphics glitch. During credits the game crashes if your controller disconnects but this might be same issue on original Xbox.
+The Matrix: Path of Neo	0	0	0	0	0	0	4	0	0	0	0	0	Stutters alot eventually gets worse the more you play eventually freezing making it unplayable
+The Punisher	5	5	5	5	5	5	5	5	1	1	1	5	Game already was in the official compatibility list. Fully playable from start to finish on latest the emulator
+The Red Star (Unreleased)	0	0	0	0	0	0	5	0	0	0	0	0	
+The Simpsons: Hit &amp; Run	5	5	5	5	5	5	5	5	5	5	5	5	Some users report occasional screen tearing, and the right stick being inverted. Some emulators have slight pauses. Some users report unplayable for Emulator 9 through Emulator 12.
+The Simpsons: Road Rage	5	0	0	0	0	0	5	0	0	0	0	5	Some voice lines are missing on the emulator.xex, this can be fixed by using Emulator 7.xex
+The Sims	0	0	0	0	0	0	5	0	0	0	0	0	
+The Sims 2	0	0	0	0	0	0	5	0	0	0	0	5	Extremely minor graphical issues on the main menu, perfect otherwise. This issue applies to Emulator 7 and Emulator 12.
+The Sims Bustin’ Out	0	0	0	0	0	0	5	0	0	0	0	0	Possibly slower load times, but near-perfect.
+The SpongeBob SquarePants Movie	0	0	0	0	0	0	5	0	0	0	0	0	Sometimes textures are assigned to the wrong entity
+The Suffering	0	0	0	0	0	0	5	0	0	0	0	0	Minor graphical bug at the top of the left screen (not sure if normal on real hardware or just a issue playing at 720p), frame rate drops when there is a lot of effects on screen
+The Suffering: Ties That Bind	0	0	0	0	0	0	5	0	0	0	0	0	
+The Terminator: Dawn of Fate	5	0	0	0	0	0	0	0	0	0	0	0	
+The Thing	5	0	0	0	0	0	5	0	0	0	0	0	
+The Urbz: Sims in the City	0	0	0	0	0	0	5	0	0	0	0	0	Emulator 7 is supported, but tends to crash/bug when you leave the city, enter the shop, or start a cutscene
+The Warriors	2	2	2	2	2	2	5c	2	2	2	2	2	Use Emulator 7 to fix crash after intro. Minor stutter if many NPCs on screen at once. Attempting to boot the game on a console from a different region shows a dirty or unreadable disc error, this is consistent with behavior on the original Xbox.
+The Wild Rings (JAP)	0	0	0	0	0	0	5	0	0	0	0	0	Graphical issues while character selection
+Thief: Deadly Shadows	5	0	0	0	0	0	5	0	0	0	0	0	FPS slowdown in some areas
+Thousand Land	0	0	0	0	0	0	5	0	0	0	0	0	
+Thrillville	0	0	0	0	0	0	5	5	0	0	0	0	Areas will occasionally fail to properly materialize which can be fixed with reloading.
+Tiger Woods PGA Tour 06	0	0	0	0	0	0	5	0	0	0	0	0	
+Tiger Woods PGA Tour 07	0	0	0	0	0	0	5	0	0	0	0	0	
+Tiger Woods PGA Tour 2003	0	0	0	0	0	0	5	0	0	0	0	0	Random artifacting on the menus. Character models do not appear during character selection, but are still selectable
+Tiger Woods PGA Tour 2004	1	1	1	1	1	1	5	0	0	0	0	0	Playable in all regions on Emulator 7.xex. On other the emulator version, seems to freeze on loading screens.
+Tiger Woods PGA Tour 2005	0	0	0	0	0	0	5	0	0	0	0	0	
+Tim Burton’s The Nightmare Before Christmas: Oogie’s Revenge	2	2	2	2	2	2	5c	2	2	2	2	2	Use Emulator 7 to fix freezes at loading screen. Minor slowdowns, but playable.
+TimeSplitters 2	4	4	4	4	4	4	5c	4	4	4	4	5	Use Emulator 7 to fix left analog stick not being responsive in game with official Xbox 360 controller (wired or wireless). Otherwise, you need an aftermarket controller with both 360 and OG Xbox support. Temporal uplink screen preview is black. Controls fixed in Emulator 12.https://www.youtube.com/watch?v=5VEnuQgRKIE
+TimeSplitters: Future Perfect	0	0	0	0	0	0	5c	4	4	4	4	5	Use Emulator 7 to fix the left analog stick not being responsive in game with official Xbox 360 controller (wired or wireless) and glitchy gun textures. Otherwise, you will need an aftermarket controller with both 360 and OG Xbox support. Controller issue not present in Emulator 12, but gun texture issue still present.
+TMNT: Mutant Melee	0	0	0	0	0	5	0	0	0	0	0	0	
+TOCA Race Driver	5	5	5	5	5	5	5	5	5	5	0	5	All versions of the emulator appear to play the game with no major issues. `the emulator` may have a few framerate drops in certain situations. You may need to run the game as Game on Demand or a DVD2Xbox patched copy due to how the game's file structure is configured.
+TOCA Race Driver 2	5	5	5	5	5	5	5	5	5	5	5	5	All versions of the emulator appear to play the game with no major issues. `the emulator` may have a few framerate drops in certain situations. You will need to run the game as Game on Demand or a DVD2Xbox patched copy due to how the game's file structure is configured. This also applies to DTM Race Driver 2 and V8 Supercars 2 which are region-specific variants of the same game.
+TOCA Race Driver 3	5	5	5	5	5	5	5	5	1	1	1	1	If you don't have an HDD ready copy of the game patched with DVD2Xbox, you will need to download these files and extract the contents to where your game is installed to make it fully playable as an HDD backup, and make sure to replace any of the old files when prompted to. The game will NOT work as Game on Demand either, unless you created it with the DVD2Xbox patched files as an ISO first. This applies to V8 Supercars 3 as well, since it's the same game. Without applying the DVD2Xbox patches, it normally crashes to dashboard, with all of the Xbox One emulators crashing to the dashboard reguardless if the game is patched or not as well. `the emulator` may have a few framerate drops in...
+ToeJam & Earl III: Mission to Earth	1	1	1	1	1	1	5c	1	1	1	1	1	Use Emulator 7 to fix black screen (Emulator 3/5/6) and fatal crash on Xbox logo (Emulator 1/2/1_1/2019/2021c). Cutscenes tend to stutter and NTSC loads noticeably slower. PAL loads faster and is less stuttery.
+Tom & Jerry in War of the Whiskers	0	0	0	0	0	0	5	0	0	0	0	0	Some stages have minor slowdown, particularly with four players.
+Stikmars	0	0	0	0	0	0	4	0	0	0	0	0	Audio breaking up.
+Tom Clancy's Ghost Recon	0	5	0	0	0	0	0	0	0	5	0	0	
+Tom Clancy’s Ghost Recon 2	0	5	0	0	0	0	5	5	0	0	5	5	May freeze when closing app during a mission, must exit to main menu first. New the emulator versions have higher framerate but lack anti-aliasing. Versions 7 and older are playable but have low framerate.
+Tom Clancy’s Ghost Recon 2: Summit Strike	0	5	0	0	0	0	5	0	0	0	0	0	
+Tom Clancy’s Ghost Recon Advanced Warfighter	4	4	4	4	4	1	4	4	0	0	0	0	Game is stuck in 4:3 mode. Low framerate and freezing in busy areas. Crashes during gameplay with Emulator 6.
+Tom Clancy’s Ghost Recon: Island Thunder	0	0	0	5	0	0	5	0	0	0	0	0	
+Tom Clancy's Rainbow Six 3	4	4	4	4	4	4	5c	4	1	1	1	1	Use Emulator 7 to fix low framerate in some areas of the game and visual issues in corners of screen. Must change communicator output mode setting to "Speakers only" or else some voice lines are missing. Crashes to dashboard with Emulator 9 and newer.
+Tom Clancy’s Rainbow Six 3: Black Arrow	0	0	0	0	0	0	5	0	0	0	0	0	
+Tom Clancy’s Rainbow Six Critical Hour	0	0	0	0	0	0	5	0	0	0	0	0	
+Tom Clancy’s Rainbow Six: Lockdown	0	0	0	0	0	0	5	0	0	0	0	0	
+Tom Clancy’s Splinter Cell	0	5	0	0	0	0	5	5	0	0	0	5	
+Tom Clancy’s Splinter Cell Double Agent	0	0	0	0	0	5	5	0	0	0	0	0	
+Tom Clancy’s Splinter Cell Chaos Theory	0	0	5	0	0	0	5	0	0	0	0	1	
+Tom Clancy’s Splinter Cell Pandora Tomorrow	0	5	0	0	0	0	5	5	1	0	0	1	The OG Xbox white theme, at the start of the game, seems flicker instantly a bit when the Ubisoft intro starts until it's gone and the videoclip is back to normal, but the game can still be fully played. However, during gameplay, it lags in most areas expect it's not really very laggy, and the framerate will go back smoother (similar to playing it in original Xbox) which it only works when switching to a thermal vision.
+Tomb Raider: Legend	2	0	0	0	2	0	2	0	0	0	0	2	Copyright text flashes then freezes but can hear main menu theme, Emulator 1 and 1_1 black screen but audio can be heard
+Tony Hawk’s American Wasteland	5	0	0	0	0	0	0	0	0	0	0	0	
+Tony Hawk’s Pro Skater 2x	5	5	5	1	5	1	5	5	5	5	5	5	Runs almost perfectly on Emulator 1.
+Tony Hawk’s Pro Skater 3	4	4	4	5	4	4	5	4	5	5	5	5	Runs fine with 480p or 640x480 VGA in Xbox 360 Settings, otherwise audio plays while hung at Xbox logo, guide is broken. Game runs at a locked 60fps regardless of console resolution settings using Emulator 9 (Recommended) or Emulator 10-c. 480p limitation applies to all other builds.
+Tony Hawk’s Pro Skater 4	5	0	5	0	0	0	5	0	5	5	5	5	Improved performance under Emulator 3 (Recommended) at least.
+Tony Hawk’s Project 8	5	5	5	4	5	4	5	5	5	0	0	5	Framerate closest to OG Xbox hardware and minimal top screen ghosting using Emulator 3 (Recommended), Emulator 4 and Emulator 6 play FMVs with sound but no video, all 2D menu/HUD elements are completely missing.
+Tony Hawk’s Underground	0	0	0	0	0	0	5	5	0	0	0	0	Minor screen tearing and framerate issues.
+Tony Hawk’s Underground 2	5	5	5	4	5	4	5	5	5	0	0	5	Framerate issues, Emulator 9 (Recommended) and 2021 improve this to a very playable status with occasional spikes, mostly from long draw distances/asset streaming (In addition, Emulator 3, 7, and 7b all mitigate performance issues well. 5 and 6 break FMVs and 2D UI/HUD elements).
+Top Gear RPM Tuning	0	0	0	0	0	0	4	0	0	0	0	0	Can’t control a car
+Top Spin	5	5	3	3	5	5	5	5	5	0	0	5	Emulator 2 & 1_1 corrupt crowd textures, Emulator 3 & 5 crash in menus
+Torino 2006	0	0	5	0	0	0	0	0	0	0	0	0	
+Tork: Prehistoric Punk	5	0	0	0	0	0	0	0	0	0	0	0	FPS slowdowns in some areas
+Total Club Manager 2004	0	0	0	0	0	0	1	0	0	0	0	0	Crashes to dashboard
+Total Club Manager 2005	0	0	0	0	0	0	5	0	0	0	0	0	
+Total Immersion Racing	0	0	0	0	0	0	5	0	0	0	0	0	
+Total Overdose: A Gunslinger's Tale in Mexico	1	1	1	1	1	1	5c	1	1	1	1	1	Use Emulator 7 to fix disc read error preventing startup. Some framerate issues in busy situations in the game. PAL version needs to be played in 480p/4:3.
+Totaled!	0	0	0	0	0	0	4	0	0	0	0	0	Low FPS
+Touge R	0	0	0	0	0	0	4	0	0	0	0	5	Screen turns black as the race starts, only the HUD remains visible. Switching to Emulator 12 fixes this and makes the game playable, though the countdown text is still broken.
+Tour de France	0	0	0	0	0	0	1	0	0	0	0	0	Crashes to dashboard
+Toxic Grind	0	0	0	0	0	0	5	0	0	0	0	0	Fully playable on Emulator 7.
+TransWorld Snowboarding	0	0	0	0	0	0	5	0	0	0	0	0	Shadows issues
+TransWorld Surf	0	0	0	0	0	0	5	0	0	0	0	0	
+Triangle Again	0	0	0	0	0	0	1	0	0	0	0	0	Black screen while the music plays in the background
+Triangle Again 2	0	0	0	0	0	0	5	0	0	0	0	0	
+Trigger Man	0	0	5	0	0	0	0	0	0	0	0	0	
+Triple Play 2002	4	4	4	4	4	4	5c	4	4	4	4	4	Use Emulator 7 to fix game freezes when quitting or finishing a game and FMV/Audio stutters.
+Trivial Pursuit Unhinged	0	0	0	0	0	5	0	0	0	0	0	0	
+Tron 2.0: Killer App	3	3	3	3	3	3	5c	3	3	3	3	3	Use Emulator 7 to fix glitches in menu screen and freeze on level load. Framerate is overall good but turning off screen glow in the settings makes the performance more stable.
+True Crime: New York City	4	4	4	4	4	4	5c	4	4	4	4	4	Use Emulator 7 to fix freeze after exiting the police department. Some stutters in the open world, but may be normal.
+True Crime: Streets of LA	0	0	0	5	0	0	5	0	0	0	0	0	
+Turok: Evolution	0	0	0	0	0	0	5	0	0	0	0	0	
+Ty the Tasmanian Tiger	5	0	0	0	0	0	5	0	0	0	0	0	
+Ty the Tasmanian Tiger 2: Bush Rescue	5	0	0	0	0	0	5	0	0	0	0	0	
+Ty the Tasmanian Tiger 3: Night of the Quinkan	5	0	0	0	0	0	0	0	0	0	0	0	
+UEFA Euro 2004: Portugal	5	0	0	0	0	0	5	0	0	0	0	0	
+UEFA Champions League 2004-2005	0	0	0	0	0	0	5	0	0	0	0	0	
+UFC: Tapout 2	0	0	0	0	0	0	5	0	0	0	0	0	
+Ultimate Beach Soccer	0	0	0	0	0	0	5	0	0	0	0	0	
+Ultimate Fighting Championship: Tapout	0	0	0	0	0	0	1	0	0	0	0	0	Black screen after the title screen
+Ultimate Pro Pinball	0	0	0	0	0	0	5	0	0	0	0	0	Wonky 2D UI elements on loading screen and dot-matrix display, only shown one page of instructions when loading a table, and glitchy music.
+Ultimate Spider-Man	0	0	0	5	0	0	0	0	0	0	0	0	
+Ultra Bust-A-Move	0	0	0	0	0	5	5	0	0	0	0	0	
+Umezawa Yukari no Igo Seminar	0	0	0	0	0	0	5	0	0	0	0	0	
+Unreal Championship	5	5	5	5	5	5	5	5	5	5	5	5	Takes a long time to boot to title screen and matches, and no loading bars. Normal gameplay.
+Unreal Championship 2: The Liandri Conflict	3	3	2	4	3	5	5	5	5	5	5	5	the emulator, Emulator 2, Emulator 5: Glitchy menus and FMVs, game crashes before loading in-game
+Unreal II: The Awakening	0	0	0	0	0	0	5	0	0	0	0	0	Works with title update installed.
+Urban Chaos: Riot Response	3	3	3	3	3	3	5c	3	0	0	0	0	Use Emulator 7 to fix crash when you attempt to load a mission.
+US Open 2003	0	0	0	0	0	0	5	0	0	0	0	0	Jul 21, 2003 10:47 prototype playable. Aug 6, 2003 and Jul 21, 2003 06:57 prototypes crash on Xbox logo.
+Van Helsing	0	0	0	0	0	0	5	0	0	0	0	0	
+Vexx	5	0	0	0	0	0	0	0	0	0	0	0	
+Vietcong: Purple Haze	0	0	5	0	0	0	0	0	0	0	0	0	
+Virtual Pool: Tournament Edition	0	0	0	0	0	0	5	0	0	0	0	0	
+Volvo: Drive for Life	5	0	0	0	0	0	5	0	0	0	0	0	
+Voodoo Vince	2	2	2	2	2	2	2	2	1	1	1	1	Freezes at the Xbox logo with Emulator 9 and newer, and at the loading screen right before the title screen with all other emulators. Oddly enough, the loading music doesn't stop even after the game freezes, which may imply the game doesn't fully freeze, but rather just loads incredibly slowly.
+V-Rally 3	0	0	0	0	0	0	5	0	0	0	0	0	
+Wakeboarding Unleashed Featuring Shaun Murray	0	0	0	5	0	0	5	0	0	0	0	0	
+Wallace &amp; Gromit in Project Zoo	4	4	4	4	4	4	4	4	1	1	1	1	All the emulator have a problem with the sound and music disappearing from the menu. On Emulator 3 and Emulator 4, if you enter the game menu, earrape sounds will appear. Since Emulator 9-Emulator 12 has an error with code 5832. Unfortunately, there are audio issues even in Emulator 7 running via Avalaunch.0.49.3
+Wallace and Gromit: Curse of the Were-Rabbit	4	1	4	5	1	5	4	4	1	1	1	1	The game is playable with some graphical glitches. All the emulator have minor framedrops up to about 40 fps.
+Warpath	0	0	0	0	0	0	5	0	0	0	0	0	
+Whacked!	0	0	0	5	0	0	5	0	0	0	0	0	Took a little time to start the first time.
+Whiplash	3	3	3	3	3	3	4c	3	3	3	3	3	Use Emulator 7 to fix audio and crash when exiting main menu. Even with config, has very heavy rendering issues.
+Whiteout	0	0	0	0	0	0	5	0	0	0	0	0	
+WinBack 2: Project Poseidon	0	0	0	5	0	0	0	0	0	0	0	0	
+Wings of War	0	0	0	0	0	0	5	0	0	0	0	0	Random freeze
+Without Warning	0	0	0	0	0	0	5	0	0	0	0	0	Some texture corruption, gameplay freezes briefly.
+World Billiards Tournament: Break Nine	0	0	0	0	0	0	4	0	0	0	0	0	Game stuck after initial hit in the game. Either player or CPU will be stuck waiting for next move
+World Championship Poker	0	0	0	0	0	0	5	0	0	0	0	0	
+World Championship Poker 2: Featuring Howard Lederer	0	0	0	0	0	0	4	0	0	0	0	0	Can play an actual game at least once, the entire console locks up when you leave a game
+World Championship Pool 2004	0	0	0	0	0	0	5	0	0	0	0	0	
+World Championship Rugby	0	0	0	0	0	0	5	0	0	0	0	0	
+World Championship Snooker 2003	0	0	0	0	0	0	5	0	0	0	0	0	
+World Championship Snooker 2004	0	0	0	0	0	0	5	0	0	0	0	0	
+World Poker Tour	0	0	0	0	0	0	5	0	0	0	0	0	Plays normally
+World Racing	0	0	0	0	0	0	5	0	0	0	0	0	
+World Racing 2	4	4	4	4	4	4	4	4	4	0	0	4	Light reflections are buggy, lags a lot with more opponents and traffic. Additionally, in Emulator 5 and below, there are jagged font textures when first loading a race.
+World Series Baseball	0	0	0	0	0	0	5	0	0	0	0	0	
+World Series Baseball 2K3	0	0	5	0	0	0	0	0	0	0	0	0	
+World Series of Poker	0	0	0	0	0	0	4	0	0	0	0	0	Runs so slow it is nearly unplayable
+World Snooker Championship 2005	0	0	0	0	0	0	4	0	0	0	0	0	Poor framerate, even Xbox guide is choppy
+World Soccer Winning Eleven 8 International	0	0	0	0	0	0	5	0	0	0	0	0	Kit textures and some HUD text are glitchy. Everything else is fine.
+World Soccer Winning Eleven 9	0	0	5	0	0	0	5	0	0	0	0	0	
+World War II Combat: Iwo Jima	0	0	0	0	0	0	5	0	0	0	0	0	Freeze on intro the first try with Emulator 7, but second try will load and the game is functional.
+World War II Combat: Road to Berlin	0	0	0	0	0	0	5	0	0	0	0	0	Freeze on intro the first try with Emulator 7, but second try will load and the game is functional.
+World's Scariest Police Chases 2	0	0	0	0	0	0	1	0	0	0	0	0	Crashes on Xbox logo
+Worms 3D	0	0	0	0	0	0	5	0	0	0	0	0	
+Worms 4: Mayhem	5	0	0	0	0	0	4	0	0	0	0	0	Runs at half framerate
+Worms Forts: Under Siege	5	0	0	0	0	0	5	0	0	0	0	0	Sega intro must be skipped or freeze at loading
+Wrath Unleashed	0	0	5	0	0	0	5	0	0	0	0	0	Some places have graphical issues.
+Wreckless: The Yakuza Missions	0	0	0	0	0	0	1	0	0	0	0	0	Crashes to dashboard
+WTA Tour Tennis	0	0	0	0	0	0	4	0	0	0	0	0	Freezes after confirming players in exhibition. Crashes to dashboard after a first play in career mode
+WWE Raw 2	5	0	0	0	0	0	5	0	0	0	0	0	Menus stutter.
+WWE WrestleMania 21	0	0	0	0	0	0	4	0	0	0	0	0	Game crashes to Xbox logo when attempting to play replays at the end of a match.
+WWF Raw	0	0	0	0	0	0	5	0	0	0	0	0	
+X2: Wolverine’s Revenge	0	0	0	5	0	0	5	0	0	0	0	0	
+Xbox Music Mixer	1	1	1	1	1	1	1	1	1	1	1	1	Freezes at Xbox logo or during the Wild Tangent logo screen with Emulator 8 and earlier. Crashes to the dashboard with Emulator 9 and newer
+Xbox Video Chat	3	3	3	3	3	3	3	3	3	3	3	3	Gets to account selection screen. More testing can't be done as there's currently no way of connecting to Insignia (Xbox Live) on the 360, so it's been set to "menus" for now
+XGRA: Extreme-G Racing Association	0	0	0	0	0	0	4	0	0	0	0	0	Game might do nothing or crash when pressing Y to try and change the camera view when doing a race, podiums appear to be darker than they should be leaving it as in-game.
+Xiaolin Showdown	0	0	0	5	0	0	5	0	0	0	0	0	
+XIII	5	5	5	5	5	5	5	5	1	1	1	1	Graphical glitches at the start of the game with Emulator 7/7b. Doesn't start with Emulator 9 and 2021
+X-Men Legends	4	4	4	4	4	4	5c	4	4	4	4	4	Use Emulator 7 to fix cutscenes and lighting issues. FMVs lag a bit.
+X-Men Legends II: Rise of Apocalypse	4	4	4	4	4	4	5c	4	4	4	4	4	Use Emulator 7 to fix graphics and sound issues. Cutscenes play but are a bit laggy, while the audio is fine. Gameplay is fine.
+X-Men: Next Dimension	0	0	0	0	0	0	5	0	0	0	0	0	Flickering loading screen apart from that its playable
+X-Men: The Official Game	0	0	0	0	0	0	5	0	0	0	0	0	
+Xyanide	0	0	0	0	0	0	5	0	0	0	0	0	
+Yager	4	4	4	4	4	4	5c	4	4	4	4	4	Use Emulator 7 to fix heavy graphical issues. Some slowdown present in busy areas.
+Yetisports Arctic Adventure	0	0	0	0	0	0	5	0	0	0	0	0	
+Yourself!Fitness	5	0	0	0	0	0	0	0	0	0	0	0	
+Yu-Gi-Oh! The Dawn of Destiny	0	0	0	0	0	0	5	0	0	0	0	0	
+Zapper	0	0	5	0	0	0	4	0	0	0	0	0	Framerate issues
+Zathura	0	0	0	0	0	0	5	0	0	0	0	0	
+Zeta Quadrant	0	0	0	0	0	0	1	0	0	0	0	0	Crashes on Xbox logo
+ZillerNet	0	0	0	0	0	0	4	0	0	0	0	0	No lyrics or menu overlay. Pressing A button pauses the video.

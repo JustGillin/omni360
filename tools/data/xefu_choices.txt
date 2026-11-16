@@ -1,0 +1,8 @@
+# Omni360 - Original Xbox emulator choices made by hand
+#
+# make_xefu_choices.py picks each game's emulator from ConsoleMods'
+# compatibility list. A line here wins over it: a title ID, '=', and one of
+# xefu, xefu2, xefu3, xefu5, xefu1_1, xefu6, xefu7, xefu7b, xefu2019,
+# xefu2021a, xefu2021b, xefu2021c. Say why after a '#'.
+
+55530058 = xefu7  # Prince of Persia: The Two Thrones - crashed after the Ubisoft logo on the fallback; xefu7 plays (tested 2026-11-16)

@@ -30,6 +30,20 @@ bool IsXboxTitleId(unsigned long titleId)
     return false;
 }
 
+bool IsUnlistedXboxTitleId(unsigned long titleId)
+{
+    bool found = false;
+    for (int i = 0; titleId != 0 && i < COUNT_OF(kXboxDiscs); ++i)
+    {
+        if (kXboxDiscs[i].titleId != titleId)
+            continue;
+        if (!(kXboxDiscs[i].flags & STORE_FLAG_UNLISTED))
+            return false;
+        found = true;
+    }
+    return found;
+}
+
 static bool IsXboxRelease(const StoreRelease *release)
 {
     return release >= kXboxReleases && release < kXboxReleases + COUNT_OF(kXboxReleases);

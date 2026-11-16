@@ -36,6 +36,12 @@ bool StoreDiscIsXbox(const StoreDisc *disc);
 // discs. For its tile's banner.
 bool IsXboxTitleId(unsigned long titleId);
 
+// Whether an Original Xbox title ID is off Microsoft's backwards
+// compatibility list - every disc of it flagged STORE_FLAG_UNLISTED - so
+// only the hacked emulators will try it. False for one XboxTitles.h hasn't
+// got: a disc or install the Store doesn't know is given the benefit.
+bool IsUnlistedXboxTitleId(unsigned long titleId);
+
 // One game by its title ID, any of its discs' - for the featured tiles, and
 // a library game's page: the 360's, then the Original Xbox's; of several
 // with it, a USA or World one first. False if no game has it.

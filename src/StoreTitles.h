@@ -37,6 +37,7 @@
 #define STORE_FLAG_PREVIEW  0x02 // a beta or prototype
 #define STORE_FLAG_REVISION 0x04 // a later pressing ("Rev 1")
 #define STORE_FLAG_UNPACKS  0x08 // a compressed RAR, unpacked on the console as it downloads - slow
+#define STORE_FLAG_UNLISTED 0x10 // an Original Xbox game off Microsoft's list - it needs the hacked emulators
 
 enum StoreCategory // Redump's
 {
