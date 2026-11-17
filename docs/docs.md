@@ -11,6 +11,7 @@ The ATG framework under `Common/` is intentionally not documented in depth. It i
 
 ## Documents
 
+0. [How it works](how-it-works.md) - the library, the Store, installs, DLC, disc installs and the Original Xbox emulator, with the files behind each. **Written for Omni360** and accurate.
 1. [Project Layout](project-layout.md) - solution structure and which code is app-owned versus embedded/vendor code. **Rewritten for Omni360** and accurate.
 2. [Setup Guide](Setup%20Guide.md) - start-to-finish console setup. **Rewritten for Omni360** and accurate.
 3. [Architecture](architecture.md) - module responsibilities. Partly stale, but the sections covering removed layers (extraction, updater) now say so and explain what replaced them.

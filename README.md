@@ -1,7 +1,5 @@
 <div align="center">
 
-<img src="docs/screenshots/startup-animation.gif" alt="Omni360 starting up: a green dot bounces, rolls into the O of the Omni360 logo, and the BETA badge rises in" width="70%">
-
 # Omni360
 
 ### Get games onto your modded Xbox 360, from the Xbox 360
@@ -36,19 +34,7 @@ Browse thousands of games, DLC and title updates, install them in the background
 2. Get your archive.org keys at [archive.org/account/s3.php](https://archive.org/account/s3.php), logged in with your normal account. These are archive.org's official script-friendly credentials, the same pair their `ia` tool uses — not your password. Put them in a plain text file, `ArchiveOrgKeys.txt`, access key on line 1 and secret key on line 2. (Or type them in on the console, in Settings — painful with a controller, but it works.)
 3. Copy `Omni360.xex` and `ArchiveOrgKeys.txt` into a folder of their own on the console, and launch it.
 
-The [Setup Guide](docs/Setup%20Guide.md) covers the whole thing step by step.
-
-<details>
-<summary><b>Choosing where things go</b></summary>
-<br>
-
-Optional `settings.txt` keys change where things go, and the games folder can also be changed on the console in Settings:
-
-- `games-path:` — where games install, and where the library is scanned. Defaults to `Hdd1:\Content\0000000000000000`, where the dashboard keeps Games on Demand and arcade titles. Add more `games-path:` lines to scan more folders, such as `Usb0:\Content\0000000000000000` — the first is still where games install. See the Setup Guide.
-- `xbla-path:` — where DLC, title updates, arcade games and indie games are written. Not set by default: they go to the `Content\0000000000000000` folder of whichever drive `games-path:` is on, so moving your install folder to a USB drive moves your downloads there too. Set this key only to keep content on a different drive from your games. (The name is inherited from X-Store, which used the same key.)
-- `apps-path:`, `homebrew-path:` and `emulators-path:` — the folders the **Apps**, **Homebrew** and **Emulators** pages show, such as `Hdd1:\Apps` for dashboards and tools, `Hdd1:\Homebrew` for homebrew games and `Hdd1:\Emulators`. Each key can be listed more than once, and none is set by default. A page with no folders isn't in the **Games + Apps** sidebar. In Settings, every folder's row says whether it holds games, homebrew, apps or emulators, and left and right change it.
-
-</details>
+The [Setup Guide](docs/Setup%20Guide.md) covers the whole thing step by step, including where games and downloads go.
 
 <br>
 
@@ -56,45 +42,56 @@ Optional `settings.txt` keys change where things go, and the games folder can al
 
 Omni360 is a store and a library in one app on the console.
 
-Its store carries about 1,500 Xbox 360 disc games, 740 Xbox Live Arcade games, 3,450 indie games and 500 Original Xbox games from archive.org, along with DLC and title updates for any of them - filtered by region, language, genre or rating, browsed by series, or found with a search. Every game gets a proper page, with its description, ratings, screenshots and artwork pulled from Xbox Live.
+### General
 
-Everything downloads and installs in the background while you keep browsing, with disc games installed as Games on Demand, and a game disc in the drive can be copied to the hard drive the same way. Nothing downloads without you choosing it, and a popup says when each job finishes or fails.
+- **A home screen of its own.** It opens on the games you played last, each under its own wallpaper, with covers and artwork found for you.
+- **Your whole library in one place**, read straight off the hard drive and sorted into Games, Apps, Homebrew and Emulators - point it at as many folders as you like.
+- **A full store** with featured games, collections, genres, series and search, filtered by region, language or rating. Every game gets a proper page with its description, ratings, screenshots and artwork.
+- **Background downloads.** Everything downloads and installs while you keep browsing, with a popup when each job finishes or fails. Nothing downloads without you choosing it.
+- **Seven languages.**
+- **Updates itself** from inside the app, installing only releases signed with the project's key.
+- **Faster downloads with the optional [PC/Mac helper](#faster-downloads-with-the-pc-helper-optional).**
 
-Your library is read straight off the hard drive, covers and all, and games start from Omni360 just as they would from the dashboard - alongside your apps, homebrew and emulators, if you point it at folders for them. Original Xbox games need nothing set up first: if the console is missing the emulator they run on, Omni360 offers to set it all up for you. It opens on the games you played last, each under its own wallpaper, and keeps itself up to date, installing only releases signed with the project's key.
+### Xbox 360
 
-**Status: beta (0.19.0-beta), working on real hardware.** Every kind of install has been run end to end on a modded console with a real library.
+- **About 1,500 disc games** from archive.org, installed as Games on Demand.
+- **DLC and title updates** for any of them.
+- **About 700 Xbox Live Arcade and 3,400 indie games**, compilations included.
+- **Play games right from the disc**, or copy one to the hard drive - the tray ejects when it's done.
+- **Reads and launches** Games on Demand installs and plain `default.xex` folders alike.
+
+### Original Xbox
+
+- **About 1,100 games** from archive.org - every one Microsoft made run on the 360, and hundreds more it didn't.
+- **Play games right from the disc**, or copy one to the hard drive - the tray ejects when it's done.
+- **Sets up the emulator for you.** If the console is missing the partition or the files Original Xbox games run on, Omni360 offers to fix it - formatting the partition and installing ConsoleMods' unlocked emulator, which runs games beyond Microsoft's list.
+- **Gets unsupported games running.** Games Microsoft never made work on the 360 are marked as such. Before one starts, Omni360 offers the emulator version players found runs it best - or lets you pick - and puts the usual one back next time it starts.
+- **Known issues up front.** Before an unsupported game starts, Omni360 shows what players have reported going wrong with it.
 
 <br>
 
 ## Screenshots
 
-<p align="center">
-  <img src="docs/screenshots/home.png" alt="Home: the games played most recently as a row of covers, over Halo 3's wallpaper" width="100%"><br>
-  <sub><b>Home</b>: what you played last, the disc in the drive first, under its own wallpaper.</sub>
-</p>
-
-<p align="center">
-  <img src="docs/screenshots/library.png" alt="Games: installed games as a grid of covers" width="100%"><br>
-  <sub><b>Games</b>: every installed game, Xbox 360 and Original Xbox, with the disc in the drive marked.</sub>
-</p>
-
-<p align="center">
-  <img src="docs/screenshots/store.png" alt="The Store: this week's featured games and the Homebrew, XBLA, XBLIG and Original Xbox buttons" width="100%"><br>
-  <sub><b>Store</b>: this week's featured games, then Homebrew, XBLA, XBLIG and Original Xbox.</sub>
-</p>
-
 <table>
   <tr>
+    <td width="50%"><img src="docs/screenshots/home.png" alt="Home: the games played most recently as a row of covers, over Halo 3's wallpaper"><br><sub><b>Home</b>: what you played last, the disc in the drive first, under its own wallpaper.</sub></td>
+    <td width="50%"><img src="docs/screenshots/library.png" alt="Games: installed games as a grid of covers"><br><sub><b>Games</b>: every installed game, Xbox 360 and Original Xbox, with the disc in the drive marked.</sub></td>
+  </tr>
+  <tr>
+    <td width="50%"><img src="docs/screenshots/store.png" alt="The Store: this week's featured games and the Homebrew, XBLA, XBLIG and Original Xbox buttons"><br><sub><b>Store</b>: this week's featured games, then Homebrew, XBLA, XBLIG and Original Xbox.</sub></td>
     <td width="50%"><img src="docs/screenshots/360-game-details.png" alt="Halo 3's page: description, ratings, screenshots and more like this"><br><sub><b>A game's page</b>: description, ratings, screenshots, its DLC and its title updates.</sub></td>
+  </tr>
+  <tr>
     <td width="50%"><img src="docs/screenshots/dlc.png" alt="Choosing a Rock Band DLC pack"><br><sub><b>DLC</b>: find the packs for any game and pick the ones you want.</sub></td>
-  </tr>
-  <tr>
     <td width="50%"><img src="docs/screenshots/settings.png" alt="Settings: the folders games, apps, homebrew and emulators live in"><br><sub><b>Settings</b>: the folders your games, apps, homebrew and emulators live in, your archive.org keys and updates.</sub></td>
-    <td width="50%"><img src="docs/screenshots/queue.png" alt="The Queue: Grand Theft Auto V waiting while an arcade game downloads"><br><sub><b>Queue</b>: everything downloads and installs in the background.</sub></td>
   </tr>
   <tr>
+    <td width="50%"><img src="docs/screenshots/queue.png" alt="The Queue: Grand Theft Auto V waiting while an arcade game downloads"><br><sub><b>Queue</b>: everything downloads and installs in the background.</sub></td>
     <td width="50%"><img src="docs/screenshots/store-popular.png" alt="The Store's A to Z, Popular and Top rated rows"><br><sub><b>Browse</b>: A to Z, or rows of Popular, Top rated and every genre.</sub></td>
+  </tr>
+  <tr>
     <td width="50%"><img src="docs/screenshots/xbla-game-details.png" alt="Alan Wake's American Nightmare installing"><br><sub><b>Xbox Live Arcade</b>: arcade games get the same pages, and show their progress as they install.</sub></td>
+    <td width="50%"></td>
   </tr>
   <tr>
     <td colspan="2"><sub>The last three shots are older than this release.</sub></td>
@@ -206,35 +203,12 @@ A good check: download the same game in your computer's web browser. If that's s
 
   </details>
 
-- **Games kept as compressed RARs install slowly.** About 20 games archive.org only has as compressed RARs (in the `XBOX_360_*` items, such as the DiRT series and Deadpool) are unpacked on the console as they download, with `dmc_unrar` - it keeps pace with the download, but Deadpool still took 64 minutes before its install. The Store marks them, and asks before starting one. Uncompressed RARs, like BioShock Infinite's, install like any other game. A compressed RAR is also the one download that can't be picked back up: its pieces are consumed as it unpacks, and the unpacking has no restart point, so one that stops starts over. A few dozen games aren't on archive.org at all.
+- **About 20 games install slowly.** archive.org only has them as compressed archives (the DiRT series and Deadpool among them), which have to be unpacked on the console as they download. Deadpool took over an hour. The Store marks them and asks before starting one, and if one is stopped it starts over from the beginning. A few dozen games aren't on archive.org at all.
 - **A multi-disc game installed some other way** — from real discs, or another tool — can't be uninstalled by version from its Store page, since Omni360 can't tell which disc is which. Its own library entry still can be, if the Store hasn't got it.
 - **A scratched disc can fail partway through a disc install.** Lower the disc read speed in Settings and try again.
 - **Key entry** on the on-screen keyboard isn't masked.
 - **DLC matching is deliberately loose** — it has to cope with release-group names like `Halo.1.Combat.Evolved.Anniversary...` and abbreviated display names like `CoD: World at War`. It scores candidates 0-100 on how much of the game's name appears in the filename, and penalises a missing number heavily so "Halo 3" doesn't offer "Halo 4". You always confirm the pack yourself.
-- **Display names** are decoded as UTF-8 or UTF-16BE, whichever each package turns out to use; characters outside the BMP become `?`.
 - **Some features won't work if Xbox Live is blocked.** Omni360 fetches game descriptions, Store artwork, wallpapers, and Xbox 360 game icons from Xbox Live. If your console uses Liveblock, Livestrong, or any other DNS-level Xbox Live block, those won't load. Original Xbox game icons come from MobCat's game list instead and aren't affected.
-
-<br>
-
-## How it works
-
-<details>
-<summary><b>The library, the Store, installs, DLC and disc installs</b></summary>
-<br>
-
-**The library** walks `{games folder}\{TitleID}\{ContentType}\*` and reads each title's ID, name and icon out of its STFS package header (`StfsParser.cpp`) — entirely offline. Covers come from Xbox Live's box art, else xboxunity.net, else the LaunchBox Games Database for the few games neither has one for, and are cached in `game:\Covers` (`CoverArt.cpp`). The list as last read is kept in `game:\Library.cache`, so the next start draws it immediately and rescans the drive behind it.
-
-**Home** (`Recents.cpp`) keeps the games you've started in `game:\Recents.txt`, most recent first — written just before the loader takes over, since starting a game ends Omni360 and nothing tells it when the game ends. Only title IDs are stored; the name, the cover and whether the game is still installed come from the library each time, so an uninstalled game drops out on its own. The focused game's wallpaper is the Store's, by title ID, and is asked for only once the focus has rested for a moment — otherwise running across the row would queue a download per tile.
-
-**The Store's games are compiled in.** `tools/make_store_titles.py` builds `StoreTitles.h` from archive.org's Redump collection (the `microsoft_xbox360_*` items, one zip per disc), with title IDs from Redump's own datfile — a disc's serial *is* its title ID: "MW-2004" is publisher code `MW` (0x4D57) and title 2004 (0x07D4). It adds games the Redump collection lacks from the `XBOX_360_2` to `_6` set, gathers each game's discs into games and versions, and writes their labels, so the console only reads tables. Wallpapers, screenshots, descriptions and ratings come from Xbox Live's servers over plain HTTP (`HttpPlain.cpp`), with a wallpaper from the LaunchBox Games Database for the few games the marketplace has none for (a gameplay screenshot where LaunchBox has no background either), and are cached in `game:\Store` (`StoreArt.cpp`).
-
-**Installing a game** (`GameInstaller.cpp`) downloads the disc's zip in 32MB pieces over two connections, from whichever of archive.org's servers holding it is fastest. archive.org stalls both connections about once a minute, so a connection that goes silent for 10 seconds, or slows below 0.5MB/s, is dropped and its piece resumed where it stopped; one server failing repeatedly moves the download to the next. As the pieces land, the disc image is decompressed once to check its CRC and to note restart points; then it's converted to Games on Demand (`GodConvert.cpp`) straight out of the zip, so the 7-8GB image is never written out — only the parts of the disc the game uses, typically 3-7GB. The package gets the game's icon from Xbox Live. Each install is noted in `game:\Store\Installed.txt`, with the disc's media ID, so the Store can tell which disc of a multi-disc game is installed. A typical game takes 30-40 minutes to download and 5-10 to install.
-
-**DLC and title updates** (`ArchiveOrgDLC.cpp`, `DownloadQueue.cpp`) send your keys as an `Authorization: LOW <access>:<secret>` header, look the game up by name in the collection's metadata, then read each matching archive's file table with a few small `Range` requests: RAR interleaves headers with each file's data, so that walks the chain one entry at a time; ZIP keeps a central directory at the tail, so one request covers it. Each file comes out of the archive on the console: a stored DLC member is read straight out of the RAR with `Range` requests, a compressed one is unpacked by `dmc_unrar` as it lands, and a title update's zip is downloaded whole and its member inflated with zlib, checked against the CRC-32 the central directory carries. All of those pick up where they stopped. archive.org's own `/download/{item}/{archive}/{path}` form, which serves the member already extracted, is the fallback for what the console can't unpack — an encrypted or split RAR, or a method `dmc_unrar` doesn't do — and that one can't be resumed and gives out a few MB past a gigabyte. Each file is written where the console expects it: DLC by its own `TitleID\ContentType\ContentID` path, lowercase `tu...` updates into `Content\0000000000000000\{TitleID}\000B0000\`, and uppercase `TU_...` updates into `{device}\Cache\`. Avatar-item packs (content type `00009000`) are filtered out.
-
-**Disc installs** (`DiscWorker.cpp`) watch the tray, read the disc that goes in, and convert it to Games on Demand the same way, reading ahead from the drive at full speed (or the speed set in Settings). An Original Xbox disc is read only where its files are, as the 360's drive refuses its security ranges.
-
-</details>
 
 <br>
 
@@ -272,6 +246,6 @@ AGPL-3.0, inherited from the original X-Store project (see `LICENSE`). Vendored 
 
 Omni360 is a modified version of [X-Store](https://github.com/951261/X-Store) by 951261, released under AGPL-3.0; this section is its notice that it has been modified (AGPL-3.0 section 5(a)). Most of the application has since been rewritten, but X-Store's code is still at its foundation: the TLS wrapper around BearSSL (`XboxTLS.cpp/.h`), the HTTPS client (`downloadFile.cpp`), DNS (`dns.cpp`), URL and text helpers (`parsing.cpp`), drive mounting (`driveMount.c`), the log console (`OutputConsole.cpp`) and the on-screen keyboard (`Keyboard.cpp`). Several of those files carry `PROGRAMMER : 951261` headers. Those headers are copyright notices, and AGPL-3.0 requires them to survive - rename the product as much as you like, but leave them, and this section, in place.
 
-Game data comes from [Redump](http://redump.org) (title IDs, by disc serial), [xboxunity.net](https://xboxunity.net) (covers), [LaunchBox Games Database](https://gamesdb.launchbox-app.com) (covers and wallpapers for the games Xbox Live and xboxunity have none for, picked into `tools/data/launchbox-*.txt`), Xbox Live's own servers (art, details and icons) and [MobCat's original Xbox game list](https://github.com/MobCat/MobCats-original-xbox-game-list) (Original Xbox cover art and icons); the games themselves from the archive.org collections named above.
+Game data comes from [Redump](http://redump.org) (title IDs, by disc serial), [xboxunity.net](https://xboxunity.net) (covers), [LaunchBox Games Database](https://gamesdb.launchbox-app.com) (covers and wallpapers for the games Xbox Live and xboxunity have none for, picked into `tools/data/launchbox-*.txt`), Xbox Live's own servers (art, details and icons), [MobCat's original Xbox game list](https://github.com/MobCat/MobCats-original-xbox-game-list) (Original Xbox cover art and icons) and [ConsoleMods](https://consolemods.org/wiki/Xbox_360:Original_Xbox_Games_Compatibility_List) (the Hacked Xefu Pack, and the community compatibility list that picks each unsupported game's emulator and its known issues); the games themselves from the archive.org collections named above.
 
 Built with [BearSSL](https://bearssl.org) (TLS), [zlib](https://zlib.net) (inflate), [dmc_unrar](https://github.com/DrMcCoy/dmc_unrar) (RAR unpacking), [cJSON](https://github.com/DaveGamble/cJSON) (JSON) and [stb_image](https://github.com/nothings/stb) (JPEG and PNG decoding, public domain).
