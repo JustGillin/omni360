@@ -651,6 +651,15 @@ enum StoreInstallState
     STORE_INSTALL_INSTALLED   // in the library
 };
 
+enum StoreXboxSupport
+{
+    STORE_XBOX_NONE,       // not an Original Xbox game - no badge
+    STORE_XBOX_OFFICIAL,   // on Microsoft's backwards compatibility list
+    STORE_XBOX_COMMUNITY,  // off it, but players got in-game on the unlocked emulator
+    STORE_XBOX_NOT_PLAYABLE, // off it, and players got no further than the menus on any emulator
+    STORE_XBOX_UNTESTED    // off it, and nobody has reported on it
+};
+
 struct StoreGameView
 {
     unsigned long titleId;  // for the wallpaper and screenshots
@@ -664,6 +673,7 @@ struct StoreGameView
     const char *description; // NULL: the page explains there's no catalog entry
     bool loading;           // the details haven't arrived yet
     bool unavailable;       // nobody has uploaded it: there's nothing to install
+    int xboxSupport;        // an Original Xbox game's badge, in place of "No details": STORE_XBOX_*
     const int *screenshots; // their numbers, for STORE_ART_SCREEN + n
     int screenshotCount;
 

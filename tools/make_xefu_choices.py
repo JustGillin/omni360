@@ -185,7 +185,9 @@ def main():
         if best >= 2:
             i = EMULATORS.index(next(e for e in PREFER if scores[EMULATORS.index(e)] == best))
             config = ratings[i].endswith("c")
-        if i == NO_PICK and not issues:
+        # A game nothing gets far in is still kept: its page says it isn't
+        # playable. Only one nobody has tried and said nothing about goes.
+        if best == 0 and not issues:
             continue
         for tid in tids:
             if tid not in listed:

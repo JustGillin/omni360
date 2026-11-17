@@ -5537,8 +5537,27 @@ static StoreGameView MakeStoreGameView(Shell &shell, const Library &lib)
         // The archive's DLC and title updates are the 360's.
         view.buttonDisabled[1] = view.buttonDisabled[2] = true;
         view.loading = false;
-        view.description = Tr(IsUnlistedXboxTitleId(g_storeGame.titleId) ? STR_XBOX_UNLISTED_DESCRIPTION
-                                                                          : STR_XBOX_DESCRIPTION);
+        const bool unlisted = IsUnlistedXboxTitleId(g_storeGame.titleId);
+        view.description = Tr(unlisted ? STR_XBOX_UNLISTED_DESCRIPTION : STR_XBOX_DESCRIPTION);
+        view.xboxSupport = STORE_XBOX_OFFICIAL;
+        if (unlisted)
+        {
+            // By how far players got on the best emulator: in-game or
+            // better is playable; tested and no further than the menus isn't.
+            const int best = XefuBestRating(g_storeGame.titleId);
+            view.xboxSupport = best >= 4 ? STORE_XBOX_COMMUNITY
+                             : best >= 1 ? STORE_XBOX_NOT_PLAYABLE
+                                         : STORE_XBOX_UNTESTED;
+            // What players reported is worth more than a stock paragraph.
+            const char *issues = XefuKnownIssues(g_storeGame.titleId);
+            if (issues != NULL)
+            {
+                static char notes[1024];
+                TrFormat(notes, sizeof(notes), STR_PLAYERS_HAVE_REPORTED, issues);
+                notes[sizeof(notes) - 1] = '\0';
+                view.description = notes;
+            }
+        }
     }
     else if (g_storeArcade == NULL && StoreGameMissing(g_storeGame))
     {

@@ -99,6 +99,12 @@ bool XefuChoiceFor(unsigned long titleId, int *emulator, bool *config, char rati
 // chooser names them. NULL if nothing is.
 const char *XefuKnownIssues(unsigned long titleId);
 
+// How far players got with a game off Microsoft's list on its best
+// emulator, by the same list: 1 doesn't work, 2 stops at the intro, 3 at
+// the menus, 4 in-game, 5 playable. 0 if nobody has tried it, or the list
+// hasn't got it.
+int XefuBestRating(unsigned long titleId);
+
 // Puts emulator (XEFU_*) in place for every game, backing up the originals
 // first. With config, xefu7's config loader, which reads ConsoleMods' file
 // for the game from HddX:\Compatibility\Configs. False if a copy failed;

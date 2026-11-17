@@ -8412,6 +8412,34 @@ void RenderStoreGameFrame(StoreGameView &view, const UiHint *hints, int hintCoun
         bx += bw + S(16.0f);
     }
 
+    // An Original Xbox game's support, as a pill where "No details" would be.
+    const bool supportBadge = (view.meta == NULL && !view.loading && view.xboxSupport != STORE_XBOX_NONE);
+    // Green, amber, red and grey; amber is light, so it takes dark text.
+    StringId supportText = STR_OFFICIALLY_SUPPORTED;
+    D3DCOLOR supportFill = COL_GREEN, supportInk = COL_TEXT;
+    switch (view.xboxSupport)
+    {
+    case STORE_XBOX_COMMUNITY:
+        supportText = STR_COMMUNITY_SUPPORTED;
+        supportFill = COL_AMBER;
+        supportInk = 0xFF1A1A1A;
+        break;
+    case STORE_XBOX_NOT_PLAYABLE:
+        supportText = STR_NOT_PLAYABLE;
+        supportFill = 0xFFB3261E;
+        break;
+    case STORE_XBOX_UNTESTED:
+        supportText = STR_UNTESTED;
+        supportFill = 0xFF4A4A4A;
+        break;
+    }
+    const char *supportLabel = Tr(supportText);
+    const float badgeH = S(30.0f);
+    const float badgeW = TextWidth(supportLabel, 0.72f, true) + S(28.0f);
+    const float badgeY = L.metaY + (LineHeight(0.86f) * 1.2f - badgeH) * 0.5f;
+    if (supportBadge && TextInClip(L.metaY, LineHeight(0.86f) * 1.2f))
+        FillRound(L.textX, badgeY, badgeW, badgeH, badgeH * 0.5f, WithAlpha(supportFill, see));
+
     for (int i = 0; i < view.screenshotCount && i < STORE_MAX_SCREENSHOTS && L.shotW > 0.0f; ++i)
     {
         const float x = L.shotsX + (i % 2) * (L.shotW + L.shotGap);
@@ -8478,6 +8506,9 @@ void RenderStoreGameFrame(StoreGameView &view, const UiHint *hints, int hintCoun
     {
         if (view.meta != NULL)
             TextFit(L.textX, L.metaY, 0.86f, WithAlpha(COL_TEXT2, see), view.meta, textW);
+        else if (supportBadge)
+            TextMid(L.textX + badgeW * 0.5f, badgeY + badgeH * 0.5f, 0.72f, WithAlpha(supportInk, see), supportLabel,
+                    ATGFONT_CENTER_X, 0.0f, true);
         else
             TextFit(L.textX, L.metaY, 0.86f, WithAlpha(COL_DIM, see),
                     Tr(view.loading ? STR_STORE_LOADING_DETAILS : STR_STORE_NO_DETAILS), textW);

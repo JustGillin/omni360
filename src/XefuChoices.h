@@ -2,7 +2,7 @@
 //
 // Which emulator each Original Xbox game off Microsoft's list plays best
 // on, from ConsoleMods' compatibility list (tools/data/xefu_compat.tsv)
-// and tools/data/xefu_choices.txt. 523 games; 123 of the list's names not in
+// and tools/data/xefu_choices.txt. 524 games; 123 of the list's names not in
 // XboxTitles.h; 1 chosen by hand.
 
 #ifndef XEFU_CHOICES_H
@@ -474,6 +474,7 @@ static const XefuChoice kXefuChoices[] =
     { 0x54540090, 6, 1, "000000500000", "Use Emulator 7 to fix game crashing at the 2K logo. Game may take up to 30 seconds to start." }, // NBA 2K6
     { 0x54540091, 6, 1, "111111510001", "Use Emulator 7 to fix game crashing at the Visual Concepts logo. Very minor glitch in main menu. Game may take up to 30 seconds to start." }, // College Hoops 2K6
     { 0x54540092, 6, 1, "000000500000", "Use Emulator 7 to fix game crashing at the 2K logo. Game may take up to 30 seconds to start." }, // Major League Baseball 2K6
+    { 0x54540096, 255, 0, "000000101000", "" }, // Major League Baseball 2K5: World Series Edition
     { 0x5454009B, 6, 1, "222222522222", "Use Emulator 7 to fix crash after intro. Minor stutter if many NPCs on screen at once. Attempting to boot the game on a console from a different region shows a dirty or unreadable disc error, this is consistent with behavior on the original Xbox." }, // The Warriors
     { 0x5454009C, 6, 0, "000000500000", "" }, // Hummer Badlands
     { 0x545400A1, 6, 1, "000000500000", "Use Emulator 7 to fix game crashing at the 2K logo. Game may take up to 30 seconds to start." }, // NBA 2K6

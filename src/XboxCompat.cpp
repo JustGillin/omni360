@@ -188,6 +188,24 @@ const char *XefuKnownIssues(unsigned long titleId)
     return NULL;
 }
 
+int XefuBestRating(unsigned long titleId)
+{
+    for (int i = 0; titleId != 0 && i < COUNT(kXefuChoices); ++i)
+    {
+        if (kXefuChoices[i].titleId != titleId)
+            continue;
+        int best = 0;
+        for (int e = 0; e < XEFU_COUNT; ++e)
+        {
+            const int r = kXefuChoices[i].ratings[e] - '0';
+            if (r > best && r <= 5)
+                best = r;
+        }
+        return best;
+    }
+    return 0;
+}
+
 static bool Copy(const char *fromDir, const char *name, const char *toDir, const char *toName)
 {
     char from[96], to[96];
