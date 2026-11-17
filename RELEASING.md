@@ -62,20 +62,6 @@ mv Release/Omni360.xex.sig Release/dist/v0.2.4-beta/ && cp Release/Omni360.xex R
 
 A rebuild changes the XEX's bytes even when the source hasn't changed, and the signature would no longer match — the app would refuse the release ("Its signature doesn't match"). `Release/` is ignored by git, so none of this can be committed by accident.
 
-### 2b. Build the PC helper
-
-```bash
-sh tools/build_helper.sh
-```
-
-It writes `Omni360Helper.exe` (Windows, no console window) and `Omni360Helper-linux` to `Release/dist/helper/`. Attach both to the release with the XEX. They aren't signed: the console never runs them, and people download them from the release page themselves. Go is needed (`winget install GoLang.Go`).
-
-The macOS helper is built by GitHub Actions, since it has to be built on a Mac. Once the release exists (a draft is fine), run **Actions → Helper for macOS → Run workflow** with the release's tag, and it attaches `Omni360Helper-macos.zip` itself:
-
-```bash
-gh workflow run helper-macos.yml -f release_tag=v0.2.4-beta
-```
-
 ### 3. Commit, tag and push
 
 ```bash
@@ -101,6 +87,20 @@ gh release create v0.2.4-beta --draft --title "v0.2.4-beta" --notes-file notes.m
 ```
 
 Or in the browser: **Releases → Draft a new release**, choose the tag, attach **both** files from `Release/dist/vX.Y.Z/` — `Omni360.xex` and `Omni360.xex.sig` — and **Save draft** rather than Publish.
+
+### 4b. Attach the PC helper
+
+```bash
+sh tools/release_helpers.sh v0.2.4-beta
+```
+
+This attaches all three helper downloads — `Omni360Helper.exe`, `Omni360Helper-linux` and `Omni360Helper-macos.zip` — to the draft. The helper changes far less often than the app, so if nothing in `helper/` changed since the last published release, it copies that release's three files over and builds nothing. Otherwise it builds Windows and Linux here (`tools/build_helper.sh`, which needs Go: `winget install GoLang.Go`) and starts the **Helper for macOS** workflow, which builds on a Mac and attaches its zip itself a few minutes later. Wait for that run before publishing:
+
+```bash
+gh run list --workflow helper-macos.yml --limit 1
+```
+
+The helpers aren't signed: the console never runs them, and people download them from the release page themselves.
 
 ### 5. Read the notes, then publish
 

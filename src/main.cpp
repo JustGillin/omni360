@@ -5739,6 +5739,20 @@ static bool InstallStoreVersion(const Shell &shell, const Library &lib, const ch
     if (compilation && !ConfirmCompilationInstall())
         return true;
 
+    // One players have tried on every emulator and got no further than its
+    // menus: the page's badge says Not playable, and so does Install, before
+    // a download of several GB.
+    const int bestRating = StoreGameIsXbox() && IsUnlistedXboxTitleId(g_storeGame.titleId)
+                               ? XefuBestRating(g_storeGame.titleId) : 0;
+    if (bestRating >= 1 && bestRating <= 3)
+    {
+        char message[192];
+        TrFormat(message, sizeof(message), STR_PLAYERS_HAVENT_GOT_IT_RUNNING, g_storeGame.name);
+        message[sizeof(message) - 1] = '\0';
+        if (!ShowConfirmUI(Tr(STR_NOT_PLAYABLE), message, Tr(STR_YOU_CAN_STILL_INSTALL_IT), Tr(STR_INSTALL)))
+            return true;
+    }
+
     // An Original Xbox game off Microsoft's list, on a console without the
     // hacked emulators: it installs, but won't start until they're there -
     // said now, not after a 6GB download. Play offers to set them up.
