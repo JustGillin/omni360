@@ -536,6 +536,21 @@ static D3DTexture *CreateTextureFromArgb(const unsigned long *pixels, unsigned l
     return tex;
 }
 
+// The signed-in profile's picture, beside the gamertag on Home. NULL with
+// nobody signed in, or a profile whose picture wouldn't read.
+static D3DTexture *g_gamerPicture = NULL;
+
+void SetGamerPicture(const unsigned long *pixels, unsigned long w, unsigned long h)
+{
+    if (g_gamerPicture != NULL)
+    {
+        g_gamerPicture->Release();
+        g_gamerPicture = NULL;
+    }
+    if (g_Initialized && pixels != NULL && w > 0 && h > 0)
+        g_gamerPicture = CreateTextureFromArgb(pixels, w, h);
+}
+
 // The footer's button icons. The art is pre-rendered by
 // tools/make_button_atlas.py and compiled in as PNG bytes, then decoded by the
 // same in-house decoder that rescues the cover thumbnails - so there is no
@@ -2556,6 +2571,7 @@ void ShutdownGameListUI()
     ReleaseStoreArt();
     ReleaseIndieTile();
     ReleaseWordPieces();
+    SetGamerPicture(NULL, 0, 0);
 
     g_UiFont.Destroy(); // tears XUI down with it
 
@@ -6497,14 +6513,41 @@ void RenderHomeFrame(HomePageView &view, const UiHint *hints, int hintCount)
         DrawToastQuads();
     else if (view.clock != NULL)
         DrawClockIcons(g_M.screenW - g_M.safeX - TextWidth(view.clock, 1.0f, true), L.navY + L.navH * 0.5f);
+
+    // The profile's picture, a circle the height of the nav buttons, with
+    // the gamertag after it. Only beside a gamertag: "Omni360" stands alone.
+    float nameX = g_M.safeX;
+    if (view.gamertag != NULL && g_gamerPicture != NULL)
+    {
+        const float pic = L.navH;
+        TextureRound(g_gamerPicture, g_M.safeX, L.navY, pic, pic, UI_ROUNDED_CORNERS ? pic * 0.5f : 0.0f, 0.0f, 0.0f,
+                     1.0f, 1.0f, 0xFFFFFFFF, 0xFFFFFFFF);
+        nameX += pic + S(12.0f);
+    }
+
+    // With a gamerscore, the gamertag moves up and the score sits under it,
+    // after the dashboard's circled G.
+    const bool showScore = view.gamertag != NULL && view.gamerscore != NULL;
+    const float navMid = L.navY + L.navH * 0.5f;
+    // Spread to the picture's top and bottom, so the two lines span it
+    // rather than crowding its middle.
+    const float nameMid = showScore ? navMid - LineHeight(0.64f) : navMid;
+    const float scoreMid = navMid + LineHeight(0.66f);
+    const float scoreRing = LineHeight(0.68f);
+    if (showScore)
+        DrawRing(nameX + scoreRing * 0.5f, scoreMid, scoreRing * 0.5f, S(1.5f), 1.0f, COL_TEXT2, COL_TEXT2);
     g_pd3dDevice->SetRenderState(D3DRS_SCISSORTESTENABLE, FALSE);
 
     // --- Pass 2: all text, one Begin/End ---
     g_UiFont.Begin();
 
     // The profile, or the app's name until there is one.
-    TextMid(g_M.safeX, L.navY + L.navH * 0.5f, 1.0f, COL_TEXT,
-            view.gamertag != NULL ? view.gamertag : "Omni360", 0, 0.0f, true);
+    TextMid(nameX, nameMid, 1.0f, COL_TEXT, view.gamertag != NULL ? view.gamertag : "Omni360", 0, 0.0f, true);
+    if (showScore)
+    {
+        TextMid(nameX + scoreRing * 0.5f, scoreMid, 0.5f, COL_TEXT2, "G", ATGFONT_CENTER_X, 0.0f, true);
+        TextMid(nameX + scoreRing + S(8.0f), scoreMid, 0.8f, COL_TEXT2, view.gamerscore, 0, 0.0f, true);
+    }
 
     // The clock, right-aligned, with its icons left of it - unless the toast
     // is showing, which takes that corner on every other page too. Free space

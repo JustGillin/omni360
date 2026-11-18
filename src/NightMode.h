@@ -61,9 +61,13 @@ bool UpdateNightMode(int *secondsLeft);
 // mode is waiting for. Paused ones aren't among them.
 int RunningJobCount();
 
-// Asks the SMC - the motherboard's power controller, nothing to do with a
-// gamepad - to switch the console off. Doesn't return when it works; see the
-// note in NightMode.cpp on why it is the SMC rather than HalReturnToFirmware.
+// Asks the kernel to switch the console off the way the dashboard does,
+// winding down first; falls back to the SMC's hard power cut if that comes
+// back. Doesn't return when it works - see the note in NightMode.cpp.
 void PowerOffConsole();
+
+// The same, for a restart. Also doesn't return when it works. Used by the
+// Exit menu on Home.
+void RestartConsole();
 
 #endif

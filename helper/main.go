@@ -98,16 +98,71 @@ func defaultCacheDir() string {
 }
 
 // announce broadcasts the helper's port on the LAN every 3 seconds.
+//
+// 255.255.255.255 alone isn't enough: Windows sends it out of one network
+// adapter only, and a PC with more than one - Wi-Fi and Ethernet, Hyper-V's
+// or WSL's virtual switch, a VPN - can send it everywhere but where the
+// Xbox is. So it also goes to each adapter's own subnet broadcast
+// (192.168.68.255 and so on), from that adapter's address, which always
+// leaves through that adapter. Re-read each round, so an adapter that comes
+// up later - Wi-Fi joining after start - is covered.
 func announce(name, id string) {
-	addr := &net.UDPAddr{IP: net.IPv4bcast, Port: announcePort}
 	msg := []byte(fmt.Sprintf("OMNI360-HELPER 2 %d %s %s", httpPort, id, name))
-	for {
-		if conn, err := net.DialUDP("udp4", nil, addr); err == nil {
+	send := func(from net.IP, to net.IP) {
+		var local *net.UDPAddr
+		if from != nil {
+			local = &net.UDPAddr{IP: from}
+		}
+		if conn, err := net.DialUDP("udp4", local, &net.UDPAddr{IP: to, Port: announcePort}); err == nil {
 			conn.Write(msg)
 			conn.Close()
 		}
+	}
+	for {
+		send(nil, net.IPv4bcast)
+		for _, b := range subnetBroadcasts() {
+			send(b.from, b.to)
+		}
 		time.Sleep(3 * time.Second)
 	}
+}
+
+type broadcastTarget struct{ from, to net.IP }
+
+// subnetBroadcasts lists each up IPv4 adapter's address and its subnet's
+// broadcast address, leaving out loopback and link-local (169.254.x.x) ones,
+// which no Xbox is reachable on.
+func subnetBroadcasts() []broadcastTarget {
+	var targets []broadcastTarget
+	ifaces, err := net.Interfaces()
+	if err != nil {
+		return nil
+	}
+	for _, iface := range ifaces {
+		if iface.Flags&net.FlagUp == 0 || iface.Flags&net.FlagLoopback != 0 || iface.Flags&net.FlagBroadcast == 0 {
+			continue
+		}
+		addrs, err := iface.Addrs()
+		if err != nil {
+			continue
+		}
+		for _, a := range addrs {
+			ipnet, ok := a.(*net.IPNet)
+			if !ok {
+				continue
+			}
+			ip := ipnet.IP.To4()
+			if ip == nil || ip.IsLinkLocalUnicast() || len(ipnet.Mask) != net.IPv4len {
+				continue
+			}
+			bcast := make(net.IP, net.IPv4len)
+			for i := range ip {
+				bcast[i] = ip[i] | ^ipnet.Mask[i]
+			}
+			targets = append(targets, broadcastTarget{from: ip, to: bcast})
+		}
+	}
+	return targets
 }
 
 func logRequests(h http.Handler) http.Handler {

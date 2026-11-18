@@ -25,26 +25,38 @@ extern "C" VOID HalSendSMCMessage(LPVOID input, LPVOID output);
 // Switching the console off
 // ---------------------------------------------------------------------------
 //
-// The usual route in homebrew is HalReturnToFirmware, which xboxkrnl.lib also
-// exports, with a FIRMWARE_REENTRY routine number for powering down. The
-// number is the problem. No XDK header declares that enum - grepping the
-// whole of %XEDK%\include for FIRMWARE_REENTRY and HalReturnToFirmware finds
-// nothing - and the two community sources that give values disagree with each
-// other: one orders the enum so that power-down is 1, the other has 1 as the
-// reboot. A wrong value here reboots the console at three in the morning,
-// which is the opposite of the point.
+// HalReturnToFirmware, which xboxkrnl.lib exports though no XDK header
+// declares it, with a FIRMWARE_REENTRY routine number. It is the kernel's own
+// shutdown: it winds the system down first and only then has the SMC cut the
+// power - the light pulses, the screen goes, the fans run on for a couple of
+// seconds - the way the dashboard and Aurora turn the console off.
 //
-// So the SMC is asked to do it directly instead. That is the same call with
-// the same 16-byte message and the same byte 0 = command as the tray state
-// in DiscWorker.cpp, which has been working on hardware for a while - so the
-// calling convention is one this codebase has already proven. The bytes are
-// libxenon's xenon_smc_power_shutdown, whose tray command is 0x0A, the same
-// as ours.
-//
-// Confirmed on hardware 2026-11-07: the console switched off inside the
-// call, and HalSendSMCMessage never returned.
+// No XDK header gives the routine numbers either. The 360's order, from
+// xkelib: Halt 0, Reboot 1, KdReboot 2, FatalErrorReboot 3, ResetSMC 4,
+// PowerDown 5, RebootQuiesce 6, ForceShutdown 7, PowerCycleQuiesce 8. Xenia
+// agrees on both used here: its kernel expects games to pass 1 for a reboot,
+// and xenia-canary labels 5 "power off (nice)" and 4 "power off (hard)".
+// (An earlier note here had sources disagreeing, power-down = 1 in one; that
+// is the original Xbox's and NT's order - Halt, PowerDown, Restart, Reboot -
+// not the 360's.)
+#define FIRMWARE_REBOOT     1
+#define FIRMWARE_POWER_DOWN 5
+extern "C" VOID HalReturnToFirmware(DWORD routine);
+
+// The SMC route stays as the fallback, for if the kernel's ever comes back.
+// It is the same call with the same 16-byte message and byte 0 = command as
+// the tray state in DiscWorker.cpp. The bytes are libxenon's
+// xenon_smc_power_shutdown and xenon_smc_power_reboot. It works - confirmed on
+// hardware 2026-11-07 - but it is a hard cut: everything stops at once, as
+// pulling the plug would.
 #define SMC_POWER     0x82
 #define SMC_POWER_OFF 0x01
+
+// libxenon's xenon_smc_power_reboot: the same power command, with 0x04 and
+// 0x30 after it - a full power cycle, as holding the button and pressing it
+// again would be, not a return to the dashboard.
+#define SMC_POWER_REBOOT     0x04
+#define SMC_POWER_REBOOT_ARG 0x30
 
 // Long enough to catch the screen going black and reach for a controller,
 // short enough not to be a wait.
@@ -114,20 +126,44 @@ bool UpdateNightMode(int *secondsLeft)
     return false;
 }
 
-void PowerOffConsole()
+// The SMC's hard version, for when the kernel's didn't happen.
+static void SmcPower(unsigned char command, unsigned char arg, const char *what)
 {
     unsigned char request[16];
     unsigned char reply[16];
     memset(request, 0, sizeof(request));
     memset(reply, 0, sizeof(reply));
     request[0] = SMC_POWER;
-    request[1] = SMC_POWER_OFF;
+    request[1] = command;
+    request[2] = arg;
 
-    dprintf("[night] asking the SMC to turn the console off\n");
+    dprintf("[power] asking the SMC to %s instead\n", what);
     HalSendSMCMessage(request, reply);
 
     // It doesn't come back when it works. If it does, the console is still
     // on, and the caller says so rather than leaving a black screen up.
     Sleep(3000);
-    dprintf("[night] still running - the SMC didn't take the power-off\n");
+    dprintf("[power] still running - the SMC didn't take it either\n");
+}
+
+void PowerOffConsole()
+{
+    dprintf("[power] asking the kernel to turn the console off\n");
+    HalReturnToFirmware(FIRMWARE_POWER_DOWN);
+
+    // The shutdown takes a moment once it's under way, so give it one
+    // before deciding it didn't happen.
+    Sleep(3000);
+    dprintf("[power] still running - the kernel didn't take the power-off\n");
+    SmcPower(SMC_POWER_OFF, 0, "turn it off");
+}
+
+void RestartConsole()
+{
+    dprintf("[power] asking the kernel to restart the console\n");
+    HalReturnToFirmware(FIRMWARE_REBOOT);
+
+    Sleep(3000);
+    dprintf("[power] still running - the kernel didn't take the restart\n");
+    SmcPower(SMC_POWER_REBOOT, SMC_POWER_REBOOT_ARG, "restart it");
 }

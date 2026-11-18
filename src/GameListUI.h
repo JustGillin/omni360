@@ -194,6 +194,7 @@ struct HomePageView
     // Along the top. clock may be NULL; gamertag is NULL until
     // there's a profile to show, and the row then starts with the app's name.
     const char *gamertag;
+    const char *gamerscore; // digits, under the gamertag; NULL for none
     const char *clock;
     const char *storage;
 
@@ -217,6 +218,10 @@ struct HomePageView
 int HomeRecentsAcross();
 
 void RenderHomeFrame(HomePageView &view, const UiHint *hints, int hintCount);
+
+// The signed-in profile's picture for Home, as 0xAARRGGBB pixels, row after
+// row - or NULL to clear it. Copied into a texture; the caller keeps pixels.
+void SetGamerPicture(const unsigned long *pixels, unsigned long w, unsigned long h);
 
 // What the disc's tile shows.
 enum LibraryDiscTile

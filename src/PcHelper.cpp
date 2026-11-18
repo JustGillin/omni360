@@ -164,20 +164,239 @@ static DWORD WINAPI ListenEntry(LPVOID)
 // Xbox is connected - the helper otherwise only hears from the console when
 // it downloads. A thread of its own: a request can take a while to fail, and
 // the listener mustn't miss announcements meanwhile.
+//
+// It is also what keeps a helper that was found by a scan, or remembered from
+// settings.txt, counted as running: some PCs' broadcasts never reach the
+// console - a firewall, a VPN or a second network adapter taking them - and
+// without this, such a helper would drop out 15 seconds after it was found.
+// /hello answers "omni360-helper 2 <id>", so a reply is as good as an
+// announcement. Without a token it needs no pairing, so it works for a
+// helper found but not yet paired with too.
+static bool ParseHello(const char *reply, char *id, unsigned int idSize)
+{
+    int version = 0;
+    char got[32] = "";
+    if (sscanf(reply, "omni360-helper %d %31s", &version, got) != 2 || version != 2)
+        return false;
+    CopyOut(id, idSize, got);
+    return true;
+}
+
 static DWORD WINAPI CheckInEntry(LPVOID)
 {
     for (;;)
     {
-        Sleep(10000);
-        char base[64], token[64];
-        if (!PcHelperUrl(base, sizeof(base), token, sizeof(token), NULL, 0))
+        Sleep(8000);
+        EnterCriticalSection(&g_helperLock);
+        char base[64], heardId[32], pairedId[32], token[64];
+        CopyOut(base, sizeof(base), g_heardEver ? g_heardUrl : "");
+        CopyOut(heardId, sizeof(heardId), g_heardId);
+        CopyOut(pairedId, sizeof(pairedId), g_pairedId);
+        CopyOut(token, sizeof(token), g_pairedToken);
+        LeaveCriticalSection(&g_helperLock);
+        if (base[0] == '\0')
             continue;
+
         char url[160], reply[64];
-        _snprintf(url, sizeof(url), "%s/hello?t=%s", base, token);
+        if (token[0] != '\0' && strcmp(heardId, pairedId) == 0)
+            _snprintf(url, sizeof(url), "%s/hello?t=%s", base, token);
+        else
+            _snprintf(url, sizeof(url), "%s/hello", base);
         url[sizeof(url) - 1] = '\0';
         unsigned long long len = 0;
-        HttpGetPlain(url, NULL, reply, sizeof(reply) - 1, &len);
+        char id[32];
+        if (HttpGetPlain(url, NULL, reply, sizeof(reply) - 1, &len) != 200 || !ParseHello(reply, id, sizeof(id)))
+            continue;
+
+        EnterCriticalSection(&g_helperLock);
+        // Unless an announcement moved it somewhere else meanwhile.
+        if (strcmp(g_heardUrl, base) == 0)
+        {
+            const bool back = !FreshLocked();
+            CopyOut(g_heardId, sizeof(g_heardId), id);
+            g_heardAt = GetTickCount();
+            g_reportedGone = false;
+            if (back)
+                dprintf("[helper] PC helper at %s answered\n", base);
+        }
+        LeaveCriticalSection(&g_helperLock);
     }
+}
+
+// ---------------------------------------------------------------------------
+// Scanning for the helper
+// ---------------------------------------------------------------------------
+//
+// For when its announcements don't arrive. Every address on the console's
+// /24 is tried on the helper's HTTP port, a batch at a time with non-blocking
+// connects - on a LAN a live address answers in a millisecond or two, so a
+// short wait per batch is plenty - and whatever accepts is asked /hello.
+// A PC that pairing could work with at all has that port open, so this finds
+// every helper pairing could use.
+
+#define HELPER_HTTP_PORT   36061 // the helper's default, as its announcements say
+#define SCAN_BATCH         24
+#define SCAN_WAIT_MS       700
+
+// The addresses in one batch that accepted a connection, into open[].
+static int ScanBatch(const unsigned long *addrs, int count, unsigned long *open)
+{
+    SOCKET socks[SCAN_BATCH];
+    bool pending[SCAN_BATCH];
+    for (int i = 0; i < count; ++i)
+    {
+        pending[i] = false;
+        socks[i] = socket(AF_INET, SOCK_STREAM, IPPROTO_TCP);
+        if (socks[i] == INVALID_SOCKET)
+            continue;
+        BOOL yes = TRUE;
+        setsockopt(socks[i], SOL_SOCKET, XBOX_SO_BYPASS_SECURITY, (PCSTR)&yes, sizeof(yes));
+        u_long nonBlocking = 1;
+        ioctlsocket(socks[i], FIONBIO, &nonBlocking);
+        sockaddr_in sa;
+        memset(&sa, 0, sizeof(sa));
+        sa.sin_family = AF_INET;
+        sa.sin_port = htons(HELPER_HTTP_PORT);
+        sa.sin_addr.s_addr = addrs[i];
+        if (connect(socks[i], (sockaddr *)&sa, sizeof(sa)) == 0 || WSAGetLastError() == WSAEWOULDBLOCK)
+            pending[i] = true;
+    }
+
+    int found = 0;
+    const DWORD start = GetTickCount();
+    for (;;)
+    {
+        const DWORD gone = GetTickCount() - start;
+        if (gone >= SCAN_WAIT_MS)
+            break;
+        fd_set writable, failed;
+        FD_ZERO(&writable);
+        FD_ZERO(&failed);
+        int waiting = 0;
+        for (int i = 0; i < count; ++i)
+        {
+            if (pending[i])
+            {
+                FD_SET(socks[i], &writable);
+                FD_SET(socks[i], &failed);
+                ++waiting;
+            }
+        }
+        if (waiting == 0)
+            break;
+        const DWORD left = SCAN_WAIT_MS - gone;
+        timeval wait;
+        wait.tv_sec = left / 1000;
+        wait.tv_usec = (left % 1000) * 1000;
+        if (select(0, NULL, &writable, &failed, &wait) <= 0)
+            break;
+        for (int i = 0; i < count; ++i)
+        {
+            if (!pending[i])
+                continue;
+            if (FD_ISSET(socks[i], &failed))
+            {
+                pending[i] = false;
+            }
+            else if (FD_ISSET(socks[i], &writable))
+            {
+                // Writable means connected - a refused or failed connect is
+                // reported in the failed set instead. /hello weeds out
+                // anything else listening on the port.
+                pending[i] = false;
+                open[found++] = addrs[i];
+            }
+        }
+    }
+
+    for (int i = 0; i < count; ++i)
+    {
+        if (socks[i] != INVALID_SOCKET)
+            closesocket(socks[i]);
+    }
+    return found;
+}
+
+PcHelperScanResult PcHelperScan(char *id, unsigned int idSize, char *name, unsigned int nameSize,
+                                PcHelperScanProgress progress)
+{
+    EnsureLock();
+    XNADDR xna;
+    memset(&xna, 0, sizeof(xna));
+    const DWORD flags = XNetGetTitleXnAddr(&xna);
+    if (flags == XNET_GET_XNADDR_PENDING || (flags & XNET_GET_XNADDR_NONE) || xna.ina.s_addr == 0)
+        return SCAN_NO_NETWORK;
+
+    const unsigned char *own = (const unsigned char *)&xna.ina.s_addr;
+    dprintf("[helper] scanning %u.%u.%u.1-254 for a helper on port %d\n", own[0], own[1], own[2], HELPER_HTTP_PORT);
+
+    unsigned long addrs[SCAN_BATCH];
+    unsigned long open[SCAN_BATCH];
+    int done = 0;
+    for (int host = 1; host <= 254;)
+    {
+        int count = 0;
+        for (; host <= 254 && count < SCAN_BATCH; ++host)
+        {
+            if (host == own[3])
+                continue;
+            unsigned char *b = (unsigned char *)&addrs[count];
+            b[0] = own[0];
+            b[1] = own[1];
+            b[2] = own[2];
+            b[3] = (unsigned char)host;
+            ++count;
+        }
+        if (progress != NULL)
+            progress(done, 253);
+        const int found = ScanBatch(addrs, count, open);
+        done += count;
+
+        for (int i = 0; i < found; ++i)
+        {
+            const unsigned char *ip = (const unsigned char *)&open[i];
+            char base[64], url[96], reply[64], gotId[32];
+            _snprintf(base, sizeof(base), "http://%u.%u.%u.%u:%d", ip[0], ip[1], ip[2], ip[3], HELPER_HTTP_PORT);
+            base[sizeof(base) - 1] = '\0';
+            _snprintf(url, sizeof(url), "%s/hello", base);
+            url[sizeof(url) - 1] = '\0';
+            unsigned long long len = 0;
+            if (HttpGetPlain(url, NULL, reply, sizeof(reply) - 1, &len) != 200 || !ParseHello(reply, gotId, sizeof(gotId)))
+                continue;
+
+            char pcName[64];
+            EnterCriticalSection(&g_helperLock);
+            // /hello doesn't say the PC's name; keep the one an announcement
+            // gave, or go by the address.
+            if (strcmp(g_heardId, gotId) != 0 || g_heardName[0] == '\0')
+                _snprintf(g_heardName, sizeof(g_heardName), "%u.%u.%u.%u", ip[0], ip[1], ip[2], ip[3]);
+            g_heardName[sizeof(g_heardName) - 1] = '\0';
+            CopyOut(g_heardUrl, sizeof(g_heardUrl), base);
+            CopyOut(g_heardId, sizeof(g_heardId), gotId);
+            g_heardAt = GetTickCount();
+            g_heardEver = true;
+            g_reportedGone = false;
+            CopyOut(pcName, sizeof(pcName), g_heardName);
+            LeaveCriticalSection(&g_helperLock);
+
+            dprintf("[helper] scan found the helper at %s\n", base);
+            CopyOut(id, idSize, gotId);
+            CopyOut(name, nameSize, pcName);
+            return SCAN_FOUND;
+        }
+    }
+    dprintf("[helper] scan found no helper\n");
+    return SCAN_NOT_FOUND;
+}
+
+bool PcHelperKnownUrl(char *url, unsigned int urlSize)
+{
+    EnsureLock();
+    EnterCriticalSection(&g_helperLock);
+    const bool known = g_heardEver && g_heardUrl[0] != '\0';
+    CopyOut(url, urlSize, known ? g_heardUrl : "");
+    LeaveCriticalSection(&g_helperLock);
+    return known;
 }
 
 void StartPcHelperListener()
@@ -191,13 +410,25 @@ void StartPcHelperListener()
         CloseHandle(h);
 }
 
-void SetPcHelperPairing(const char *id, const char *token, bool enabled)
+void SetPcHelperPairing(const char *id, const char *token, bool enabled, const char *url)
 {
     EnsureLock();
     EnterCriticalSection(&g_helperLock);
     CopyOut(g_pairedId, sizeof(g_pairedId), id != NULL ? id : "");
     CopyOut(g_pairedToken, sizeof(g_pairedToken), token != NULL ? token : "");
     g_enabled = enabled;
+    // Where the paired helper was last: the check-in asks it straight away,
+    // in case its announcements never get here. Not counted as running until
+    // it answers. Only when nothing has been heard yet - an announcement is
+    // newer than settings.txt.
+    if (url != NULL && url[0] != '\0' && g_pairedId[0] != '\0' && !g_heardEver)
+    {
+        CopyOut(g_heardUrl, sizeof(g_heardUrl), url);
+        CopyOut(g_heardId, sizeof(g_heardId), g_pairedId);
+        g_heardAt = GetTickCount() - HELPER_FRESH_MS - 1;
+        g_heardEver = true;
+        g_reportedGone = true; // nothing to report going quiet yet
+    }
     LeaveCriticalSection(&g_helperLock);
 }
 

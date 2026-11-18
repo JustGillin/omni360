@@ -411,6 +411,8 @@
     <ClInclude Include="src\Recents.h" />
     <ClInclude Include="src\QueueState.h" />
     <ClInclude Include="src\NightMode.h" />
+    <ClInclude Include="src\ClockSync.h" />
+    <ClInclude Include="src\Profiles.h" />
     <ClInclude Include="src\UiSound.h" />
     <ClInclude Include="src\Featured.h" />
     <ClInclude Include="src\ServiceCheck.h" />
@@ -503,6 +505,8 @@
     <ClCompile Include="src\Recents.cpp" />
     <ClCompile Include="src\QueueState.cpp" />
     <ClCompile Include="src\NightMode.cpp" />
+    <ClCompile Include="src\ClockSync.cpp" />
+    <ClCompile Include="src\Profiles.cpp" />
     <ClCompile Include="src\UiSound.cpp" />
     <ClCompile Include="src\Featured.cpp" />
     <ClCompile Include="src\ServiceCheck.cpp" />

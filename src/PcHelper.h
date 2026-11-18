@@ -25,9 +25,29 @@
 void StartPcHelperListener();
 
 // The pairing settings.txt holds: the helper's id and token (empty when not
-// paired), and whether to use it. main.cpp sets them at startup and after a
-// change in Settings.
-void SetPcHelperPairing(const char *id, const char *token, bool enabled);
+// paired), whether to use it, and where it was last (may be NULL or empty).
+// main.cpp sets them at startup and after a change in Settings.
+void SetPcHelperPairing(const char *id, const char *token, bool enabled, const char *url);
+
+// Settings' Scan: tries every address on the console's /24 for a helper, for
+// when its announcements don't reach the console. Blocks for up to about ten
+// seconds; progress, if not NULL, is called between batches with how many
+// addresses have been tried of how many. A helper found counts as heard -
+// the status, pairing and downloads all use it - and the check-in keeps it
+// so while it answers.
+enum PcHelperScanResult
+{
+    SCAN_FOUND,
+    SCAN_NOT_FOUND,
+    SCAN_NO_NETWORK
+};
+typedef void (*PcHelperScanProgress)(int done, int total);
+PcHelperScanResult PcHelperScan(char *id, unsigned int idSize, char *name, unsigned int nameSize,
+                                PcHelperScanProgress progress);
+
+// Where the helper heard most recently is ("http://192.168.1.20:36061"),
+// running or not - what main.cpp saves so the next start can find it.
+bool PcHelperKnownUrl(char *url, unsigned int urlSize);
 
 enum PcHelperStatus
 {

@@ -44,6 +44,8 @@ end-to-end on real hardware against a real 27-game library.
 #include "GameInstaller.h"
 #include "QueueState.h" // TakeRestoredTally, for the one line about last time
 #include "NightMode.h"
+#include "ClockSync.h"   // SyncClock, StartClockSync
+#include "Profiles.h"    // ListProfiles, SignInProfile - auto sign-in
 #include "UpdateCheck.h"
 #include "ArchiveOrgDLC.h"
 #include "downloadFile.h" // DownloadProgressFn + FormatBytes, for the progress callback
@@ -77,11 +79,14 @@ extern "C" NTSTATUS XexGetModuleHandle(PSZ moduleName, PHANDLE outHandle);
 #define HELPER_ID_KEY "helper-id: "       // the paired PC helper (PcHelper.h); empty when not paired
 #define HELPER_TOKEN_KEY "helper-token: " // what it gave this console when it paired
 #define HELPER_USE_KEY "helper-use: "     // "off" leaves it out of downloads; on otherwise
+#define HELPER_URL_KEY "helper-url: "     // where the paired helper was last, for a PC whose announcements don't arrive
 #define EJECT_KEY "eject-after-install: " // "yes" opens the tray once a disc has installed
 #define DISC_SPEED_KEY "disc-speed: "       // 1 to 4, DiscWorker's spindle speed for installs
 #define STORE_FILTER_KEY "store-filter: "   // the Store letters' filters and order: "sort=a-z;regions=usa,eur;..."
 #define LANGUAGE_KEY "language: "           // a code from Strings.h ("fr"); absent follows the console's language
 #define CLOCK_KEY "clock: "                 // "12" or "24"; absent follows the language (its @clock)
+#define CLOCK_SYNC_KEY "set-clock: "        // "yes" sets the clock from pool.ntp.org at start
+#define SIGN_IN_KEY "sign-in-at-start: "    // a profile's offline XUID in hex, signed in at start when nobody is; "off" or absent for none
 #define HOMEBREW_MIRROR_KEY "homebrew-mirror: " // for testing: homebrew from "http://PC:8000", a folder of the repo's .7z files
 #define CREDENTIALS_FILE "game:\\ArchiveOrgKeys.txt"
 #define CONTENT_PATH_KEY "xbla-path: "   // X-Store's name for it, kept so an old settings.txt still works
@@ -363,7 +368,19 @@ static void ApplyPcHelperSettings()
     char id[32], token[64];
     GetSettingsPath(HELPER_ID_KEY, "", id, sizeof(id));
     GetSettingsPath(HELPER_TOKEN_KEY, "", token, sizeof(token));
-    SetPcHelperPairing(id, token, PcHelperUseSetting());
+    char url[64];
+    GetSettingsPath(HELPER_URL_KEY, "", url, sizeof(url));
+    SetPcHelperPairing(id, token, PcHelperUseSetting(), url);
+}
+
+static bool SetSettingsValue(const char *key, const char *value);
+
+// Where the paired helper is now, for next time - see SetPcHelperPairing.
+static void SavePcHelperUrl()
+{
+    char url[64];
+    if (PcHelperKnownUrl(url, sizeof(url)))
+        SetSettingsValue(HELPER_URL_KEY, url);
 }
 
 // Whether the tray opens once a disc has installed. Off unless turned on.
@@ -380,6 +397,24 @@ static bool UpdateChecksOn()
     char value[16];
     GetSettingsPath(UPDATE_CHECK_KEY, "yes", value, sizeof(value));
     return _stricmp(value, "off") != 0;
+}
+
+// Whether to set the clock from the internet at start. Off unless turned on:
+// it changes the console's own clock, which is something to ask for.
+static bool ClockSyncAtStart()
+{
+    char value[16];
+    GetSettingsPath(CLOCK_SYNC_KEY, "off", value, sizeof(value));
+    return _stricmp(value, "yes") == 0;
+}
+
+// The profile signed in at start when nobody is signed in yet - its offline
+// XUID, or 0 for none.
+static unsigned long long SignInProfileSetting()
+{
+    char value[32];
+    GetSettingsPath(SIGN_IN_KEY, "off", value, sizeof(value));
+    return _strtoui64(value, NULL, 16);
 }
 
 // Writes one key into settings.txt - replacing its existing line, or adding
@@ -1672,12 +1707,16 @@ enum SettingsRow
     SETTINGS_ROW_EJECT,        // opening the tray after a disc install, on or off
     SETTINGS_ROW_HELPER_PAIR,  // the PC helper: pair with the one running
     SETTINGS_ROW_HELPER_UNPAIR,
+    SETTINGS_ROW_HELPER_SCAN,  // look for it on the network, then pair
     SETTINGS_ROW_HELPER_USE,   // whether downloads go through it
     SETTINGS_ROW_INSTALL_TYPE, // Games on Demand or folder games, for Store installs
     SETTINGS_ROW_RESYNC_LIBRARY, // re-read the library from disk and re-fetch missing icons
     SETTINGS_ROW_LANGUAGE,     // a language's row: A picks it (arg is its index)
     SETTINGS_ROW_LANGUAGE_REFRESH, // looks again for language files beside Omni360
-    SETTINGS_ROW_CLOCK         // 12- or 24-hour, or what the language says: left and right
+    SETTINGS_ROW_CLOCK,        // 12- or 24-hour, or what the language says: left and right
+    SETTINGS_ROW_CLOCK_SYNC_NOW, // set the clock from the internet now
+    SETTINGS_ROW_CLOCK_SYNC,   // ...and at start, on or off
+    SETTINGS_ROW_SIGN_IN       // the profile signed in at start: A picks it
 };
 
 // Rescans with the library folders now in settings.txt.
@@ -2171,14 +2210,58 @@ static void PairPcHelper()
         return;
     }
     ApplyPcHelperSettings();
+    SavePcHelperUrl();
     ShowMessageUI(Tr(STR_PAIRED), Tr(STR_STORE_DOWNLOADS_GO_THROUGH_YOUR), NULL);
 }
 
 static void UnpairPcHelper()
 {
-    if (!SetSettingsValue(HELPER_ID_KEY, "") || !SetSettingsValue(HELPER_TOKEN_KEY, ""))
+    if (!SetSettingsValue(HELPER_ID_KEY, "") || !SetSettingsValue(HELPER_TOKEN_KEY, "") ||
+        !SetSettingsValue(HELPER_URL_KEY, ""))
         ShowMessageUI(Tr(STR_NOT_SAVED), Tr(STR_SETTINGS_TXT_COULD_NOT_BE), NULL);
     ApplyPcHelperSettings();
+}
+
+static void ScanProgress(int done, int total)
+{
+    char detail[64];
+    TrFormat(detail, sizeof(detail), STR_CHECKED_ADDRESSES, TrNum(done), TrNum(total));
+    detail[sizeof(detail) - 1] = '\0';
+    RenderStatusFrame(Tr(STR_LOOKING_FOR_YOUR_PC), Tr(STR_LOOKING_FOR_OMNI360_HELPER_ON), detail);
+}
+
+// Scan, in Settings: looks for the helper rather than waiting to hear it, and
+// goes straight on to pairing with what it finds - unless it is the PC this
+// console is already paired with, which just reconnects.
+static void ScanForPcHelper()
+{
+    ScanProgress(0, 253);
+    char id[32], name[64];
+    const PcHelperScanResult result = PcHelperScan(id, sizeof(id), name, sizeof(name), ScanProgress);
+    if (result == SCAN_NO_NETWORK)
+    {
+        ShowMessageUI(Tr(STR_NO_HELPER_FOUND), Tr(STR_CHECK_THE_CONSOLES_NETWORK_CONNECTION), NULL);
+        return;
+    }
+    if (result == SCAN_NOT_FOUND)
+    {
+        ShowMessageUI(Tr(STR_NO_HELPER_FOUND), Tr(STR_MAKE_SURE_OMNI360_HELPER_IS_RUNNING),
+                      Tr(STR_IF_IT_IS_ALLOW_IT_THROUGH));
+        return;
+    }
+
+    char pairedId[32];
+    GetSettingsPath(HELPER_ID_KEY, "", pairedId, sizeof(pairedId));
+    if (pairedId[0] != '\0' && strcmp(pairedId, id) == 0)
+    {
+        SavePcHelperUrl();
+        char message[128];
+        TrFormat(message, sizeof(message), STR_CONNECTED_TO_AGAIN, name);
+        message[sizeof(message) - 1] = '\0';
+        ShowMessageUI(Tr(STR_FOUND_YOUR_PC), message, NULL);
+        return;
+    }
+    PairPcHelper();
 }
 
 static void TogglePcHelperUse()
@@ -2209,6 +2292,134 @@ static void ToggleUpdateChecks()
     const bool on = !UpdateChecksOn();
     if (!SetSettingsValue(UPDATE_CHECK_KEY, on ? "yes" : "off"))
         ShowMessageUI(Tr(STR_NOT_SAVED), Tr(STR_SETTINGS_TXT_COULD_NOT_BE), NULL);
+}
+
+static void ToggleClockSync()
+{
+    const bool on = !ClockSyncAtStart();
+    if (!SetSettingsValue(CLOCK_SYNC_KEY, on ? "yes" : "off"))
+        ShowMessageUI(Tr(STR_NOT_SAVED), Tr(STR_SETTINGS_TXT_COULD_NOT_BE), NULL);
+}
+
+#define MAX_SIGN_IN_PROFILES 32
+
+// A in Settings: Off, or one of the profiles on the console's drives.
+static void PickSignInProfile()
+{
+    static ProfileEntry profiles[MAX_SIGN_IN_PROFILES];
+    const int count = ListProfiles(profiles, MAX_SIGN_IN_PROFILES);
+    if (count == 0)
+    {
+        ShowMessageUI(Tr(STR_NO_PROFILES_FOUND), Tr(STR_CREATE_A_PROFILE_FROM_THE_GUIDE), NULL);
+        return;
+    }
+
+    const unsigned long long current = SignInProfileSetting();
+    const char *labels[MAX_SIGN_IN_PROFILES + 1];
+    labels[0] = Tr(STR_SIGN_IN_OFF);
+    int focus = 0;
+    for (int i = 0; i < count; ++i)
+    {
+        labels[i + 1] = profiles[i].gamertag;
+        if (profiles[i].xuid == current)
+            focus = i + 1;
+    }
+
+    const int picked = ShowAlertListUI(Tr(STR_SIGN_IN_AT_START), Tr(STR_THIS_PROFILE_IS_SIGNED_IN), labels, NULL,
+                                       count + 1, focus);
+    if (picked < 0)
+        return;
+
+    char value[32];
+    if (picked == 0)
+        strcpy(value, "off");
+    else
+        _snprintf(value, sizeof(value), "%016llX", profiles[picked - 1].xuid);
+    value[sizeof(value) - 1] = '\0';
+    if (!SetSettingsValue(SIGN_IN_KEY, value))
+        ShowMessageUI(Tr(STR_NOT_SAVED), Tr(STR_SETTINGS_TXT_COULD_NOT_BE), NULL);
+}
+
+// What the Settings row's button says: the profile's gamertag, or Off - or
+// the XUID itself for one no longer on any drive, so it isn't mistaken for
+// Off while it still sits in settings.txt.
+static void SignInProfileLabel(char *out, size_t outSize)
+{
+    const unsigned long long xuid = SignInProfileSetting();
+    if (xuid == 0)
+    {
+        _snprintf(out, outSize, "%s", Tr(STR_SIGN_IN_OFF));
+        out[outSize - 1] = '\0';
+        return;
+    }
+    static ProfileEntry profiles[MAX_SIGN_IN_PROFILES];
+    const int count = ListProfiles(profiles, MAX_SIGN_IN_PROFILES);
+    for (int i = 0; i < count; ++i)
+    {
+        if (profiles[i].xuid == xuid)
+        {
+            _snprintf(out, outSize, "%s", profiles[i].gamertag);
+            out[outSize - 1] = '\0';
+            return;
+        }
+    }
+    _snprintf(out, outSize, "%016llX", xuid);
+    out[outSize - 1] = '\0';
+}
+
+// How far the clock was out, in the largest unit that reads naturally.
+static void FormatClockOffset(char *out, size_t outSize, long long offset)
+{
+    long long size = offset < 0 ? -offset : offset;
+    StringId unit = STR_CLOCK_SECONDS;
+    if (size >= 2 * 86400)
+    {
+        size /= 86400;
+        unit = STR_CLOCK_DAYS;
+    }
+    else if (size >= 2 * 3600)
+    {
+        size /= 3600;
+        unit = STR_CLOCK_HOURS;
+    }
+    else if (size >= 2 * 60)
+    {
+        size /= 60;
+        unit = STR_CLOCK_MINUTES;
+    }
+    char amount[48];
+    TrFormat(amount, sizeof(amount), unit, TrNum((long)size));
+    amount[sizeof(amount) - 1] = '\0';
+    TrFormat(out, outSize, offset > 0 ? STR_CLOCK_WAS_BEHIND : STR_CLOCK_WAS_AHEAD, amount);
+    out[outSize - 1] = '\0';
+}
+
+// Set now, in Settings: asks while a status frame is up - a few seconds at
+// most - and says what happened.
+static void SetClockNow()
+{
+    RenderStatusFrame(Tr(STR_SETTING_THE_CLOCK), Tr(STR_ASKING_POOL_NTP_ORG), NULL);
+    long long offset = 0;
+    switch (SyncClock(&offset))
+    {
+    case CLOCK_SYNC_ALREADY_RIGHT:
+        ShowMessageUI(Tr(STR_CLOCK_IS_RIGHT), Tr(STR_THE_CLOCK_WAS_ALREADY_RIGHT), NULL);
+        break;
+    case CLOCK_SYNC_SET:
+    {
+        char message[96];
+        FormatClockOffset(message, sizeof(message), offset);
+        ShowMessageUI(Tr(STR_CLOCK_SET), message, NULL);
+        break;
+    }
+    case CLOCK_SYNC_NO_ANSWER:
+        ShowMessageUI(Tr(STR_CLOCK_NOT_SET), Tr(STR_THE_TIME_SERVER_DIDNT_ANSWER),
+                      Tr(STR_CHECK_THE_CONSOLES_NETWORK_CONNECTION));
+        break;
+    default:
+        ShowMessageUI(Tr(STR_CLOCK_NOT_SET), Tr(STR_THE_CONSOLE_REFUSED_THE_NEW_TIME), NULL);
+        break;
+    }
 }
 
 static void RemoveKeys(SettingsOutcome &outcome)
@@ -2320,6 +2531,8 @@ static void AddComingSoonRow(SettingsPage &page, const char *label, const char *
     row.status = Tr(STR_COMING_SOON);
     row.help = help;
 }
+
+static void FormatKernelVersion(char *out, size_t outSize); // with the System popup
 
 static void BuildSettingsPage(SettingsPage &page, const Library &lib, const char *gamesPath)
 {
@@ -2480,11 +2693,21 @@ static void BuildSettingsPage(SettingsPage &page, const Library &lib, const char
                 page.rows[page.count - 1].controls[0].on = PcHelperUseSetting();
                 AddSettingsControl(page, SETTINGS_CONTROL_BUTTON, Tr(STR_UNPAIR), SETTINGS_ROW_HELPER_UNPAIR,
                                    Tr(STR_STOPS_USING_THIS_PC_YOU));
+                // Paired, but nothing heard: its address may have changed.
+                if (helper == PC_HELPER_PAIRED_OFFLINE)
+                    AddSettingsControl(page, SETTINGS_CONTROL_BUTTON, Tr(STR_SCAN), SETTINGS_ROW_HELPER_SCAN,
+                                       Tr(STR_LOOKS_FOR_YOUR_PC_AGAIN));
             }
-            else
+            else if (helper == PC_HELPER_FOUND)
             {
                 AddSettingsControl(page, SETTINGS_CONTROL_BUTTON, Tr(STR_PAIR), SETTINGS_ROW_HELPER_PAIR,
                                    Tr(STR_RUN_OMNI360_HELPER_ON_YOUR));
+            }
+            else
+            {
+                // Nothing heard, so nothing to pair with yet - go and look.
+                AddSettingsControl(page, SETTINGS_CONTROL_BUTTON, Tr(STR_SCAN), SETTINGS_ROW_HELPER_SCAN,
+                                   Tr(STR_LOOKS_FOR_OMNI360_HELPER_ON_YOUR));
             }
         }
 
@@ -2519,7 +2742,20 @@ static void BuildSettingsPage(SettingsPage &page, const Library &lib, const char
             c.valueCount = 2;
         }
 
-        AddComingSoonRow(page, Tr(STR_AUTO_SIGN_IN), Tr(STR_SIGNING_A_PROFILE_IN_WHEN));
+        {
+            static char signInLabel[32];
+            SignInProfileLabel(signInLabel, sizeof(signInLabel));
+            AddSettingsRow(page, SETTINGS_VIEW_LINE, Tr(STR_SIGN_IN_AT_START));
+            AddSettingsControl(page, SETTINGS_CONTROL_BUTTON, signInLabel, SETTINGS_ROW_SIGN_IN,
+                               Tr(STR_SIGNS_THIS_PROFILE_IN_WHEN));
+        }
+
+        AddSettingsRow(page, SETTINGS_VIEW_LINE, Tr(STR_SET_CLOCK_FROM_INTERNET));
+        AddSettingsControl(page, SETTINGS_CONTROL_BUTTON, Tr(STR_SET_NOW), SETTINGS_ROW_CLOCK_SYNC_NOW,
+                           Tr(STR_ASKS_A_TIME_SERVER_FOR));
+        AddSettingsControl(page, SETTINGS_CONTROL_CHECK, Tr(STR_AT_START), SETTINGS_ROW_CLOCK_SYNC,
+                           Tr(STR_SETS_THE_CLOCK_EACH_TIME));
+        page.rows[page.count - 1].controls[1].on = ClockSyncAtStart();
     }
 
     if (page.section == SETTINGS_SECTION_ASSETS)
@@ -2619,7 +2855,17 @@ static void BuildSettingsPage(SettingsPage &page, const Library &lib, const char
                            Tr(STR_ASKS_GITHUB_FOR_THE_LATEST_2));
         page.rows[page.count - 1].controls[1].on = UpdateChecksOn();
 
-        AddComingSoonRow(page, Tr(STR_VERSION_INFO), Tr(STR_OMNI360S_BUILD_AND_THE_CONSOLES));
+        {
+            static char versionInfo[96];
+            char kernel[32];
+            FormatKernelVersion(kernel, sizeof(kernel));
+            _snprintf(versionInfo, sizeof(versionInfo), "Omni360 %s  \xC2\xB7  %s %s", CURRENT_VERSION,
+                      Tr(STR_SYSTEM_KERNEL), kernel);
+            versionInfo[sizeof(versionInfo) - 1] = '\0';
+            SettingsRowView &row = AddSettingsRow(page, SETTINGS_VIEW_LINE, Tr(STR_VERSION_INFO));
+            row.status = versionInfo;
+            row.help = Tr(STR_BACK_ON_HOME_SHOWS_MORE);
+        }
 
         AddSettingsRow(page, SETTINGS_VIEW_LINE, Tr(STR_SPEED_TEST));
         AddSettingsControl(page, SETTINGS_CONTROL_BUTTON, Tr(STR_RUN_TEST), SETTINGS_ROW_SPEED_TEST,
@@ -2696,8 +2942,12 @@ static SettingsOutcome RunSettingsRow(SettingsRow row, int arg, Library &lib, ch
     case SETTINGS_ROW_SOUNDS:       ToggleUiSounds(); break;
     case SETTINGS_ROW_INSTALL_TYPE: ToggleInstallType(); break;
     case SETTINGS_ROW_EJECT:        ToggleEjectAfterInstall(); break;
+    case SETTINGS_ROW_CLOCK_SYNC_NOW: SetClockNow(); break;
+    case SETTINGS_ROW_CLOCK_SYNC:   ToggleClockSync(); break;
+    case SETTINGS_ROW_SIGN_IN:      PickSignInProfile(); break;
     case SETTINGS_ROW_HELPER_PAIR:  PairPcHelper(); break;
     case SETTINGS_ROW_HELPER_UNPAIR: UnpairPcHelper(); break;
+    case SETTINGS_ROW_HELPER_SCAN:  ScanForPcHelper(); break;
     case SETTINGS_ROW_HELPER_USE:   TogglePcHelperUse(); break;
     case SETTINGS_ROW_SPEED_TEST:   RunSpeedTest(gamesPath); break;
     case SETTINGS_ROW_LANGUAGE:     PickLanguage(arg); break;
@@ -5425,6 +5675,19 @@ static void PlayLibraryGame(const InstalledGame &game)
 // wherever DashLaunch says, which is the only exit now that Home is the
 // root - the Xbox Dashboard and settings.txt's "app:" places were a menu
 // here until then. Launch.h still has what either of those would need.
+//
+// Restart and Turn off sit beside it, as on any dashboard. All three leave
+// the same way - the main loop ends and the workers stop as they always do,
+// so a game install's staging is flushed - and only then does the power go.
+enum ExitAction
+{
+    EXIT_NONE,
+    EXIT_TO_DASHBOARD,
+    EXIT_RESTART,
+    EXIT_TURN_OFF
+};
+static ExitAction g_exitAction = EXIT_NONE;
+
 static bool ExitMenu()
 {
     const int pending = PendingDownloadCount() + PendingDiscJobCount() + PendingGameJobCount();
@@ -5433,13 +5696,21 @@ static bool ExitMenu()
     if (pending > 0)
         TrCount(message, sizeof(message), STR_JOBS_PENDING_ONE, STR_JOBS_PENDING, pending);
     else
-        TrFormat(message, sizeof(message), STR_BACK_TO_DASHBOARD);
+        TrFormat(message, sizeof(message), STR_EXIT_WHERE_TO);
     message[sizeof(message) - 1] = '\0';
 
-    return ShowConfirmUI(Tr(STR_EXIT_OMNI360), message,
-                         pending > 0 ? Tr(STR_LEAVING_STOPS_THEM_FILES_THAT)
-                                     : NULL,
-                         Tr(STR_EXIT));
+    const char *buttons[3] = { Tr(STR_EXIT), Tr(STR_EXIT_RESTART), Tr(STR_EXIT_TURN_OFF) };
+    const int answer = ShowAlertButtonsUI(Tr(STR_EXIT_OMNI360), message,
+                                          pending > 0 ? Tr(STR_LEAVING_STOPS_THEM_FILES_THAT) : NULL,
+                                          buttons, 3);
+    switch (answer)
+    {
+    case 0: g_exitAction = EXIT_TO_DASHBOARD; break;
+    case 1: g_exitAction = EXIT_RESTART; break;
+    case 2: g_exitAction = EXIT_TURN_OFF; break;
+    default: g_exitAction = EXIT_NONE; break;
+    }
+    return g_exitAction != EXIT_NONE;
 }
 static StoreGameView MakeStoreGameView(Shell &shell, const Library &lib)
 {
@@ -6265,6 +6536,131 @@ extern "C" VOID HalSendSMCMessage(LPVOID input, LPVOID output);
 #define SYSTEM_TEMP_MAX_C 90.0f // a full bar
 #define SYSTEM_TEMP_REFRESH_MS 1000
 
+// The kernel's version - the one the dashboard shows as its own, 2.0.17559.0
+// on a current console. Not in an XDK header, but xboxkrnl.lib exports it;
+// the symbol is the import slot, which holds the structure's address.
+struct KernelVersionInfo
+{
+    WORD major;
+    WORD minor;
+    WORD build;
+    BYTE approvalType;
+    BYTE qfe;
+};
+extern "C" KernelVersionInfo *XboxKrnlVersion;
+
+static void FormatKernelVersion(char *out, size_t outSize)
+{
+    const KernelVersionInfo *v = XboxKrnlVersion;
+    if (v != NULL)
+        _snprintf(out, outSize, "%u.%u.%u.%u", v->major, v->minor, v->build, v->qfe);
+    else
+        _snprintf(out, outSize, "?");
+    out[outSize - 1] = '\0';
+}
+
+// Home's picture beside the gamertag, read again only when a different
+// profile is signed in - it's a read from the profile, not something to do
+// every second. The large picture: 64x64, in the linear ARGB layout the
+// XDK writes it in, which is the pixel order SetGamerPicture takes.
+#define GAMER_PICTURE_SIZE 64
+
+// The gamerscore under the gamertag, read with the picture: it only changes
+// inside a game, and Omni360 starts again after every one.
+//
+// Through XAM rather than the documented XUserReadProfileSettings, which
+// lives in xonline.lib - the whole Xbox Live library, for one number. That
+// is a wrapper over this, which xapilib.lib (linked already) exports: the
+// same arguments plus who to read for, none meaning the requesting user.
+// Signature from xkelib.
+extern "C" DWORD XamUserReadProfileSettings(DWORD titleId, DWORD userIndex, DWORD numFor, const XUID *xuidsFor,
+                                           DWORD numSettingIds, const DWORD *settingIds, DWORD *resultsSize,
+                                           PXUSER_READ_PROFILE_SETTING_RESULT results, PXOVERLAPPED overlapped);
+
+static char g_gamerscore[16];
+
+static void ReadGamerscore(DWORD user)
+{
+    g_gamerscore[0] = '\0';
+    const DWORD ids[1] = { XPROFILE_GAMERCARD_CRED };
+    BYTE buffer[256];
+    DWORD size = sizeof(buffer);
+    PXUSER_READ_PROFILE_SETTING_RESULT result = (PXUSER_READ_PROFILE_SETTING_RESULT)buffer;
+    const DWORD status = XamUserReadProfileSettings(0, user, 0, NULL, 1, ids, &size, result, NULL);
+    if (status != ERROR_SUCCESS || result->dwSettingsLen < 1 || result->pSettings == NULL)
+    {
+        dprintf("[profile] couldn't read the gamerscore: %08lX\n", (unsigned long)status);
+        return;
+    }
+    _snprintf(g_gamerscore, sizeof(g_gamerscore), "%ld", (long)result->pSettings[0].data.nData);
+    g_gamerscore[sizeof(g_gamerscore) - 1] = '\0';
+}
+
+static void UpdateGamerPicture(bool signedIn, DWORD user)
+{
+    static XUID shown = INVALID_XUID;
+    XUID xuid = INVALID_XUID;
+    if (signedIn && XUserGetXUID(user, &xuid) != ERROR_SUCCESS)
+        xuid = INVALID_XUID;
+    if (xuid == shown)
+        return;
+    shown = xuid;
+
+    if (xuid == INVALID_XUID)
+    {
+        g_gamerscore[0] = '\0';
+        SetGamerPicture(NULL, 0, 0);
+        return;
+    }
+    ReadGamerscore(user);
+    static unsigned long pixels[GAMER_PICTURE_SIZE * GAMER_PICTURE_SIZE];
+    const DWORD result = XUserReadGamerPicture(user, FALSE, (PBYTE)pixels, GAMER_PICTURE_SIZE * sizeof(unsigned long),
+                                               GAMER_PICTURE_SIZE, NULL);
+    if (result == ERROR_SUCCESS)
+        SetGamerPicture(pixels, GAMER_PICTURE_SIZE, GAMER_PICTURE_SIZE);
+    else
+    {
+        dprintf("[profile] couldn't read the gamer picture: %08lX\n", (unsigned long)result);
+        SetGamerPicture(NULL, 0, 0);
+    }
+}
+
+// The first profile signed in, by gamertag - false when there's none.
+// Checked at most once a second: it changes only when someone signs in or
+// out through the Guide.
+static bool SignedInGamertag(char *out, size_t outSize)
+{
+    static char cached[XUSER_NAME_SIZE];
+    static bool have = false;
+    static DWORD checkedAt = 0;
+    static bool checked = false;
+
+    if (!checked || GetTickCount() - checkedAt >= 1000)
+    {
+        have = false;
+        DWORD signedIn = 0;
+        for (DWORD user = 0; user < XUSER_MAX_COUNT && !have; ++user)
+        {
+            if (XUserGetSigninState(user) == eXUserSigninState_NotSignedIn)
+                continue;
+            if (XUserGetName(user, cached, sizeof(cached)) == ERROR_SUCCESS && cached[0] != '\0')
+            {
+                have = true;
+                signedIn = user;
+            }
+        }
+        checked = true;
+        checkedAt = GetTickCount();
+        UpdateGamerPicture(have, signedIn);
+    }
+    if (have)
+    {
+        _snprintf(out, outSize, "%s", cached);
+        out[outSize - 1] = '\0';
+    }
+    return have;
+}
+
 static bool g_systemFahrenheit = false;
 static float g_systemTemps[SYSTEM_TEMP_COUNT]; // CPU, GPU, memory, case - degrees C
 static bool g_systemTempsRead = false;
@@ -6337,7 +6733,22 @@ static void ShowSystemPopup()
     view.heading = Tr(STR_SYSTEM);
     view.rows[0].label = Tr(STR_SYSTEM_IP_ADDRESS);
     view.rows[0].value = ip;
-    view.rowCount = 1;
+
+    static char gamertag[XUSER_NAME_SIZE];
+    if (!SignedInGamertag(gamertag, sizeof(gamertag)))
+        _snprintf(gamertag, sizeof(gamertag), "%s", Tr(STR_SYSTEM_NOBODY));
+    gamertag[sizeof(gamertag) - 1] = '\0';
+    view.rows[1].label = Tr(STR_SYSTEM_SIGNED_IN);
+    view.rows[1].value = gamertag;
+
+    static char kernel[32];
+    FormatKernelVersion(kernel, sizeof(kernel));
+    view.rows[2].label = Tr(STR_SYSTEM_KERNEL);
+    view.rows[2].value = kernel;
+
+    view.rows[3].label = Tr(STR_APP_NAME);
+    view.rows[3].value = CURRENT_VERSION;
+    view.rowCount = 4;
 
     view.barsHeading = Tr(STR_SYSTEM_TEMPERATURES);
     for (int i = 0; i < SYSTEM_TEMP_COUNT; ++i)
@@ -6375,7 +6786,9 @@ static HomePageView MakeHomeView(const Shell &shell, const Library &lib)
     HomePageView view;
     memset(&view, 0, sizeof(view));
 
-    view.gamertag = NULL; // until there's a profile to show
+    static char gamertag[XUSER_NAME_SIZE];
+    view.gamertag = SignedInGamertag(gamertag, sizeof(gamertag)) ? gamertag : NULL;
+    view.gamerscore = (view.gamertag != NULL && g_gamerscore[0] != '\0') ? g_gamerscore : NULL;
     view.focus = shell.homeFocus;
     view.navFocus = shell.homeNavFocus;
     view.recentFocus = shell.homeSelected;
@@ -7887,6 +8300,8 @@ int main()
     // sees it - the first thing to read when a download won't connect.
     StartNetwork();
     LogNetworkStatus();
+    if (ClockSyncAtStart())
+        StartClockSync();
     StartupStep("network");
     SetDiscReadSpeed(DiscSpeedSetting());
     SetEjectAfterInstall(EjectAfterInstallSetting());
@@ -8129,6 +8544,15 @@ int main()
     if (!searchStarted)
         dprintf("ERROR: the search worker didn't start - searches are unavailable\n");
     StartupStep("the mark forming and resting");
+
+    // The profile picked in Settings, signed in with nothing to press - but
+    // only when nobody is signed in already, so coming back from a game
+    // never signs a second profile in beside the one that played it.
+    {
+        const unsigned long long xuid = SignInProfileSetting();
+        if (xuid != 0 && !AnyoneSignedIn())
+            SignInProfile(xuid);
+    }
 
     // What finished in an earlier run, in one line - after the startup
     // screen rather than during it, and one line rather than one a job,
@@ -9574,7 +9998,10 @@ int main()
     // Stop the worker before anything it uses goes away. A transfer stops at
     // its next progress report; a request already waiting on archive.org
     // can't be interrupted, so this is bounded rather than waited out.
-    if (PendingDownloadCount() + PendingDiscJobCount() + PendingGameJobCount() > 0)
+    if (g_exitAction == EXIT_RESTART || g_exitAction == EXIT_TURN_OFF)
+        RenderStatusFrame(Tr(g_exitAction == EXIT_RESTART ? STR_RESTARTING : STR_TURNING_OFF),
+                          Tr(STR_STOPPING_DOWNLOADS_AND_INSTALLS_FIRST), NULL);
+    else if (PendingDownloadCount() + PendingDiscJobCount() + PendingGameJobCount() > 0)
         RenderStatusFrame(Tr(STR_STOPPING), Tr(STR_STOPPING_DOWNLOADS_AND_INSTALLS), Tr(STR_FILES_THAT_ALREADY_FINISHED_STAY));
     StopDownloadQueue(15000);
 
@@ -9594,6 +10021,13 @@ int main()
     StopStoreArt(3000);
 
     free(lib.games);
+
+    // Neither returns when it works. If one does, the console is still on,
+    // and leaving to the dashboard is better than a frozen last frame.
+    if (g_exitAction == EXIT_RESTART)
+        RestartConsole();
+    else if (g_exitAction == EXIT_TURN_OFF)
+        PowerOffConsole();
 
     dprintf("Done.\n");
 
