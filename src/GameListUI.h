@@ -1042,12 +1042,23 @@ bool ShowAlertUI(const char *heading, const char *message, const char *detailLin
 int ShowAlertButtonsUI(const char *heading, const char *message, const char *detailLine, const char **labels,
                        int count, int maxMessageLines = 5);
 
+// Icons for a list card's rows, so what a row is reads at a glance.
+enum UiListIcon
+{
+    UI_ICON_NONE = -1,
+    UI_ICON_DRIVE,    // the hard drive
+    UI_ICON_USB,      // a USB drive
+    UI_ICON_FOLDER,
+    UI_ICON_CHECK,    // "this one" - Use this folder
+    UI_ICON_KEYBOARD  // typing instead - Type a path
+};
+
 // The same card holding a list to pick from: up and down move, the rest
 // scroll, A picks - returning the row - and B returns -1. Each row is a bold
 // label with a note on its right; notes may be NULL. focus is the row
-// focused first.
+// focused first. icons, when not NULL, puts a UiListIcon before each label.
 int ShowAlertListUI(const char *heading, const char *message, const char **labels, const char **notes, int count,
-                    int focus);
+                    int focus, const int *icons = NULL);
 
 // An alert asking to go ahead - confirmLabel names what that does, e.g.
 // "Remove" - or Cancel. For actions that take long or can't be undone.

@@ -4868,13 +4868,31 @@ static D3DCOLOR Faded(D3DCOLOR color, float a)
 #define ALERT_MAX_BUTTONS 3
 #define ALERT_LIST_ROW_H  52.0f
 #define ALERT_LIST_ROWS   6     // shown at once; the rest scroll
+#define ALERT_HINTS_H     34.0f // the button hints along the card's foot
+#define ALERT_HINTS_GAP   18.0f
+
+static void DrawNavIcon(int icon, float cx, float cy, float size, D3DCOLOR tint); // with Home's nav row
+
+// A list row's UiListIcon as the atlas has it.
+static int NavIconForListIcon(int icon)
+{
+    switch (icon)
+    {
+    case UI_ICON_DRIVE:    return NAV_ICON_DRIVE;
+    case UI_ICON_USB:      return NAV_ICON_USB;
+    case UI_ICON_FOLDER:   return NAV_ICON_FOLDER;
+    case UI_ICON_CHECK:    return NAV_ICON_CHECK;
+    case UI_ICON_KEYBOARD: return NAV_ICON_KEYBOARD;
+    default:               return -1;
+    }
+}
 
 // Every alert: the card, its text, and either buttons or - with listCount -
 // a list of rows to pick from inside the card, as the emulator chooser has.
 // Returns the button or row pressed, or -1 for B (0 for a lone OK).
 static int RunAlert(const char *heading, const char *message, const char *detailLine, int maxMessageLines,
                     const char **labels, int count, const char **rowLabels, const char **rowNotes, int listCount,
-                    int listFocus)
+                    int listFocus, const int *rowIcons = NULL)
 {
     if (!g_Initialized)
         return -1;
@@ -4906,8 +4924,11 @@ static int RunAlert(const char *heading, const char *message, const char *detail
     const float rowH = S(ALERT_LIST_ROW_H);
     const int rowsShown = list ? (listCount < ALERT_LIST_ROWS ? listCount : ALERT_LIST_ROWS) : 0;
     const float footH = list ? rowsShown * rowH : buttonH;
+    const float hintsH = S(ALERT_HINTS_H);
+    const float hintsGap = S(ALERT_HINTS_GAP);
     const float cardH = pad + titleH + S(12.0f) + messageLines * messageLineH +
-                        (hasDetail ? S(8.0f) + detailLines * detailLineH : 0.0f) + S(24.0f) + footH + pad;
+                        (hasDetail ? S(8.0f) + detailLines * detailLineH : 0.0f) + S(24.0f) + footH + hintsGap +
+                        hintsH + pad;
     const float cardX = (g_M.screenW - cardW) * 0.5f;
     const float restY = (g_M.screenH - cardH) * 0.5f;
 
@@ -4924,6 +4945,27 @@ static int RunAlert(const char *heading, const char *message, const char *detail
         buttonX[i] = right - buttonW[i];
         right = buttonX[i] - gap;
     }
+
+    // The buttons that work here, along the card's foot as every page has
+    // them: A and B for a list or a choice, A alone for a lone OK - B does
+    // the same there, so it isn't another choice to offer.
+    ButtonHint hints[2];
+    int hintCount = 0;
+    hints[hintCount].sprite = SpriteForButton(UI_BUTTON_A);
+    hints[hintCount++].label = TrW((list || count > 1) ? STR_SELECT : STR_BUTTON_OK);
+    if (list || count > 1)
+    {
+        hints[hintCount].sprite = SpriteForButton(UI_BUTTON_B);
+        hints[hintCount++].label = TrW(list ? STR_BUTTON_BACK : STR_BUTTON_CANCEL);
+    }
+    {
+        const float width = LayoutButtonHints(hints, hintCount, 0.0f);
+        LayoutButtonHints(hints, hintCount, cardX + cardW - pad - width);
+    }
+
+    // A row's icon, when the list has them, sits before its label.
+    const float iconSize = S(26.0f);
+    const float labelX = rowIcons != NULL ? S(22.0f) + iconSize + S(14.0f) : S(22.0f);
 
     int focus = list ? (listFocus >= 0 && listFocus < listCount ? listFocus : 0) : 0;
     int scroll = 0;
@@ -4989,10 +5031,13 @@ static int RunAlert(const char *heading, const char *message, const char *detail
         ShadowRound(cardX, cardY + S(6.0f), cardW, cardH, g_M.radius, S(28.0f), Faded(COL_SHADOW, a));
         FillRound(cardX, cardY, cardW, cardH, g_M.radius, Faded(COL_SURFACE, a));
 
-        const float footY = cardY + cardH - pad - footH;
+        const float hintsY = cardY + cardH - pad - hintsH * 0.5f;
+        const float footY = cardY + cardH - pad - hintsH - hintsGap - footH;
         const float innerX = cardX + pad;
         if (list)
         {
+            // Square-cornered rows: pills stacked six deep read as buttons
+            // rather than as a list.
             const float plateH = rowH - S(6.0f);
             for (int r = 0; r < rowsShown; ++r)
             {
@@ -5000,12 +5045,17 @@ static int RunAlert(const char *heading, const char *message, const char *detail
                 const float y = footY + r * rowH;
                 if (i == focus)
                 {
-                    FillRound(innerX, y, textW, plateH, plateH * 0.5f, Faded(COL_ALERT_BTN_HI, a));
+                    FillRound(innerX, y, textW, plateH, 0.0f, Faded(COL_ALERT_BTN_HI, a));
                     if (t >= 1.0f)
-                        FocusRing(innerX, y, textW, plateH, plateH * 0.5f);
+                        FocusRing(innerX, y, textW, plateH, 0.0f);
                 }
                 else
-                    FillRound(innerX, y, textW, plateH, plateH * 0.5f, Faded(COL_ALERT_BTN, a));
+                    FillRound(innerX, y, textW, plateH, 0.0f, Faded(COL_ALERT_BTN, a));
+
+                const int icon = rowIcons != NULL ? NavIconForListIcon(rowIcons[i]) : -1;
+                if (icon >= 0)
+                    DrawNavIcon(icon, innerX + S(22.0f) + iconSize * 0.5f, y + plateH * 0.5f, iconSize,
+                                Faded(i == focus ? COL_TEXT : COL_TEXT2, a));
             }
         }
         else
@@ -5022,6 +5072,8 @@ static int RunAlert(const char *heading, const char *message, const char *detail
             if (t >= 1.0f)
                 FocusRing(buttonX[focus], footY, buttonW[focus], buttonH, buttonH * 0.5f);
         }
+        for (int i = 0; i < hintCount; ++i)
+            DrawButtonSprite(hints[i].sprite, hints[i].badgeX, hintsY);
 
         TextBegin();
         float y = cardY + pad;
@@ -5040,7 +5092,8 @@ static int RunAlert(const char *heading, const char *message, const char *detail
             {
                 const int i = scroll + r;
                 const float cy = footY + r * rowH + plateH * 0.5f;
-                TextMid(innerX + S(22.0f), cy, 0.85f, Faded(COL_TEXT, a), rowLabels[i], 0, 0.0f, true);
+                TextMid(innerX + labelX, cy, 0.85f, Faded(COL_TEXT, a), rowLabels[i], ATGFONT_TRUNCATED,
+                        textW - labelX - S(22.0f), true);
                 if (rowNotes != NULL && rowNotes[i] != NULL)
                     TextMid(innerX + textW - S(22.0f), cy, 0.76f, Faded(i == focus ? COL_TEXT : COL_TEXT2, a),
                             rowNotes[i], ATGFONT_RIGHT);
@@ -5059,6 +5112,14 @@ static int RunAlert(const char *heading, const char *message, const char *detail
                 TextMid(buttonX[i] + buttonW[i] * 0.5f, footY + buttonH * 0.5f, 0.85f,
                         Faded(i == 0 || i == focus ? COL_TEXT : COL_TEXT2, a), labels[i], ATGFONT_CENTER_X, 0.0f,
                         true);
+        }
+        {
+            const float scale = HINT_LABEL_SCALE * g_M.textScale;
+            g_UiFont.SetBold(false);
+            g_UiFont.SetScaleFactors(scale, scale);
+            for (int i = 0; i < hintCount; ++i)
+                g_UiFont.DrawText(hints[i].labelX, TextTopForCenter(hintsY, scale), Faded(COL_TEXT2, a),
+                                  hints[i].label);
         }
         TextEnd();
 
@@ -5079,9 +5140,9 @@ int ShowAlertButtonsUI(const char *heading, const char *message, const char *det
 }
 
 int ShowAlertListUI(const char *heading, const char *message, const char **labels, const char **notes, int count,
-                    int focus)
+                    int focus, const int *icons)
 {
-    return RunAlert(heading, message, NULL, 5, NULL, 0, labels, notes, count, focus);
+    return RunAlert(heading, message, NULL, 5, NULL, 0, labels, notes, count, focus, icons);
 }
 
 bool ShowAlertUI(const char *heading, const char *message, const char *detailLine, const char *confirmLabel,

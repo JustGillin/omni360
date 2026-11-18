@@ -30,8 +30,8 @@ OUT_HEADER = os.path.join(ROOT, "src", "NavIcons.h")
 
 SS = 8                        # supersampling factor
 CELL = 64                     # atlas cell, in final pixels
-COLS, ROWS = 4, 2             # 7 icons and a spare
-ATLAS_W, ATLAS_H = CELL * COLS, CELL * ROWS   # 256x128, both powers of two
+COLS, ROWS = 4, 4             # 12 icons and room for four more
+ATLAS_W, ATLAS_H = CELL * COLS, CELL * ROWS   # 256x256, both powers of two
 
 STROKE = 4.0                  # line width in final pixels
 INSET = 11.0                  # margin inside the cell, so the art is ~42px
@@ -166,6 +166,68 @@ def icon_settings(d):
     d.ellipse([cx - hole, cy - hole, cx + hole, cy + hole], fill=0)
 
 
+# --- list icons -----------------------------------------------------------
+#
+# Beside the rows of a list - the folder picker's drives and folders - so
+# what each row is reads at a glance. Same weight and inset as the nav row's.
+
+
+def icon_drive(d):
+    """A hard drive: a slab with a light on its face."""
+    x0, y0, x1, y1 = box()
+    cy = (y0 + y1) * 0.5
+    h = (y1 - y0) * 0.30
+    rrect(d, x0, cy - h, x1, cy + h, px(4.0))
+    disc(d, x1 - px(9.0), cy, px(2.6))
+    line(d, (x0 + px(8.0), cy), (x0 + (x1 - x0) * 0.45, cy), STROKE * 0.8)
+
+
+def icon_usb(d):
+    """A USB stick: a body and its plug, standing up."""
+    x0, y0, x1, y1 = box()
+    cx = (x0 + x1) * 0.5
+    bodyW = (x1 - x0) * 0.42
+    plugW = bodyW * 0.62
+    plugBottom = y0 + (y1 - y0) * 0.30
+    rrect(d, cx - plugW * 0.5, y0, cx + plugW * 0.5, plugBottom, px(1.5), STROKE * 0.85)
+    rrect(d, cx - bodyW * 0.5, plugBottom, cx + bodyW * 0.5, y1, px(4.0))
+
+
+def icon_folder(d):
+    """A folder: a body with a tab on its top left."""
+    x0, y0, x1, y1 = box()
+    top = y0 + (y1 - y0) * 0.16
+    tabTop = top - px(1.0)
+    bodyTop = top + px(7.0)
+    tabRight = x0 + (x1 - x0) * 0.42
+    d.line([(x0, y1 - px(4.0)), (x0, tabTop + px(3.0)), (x0 + px(3.0), tabTop), (tabRight - px(3.0), tabTop),
+            (tabRight + px(3.0), bodyTop), (x1 - px(3.0), bodyTop), (x1, bodyTop + px(3.0)), (x1, y1 - px(4.0)),
+            (x1 - px(4.0), y1), (x0 + px(4.0), y1), (x0, y1 - px(4.0))],
+           fill=255, width=int(round(px(STROKE))), joint="curve")
+
+
+def icon_check(d):
+    """A tick: this one."""
+    x0, y0, x1, y1 = box()
+    w = x1 - x0
+    d.line([(x0 + w * 0.08, y0 + w * 0.52), (x0 + w * 0.38, y0 + w * 0.80), (x0 + w * 0.94, y0 + w * 0.20)],
+           fill=255, width=int(round(px(STROKE * 1.15))), joint="curve")
+
+
+def icon_keyboard(d):
+    """A keyboard: a frame with rows of keys and a space bar."""
+    x0, y0, x1, y1 = box()
+    cy = (y0 + y1) * 0.5
+    h = (y1 - y0) * 0.34
+    rrect(d, x0, cy - h, x1, cy + h, px(4.0))
+    keyR = px(2.1)
+    for row, y in enumerate((cy - h * 0.42, cy)):
+        for i in range(5):
+            x = x0 + (x1 - x0) * (0.18 + 0.16 * i)
+            disc(d, x, y, keyR)
+    line(d, (x0 + (x1 - x0) * 0.30, cy + h * 0.48), (x0 + (x1 - x0) * 0.70, cy + h * 0.48), STROKE * 0.8)
+
+
 ICONS = [
     ("LIBRARY", icon_library),
     ("APPS", icon_apps),
@@ -174,6 +236,11 @@ ICONS = [
     ("STORE", icon_store),
     ("QUEUE", icon_queue),
     ("SETTINGS", icon_settings),
+    ("DRIVE", icon_drive),
+    ("USB", icon_usb),
+    ("FOLDER", icon_folder),
+    ("CHECK", icon_check),
+    ("KEYBOARD", icon_keyboard),
 ]
 
 

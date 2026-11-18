@@ -1911,28 +1911,56 @@ enum FolderPickResult
     FOLDER_CANCELLED
 };
 
-static FolderPickResult PickFolder(const char *heading, char *out, size_t outSize)
+// Up a level, remembering the name of the folder - or the drive - left, to
+// put the highlight back on.
+static void GoUpFolder(char *path, size_t pathSize, char *cameFrom, size_t cameFromSize)
+{
+    const char *slash = strrchr(path, '\\');
+    _snprintf(cameFrom, cameFromSize, "%s", slash != NULL ? slash + 1 : path);
+    cameFrom[cameFromSize - 1] = '\0';
+    FolderParent(path, path, pathSize);
+}
+
+// start, when it's a folder that's there, is where it opens - B still goes
+// up from it to the drives. typeHint is the keyboard's line under its title
+// for Type a path, which starts filled in with start (or "Usb0:\").
+static FolderPickResult PickFolder(const char *heading, const char *start, StringId typeHint, char *out,
+                                   size_t outSize)
 {
     static FolderEntry entries[FOLDER_PICKER_MAX];
     static const char *labels[FOLDER_PICKER_MAX + 1];
-    static const char *sublabels[FOLDER_PICKER_MAX + 1];
+    static const char *notes[FOLDER_PICKER_MAX + 1];
+    static int icons[FOLDER_PICKER_MAX + 1];
     char path[MAX_TEXT_LENGTH] = "";
+    if (start != NULL && start[0] != '\0' && FolderExists(start))
+    {
+        _snprintf(path, sizeof(path), "%s", start);
+        path[sizeof(path) - 1] = '\0';
+    }
+    // The one just come back up out of, so the highlight lands on it rather
+    // than back at the top: going up and down a branch is most of browsing.
+    char cameFrom[FOLDER_ENTRY_NAME_SIZE] = "";
 
     for (;;)
     {
         int count = 0;
+        int focus = 0;
         if (path[0] == '\0')
         {
             const int drives = ListDrives(entries, FOLDER_PICKER_MAX);
             for (int i = 0; i < drives; ++i)
             {
+                if (_stricmp(entries[i].name, cameFrom) == 0)
+                    focus = count;
+                icons[count] = _strnicmp(entries[i].name, "Usb", 3) == 0 ? UI_ICON_USB : UI_ICON_DRIVE;
                 labels[count] = entries[i].name;
-                sublabels[count++] = DriveKind(entries[i].name) != NULL ? DriveKind(entries[i].name) : "";
+                notes[count++] = DriveKind(entries[i].name);
             }
+            icons[count] = UI_ICON_KEYBOARD;
             labels[count] = Tr(STR_TYPE_A_PATH);
-            sublabels[count++] = Tr(STR_FOR_A_FOLDER_NOT_LISTED_HERE);
+            notes[count++] = NULL;
 
-            const int chosen = ShowChoiceUI(heading, Tr(STR_CHOOSE_A_DRIVE), labels, sublabels, count, TrW(STR_OPEN));
+            const int chosen = ShowAlertListUI(heading, Tr(STR_CHOOSE_A_DRIVE), labels, notes, count, focus, icons);
             if (chosen < 0)
                 return FOLDER_CANCELLED;
             if (chosen == drives)
@@ -1940,8 +1968,9 @@ static FolderPickResult PickFolder(const char *heading, char *out, size_t outSiz
                 WCHAR title[64];
                 Utf8ToWideText(heading, title, 64);
                 std::string typed;
-                if (OpenKeyboardToString(XUSER_INDEX_ANY, &typed, title, TrW(STR_A_FOLDER_OF_GAMES_HOMEBREW),
-                                         L"Usb0:\\") != ERROR_SUCCESS)
+                WCHAR typedStart[MAX_TEXT_LENGTH];
+                Utf8ToWideText(start != NULL && start[0] != '\0' ? start : "Usb0:\\", typedStart, MAX_TEXT_LENGTH);
+                if (OpenKeyboardToString(XUSER_INDEX_ANY, &typed, title, TrW(typeHint), typedStart) != ERROR_SUCCESS)
                     continue; // back to the drives
                 _snprintf(out, outSize, "%s", typed.c_str());
                 out[outSize - 1] = '\0';
@@ -1949,6 +1978,7 @@ static FolderPickResult PickFolder(const char *heading, char *out, size_t outSiz
             }
             _snprintf(path, sizeof(path), "%s", entries[chosen].name);
             path[sizeof(path) - 1] = '\0';
+            cameFrom[0] = '\0';
             continue;
         }
 
@@ -1956,23 +1986,27 @@ static FolderPickResult PickFolder(const char *heading, char *out, size_t outSiz
         if (folders < 0)
         {
             ShowMessageUI(Tr(STR_COULDNT_OPEN_THIS_FOLDER), path, NULL);
-            FolderParent(path, path, sizeof(path));
+            GoUpFolder(path, sizeof(path), cameFrom, sizeof(cameFrom));
             continue;
         }
 
         // The first row picks the folder you're in; the rest go further in.
+        icons[count] = UI_ICON_CHECK;
         labels[count] = Tr(STR_USE_THIS_FOLDER);
-        sublabels[count++] = path;
+        notes[count++] = NULL;
         for (int i = 0; i < folders; ++i)
         {
+            if (_stricmp(entries[i].name, cameFrom) == 0)
+                focus = count;
+            icons[count] = UI_ICON_FOLDER;
             labels[count] = entries[i].name;
-            sublabels[count++] = "";
+            notes[count++] = NULL;
         }
 
-        const int chosen = ShowChoiceUI(heading, path, labels, sublabels, count, TrW(STR_OPEN));
+        const int chosen = ShowAlertListUI(heading, path, labels, notes, count, focus, icons);
         if (chosen < 0)
         {
-            FolderParent(path, path, sizeof(path)); // B: up a level
+            GoUpFolder(path, sizeof(path), cameFrom, sizeof(cameFrom)); // B: up a level
             continue;
         }
         if (chosen == 0)
@@ -1985,13 +2019,15 @@ static FolderPickResult PickFolder(const char *heading, char *out, size_t outSiz
         if (FolderChild(path, entries[chosen - 1].name, child, sizeof(child)))
             _snprintf(path, sizeof(path), "%s", child);
         path[sizeof(path) - 1] = '\0';
+        cameFrom[0] = '\0';
     }
 }
 
 static void AddLibraryFolder(Library &lib, const char *gamesPath, SettingsOutcome &outcome)
 {
     char picked[MAX_TEXT_LENGTH];
-    const FolderPickResult result = PickFolder(Tr(STR_ADD_FOLDER), picked, sizeof(picked));
+    const FolderPickResult result =
+        PickFolder(Tr(STR_ADD_FOLDER), NULL, STR_A_FOLDER_OF_GAMES_HOMEBREW, picked, sizeof(picked));
     if (result == FOLDER_CANCELLED)
         return;
     const std::string typed = picked;
@@ -2043,13 +2079,13 @@ static void AddLibraryFolder(Library &lib, const char *gamesPath, SettingsOutcom
 
 static void ChangeGamesFolder(Library &lib, char *gamesPath, size_t gamesPathSize, SettingsOutcome &outcome)
 {
-    WCHAR current[MAX_TEXT_LENGTH];
-    NarrowToWide(gamesPath, current, MAX_TEXT_LENGTH);
-
-    std::string typed;
-    if (OpenKeyboardToString(XUSER_INDEX_ANY, &typed, TrW(STR_GAMES_FOLDER),
-                             TrW(STR_WHERE_YOUR_INSTALLED_GAMES_ARE), current) != ERROR_SUCCESS)
-        return; // cancelled
+    // Picked, opening at the folder it is now; Type a path is still there,
+    // filled in with it, for one the list doesn't reach.
+    char picked[MAX_TEXT_LENGTH];
+    if (PickFolder(Tr(STR_STORAGE_DOWNLOADS_HERE), gamesPath, STR_WHERE_YOUR_INSTALLED_GAMES_ARE, picked,
+                   sizeof(picked)) == FOLDER_CANCELLED)
+        return;
+    const std::string typed = picked;
 
     char newPath[MAX_TEXT_LENGTH];
     if (!NormaliseGamesPath(typed, newPath, sizeof(newPath)) || strlen(newPath) >= gamesPathSize)
@@ -2772,7 +2808,7 @@ static void BuildSettingsPage(SettingsPage &page, const Library &lib, const char
         // target you had to find.
         AddSettingsRow(page, SETTINGS_VIEW_HEADING, Tr(STR_MANAGE_PATHS));
         AddSettingsControl(page, SETTINGS_CONTROL_BUTTON, Tr(STR_ADD_PATH), SETTINGS_ROW_ADD_FOLDER,
-                           Tr(STR_TYPE_THE_PATH_OF_ANOTHER));
+                           Tr(STR_PICK_ANOTHER_FOLDER_OF_GAMES));
 
         // Where downloads and disc installs go: always scanned, always first.
         TrCount(page.installStatus, sizeof(page.installStatus), STR_DOWNLOADS_GO_HERE_ONE, STR_DOWNLOADS_GO_HERE,
@@ -2785,7 +2821,10 @@ static void BuildSettingsPage(SettingsPage &page, const Library &lib, const char
             row.checked = true;
             row.locked = true;
             row.help = page.installHelp;
-            page.actions[page.count - 1][0] = SETTINGS_ROW_GAMES_FOLDER;
+            // Its box is locked - this folder is always looked in - so the
+            // row needs a button to say A does something here at all.
+            AddSettingsControl(page, SETTINGS_CONTROL_BUTTON, Tr(STR_CHANGE), SETTINGS_ROW_GAMES_FOLDER,
+                               page.installHelp);
         }
 
         // The other paths looked in - games, homebrew and apps - and the likely
