@@ -40,6 +40,7 @@ STR(NAV_EMULATORS,          "Emulators")
 STR(NAV_STORE,              "Store")
 STR(NAV_QUEUE,              "Queue")
 STR(NAV_SETTINGS,           "Settings")
+STR(NAV_FAVOURITES,         "Favorites")
 
 // ---- Tile pills -------------------------------------------------------------
 STR(PILL_IN_DRIVE,          "IN DRIVE")
@@ -49,6 +50,7 @@ STR(PILL_INSTALLING,        "INSTALLING")
 // ---- Home -------------------------------------------------------------------
 STR(HOME_IN_THE_DRIVE,      "IN THE DRIVE")
 STR(HOME_CONTINUE_PLAYING,  "CONTINUE PLAYING")
+STR(HOME_FAVOURITES,        "FAVORITES")
 
 // ---- System popup (Back on Home) -------------------------------------------
 STR(SYSTEM,                 "System")
@@ -72,6 +74,18 @@ STR(LIB_NO_FOLDER,          "(no folder set)")
 STR(LIB_NO_GAMES,           "No games found")
 STR(LIB_NO_GAMES_HINT,      "Press Y to choose your games folder in Settings, or put a game disc in the drive.")
 STR(LIB_DOWNLOADING,        "Downloading")
+STR(NO_FAVOURITES_YET,      "No favorites yet")
+STR(PRESS_Y_ON_A_GAME_TO,   "Press Y on a game in Games and choose Add to favorites.")
+STR(OPTIONS,                "Options")
+STR(ADD_TO_FAVOURITES,      "Add to favorites")
+STR(REMOVE_FROM_FAVOURITES, "Remove from favorites")
+STR(ADDED_TO_FAVOURITES,    "Added to favorites")
+STR(REMOVED_FROM_FAVOURITES, "Removed from favorites")
+STR(RENAME,                 "Rename")
+STR(USE_THE_ORIGINAL_NAME,  "Use the original name")
+STR(ORIGINALLY,             "Originally {1}")
+STR(ONLY_OMNI360_SHOWS_THIS_NAME, "Only Omni360 shows this name - the game's files keep theirs. Clear it to go back to the original.")
+STR(GAMEMARKS_TXT_COULD_NOT_BE, "GameMarks.txt couldn't be written beside Omni360.")
 
 // ---- Store ------------------------------------------------------------------
 STR(STORE_FEATURED,         "Featured")

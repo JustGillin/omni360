@@ -28,6 +28,7 @@ NAV_EMULATORS = Emulators
 NAV_STORE = Store
 NAV_QUEUE = Queue
 NAV_SETTINGS = Settings
+NAV_FAVOURITES = Favorites
 
 # ---- Tile pills
 PILL_IN_DRIVE = IN DRIVE
@@ -37,6 +38,7 @@ PILL_INSTALLING = INSTALLING
 # ---- Home
 HOME_IN_THE_DRIVE = IN THE DRIVE
 HOME_CONTINUE_PLAYING = CONTINUE PLAYING
+HOME_FAVOURITES = FAVORITES
 
 # ---- System popup (Back on Home)
 SYSTEM = System
@@ -60,6 +62,18 @@ LIB_NO_FOLDER = (no folder set)
 LIB_NO_GAMES = No games found
 LIB_NO_GAMES_HINT = Press Y to choose your games folder in Settings, or put a game disc in the drive.
 LIB_DOWNLOADING = Downloading
+NO_FAVOURITES_YET = No favorites yet
+PRESS_Y_ON_A_GAME_TO = Press Y on a game in Games and choose Add to favorites.
+OPTIONS = Options
+ADD_TO_FAVOURITES = Add to favorites
+REMOVE_FROM_FAVOURITES = Remove from favorites
+ADDED_TO_FAVOURITES = Added to favorites
+REMOVED_FROM_FAVOURITES = Removed from favorites
+RENAME = Rename
+USE_THE_ORIGINAL_NAME = Use the original name
+ORIGINALLY = Originally {1}
+ONLY_OMNI360_SHOWS_THIS_NAME = Only Omni360 shows this name - the game's files keep theirs. Clear it to go back to the original.
+GAMEMARKS_TXT_COULD_NOT_BE = GameMarks.txt couldn't be written beside Omni360.
 
 # ---- Store
 STORE_FEATURED = Featured

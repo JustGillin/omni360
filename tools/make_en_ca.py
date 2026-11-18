@@ -42,6 +42,15 @@ LINES = {
     'SPEED_CONSOLE_LIMIT': "Your console's the slowest part, buddy: it can't keep up with any more than this.",
     'NIGHT_WAITING': "The console'll turn off when the queued downloads are done. Sleep tight, bud.",
     'COLLECTION_ONLY_ON_360': 'Only on Xbox 360, eh',
+    # Canadian spelling, which the US English base doesn't have.
+    'NAV_FAVOURITES': 'Favourites',
+    'HOME_FAVOURITES': 'FAVOURITES',
+    'NO_FAVOURITES_YET': 'No favourites yet, eh',
+    'PRESS_Y_ON_A_GAME_TO': 'Press Y on a game in Games and choose Add to favourites.',
+    'ADD_TO_FAVOURITES': 'Add to favourites',
+    'REMOVE_FROM_FAVOURITES': 'Remove from favourites',
+    'ADDED_TO_FAVOURITES': 'Added to favourites',
+    'REMOVED_FROM_FAVOURITES': 'Removed from favourites',
 }
 
 # Short headings that are bad news: "Couldn't install" -> "Sorry, couldn't install".

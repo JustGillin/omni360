@@ -33,6 +33,9 @@ enum ShellPage
 {
     SHELL_PAGE_HOME,
     SHELL_PAGE_LIBRARY,
+    // In the sidebar only: main.cpp shows it as the library's page with
+    // just the favourites, so shell.page is never this - see SidebarPage.
+    SHELL_PAGE_FAVOURITES,
     SHELL_PAGE_APPS,
     SHELL_PAGE_HOMEBREW,
     SHELL_PAGE_EMULATORS,
@@ -57,6 +60,7 @@ struct ShellSidebar
     ShellPage page;       // the highlighted page
     bool focused;         // the sidebar has focus, rather than the page
     int libraryCount;     // shown beside Your Library
+    int favouritesCount;  // beside Favourites
     int appsCount;        // beside Apps
     int homebrewCount;    // beside Homebrew
     int emulatorsCount;   // beside Emulators
@@ -158,7 +162,7 @@ struct UiHint
 // row, or the recents row. main.cpp owns which (HOME_FOCUS_* below) and does
 // the moving; this only draws.
 
-#define HOME_RECENTS_MAX 12
+#define HOME_RECENTS_MAX 8 // the favourites tile included; a 4:3 screen scrolls the last few
 #define HOME_NAV_MAX 8
 
 enum HomeFocus
@@ -166,6 +170,9 @@ enum HomeFocus
     HOME_FOCUS_NAV,
     HOME_FOCUS_RECENTS
 };
+
+// The favourites tile's covers: a 2x2 grid in one tile.
+#define HOME_FAVOURITE_COVERS 4
 
 // One tile in the recents row. The disc in the drive is one of these too,
 // drawn as the library's disc tile is, so Home needs no separate case.
@@ -177,6 +184,13 @@ struct HomeRecentView
     unsigned long titleId; // its cover, and the page's wallpaper; 0 for none
     const char *name;
     bool disc;             // the disc in the drive rather than a library game
+
+    // The favourites tile, last in the row: a 2x2 grid of the first
+    // favourites' covers, and the Favorites page on A. titleId is then the
+    // first favourite's, for the wallpaper behind it; name is how many.
+    bool favourites;
+    unsigned long covers[HOME_FAVOURITE_COVERS];
+    int coverCount;
 };
 
 // One button in the nav row. page is what main.cpp does with it when A is
@@ -222,6 +236,10 @@ void RenderHomeFrame(HomePageView &view, const UiHint *hints, int hintCount);
 // The signed-in profile's picture for Home, as 0xAARRGGBB pixels, row after
 // row - or NULL to clear it. Copied into a texture; the caller keeps pixels.
 void SetGamerPicture(const unsigned long *pixels, unsigned long w, unsigned long h);
+
+// UTF-8 to UTF-16, as the UI draws text - for the on-screen keyboard's
+// default text, which is wide.
+void Utf8ToWideText(const char *in, WCHAR *out, int outSize);
 
 // What the disc's tile shows.
 enum LibraryDiscTile
@@ -276,6 +294,19 @@ struct LibraryPageView
     const char *discName;      // the game's, or what's wrong with the disc
     unsigned long discTitleId; // for its box art; 0 for none
     float discProgress;        // DISC_TILE_INSTALLING: 0..1, negative when unknown
+
+    // The Favourites page is the library's grid showing some of its games:
+    // order lists them, as indexes into games, and orderCount is how many.
+    // NULL shows every game in games' order. games and count stay the whole
+    // library either way - the covers are built for all of it.
+    const int *order;
+    int orderCount;
+
+    // Per game in games, or NULL: the name to show in place of displayName
+    // (a rename; NULL entries keep the package's). Favourites carry no mark
+    // of their own - as on the Xbox dashboard, being on the Favorites page is
+    // what makes one.
+    const char *const *names;
 };
 
 // The library is a grid of cover tiles. How many full rows fit - LB/RB page

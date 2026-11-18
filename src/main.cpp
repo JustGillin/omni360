@@ -46,6 +46,7 @@ end-to-end on real hardware against a real 27-game library.
 #include "NightMode.h"
 #include "ClockSync.h"   // SyncClock, StartClockSync
 #include "Profiles.h"    // ListProfiles, SignInProfile - auto sign-in
+#include "GameMarks.h"   // favourites and renamed games
 #include "UpdateCheck.h"
 #include "ArchiveOrgDLC.h"
 #include "downloadFile.h" // DownloadProgressFn + FormatBytes, for the progress callback
@@ -943,12 +944,23 @@ static bool WriteFolderKind(FolderKind kind, const char *gamesPath, const char *
 // after every uppercase one. Ties break on title ID so the order is total and
 // stable across launches: two titles genuinely can share a display name, and
 // the ID is the thing that tells them apart (which is why the row draws it).
+// A game's name as the user sees it: what they renamed it to, or the
+// library's own. Only what's shown - the Store, DLC and title updates keep
+// going by displayName.
+static const char *ShownName(const InstalledGame &game)
+{
+    const char *renamed = RenamedTo(game.titleId, game.displayName);
+    return renamed != NULL ? renamed : game.displayName;
+}
+
+//
+// By the name shown, so a renamed game files under its new name.
 static int CompareGamesByName(const void *a, const void *b)
 {
     const InstalledGame *ga = (const InstalledGame *)a;
     const InstalledGame *gb = (const InstalledGame *)b;
 
-    int byName = _stricmp(ga->displayName, gb->displayName);
+    int byName = _stricmp(ShownName(*ga), ShownName(*gb));
     if (byName != 0)
         return byName;
 
@@ -1518,6 +1530,39 @@ struct Library
 // Goes up with every scan on the UI thread, so a scan startup left running
 // behind the library can tell it's been overtaken.
 static int g_libraryGeneration = 0;
+
+// ---------------------------------------------------------------------------
+// Favourites and renames, per library game
+// ---------------------------------------------------------------------------
+//
+// GameMarks.h's answers for each game in the library, worked out again only
+// when the library or the marks change - the grid wants them every frame.
+
+static const char *g_shownNames[MAX_INSTALLED_GAMES]; // a rename, or NULL
+static int g_favouriteOrder[MAX_INSTALLED_GAMES];     // the favourites, as library indexes, in its order
+static int g_favouriteShown = 0;
+static int g_marksVersion = 0; // up with every favourite or rename made here
+
+static void RefreshGameMarks(const Library &lib)
+{
+    static int builtVersion = -1, builtGeneration = -1, builtCount = -1;
+    static const InstalledGame *builtGames = NULL;
+    if (builtVersion == g_marksVersion && builtGeneration == g_libraryGeneration && builtCount == lib.count &&
+        builtGames == lib.games)
+        return;
+    builtVersion = g_marksVersion;
+    builtGeneration = g_libraryGeneration;
+    builtCount = lib.count;
+    builtGames = lib.games;
+
+    g_favouriteShown = 0;
+    for (int i = 0; i < lib.count && i < MAX_INSTALLED_GAMES; ++i)
+    {
+        g_shownNames[i] = RenamedTo(lib.games[i].titleId, lib.games[i].displayName);
+        if (IsFavourite(lib.games[i].titleId, lib.games[i].displayName))
+            g_favouriteOrder[g_favouriteShown++] = i;
+    }
+}
 
 // The disc in the drive's title ID, while there's a game disc in it - its
 // box art is asked for ahead of the library's, as it's the first tile.
@@ -3294,6 +3339,9 @@ struct Shell
     // library, with libraryInGame. The page is the same either way.
     bool storeInGame;
     bool libraryInGame;
+    // The library's page showing only the favourites - Favourites in the
+    // sidebar. librarySelected counts its tiles then, not the library's.
+    bool libraryFavourites;
     int storeGameFocus;     // STORE_GAME_FOCUS_*
     int storeVersionChosen;
     int storeVersionScroll;
@@ -3380,7 +3428,37 @@ static bool PageHidden(ShellPage page)
     ShelfKind shelf;
     if (ShelfForPage(page, &shelf))
         return g_shelves[shelf].pathCount == 0;
-    return page != SHELL_PAGE_LIBRARY;
+    // Favourites is listed even with none, so there's somewhere that says
+    // how to make one.
+    return page != SHELL_PAGE_LIBRARY && page != SHELL_PAGE_FAVOURITES;
+}
+
+// What the sidebar highlights: Favourites is the library's page in its
+// favourites mode, never a page of its own.
+static ShellPage SidebarPage(const Shell &shell)
+{
+    if (shell.page == SHELL_PAGE_LIBRARY && shell.libraryFavourites)
+        return SHELL_PAGE_FAVOURITES;
+    return shell.page;
+}
+
+// The other way: to a page as the sidebar lists it. Switching between Games
+// and Favourites starts the grid at the top, as their tiles differ.
+static void ShowSidebarPage(Shell &shell, ShellPage page)
+{
+    if (page == SHELL_PAGE_FAVOURITES || page == SHELL_PAGE_LIBRARY)
+    {
+        const bool favourites = (page == SHELL_PAGE_FAVOURITES);
+        if (shell.page != SHELL_PAGE_LIBRARY || shell.libraryFavourites != favourites)
+        {
+            shell.librarySelected = 0;
+            shell.libraryScroll = 0;
+        }
+        shell.page = SHELL_PAGE_LIBRARY;
+        shell.libraryFavourites = favourites;
+        return;
+    }
+    shell.page = page;
 }
 
 // Up or down the sidebar, past the pages it leaves out. Stays put at either end.
@@ -3398,7 +3476,7 @@ static ShellPage NextShownPage(ShellPage page, int step)
 // recents row, everything else on the sidebar it was reached from.
 static void EnterPage(Shell &shell, ShellPage page, bool fromSidebar)
 {
-    shell.page = page;
+    ShowSidebarPage(shell, page);
     if (page == SHELL_PAGE_HOME)
     {
         shell.sidebarFocused = false;
@@ -6457,7 +6535,8 @@ static void PublishSidebar(const Shell &shell, const Library &lib)
 {
     ShellSidebar sidebar;
     sidebar.shown = SidebarShown(shell);
-    sidebar.page = shell.page;
+    sidebar.page = SidebarPage(shell);
+    sidebar.favouritesCount = g_favouriteShown;
     // Home draws no sidebar; never let a focused one be published for it,
     // whatever shell.sidebarFocused was left holding.
     sidebar.focused = SidebarShown(shell) && shell.sidebarFocused;
@@ -6815,9 +6894,12 @@ static HomePageView MakeHomeView(const Shell &shell, const Library &lib)
         item.count = (p == SHELL_PAGE_QUEUE) ? queued : 0;
     }
 
+    // Eight tiles at most, the last of them Favorites when there are any.
+    const int recentRoom = g_favouriteShown > 0 ? HOME_RECENTS_MAX - 1 : HOME_RECENTS_MAX;
+
     // The disc first: it's the thing you've just put in, so it's what you
     // most likely came here to start.
-    if (shell.hasDisc && view.recentCount < HOME_RECENTS_MAX)
+    if (shell.hasDisc && view.recentCount < recentRoom)
     {
         HomeRecentView &tile = view.recents[view.recentCount];
         // Only a disc that read has a title ID worth asking for art by, as
@@ -6828,7 +6910,7 @@ static HomePageView MakeHomeView(const Shell &shell, const Library &lib)
         view.recentCount++;
     }
 
-    for (int i = 0; i < g_recentCount && view.recentCount < HOME_RECENTS_MAX; ++i)
+    for (int i = 0; i < g_recentCount && view.recentCount < recentRoom; ++i)
     {
         const InstalledGame *game = NULL;
         for (int g = 0; g < lib.count && game == NULL; ++g)
@@ -6841,18 +6923,167 @@ static HomePageView MakeHomeView(const Shell &shell, const Library &lib)
 
         HomeRecentView &tile = view.recents[view.recentCount];
         tile.titleId = game->titleId;
-        tile.name = game->displayName;
+        tile.name = ShownName(*game);
         tile.disc = false;
         view.recentCount++;
     }
 
-    if (view.recentCount == 0)
+    if (view.recentCount == 0 && g_favouriteShown == 0)
     {
         view.emptyTitle = Tr(lib.count > 0 ? STR_HOME_NOTHING_PLAYED : STR_HOME_NO_GAMES);
         view.emptyHint = Tr(lib.count > 0 ? STR_HOME_NOTHING_PLAYED_HINT : STR_HOME_NO_GAMES_HINT);
     }
 
+    // Favorites, last in the row: a 2x2 of the first ones' covers, the first
+    // one's wallpaper behind it, and A opens the Favorites page.
+    if (g_favouriteShown > 0 && view.recentCount < HOME_RECENTS_MAX)
+    {
+        static char favouritesCount[48];
+        TrCount(favouritesCount, sizeof(favouritesCount), STR_STORE_GAME_COUNT_ONE, STR_STORE_GAME_COUNT,
+                g_favouriteShown);
+        favouritesCount[sizeof(favouritesCount) - 1] = '\0';
+
+        HomeRecentView &tile = view.recents[view.recentCount++];
+        tile.favourites = true;
+        tile.name = favouritesCount;
+        for (int i = 0; i < g_favouriteShown && tile.coverCount < HOME_FAVOURITE_COVERS; ++i)
+            tile.covers[tile.coverCount++] = lib.games[g_favouriteOrder[i]].titleId;
+        tile.titleId = tile.covers[0];
+    }
+
     return view;
+}
+
+// The library's tile for a library game, on the page as it's showing - so
+// the focus can follow a game the library has just moved.
+static int LibraryItemFor(const Shell &shell, int index)
+{
+    if (!shell.libraryFavourites)
+        return index + ((shell.hasDisc) ? 1 : 0);
+    for (int i = 0; i < g_favouriteShown; ++i)
+    {
+        if (g_favouriteOrder[i] == index)
+            return i;
+    }
+    return 0;
+}
+
+// Sorts the library again by the names shown - after a rename - keeping the
+// focus on the game that was renamed. The covers are built per position, so
+// they go too and are made again from the images the scan kept, which is
+// quick: nothing is read from disk.
+static void ResortLibrary(Shell &shell, Library &lib, unsigned long titleId, const char *name)
+{
+    if (lib.count > 1)
+        qsort(lib.games, lib.count, sizeof(InstalledGame), CompareGamesByName);
+    ReleaseGameListIcons();
+    lib.cacheDirty = true;
+    g_marksVersion++;
+    RefreshGameMarks(lib);
+    for (int i = 0; i < lib.count; ++i)
+    {
+        if (lib.games[i].titleId == titleId && strcmp(lib.games[i].displayName, name) == 0)
+        {
+            shell.librarySelected = LibraryItemFor(shell, i);
+            break;
+        }
+    }
+}
+
+// Y on a library game: favourite it or not, and rename it.
+static void LibraryGameOptions(Shell &shell, Library &lib, int index)
+{
+    if (index < 0 || index >= lib.count)
+        return;
+    // Copied out: a rename re-sorts the library under the reference.
+    const unsigned long titleId = lib.games[index].titleId;
+    char name[256];
+    _snprintf(name, sizeof(name), "%s", lib.games[index].displayName);
+    name[sizeof(name) - 1] = '\0';
+    char shown[256];
+    _snprintf(shown, sizeof(shown), "%s", ShownName(lib.games[index]));
+    shown[sizeof(shown) - 1] = '\0';
+
+    const bool favourite = IsFavourite(titleId, name);
+    const bool renamed = RenamedTo(titleId, name) != NULL;
+
+    enum { OPTION_FAVOURITE, OPTION_RENAME, OPTION_ORIGINAL_NAME };
+    const char *labels[3];
+    int options[3];
+    int count = 0;
+    labels[count] = Tr(favourite ? STR_REMOVE_FROM_FAVOURITES : STR_ADD_TO_FAVOURITES);
+    options[count++] = OPTION_FAVOURITE;
+    labels[count] = Tr(STR_RENAME);
+    options[count++] = OPTION_RENAME;
+    if (renamed)
+    {
+        labels[count] = Tr(STR_USE_THE_ORIGINAL_NAME);
+        options[count++] = OPTION_ORIGINAL_NAME;
+    }
+
+    char message[320] = "";
+    if (renamed)
+        TrFormat(message, sizeof(message), STR_ORIGINALLY, name);
+    message[sizeof(message) - 1] = '\0';
+
+    const int picked = ShowAlertListUI(shown, message, labels, NULL, count, 0);
+    if (picked < 0)
+        return;
+
+    switch (options[picked])
+    {
+    case OPTION_FAVOURITE:
+    {
+        const bool saved = SetFavourite(titleId, name, !favourite);
+        g_marksVersion++;
+        RefreshGameMarks(lib);
+        if (!saved)
+            ShowShellToast(Tr(STR_NOT_SAVED), Tr(STR_GAMEMARKS_TXT_COULD_NOT_BE), UI_TOAST_ERROR);
+        else
+            ShowShellToast(Tr(favourite ? STR_REMOVED_FROM_FAVOURITES : STR_ADDED_TO_FAVOURITES), shown,
+                           UI_TOAST_SUCCESS);
+        break;
+    }
+    case OPTION_RENAME:
+    {
+        WCHAR current[128];
+        Utf8ToWideText(shown, current, 128);
+        std::string typed;
+        if (OpenKeyboardToString(XUSER_INDEX_ANY, &typed, TrW(STR_RENAME), TrW(STR_ONLY_OMNI360_SHOWS_THIS_NAME),
+                                 current) != ERROR_SUCCESS)
+            return; // cancelled
+        if (!SetRename(titleId, name, typed.c_str()))
+            ShowShellToast(Tr(STR_NOT_SAVED), Tr(STR_GAMEMARKS_TXT_COULD_NOT_BE), UI_TOAST_ERROR);
+        ResortLibrary(shell, lib, titleId, name);
+        break;
+    }
+    case OPTION_ORIGINAL_NAME:
+        if (!SetRename(titleId, name, NULL))
+            ShowShellToast(Tr(STR_NOT_SAVED), Tr(STR_GAMEMARKS_TXT_COULD_NOT_BE), UI_TOAST_ERROR);
+        ResortLibrary(shell, lib, titleId, name);
+        break;
+    }
+}
+
+// The library's page, all of it or the favourites: how many tiles lead the
+// games (the disc's, which Favourites doesn't show), how many games follow,
+// and which library game a tile is - -1 for the disc's.
+static int LibraryDiscItems(const Shell &shell)
+{
+    return (shell.hasDisc && !shell.libraryFavourites) ? 1 : 0;
+}
+
+static int LibraryShownGames(const Shell &shell, const Library &lib)
+{
+    return shell.libraryFavourites ? g_favouriteShown : lib.count;
+}
+
+static int LibraryGameAt(const Shell &shell, const Library &lib, int item)
+{
+    const int i = item - LibraryDiscItems(shell);
+    if (i < 0 || i >= LibraryShownGames(shell, lib))
+        return -1;
+    return shell.libraryFavourites ? g_favouriteOrder[i] : i;
 }
 
 static LibraryPageView MakeLibraryView(const Shell &shell, const Library &lib, const char *gamesPath)
@@ -6860,6 +7091,9 @@ static LibraryPageView MakeLibraryView(const Shell &shell, const Library &lib, c
     LibraryPageView view;
     view.games = lib.games;
     view.count = lib.count;
+    view.names = g_shownNames;
+    view.order = shell.libraryFavourites ? g_favouriteOrder : NULL;
+    view.orderCount = g_favouriteShown;
     view.selected = shell.librarySelected;
     view.scroll = shell.libraryScroll;
     view.gamesPath = gamesPath;
@@ -6883,6 +7117,17 @@ static LibraryPageView MakeLibraryView(const Shell &shell, const Library &lib, c
         const QueueJobSnapshot &job = shell.queueJobs[i];
         if (job.kind == QUEUE_JOB_DISC_INSTALL && job.state == QUEUE_ACTIVE)
             view.discProgress = job.fraction;
+    }
+
+    // Favourites: the starred games alone, without the disc, and its own
+    // words when there are none yet.
+    if (shell.libraryFavourites)
+    {
+        view.hasDisc = false;
+        view.bannerText = NULL;
+        view.heading = Tr(STR_NAV_FAVOURITES);
+        view.emptyTitle = Tr(STR_NO_FAVOURITES_YET);
+        view.emptyHint = Tr(STR_PRESS_Y_ON_A_GAME_TO);
     }
     return view;
 }
@@ -7234,6 +7479,7 @@ static bool HomeTileAction(Shell &shell, const Library &lib, const char *gamesPa
         if ((pressed & XINPUT_GAMEPAD_X) && (state == DISC_TILE_READY || state == DISC_TILE_INSTALLED))
         {
             shell.page = SHELL_PAGE_LIBRARY;
+            shell.libraryFavourites = false; // librarySelected below is the whole library's
             shell.sidebarFocused = false;
             shell.librarySelected = 0; // the disc is the library's first tile
         }
@@ -7255,6 +7501,7 @@ static bool HomeTileAction(Shell &shell, const Library &lib, const char *gamesPa
         // On the library's page, so B comes back to the grid rather than to
         // the Store - OpenGameByTitleId goes by whichever page is showing.
         shell.page = SHELL_PAGE_LIBRARY;
+        shell.libraryFavourites = false;
         shell.sidebarFocused = false;
         shell.librarySelected = index + (shell.hasDisc ? 1 : 0);
         OpenGameByTitleId(shell, lib, tile.titleId, lib.games[index].displayName);
@@ -8303,6 +8550,8 @@ int main()
     if (ClockSyncAtStart())
         StartClockSync();
     StartupStep("network");
+    // Before the library is read: renamed games are sorted by the new name.
+    LoadGameMarks();
     SetDiscReadSpeed(DiscSpeedSetting());
     SetEjectAfterInstall(EjectAfterInstallSetting());
     if (StartUiSounds())
@@ -8789,6 +9038,7 @@ int main()
 
         PublishSidebar(shell, lib);
 
+        RefreshGameMarks(lib);
         UiInput input = PollUiInput();
         const WORD pressed = input.pressed;
 
@@ -8869,7 +9119,12 @@ int main()
                     if (shell.homeSelected > home.recentCount - 1) shell.homeSelected = home.recentCount - 1;
                     if (shell.homeSelected < 0) shell.homeSelected = 0;
                 }
-                else if (pressed & (XINPUT_GAMEPAD_A | XINPUT_GAMEPAD_X | XINPUT_GAMEPAD_START))
+                else if ((pressed & XINPUT_GAMEPAD_A) && home.recents[shell.homeSelected].favourites)
+                {
+                    EnterPage(shell, SHELL_PAGE_FAVOURITES, false);
+                }
+                else if ((pressed & (XINPUT_GAMEPAD_A | XINPUT_GAMEPAD_X | XINPUT_GAMEPAD_START)) &&
+                         !home.recents[shell.homeSelected].favourites)
                 {
                     // START is the disc's install, as it is in the grid.
                     acted = HomeTileAction(shell, lib, gamesPath, pressed, home.recents[shell.homeSelected]);
@@ -8891,9 +9146,9 @@ int main()
         else if (shell.sidebarFocused)
         {
             if (input.nav == XINPUT_GAMEPAD_DPAD_UP)
-                shell.page = NextShownPage(shell.page, -1);
+                ShowSidebarPage(shell, NextShownPage(SidebarPage(shell), -1));
             else if (input.nav == XINPUT_GAMEPAD_DPAD_DOWN)
-                shell.page = NextShownPage(shell.page, 1);
+                ShowSidebarPage(shell, NextShownPage(SidebarPage(shell), 1));
             else if ((input.nav == XINPUT_GAMEPAD_DPAD_RIGHT || (pressed & XINPUT_GAMEPAD_A)) &&
                      PageTakesFocus(shell, shell.page))
                 shell.sidebarFocused = false;
@@ -8958,10 +9213,11 @@ int main()
             bool toSidebar = false;
 
             // The disc's tile, when there is one, is item 0 and the games
-            // follow it.
-            const int discItems = shell.hasDisc ? 1 : 0;
-            const int itemCount = lib.count + discItems;
-            const bool onDisc = shell.hasDisc && shell.librarySelected == 0;
+            // follow it - all of them, or on Favourites just those.
+            const int discItems = LibraryDiscItems(shell);
+            const int itemCount = LibraryShownGames(shell, lib) + discItems;
+            const bool onDisc = discItems > 0 && shell.librarySelected == 0;
+            const int chosenGame = LibraryGameAt(shell, lib, shell.librarySelected);
 
             if (StepGrid(input, itemCount, LibraryPageVisibleRows(MakeLibraryView(shell, lib, gamesPath)),
                          shell.librarySelected))
@@ -8979,22 +9235,29 @@ int main()
             {
                 acted = DiscTileAction(shell, lib, gamesPath, pressed);
             }
-            else if ((pressed & XINPUT_GAMEPAD_A) && lib.count > 0 && !onDisc)
+            else if ((pressed & XINPUT_GAMEPAD_A) && chosenGame >= 0)
             {
                 // The library is what you have, so A plays it - as the
                 // dashboard and Aurora do.
-                PlayLibraryGame(lib.games[shell.librarySelected - discItems]);
+                PlayLibraryGame(lib.games[chosenGame]);
                 acted = true;
             }
-            else if ((pressed & XINPUT_GAMEPAD_X) && lib.count > 0 && !onDisc)
+            else if ((pressed & XINPUT_GAMEPAD_X) && chosenGame >= 0)
             {
                 // Its page, with its DLC and title updates a button away - X,
                 // as on the disc's tile.
-                const InstalledGame &chosen = lib.games[shell.librarySelected - discItems];
+                const InstalledGame &chosen = lib.games[chosenGame];
                 dprintf("Selected: %s (Title ID %08lX)\n", chosen.displayName, chosen.titleId);
                 OpenLibraryGame(shell, lib, chosen);
             }
-            else if (pressed & XINPUT_GAMEPAD_Y)
+            else if ((pressed & XINPUT_GAMEPAD_Y) && chosenGame >= 0 && (shell.keysSaved || shell.libraryFavourites))
+            {
+                // On a game: favourite it, or rename it. Not while the keys
+                // banner is up on Games, whose Y badge goes to Settings.
+                LibraryGameOptions(shell, lib, chosenGame);
+                acted = true;
+            }
+            else if ((pressed & XINPUT_GAMEPAD_Y) && !shell.libraryFavourites)
             {
                 // A shortcut, for the keys banner and the empty library, which
                 // both send you to Settings with a Y badge: to the keys, or
@@ -9618,6 +9881,11 @@ int main()
                     hintCount = AddHint(hints, hintCount, UI_BUTTON_A, TrW(STR_OPEN));
                 hintCount = AddHint(hints, hintCount, UI_BUTTON_B, TrW(STR_EXIT));
             }
+            else if (view.recentCount > 0 && view.recents[view.recentFocus].favourites)
+            {
+                hintCount = AddHint(hints, hintCount, UI_BUTTON_A, TrW(STR_OPEN));
+                hintCount = AddHint(hints, hintCount, UI_BUTTON_B, TrW(STR_EXIT));
+            }
             else
             {
                 // On the disc's tile the buttons say what its state allows,
@@ -9681,8 +9949,8 @@ int main()
                 {
                     // The console's own A, X, B order. On the disc's tile they
                     // say what the disc's state allows.
-                    const int itemCount = lib.count + (shell.hasDisc ? 1 : 0);
-                    const bool onDisc = shell.hasDisc && shell.librarySelected == 0;
+                    const int itemCount = LibraryShownGames(shell, lib) + LibraryDiscItems(shell);
+                    const bool onDisc = LibraryDiscItems(shell) > 0 && shell.librarySelected == 0;
 
                     if (onDisc)
                     {
@@ -9708,10 +9976,12 @@ int main()
                             break;
                         }
                     }
-                    else if (lib.count > 0)
+                    else if (LibraryGameAt(shell, lib, shell.librarySelected) >= 0)
                     {
                         hintCount = AddHint(hints, hintCount, UI_BUTTON_A, TrW(STR_PLAY));
                         hintCount = AddHint(hints, hintCount, UI_BUTTON_X, TrW(STR_VIEW_GAME), TrW(STR_VIEW));
+                        if (shell.keysSaved || shell.libraryFavourites)
+                            hintCount = AddHint(hints, hintCount, UI_BUTTON_Y, TrW(STR_OPTIONS));
                     }
                     hintCount = AddHint(hints, hintCount, UI_BUTTON_B, TrW(STR_NAV_HOME));
                     if (itemCount > LibraryPageVisibleRows(view) * LibraryGridColumns())

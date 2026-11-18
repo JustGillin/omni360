@@ -829,6 +829,13 @@ static void DrawGradientRect(float x, float y, float w, float h,
 // BMP range is enough here. These are STFS display names, not
 // supplementary-plane text, and the font would have nothing to draw for it
 // anyway.
+static void Utf8ToWide(const char *in, WCHAR *out, int outSize);
+
+void Utf8ToWideText(const char *in, WCHAR *out, int outSize)
+{
+    Utf8ToWide(in, out, outSize);
+}
+
 static void Utf8ToWide(const char *in, WCHAR *out, int outSize)
 {
     const unsigned char *p = (const unsigned char *)in;
@@ -1893,6 +1900,7 @@ static const StringId kShellPageNames[SHELL_PAGE_COUNT] =
 {
     STR_NAV_HOME,
     STR_NAV_GAMES,
+    STR_NAV_FAVOURITES,
     STR_NAV_APPS,
     STR_NAV_HOMEBREW,
     STR_NAV_EMULATORS,
@@ -1960,6 +1968,7 @@ static bool NavCountFor(int page, NavCount *out)
 {
     int count = 0;
     if (page == SHELL_PAGE_LIBRARY) count = g_sidebar.libraryCount;
+    if (page == SHELL_PAGE_FAVOURITES) count = g_sidebar.favouritesCount;
     if (page == SHELL_PAGE_APPS) count = g_sidebar.appsCount;
     if (page == SHELL_PAGE_HOMEBREW) count = g_sidebar.homebrewCount;
     if (page == SHELL_PAGE_EMULATORS) count = g_sidebar.emulatorsCount;
@@ -3963,7 +3972,8 @@ static bool ItemIsDisc(const LibraryItems &it, int item)
 
 static int ItemGameIndex(const LibraryItems &it, int item)
 {
-    return item - it.discItems;
+    const int i = item - it.discItems;
+    return it.view->order != NULL ? it.view->order[i] : i;
 }
 
 static D3DTexture *ItemBoxArt(const LibraryItems &it, int item)
@@ -3986,7 +3996,10 @@ static const char *ItemName(const LibraryItems &it, int item)
 {
     if (ItemIsDisc(it, item))
         return it.view->discName != NULL ? it.view->discName : "";
-    return it.view->games[ItemGameIndex(it, item)].displayName;
+    const int game = ItemGameIndex(it, item);
+    if (it.view->names != NULL && it.view->names[game] != NULL)
+        return it.view->names[game];
+    return it.view->games[game].displayName;
 }
 
 // A disc with no box art yet: a disc, drawn from circles, on a dark green tile.
@@ -4117,7 +4130,7 @@ void RenderLibraryFrame(LibraryPageView &view, const UiHint *hints, int hintCoun
     items.view = &view;
     items.icons = icons;
     items.discItems = view.hasDisc ? 1 : 0;
-    items.count = gameCount + items.discItems;
+    items.count = (view.order != NULL ? view.orderCount : gameCount) + items.discItems;
 
     const LibraryLayout L = ComputeLibraryLayout(view);
 
@@ -4288,9 +4301,11 @@ void RenderLibraryFrame(LibraryPageView &view, const UiHint *hints, int hintCoun
 
     if (items.count == 0)
     {
-        char where[300];
-        TrFormat(where, sizeof(where), STR_LIB_SEARCHED,
-                 view.gamesPath != NULL ? view.gamesPath : Tr(STR_LIB_NO_FOLDER));
+        // Where it looked - not on Favourites, which didn't look anywhere.
+        char where[300] = "";
+        if (view.order == NULL)
+            TrFormat(where, sizeof(where), STR_LIB_SEARCHED,
+                     view.gamesPath != NULL ? view.gamesPath : Tr(STR_LIB_NO_FOLDER));
 
         const float x = g_M.contentX + S(32.0f);
         const float w = g_M.contentW - S(64.0f);
@@ -6381,6 +6396,23 @@ static void DrawHomeWallpaper(const HomeWallpapers &art)
 // for what's in the drive, a cover otherwise.
 static void DrawHomeTileArt(const HomeRecentView &tile, float x, float y, float s)
 {
+    // The favourites tile: its first four covers in a 2x2 grid on a dark
+    // panel, the way the Xbox dashboard shows a group on Home - the mosaic
+    // is what says it's a collection, and the caption over the row names it.
+    if (tile.favourites)
+    {
+        FillRoundGradient(x, y, s, s, g_M.radius, 0xFF2A2F2A, 0xFF151815, true);
+        const float pad = s * 0.06f;
+        const float cell = (s - pad * 3.0f) * 0.5f;
+        for (int i = 0; i < tile.coverCount && i < HOME_FAVOURITE_COVERS; ++i)
+        {
+            const float cx = x + pad + (i % 2) * (cell + pad);
+            const float cy = y + pad + (i / 2) * (cell + pad);
+            DrawTileArt(BoxArtFor(tile.covers[i]), NULL, cx, cy, cell, cell);
+        }
+        return;
+    }
+
     D3DTexture *cover = BoxArtFor(tile.titleId);
     if (tile.disc && cover == NULL)
         DrawDiscArt(x, y, s, s);
@@ -6418,13 +6450,14 @@ void RenderHomeFrame(HomePageView &view, const UiHint *hints, int hintCount)
     // its neighbours so it can grow over them - as the library's grid does,
     // but much further: FocusGrowFor only gives the timing, and the size it
     // eases to is this page's own.
+    const bool recentsFocused = (view.focus == HOME_FOCUS_RECENTS);
     const float growT =
-        (FocusGrowFor(view.recentFocus, !navFocused && view.recentCount > 0) - 1.0f) / (FOCUS_GROW - 1.0f);
+        (FocusGrowFor(view.recentFocus, recentsFocused && view.recentCount > 0) - 1.0f) / (FOCUS_GROW - 1.0f);
     const float grow = 1.0f + growT * (HOME_FOCUS_GROW - 1.0f);
     const int focusCol = (focusTile >= view.recentScroll && focusTile < view.recentScroll + L.across)
                              ? focusTile - view.recentScroll
                              : -1;
-    const bool growTile = !navFocused && focusCol >= 0;
+    const bool growTile = recentsFocused && focusCol >= 0;
     const float focusS = L.tile * grow;
     const float focusOX = g_M.safeX + focusCol * (L.tile + L.gap) - (focusS - L.tile) * 0.5f;
     const float focusOY = L.rowY - (focusS - L.tile) * 0.5f;
@@ -6583,14 +6616,17 @@ void RenderHomeFrame(HomePageView &view, const UiHint *hints, int hintCount)
         TextMid(g_M.screenW * 0.5f, L.navY + L.navH + S(16.0f), 0.72f, COL_TEXT, view.nav[navFocus].label,
                 ATGFONT_CENTER_X, 0.0f, true);
 
-    // The focused game, over the wallpaper.
+    // The focused game, over the wallpaper - or, on the favourites tile,
+    // FAVORITES and how many.
     if (focusTile >= 0)
     {
         const HomeRecentView &game = view.recents[focusTile];
         const float nameW = g_M.screenW * 0.55f;
 
-        Text(g_M.safeX, L.nameY, 0.62f, COL_GREEN_TEXT, Tr(game.disc ? STR_HOME_IN_THE_DRIVE : STR_HOME_CONTINUE_PLAYING), 0, 0.0f,
-             true);
+        const StringId caption = game.favourites ? STR_HOME_FAVOURITES
+                                 : game.disc     ? STR_HOME_IN_THE_DRIVE
+                                                 : STR_HOME_CONTINUE_PLAYING;
+        Text(g_M.safeX, L.nameY, 0.62f, COL_GREEN_TEXT, Tr(caption), 0, 0.0f, true);
         TextFit(g_M.safeX, L.nameY + S(26.0f), 2.0f, COL_TEXT, game.name, nameW, true);
     }
 
