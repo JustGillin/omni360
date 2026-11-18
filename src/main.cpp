@@ -28,6 +28,7 @@ end-to-end on real hardware against a real 27-game library.
 #include "Launch.h"
 #include "LibraryCache.h"
 #include "Recents.h"
+#include "StorageScan.h" // StartStorageScan, for the Storage page
 #include "UiSound.h"
 #include "Featured.h"
 #include "ServiceCheck.h"
@@ -1735,6 +1736,7 @@ struct SettingsOutcome
 {
     bool libraryChanged; // the games folder changed and the library was rescanned
     bool keysChanged;    // the saved keys were replaced or removed
+    bool openStorage;    // Manage storage: the caller opens the Storage page
 };
 
 enum SettingsRow
@@ -1761,7 +1763,8 @@ enum SettingsRow
     SETTINGS_ROW_CLOCK,        // 12- or 24-hour, or what the language says: left and right
     SETTINGS_ROW_CLOCK_SYNC_NOW, // set the clock from the internet now
     SETTINGS_ROW_CLOCK_SYNC,   // ...and at start, on or off
-    SETTINGS_ROW_SIGN_IN       // the profile signed in at start: A picks it
+    SETTINGS_ROW_SIGN_IN,      // the profile signed in at start: A picks it
+    SETTINGS_ROW_MANAGE_STORAGE // the Storage page
 };
 
 // Rescans with the library folders now in settings.txt.
@@ -2579,6 +2582,62 @@ static void AddComingSoonRow(SettingsPage &page, const char *label, const char *
 
 static void FormatKernelVersion(char *out, size_t outSize); // with the System popup
 
+// ---------------------------------------------------------------------------
+// Storage: sizes per title per drive, read on a thread (StorageScan.h)
+// ---------------------------------------------------------------------------
+
+// The library's folders and folder games, handed to the scan. False if one
+// is already running.
+static bool BeginStorageScan(const Library &lib, const char *gamesPath)
+{
+    static StorageScanRequest request; // too big for the stack
+    memset(&request, 0, sizeof(request));
+    _snprintf(request.roots[request.rootCount++], sizeof(request.roots[0]), "%s", gamesPath);
+    for (int p = 0; p < g_moreGamesPathCount && request.rootCount < STORAGE_MAX_ROOTS; ++p)
+        _snprintf(request.roots[request.rootCount++], sizeof(request.roots[0]), "%s", g_moreGamesPaths[p]);
+    for (int i = 0; i < lib.count && request.folderCount < STORAGE_MAX_FOLDERS; ++i)
+    {
+        if (!lib.games[i].folder)
+            continue;
+        StorageFolderGame &f = request.folders[request.folderCount++];
+        f.titleId = lib.games[i].titleId;
+        _snprintf(f.path, sizeof(f.path), "%s", lib.games[i].packagePath);
+        f.path[sizeof(f.path) - 1] = '\0';
+    }
+    return StartStorageScan(request);
+}
+
+// A title's name for the scan's log: the library's - which names Original
+// Xbox games too - then the bundled list's.
+static const Library *g_storageNamesFrom = NULL;
+static const char *StorageTitleName(unsigned long titleId)
+{
+    for (int i = 0; g_storageNamesFrom != NULL && i < g_storageNamesFrom->count; ++i)
+    {
+        if (g_storageNamesFrom->games[i].titleId == titleId)
+            return g_storageNamesFrom->games[i].displayName;
+    }
+    return LookupTitleName(titleId);
+}
+
+// A finished scan, into the log once - for checking it against the drive
+// before there's a page to show it.
+static void PollStorageScan(const Library &lib)
+{
+    static int logged = 0;
+    const StorageSnapshot *snap = StorageSnapshotAcquire();
+    const int generation = snap != NULL ? snap->generation : 0;
+    if (snap != NULL)
+        StorageSnapshotRelease();
+    if (generation != 0 && generation != logged)
+    {
+        logged = generation;
+        g_storageNamesFrom = &lib;
+        LogStorageSnapshot(StorageTitleName);
+        g_storageNamesFrom = NULL;
+    }
+}
+
 static void BuildSettingsPage(SettingsPage &page, const Library &lib, const char *gamesPath)
 {
     std::string accessKey, secretKey;
@@ -2593,6 +2652,11 @@ static void BuildSettingsPage(SettingsPage &page, const Library &lib, const char
 
     if (page.section == SETTINGS_SECTION_STORAGE)
     {
+        // --- Drives: the Storage page ---
+        AddSettingsRow(page, SETTINGS_VIEW_HEADING, Tr(STR_STORAGE_DRIVES));
+        AddSettingsControl(page, SETTINGS_CONTROL_BUTTON, Tr(STR_STORAGE_MANAGE), SETTINGS_ROW_MANAGE_STORAGE,
+                           Tr(STR_STORAGE_MANAGE_HELP));
+
         // --- Manage paths ---
         // Names the content folder as well when it isn't the games folder
         // itself, so it's clear where DLC, updates and arcade games land - they
@@ -2990,6 +3054,7 @@ static SettingsOutcome RunSettingsRow(SettingsRow row, int arg, Library &lib, ch
     case SETTINGS_ROW_CLOCK_SYNC_NOW: SetClockNow(); break;
     case SETTINGS_ROW_CLOCK_SYNC:   ToggleClockSync(); break;
     case SETTINGS_ROW_SIGN_IN:      PickSignInProfile(); break;
+    case SETTINGS_ROW_MANAGE_STORAGE: outcome.openStorage = true; break;
     case SETTINGS_ROW_HELPER_PAIR:  PairPcHelper(); break;
     case SETTINGS_ROW_HELPER_UNPAIR: UnpairPcHelper(); break;
     case SETTINGS_ROW_HELPER_SCAN:  ScanForPcHelper(); break;
@@ -3261,6 +3326,15 @@ struct Shell
     int queueRecentFocus;
     int queueRecentScroll;
     bool queueOnRecents; // the row has the focus, not the cards below it
+
+    // Storage: which column (0 the actions, 1 the drives) and row, and where
+    // B goes back to. sidebarOnStorage: the sidebar has focus on its storage
+    // ring rather than a page - cleared whenever the sidebar loses focus.
+    int storageColumn;
+    int storageRow;
+    ShellPage storageReturn;
+    bool storageFromRing;
+    bool sidebarOnStorage;
 
     // The disc in the drive, as the library's first tile - see UpdateDisc.
     // librarySelected counts it: with a disc, 0 is the disc and game i is
@@ -6486,6 +6560,7 @@ static unsigned long FocusSignature(const Shell &shell)
         shell.storeVersionsOpen, shell.storeVersionFocus,
         shell.storeFilterOpen, shell.storeFilterFocus, FilterSignature(),
         shell.storeInHomebrew, shell.homebrewRow, shell.homebrewPlace,
+        shell.storageColumn, shell.storageRow, shell.sidebarOnStorage,
         g_shelves[SHELF_APPS].selected, g_shelves[SHELF_HOMEBREW].selected, g_shelves[SHELF_EMULATORS].selected,
     };
     unsigned long hash = 2166136261UL; // FNV-1a
@@ -6554,6 +6629,7 @@ static void PublishSidebar(const Shell &shell, const Library &lib)
     sidebar.storageDetail[sizeof(sidebar.storageDetail) - 1] = '\0';
     strncpy(sidebar.storageTotal, shell.storage.total, sizeof(sidebar.storageTotal) - 1);
     sidebar.storageTotal[sizeof(sidebar.storageTotal) - 1] = '\0';
+    sidebar.storageFocused = sidebar.focused && shell.sidebarOnStorage && shell.storage.used >= 0.0f;
 
     // Settings lists its sections in the pages' place.
     for (int s = 0; s < SETTINGS_SECTION_COUNT; ++s)
@@ -6577,6 +6653,326 @@ static int g_recentCount = 0;
 static void ReadRecents()
 {
     g_recentCount = LoadRecents(g_recents, MAX_RECENTS);
+}
+
+// ---------------------------------------------------------------------------
+// Storage
+// ---------------------------------------------------------------------------
+//
+// Every drive's space and what it went on, from StorageScan's latest
+// snapshot, and the things to do about it. Measured again each time the page
+// is opened; the last measurement shows meanwhile.
+
+enum StorageAction
+{
+    STORAGE_ACTION_FREE_UP,
+    STORAGE_ACTION_PARTIALS,
+    STORAGE_ACTION_LEFTOVERS,
+    STORAGE_ACTION_RESCAN,
+    STORAGE_ACTION_COUNT
+};
+
+// The view's text, kept for the frame that draws it.
+struct StorageViewText
+{
+    char subtitle[96];
+    char actionDetail[STORAGE_ACTION_COUNT][96];
+    char freeLine[STORAGE_VIEW_DRIVES][96];
+    char name[STORAGE_VIEW_DRIVES][48];
+    char device[STORAGE_VIEW_DRIVES][8];
+    char shareLine[STORAGE_VIEW_DRIVES][STORAGE_SHARE_COUNT][64];
+    StorageActionView actions[STORAGE_ACTION_COUNT];
+    StorageDriveView drives[STORAGE_VIEW_DRIVES];
+    int driveIndex[STORAGE_VIEW_DRIVES]; // into the snapshot's drives
+    unsigned long long partialBytes;
+    int partialItems;
+};
+
+static StorageViewText g_storageText;
+
+static void StorageBytes(unsigned long long bytes, char *out, size_t outSize)
+{
+    if (!FormatBytes(bytes, out, outSize))
+        _snprintf(out, outSize, "?");
+    out[outSize - 1] = '\0';
+}
+
+// DLC or updates whose game isn't on any drive - less any for the disc in the
+// drive or a game played from one lately, since a disc game's DLC lives here
+// with no installed game beside it.
+static bool StorageLeftover(const StorageTitle &t, const Shell &shell)
+{
+    if (!StorageTitleIsLeftover(t))
+        return false;
+    if (shell.disc.titleId != 0 && shell.disc.titleId == t.titleId)
+        return false;
+    for (int i = 0; i < g_recentCount; ++i)
+    {
+        if (g_recents[i].titleId == t.titleId)
+            return false;
+    }
+    return true;
+}
+
+static StoragePageView MakeStorageView(const Shell &shell)
+{
+    StorageViewText &v = g_storageText;
+    memset(&v, 0, sizeof(v));
+
+    char contentDrive[16];
+    DriveOfPath(g_contentBase, contentDrive, sizeof(contentDrive));
+    const size_t contentDriveLen = strcspn(contentDrive, ":");
+
+    int driveCount = 0;
+    int leftoverTitles = 0;
+    unsigned long long leftoverBytes = 0, freeInAll = 0;
+    const bool measuring = StorageScanRunning();
+
+    const StorageSnapshot *snap = StorageSnapshotAcquire();
+    if (snap != NULL)
+    {
+        for (int d = 0; d < snap->driveCount && driveCount < STORAGE_VIEW_DRIVES; ++d)
+        {
+            const StorageDrive &drive = snap->drives[d];
+            v.partialBytes += drive.partialBytes;
+            v.partialItems += drive.partialItems;
+            if (!drive.present || drive.capacity == 0)
+                continue;
+            freeInAll += drive.freeBytes;
+
+            const int i = driveCount++;
+            v.driveIndex[i] = d;
+            StorageDriveView &view = v.drives[i];
+
+            if (_strnicmp(drive.name, "Usb", 3) == 0)
+                TrFormat(v.name[i], sizeof(v.name[i]), STR_STORAGE_USB_DRIVE, TrNum(atoi(drive.name + 3) + 1));
+            else
+                TrFormat(v.name[i], sizeof(v.name[i]), STR_STORAGE_HARD_DRIVE);
+            _snprintf(v.device[i], sizeof(v.device[i]), "%s", drive.name);
+            v.device[i][sizeof(v.device[i]) - 1] = '\0';
+
+            char freeText[32], totalText[32];
+            StorageBytes(drive.freeBytes, freeText, sizeof(freeText));
+            StorageBytes(drive.capacity, totalText, sizeof(totalText));
+            TrFormat(v.freeLine[i], sizeof(v.freeLine[i]), STR_STORAGE_FREE_OF, freeText, totalText);
+
+            // What the space went on. Other is what's in use that the scan
+            // doesn't account for - the system, saves, Aurora - so the three
+            // and the free space fill the bar.
+            const double cap = (double)drive.capacity;
+            const unsigned long long used = drive.capacity - drive.freeBytes;
+            const unsigned long long games = drive.bytes[STORAGE_GAME] + drive.bytes[STORAGE_DISC_INSTALL];
+            const unsigned long long extras = drive.bytes[STORAGE_DLC] + drive.bytes[STORAGE_UPDATE];
+            const unsigned long long other = used > games + extras ? used - games - extras : 0;
+            const unsigned long long shares[STORAGE_SHARE_COUNT] = { games, extras, other };
+            static const StringId kShareIds[STORAGE_SHARE_COUNT] = { STR_STORAGE_SHARE_GAMES, STR_STORAGE_SHARE_EXTRAS,
+                                                                     STR_STORAGE_SHARE_OTHER };
+            for (int s = 0; s < STORAGE_SHARE_COUNT; ++s)
+            {
+                view.shares[s] = (float)(shares[s] / cap);
+                char size[32];
+                StorageBytes(shares[s], size, sizeof(size));
+                TrFormat(v.shareLine[i][s], sizeof(v.shareLine[i][s]), kShareIds[s], size);
+                view.shareLines[s] = v.shareLine[i][s];
+            }
+
+            view.name = v.name[i];
+            view.device = v.device[i];
+            view.freeLine = v.freeLine[i];
+            view.used = (float)(used / cap);
+            view.note = (strlen(drive.name) == contentDriveLen && _strnicmp(drive.name, contentDrive, contentDriveLen) == 0)
+                            ? Tr(STR_STORAGE_DOWNLOADS_HERE) : NULL;
+        }
+
+        // Leftovers by title, counted once however many drives they're on.
+        for (int i = 0; i < snap->titleCount; ++i)
+        {
+            const StorageTitle &t = snap->titles[i];
+            if (!StorageLeftover(t, shell))
+                continue;
+            leftoverBytes += t.bytes[STORAGE_DLC] + t.bytes[STORAGE_UPDATE];
+            bool seen = false;
+            for (int j = 0; j < i && !seen; ++j)
+                seen = snap->titles[j].titleId == t.titleId && StorageLeftover(snap->titles[j], shell);
+            if (!seen)
+                leftoverTitles++;
+        }
+        StorageSnapshotRelease();
+    }
+
+    if (snap == NULL || measuring)
+        TrFormat(v.subtitle, sizeof(v.subtitle), STR_STORAGE_MEASURING);
+    else
+    {
+        char freeText[32];
+        StorageBytes(freeInAll, freeText, sizeof(freeText));
+        TrFormat(v.subtitle, sizeof(v.subtitle), STR_STORAGE_FREE_IN_ALL, freeText);
+    }
+
+    char size[32];
+    StorageAction a;
+
+    a = STORAGE_ACTION_FREE_UP;
+    v.actions[a].label = Tr(STR_STORAGE_FREE_UP);
+    TrFormat(v.actionDetail[a], sizeof(v.actionDetail[a]), STR_STORAGE_FREE_UP_DETAIL);
+
+    a = STORAGE_ACTION_PARTIALS;
+    v.actions[a].label = Tr(STR_STORAGE_PARTIALS);
+    v.actions[a].quiet = v.partialItems == 0;
+    StorageBytes(v.partialBytes, size, sizeof(size));
+    if (v.partialItems == 0)
+        TrFormat(v.actionDetail[a], sizeof(v.actionDetail[a]), STR_STORAGE_NONE);
+    else
+        TrCount(v.actionDetail[a], sizeof(v.actionDetail[a]), STR_STORAGE_ITEMS_ONE, STR_STORAGE_ITEMS,
+                v.partialItems, size);
+
+    a = STORAGE_ACTION_LEFTOVERS;
+    v.actions[a].label = Tr(STR_STORAGE_LEFTOVERS);
+    v.actions[a].quiet = leftoverTitles == 0;
+    StorageBytes(leftoverBytes, size, sizeof(size));
+    if (leftoverTitles == 0)
+        TrFormat(v.actionDetail[a], sizeof(v.actionDetail[a]), STR_STORAGE_NONE);
+    else
+        TrCount(v.actionDetail[a], sizeof(v.actionDetail[a]), STR_STORAGE_GAMES_ONE, STR_STORAGE_GAMES,
+                leftoverTitles, size);
+
+    a = STORAGE_ACTION_RESCAN;
+    v.actions[a].label = Tr(STR_STORAGE_RESCAN);
+    v.actions[a].quiet = measuring;
+    TrFormat(v.actionDetail[a], sizeof(v.actionDetail[a]), measuring ? STR_STORAGE_MEASURING : STR_STORAGE_RESCAN_DETAIL);
+
+    for (int i = 0; i < STORAGE_ACTION_COUNT; ++i)
+        v.actions[i].detail = v.actionDetail[i];
+
+    StoragePageView view;
+    memset(&view, 0, sizeof(view));
+    view.subtitle = v.subtitle;
+    view.actions = v.actions;
+    view.actionCount = STORAGE_ACTION_COUNT;
+    view.drives = v.drives;
+    view.driveCount = driveCount;
+    view.emptyLine = snap == NULL ? Tr(STR_STORAGE_MEASURING) : Tr(STR_STORAGE_NO_DRIVES);
+    view.focused = true;
+    view.column = shell.storageColumn;
+    view.row = shell.storageRow;
+    return view;
+}
+
+// To the Storage page from the sidebar's ring or Settings, measuring again
+// on the way in. B goes back to where it came from.
+static void EnterStoragePage(Shell &shell, const Library &lib, const char *gamesPath, ShellPage from, bool fromRing)
+{
+    shell.storageReturn = from;
+    shell.storageFromRing = fromRing;
+    shell.page = SHELL_PAGE_STORAGE;
+    shell.sidebarFocused = false;
+    shell.storageColumn = 0;
+    shell.storageRow = 0;
+    BeginStorageScan(lib, gamesPath);
+}
+
+static void LeaveStoragePage(Shell &shell)
+{
+    if (!shell.storageFromRing)
+    {
+        shell.page = SHELL_PAGE_SETTINGS;
+        shell.sidebarFocused = false; // on the Manage storage row, where it was
+        return;
+    }
+    // Back to the ring it was opened from.
+    ShowSidebarPage(shell, shell.storageReturn);
+    shell.sidebarFocused = true;
+    shell.sidebarOnStorage = true;
+}
+
+// Partial downloads, deleted once confirmed - only with nothing in the
+// queue, since a waiting or paused job resumes from them. True if the page
+// should measure again.
+static bool ClearPartialsFromStorage()
+{
+    if (g_storageText.partialItems == 0)
+    {
+        ShowShellToast(Tr(STR_STORAGE_PARTIALS), Tr(STR_STORAGE_NO_PARTIALS), UI_TOAST_INFO);
+        return false;
+    }
+    if (PendingDownloadCount() + PendingDiscJobCount() + PendingGameJobCount() > 0)
+    {
+        ShowShellToast(Tr(STR_STORAGE_QUEUE_BUSY), Tr(STR_STORAGE_QUEUE_BUSY_DETAIL), UI_TOAST_ERROR);
+        return false;
+    }
+
+    char size[32], message[200];
+    StorageBytes(g_storageText.partialBytes, size, sizeof(size));
+    TrFormat(message, sizeof(message), STR_STORAGE_DELETE_PARTIALS_MESSAGE, size);
+    if (!ShowConfirmUI(Tr(STR_STORAGE_DELETE_PARTIALS), message, Tr(STR_STORAGE_DELETE_PARTIALS_DETAIL),
+                       Tr(STR_STORAGE_DELETE)))
+        return false;
+
+    RenderStatusFrame(Tr(STR_STORAGE_PARTIALS), Tr(STR_STORAGE_DELETE), NULL);
+    unsigned long long freed = 0;
+    const bool ok = ClearPartialDownloads(&freed);
+    StorageBytes(freed, size, sizeof(size));
+    TrFormat(message, sizeof(message), STR_STORAGE_FREED, size);
+    if (ok)
+        ShowShellToast(Tr(STR_STORAGE_PARTIALS_DELETED), message, UI_TOAST_SUCCESS);
+    else
+        ShowShellToast(Tr(STR_STORAGE_NOT_ALL_DELETED), message, UI_TOAST_ERROR);
+    return true;
+}
+
+// The page's input. True if something took over the screen.
+static bool StoragePageInput(Shell &shell, const UiInput &input, const Library &lib, const char *gamesPath)
+{
+    const WORD pressed = input.pressed;
+    int driveCount = 0;
+    for (int i = 0; i < STORAGE_VIEW_DRIVES; ++i)
+        driveCount += g_storageText.drives[i].name != NULL ? 1 : 0;
+
+    if (pressed & XINPUT_GAMEPAD_B)
+    {
+        LeaveStoragePage(shell);
+        return false;
+    }
+
+    const int rows = shell.storageColumn == 0 ? STORAGE_ACTION_COUNT : driveCount;
+    if (input.nav == XINPUT_GAMEPAD_DPAD_UP && shell.storageRow > 0)
+        shell.storageRow--;
+    else if (input.nav == XINPUT_GAMEPAD_DPAD_DOWN && shell.storageRow < rows - 1)
+        shell.storageRow++;
+    else if (input.nav == XINPUT_GAMEPAD_DPAD_RIGHT && shell.storageColumn == 0 && driveCount > 0)
+    {
+        shell.storageColumn = 1;
+        if (shell.storageRow > driveCount - 1)
+            shell.storageRow = driveCount - 1;
+    }
+    else if (input.nav == XINPUT_GAMEPAD_DPAD_LEFT && shell.storageColumn == 1)
+    {
+        shell.storageColumn = 0;
+        shell.storageRow = 0;
+    }
+    else if (pressed & XINPUT_GAMEPAD_A)
+    {
+        if (shell.storageColumn == 1)
+        {
+            // A drive's contents: the next step.
+            ShowShellToast(Tr(STR_COMING_SOON), Tr(STR_STORAGE_NEXT), UI_TOAST_INFO);
+            return false;
+        }
+        switch (shell.storageRow)
+        {
+        case STORAGE_ACTION_PARTIALS:
+            if (ClearPartialsFromStorage())
+                BeginStorageScan(lib, gamesPath);
+            return true;
+        case STORAGE_ACTION_RESCAN:
+            BeginStorageScan(lib, gamesPath);
+            return false;
+        default:
+            ShowShellToast(Tr(STR_COMING_SOON), Tr(STR_STORAGE_NEXT), UI_TOAST_INFO);
+            return false;
+        }
+    }
+    return false;
 }
 
 // What the disc's tile shows, wherever it is drawn: the library's grid and
@@ -8913,6 +9309,9 @@ int main()
             }
         }
         PollLibraryRescan(shell, lib, gamesPath);
+        PollStorageScan(lib);
+        if (!shell.sidebarFocused)
+            shell.sidebarOnStorage = false;
         if (shell.rescanShelves)
         {
             shell.rescanShelves = false;
@@ -9131,10 +9530,24 @@ int main()
                 }
             }
         }
+        else if (shell.sidebarFocused && shell.sidebarOnStorage)
+        {
+            // The storage ring at the foot of the sidebar: A opens Storage.
+            if (input.nav == XINPUT_GAMEPAD_DPAD_UP)
+                shell.sidebarOnStorage = false;
+            else if (pressed & XINPUT_GAMEPAD_A)
+                EnterStoragePage(shell, lib, gamesPath, SidebarPage(shell), true);
+            else if (pressed & XINPUT_GAMEPAD_B)
+                EnterPage(shell, SHELL_PAGE_HOME, false);
+        }
         else if (shell.sidebarFocused && shell.page == SHELL_PAGE_SETTINGS)
         {
-            // Settings' own sections, shown as the highlight moves.
-            if (input.nav == XINPUT_GAMEPAD_DPAD_UP || input.nav == XINPUT_GAMEPAD_DPAD_DOWN)
+            // Settings' own sections, shown as the highlight moves - and down
+            // off the last one, the storage ring.
+            if (input.nav == XINPUT_GAMEPAD_DPAD_DOWN && shell.settings.section == SETTINGS_SECTION_COUNT - 1 &&
+                shell.storage.used >= 0.0f)
+                shell.sidebarOnStorage = true;
+            else if (input.nav == XINPUT_GAMEPAD_DPAD_UP || input.nav == XINPUT_GAMEPAD_DPAD_DOWN)
                 StepSettingsSection(shell.settings, input.nav == XINPUT_GAMEPAD_DPAD_UP ? -1 : 1, lib, gamesPath);
             else if (pressed & (XINPUT_GAMEPAD_LEFT_SHOULDER | XINPUT_GAMEPAD_RIGHT_SHOULDER))
                 StepSettingsSection(shell.settings, (pressed & XINPUT_GAMEPAD_LEFT_SHOULDER) ? -1 : 1, lib, gamesPath);
@@ -9148,7 +9561,13 @@ int main()
             if (input.nav == XINPUT_GAMEPAD_DPAD_UP)
                 ShowSidebarPage(shell, NextShownPage(SidebarPage(shell), -1));
             else if (input.nav == XINPUT_GAMEPAD_DPAD_DOWN)
-                ShowSidebarPage(shell, NextShownPage(SidebarPage(shell), 1));
+            {
+                const ShellPage next = NextShownPage(SidebarPage(shell), 1);
+                if (next == SidebarPage(shell) && shell.storage.used >= 0.0f)
+                    shell.sidebarOnStorage = true; // past the last page, the storage ring
+                else
+                    ShowSidebarPage(shell, next);
+            }
             else if ((input.nav == XINPUT_GAMEPAD_DPAD_RIGHT || (pressed & XINPUT_GAMEPAD_A)) &&
                      PageTakesFocus(shell, shell.page))
                 shell.sidebarFocused = false;
@@ -9569,6 +9988,10 @@ int main()
                 shell.storeFocus < STORE_FOCUS_SPOTLIGHT)
                 PrefetchLetterCovers(kStoreLetters[shell.storeFocus - STORE_FOCUS_LETTERS], -1);
         }
+        else if (shell.page == SHELL_PAGE_STORAGE)
+        {
+            acted = StoragePageInput(shell, input, lib, gamesPath);
+        }
         else if (shell.page == SHELL_PAGE_QUEUE)
         {
             // Up off the first card steps into the row of installs above it;
@@ -9806,6 +10229,9 @@ int main()
                 // keys that no longer exist.
                 if (changed.keysChanged)
                     haveAuth = false;
+
+                if (changed.openStorage)
+                    EnterStoragePage(shell, lib, gamesPath, SHELL_PAGE_SETTINGS, false);
 
                 acted = true;
             }
@@ -10204,6 +10630,18 @@ int main()
                 shell.queueRecentScroll = view.recentScroll;
             }
             break;
+
+        case SHELL_PAGE_STORAGE:
+        {
+            StoragePageView view = MakeStorageView(shell);
+            if (!(view.column == 0 && view.row == STORAGE_ACTION_RESCAN && StorageScanRunning()))
+                hintCount = AddHint(hints, hintCount, UI_BUTTON_A, TrW(STR_SELECT));
+            hintCount = AddHint(hints, hintCount, UI_BUTTON_B, TrW(STR_BUTTON_BACK));
+            RenderStorageFrame(view, hints, hintCount);
+            shell.storageColumn = view.column;
+            shell.storageRow = view.row;
+        }
+        break;
 
         case SHELL_PAGE_SETTINGS:
         {

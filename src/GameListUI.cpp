@@ -1906,7 +1906,8 @@ static const StringId kShellPageNames[SHELL_PAGE_COUNT] =
     STR_NAV_EMULATORS,
     STR_NAV_STORE,
     STR_NAV_QUEUE,
-    STR_NAV_SETTINGS
+    STR_NAV_SETTINGS,
+    STR_STORAGE_TITLE
 };
 
 const char *ShellPageName(ShellPage page)
@@ -2095,7 +2096,7 @@ static void DrawSidebarQuads(bool focused)
         const float y = SectionItemY(s);
         FillRound(g_M.navX, y, g_M.navW, itemH, g_M.radius, COL_SURFACE_HI);
         FillRound(g_M.navX + S(8.0f), y + S(14.0f), S(4.0f), itemH - S(28.0f), R(2.0f), COL_GREEN);
-        if (focused)
+        if (focused && !g_sidebar.storageFocused)
             FocusRing(g_M.navX, y, g_M.navW, itemH, g_M.radius);
     }
 
@@ -2109,7 +2110,7 @@ static void DrawSidebarQuads(bool focused)
         {
             FillRound(g_M.navX, y, g_M.navW, itemH, g_M.radius, COL_SURFACE_HI);
             FillRound(g_M.navX + S(8.0f), y + S(14.0f), S(4.0f), itemH - S(28.0f), R(2.0f), COL_GREEN);
-            if (focused)
+            if (focused && !g_sidebar.storageFocused)
                 FocusRing(g_M.navX, y, g_M.navW, itemH, g_M.radius);
         }
 
@@ -2127,6 +2128,14 @@ static void DrawSidebarQuads(bool focused)
         const float ring = StorageRingSize();
         float used = g_sidebar.storageUsed > 1.0f ? 1.0f : g_sidebar.storageUsed;
         DrawRing(g_M.safeX + ring * 0.5f, StorageCenterY(), ring * 0.5f, ring * 0.18f, used, COL_GREEN, COL_TRACK);
+
+        // Selectable: down past the last page, and A opens Storage.
+        if (focused && g_sidebar.storageFocused)
+        {
+            const float pad = S(10.0f);
+            FocusRing(g_M.safeX - pad, StorageCenterY() - ring * 0.5f - pad,
+                      g_M.navX + g_M.navW - g_M.safeX + pad * 2.0f, ring + pad * 2.0f, g_M.radius);
+        }
     }
 }
 
@@ -9093,6 +9102,229 @@ void RenderQueueFrame(QueuePageView &view, const UiHint *hints, int hintCount)
                 MarqueeTextMid(x, recentNameY + LineHeight(0.72f) * 0.6f, 0.72f, COL_TEXT, r.name, recTile, true);
             else
                 TextFit(x, recentNameY, 0.72f, COL_TEXT2, r.name, recTile);
+        }
+    }
+
+    g_UiFont.SetBold(false);
+    g_UiFont.SetScaleFactors(1.0f, 1.0f);
+    g_UiFont.End();
+
+    EndFrame();
+}
+
+// ---------------------------------------------------------------------------
+// Storage
+// ---------------------------------------------------------------------------
+
+#define COL_STORAGE_EXTRAS 0xFF3A8FD6 // DLC and updates, beside the games' green
+#define COL_STORAGE_OTHER  0xFF6E6E6E // the rest of what's in use
+
+static const D3DCOLOR kStorageShareColors[STORAGE_SHARE_COUNT] = { COL_GREEN, COL_STORAGE_EXTRAS, COL_STORAGE_OTHER };
+
+struct StorageLayout
+{
+    float actionsX, actionsW, actionRowH, actionGap;
+    float drivesX, drivesW, cardH, cardGap;
+    float top;
+    bool legend; // room for the legend under each card's bar
+};
+
+static StorageLayout LayOutStorage(int driveCount)
+{
+    StorageLayout l;
+    l.top = g_M.listY;
+    l.actionGap = S(12.0f);
+    l.actionRowH = S(84.0f);
+    l.actionsX = g_M.contentX;
+    l.actionsW = g_M.contentW * 0.36f;
+    l.drivesX = l.actionsX + l.actionsW + S(28.0f);
+    l.drivesW = g_M.contentX + g_M.contentW - l.drivesX;
+    l.cardGap = S(16.0f);
+
+    const float room = g_M.footerY - S(30.0f) - l.top;
+    const int n = driveCount > 0 ? driveCount : 1;
+    l.cardH = (room - l.cardGap * (n - 1)) / n;
+    if (l.cardH > S(176.0f))
+        l.cardH = S(176.0f);
+    l.legend = l.cardH >= S(150.0f);
+    return l;
+}
+
+// The ring's radius in a card, smaller when the cards are squeezed.
+static float StorageRingRadius(const StorageLayout &l)
+{
+    float r = S(50.0f);
+    if (r > l.cardH * 0.5f - S(14.0f))
+        r = l.cardH * 0.5f - S(14.0f);
+    return r;
+}
+
+// Where a card's text starts, and its bar's top.
+static float StorageTextX(const StorageLayout &l)
+{
+    return l.drivesX + S(24.0f) + StorageRingRadius(l) * 2.0f + S(28.0f);
+}
+
+static float StorageBarY(const StorageLayout &l, float cardY)
+{
+    return cardY + l.cardH * 0.5f + S(26.0f) - (l.legend ? S(14.0f) : 0.0f);
+}
+
+#define STORAGE_BAR_H 10.0f
+
+void RenderStorageFrame(StoragePageView &view, const UiHint *hints, int hintCount)
+{
+    if (!g_Initialized)
+        return;
+
+    const int actionCount = (view.actions != NULL && view.actionCount > 0) ? view.actionCount : 0;
+    const int driveCount = (view.drives != NULL && view.driveCount > 0) ? view.driveCount : 0;
+    if (view.column == 1 && driveCount == 0)
+        view.column = 0;
+    const int rows = view.column == 0 ? actionCount : driveCount;
+    if (view.row > rows - 1) view.row = rows - 1;
+    if (view.row < 0) view.row = 0;
+
+    const StorageLayout l = LayOutStorage(driveCount);
+    const float r = StorageRingRadius(l);
+    const float textX = StorageTextX(l);
+    const float right = l.drivesX + l.drivesW - S(24.0f);
+    const float barH = S(STORAGE_BAR_H);
+
+    BeginFrame();
+    const bool showToast = ToastVisibleThisFrame();
+
+    ButtonHint footer[MAX_FOOTER_HINTS];
+    const int footerCount = LayoutFooter(hints, hintCount, footer);
+
+    // --- Pass 1: quads ---
+    DrawFrameBase(false);
+
+    for (int i = 0; i < actionCount; ++i)
+    {
+        const float y = l.top + i * (l.actionRowH + l.actionGap);
+        const bool on = view.column == 0 && view.row == i;
+        FillRound(l.actionsX, y, l.actionsW, l.actionRowH, g_M.radius, on ? COL_SURFACE_HI : COL_SURFACE);
+        if (on && view.focused)
+            FocusRing(l.actionsX, y, l.actionsW, l.actionRowH, g_M.radius);
+    }
+
+    for (int d = 0; d < driveCount; ++d)
+    {
+        const StorageDriveView &drive = view.drives[d];
+        const float y = l.top + d * (l.cardH + l.cardGap);
+        const bool on = view.column == 1 && view.row == d;
+        FillRound(l.drivesX, y, l.drivesW, l.cardH, g_M.radius, on ? COL_SURFACE_HI : COL_SURFACE);
+        if (on && view.focused)
+            FocusRing(l.drivesX, y, l.drivesW, l.cardH, g_M.radius);
+
+        const float used = drive.used < 0.0f ? 0.0f : drive.used > 1.0f ? 1.0f : drive.used;
+        DrawRing(l.drivesX + S(24.0f) + r, y + l.cardH * 0.5f, r, r * 0.16f, used, COL_GREEN, COL_TRACK);
+
+        // The bar: each share in its colour, end to end, over the track.
+        const float barW = right - textX;
+        const float barY = StorageBarY(l, y);
+        FillRound(textX, barY, barW, barH, barH * 0.5f, COL_TRACK);
+        float x = textX;
+        for (int s = 0; s < STORAGE_SHARE_COUNT; ++s)
+        {
+            if (drive.shares[s] <= 0.0f || x >= textX + barW)
+                continue;
+            float w = barW * drive.shares[s];
+            if (w < S(3.0f))
+                w = S(3.0f); // something there, however little
+            if (x + w > textX + barW)
+                w = textX + barW - x;
+            DrawRect(x, barY, w, barH, kStorageShareColors[s]);
+            x += w;
+        }
+
+        if (l.legend)
+        {
+            float lx = textX;
+            const float ly = barY + barH + S(14.0f);
+            for (int s = 0; s < STORAGE_SHARE_COUNT; ++s)
+            {
+                if (drive.shareLines[s] == NULL)
+                    continue;
+                const float dot = S(12.0f);
+                FillRound(lx, ly + (LineHeight(0.68f) * 1.2f - dot) * 0.5f, dot, dot, R(3.0f), kStorageShareColors[s]);
+                lx += S(20.0f) + TextWidth(drive.shareLines[s], 0.68f) + S(22.0f);
+            }
+        }
+    }
+
+    DrawButtonHintShapes(footer, footerCount, g_M.footerY);
+    DrawHeaderQuads(showToast);
+
+    // --- Pass 2: text ---
+    g_UiFont.Begin();
+
+    DrawHeaderText(Tr(STR_STORAGE_TITLE), view.subtitle, showToast);
+    DrawButtonHintText(footer, footerCount, g_M.footerY);
+
+    for (int i = 0; i < actionCount; ++i)
+    {
+        const StorageActionView &a = view.actions[i];
+        const float y = l.top + i * (l.actionRowH + l.actionGap);
+        const float tx = l.actionsX + S(22.0f);
+        const float tw = l.actionsW - S(44.0f);
+        const float labelH = LineHeight(0.95f) * 1.2f;
+        const float detailH = LineHeight(0.75f) * 1.2f;
+        const float blockY = y + (l.actionRowH - labelH - detailH) * 0.5f;
+        TextFit(tx, blockY, 0.95f, a.quiet ? COL_TEXT2 : COL_TEXT, a.label, tw, true);
+        if (a.detail != NULL)
+            TextFit(tx, blockY + labelH, 0.75f, COL_DIM, a.detail, tw);
+    }
+
+    if (driveCount == 0 && view.emptyLine != NULL)
+        TextFit(l.drivesX, l.top + S(8.0f), 0.85f, COL_TEXT2, view.emptyLine, l.drivesW);
+
+    for (int d = 0; d < driveCount; ++d)
+    {
+        const StorageDriveView &drive = view.drives[d];
+        const float y = l.top + d * (l.cardH + l.cardGap);
+
+        const float used = drive.used < 0.0f ? 0.0f : drive.used > 1.0f ? 1.0f : drive.used;
+        char pct[16];
+        _snprintf(pct, sizeof(pct), "%.1f%%", used * 100.0f);
+        pct[sizeof(pct) - 1] = '\0';
+        TextMid(l.drivesX + S(24.0f) + r, y + l.cardH * 0.5f, 0.78f, COL_TEXT, pct, ATGFONT_CENTER_X, 0.0f, true);
+
+        const float barY = StorageBarY(l, y);
+        const float freeY = barY - S(12.0f) - LineHeight(0.8f) * 1.2f;
+        const float nameY = freeY - LineHeight(1.0f) * 1.2f;
+
+        // The name and its device on one line, the free space and the note
+        // on the next, both above the bar.
+        float deviceW = 0.0f;
+        if (drive.device != NULL)
+        {
+            deviceW = TextWidth(drive.device, 0.72f) + S(16.0f);
+            Text(right, nameY + S(4.0f), 0.72f, COL_DIM, drive.device, ATGFONT_RIGHT);
+        }
+        TextFit(textX, nameY, 1.0f, COL_TEXT, drive.name, right - textX - deviceW, true);
+
+        float noteW = 0.0f;
+        if (drive.note != NULL)
+        {
+            noteW = TextWidth(drive.note, 0.72f, true) + S(16.0f);
+            Text(right, freeY + S(3.0f), 0.72f, COL_GREEN_TEXT, drive.note, ATGFONT_RIGHT, 0.0f, true);
+        }
+        TextFit(textX, freeY, 0.8f, COL_TEXT2, drive.freeLine, right - textX - noteW);
+
+        if (l.legend)
+        {
+            float lx = textX;
+            const float ly = barY + barH + S(14.0f);
+            for (int s = 0; s < STORAGE_SHARE_COUNT; ++s)
+            {
+                if (drive.shareLines[s] == NULL)
+                    continue;
+                lx += S(20.0f);
+                Text(lx, ly, 0.68f, COL_TEXT2, drive.shareLines[s]);
+                lx += TextWidth(drive.shareLines[s], 0.68f) + S(22.0f);
+            }
         }
     }
 

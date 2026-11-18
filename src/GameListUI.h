@@ -42,6 +42,9 @@ enum ShellPage
     SHELL_PAGE_STORE,
     SHELL_PAGE_QUEUE,
     SHELL_PAGE_SETTINGS,
+    // In no sidebar and no nav row: reached from the sidebar's storage ring
+    // and from Settings > Storage.
+    SHELL_PAGE_STORAGE,
     SHELL_PAGE_COUNT
 };
 
@@ -76,6 +79,7 @@ struct ShellSidebar
     char storageLabel[16];  // "Hdd1"
     char storageDetail[32]; // "402 GB free"
     char storageTotal[32];  // "of 931 GB"
+    bool storageFocused;    // with focused: the ring has it, not a page - A opens Storage
 
     // In place of the pages: a page's own sections, drawn the same way -
     // Settings' General, Assets, Storage... sectionCount 0 lists the pages.
@@ -815,6 +819,54 @@ struct QueuePageView
 };
 
 void RenderQueueFrame(QueuePageView &view, const UiHint *hints, int hintCount);
+
+// Storage: a card per drive on the right - a ring for how full it is, and a
+// bar split into what the space went on - and the things to do about it down
+// the left. main.cpp works out every line; this only draws.
+
+#define STORAGE_VIEW_DRIVES  4
+#define STORAGE_VIEW_ACTIONS 4
+
+enum StorageShare
+{
+    STORAGE_SHARE_GAMES,
+    STORAGE_SHARE_EXTRAS, // DLC and title updates
+    STORAGE_SHARE_OTHER,  // everything else in use: the system, saves, Aurora...
+    STORAGE_SHARE_COUNT
+};
+
+struct StorageDriveView
+{
+    const char *name;     // "Hard drive"
+    const char *device;   // "Hdd1"
+    const char *freeLine; // "125.1 GB free of 293.3 GB"
+    const char *note;     // "Downloads go here", or NULL
+    float used;           // 0..1, the ring
+    float shares[STORAGE_SHARE_COUNT];        // of the capacity, 0..1; the rest of the bar is free
+    const char *shareLines[STORAGE_SHARE_COUNT]; // the legend: "Games 158.6 GB"
+};
+
+struct StorageActionView
+{
+    const char *label;
+    const char *detail;
+    bool quiet; // nothing to do there right now - drawn dimmer, still selectable
+};
+
+struct StoragePageView
+{
+    const char *subtitle;
+    const StorageActionView *actions;
+    int actionCount;
+    const StorageDriveView *drives;
+    int driveCount;
+    const char *emptyLine; // in the drives' place while there are none to show
+    bool focused;
+    int column; // 0: the actions, 1: the drives
+    int row;
+};
+
+void RenderStorageFrame(StoragePageView &view, const UiHint *hints, int hintCount);
 
 // ---------------------------------------------------------------------------
 // Popup
