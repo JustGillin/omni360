@@ -4428,18 +4428,53 @@ void RenderProgressFrame(const char *title, const char *statusLine,
 // Pushing the stick one way while holding the d-pad the other sets both bits,
 // which the direction check downstream reads as "no clear input" and ignores -
 // the right outcome for contradictory input.
+// Every connected controller, merged into one: buttons from any pad, the left
+// stick from whichever pad pushes it furthest, the furthest-pulled triggers.
+// Not just player 1's - a controller can sit in any slot, and some (an Xbox
+// One pad through the XboxInput plugin, say) never land in the first one.
+static XINPUT_GAMEPAD MergedGamepad()
+{
+    XINPUT_GAMEPAD merged;
+    ZeroMemory(&merged, sizeof(merged));
+    int bestStick = 0;
+
+    for (DWORD i = 0; i < XUSER_MAX_COUNT; ++i)
+    {
+        XINPUT_STATE state;
+        ZeroMemory(&state, sizeof(state));
+        if (XInputGetState(i, &state) != ERROR_SUCCESS)
+            continue;
+
+        const XINPUT_GAMEPAD &pad = state.Gamepad;
+        merged.wButtons |= pad.wButtons;
+        if (pad.bLeftTrigger > merged.bLeftTrigger)
+            merged.bLeftTrigger = pad.bLeftTrigger;
+        if (pad.bRightTrigger > merged.bRightTrigger)
+            merged.bRightTrigger = pad.bRightTrigger;
+
+        int ax = pad.sThumbLX < 0 ? -pad.sThumbLX : pad.sThumbLX;
+        int ay = pad.sThumbLY < 0 ? -pad.sThumbLY : pad.sThumbLY;
+        int deflection = ax > ay ? ax : ay;
+        if (deflection > bestStick)
+        {
+            bestStick = deflection;
+            merged.sThumbLX = pad.sThumbLX;
+            merged.sThumbLY = pad.sThumbLY;
+        }
+    }
+    return merged;
+}
+
 static WORD CurrentButtons()
 {
-    XINPUT_STATE state;
-    ZeroMemory(&state, sizeof(state));
-    XInputGetState(0, &state);
+    XINPUT_GAMEPAD pad = MergedGamepad();
 
-    WORD buttons = state.Gamepad.wButtons;
+    WORD buttons = pad.wButtons;
 
     const int NAV_THRESHOLD = 16000;
 
-    int x = state.Gamepad.sThumbLX;
-    int y = state.Gamepad.sThumbLY;
+    int x = pad.sThumbLX;
+    int y = pad.sThumbLY;
     int ax = (x < 0) ? -x : x;
     int ay = (y < 0) ? -y : y;
 
@@ -4479,18 +4514,16 @@ static WORD g_inputHeldDirection = 0;
 static int g_inputRepeatCountdown = 0;
 static BYTE g_triggersPrev = 0;
 
-// The triggers pulled past halfway, as UI_TRIGGER_*. Controller 0's, as
+// The triggers pulled past halfway, as UI_TRIGGER_*. Any controller's, as
 // CurrentButtons reads.
 static BYTE CurrentTriggers()
 {
-    XINPUT_STATE state;
-    ZeroMemory(&state, sizeof(state));
-    XInputGetState(0, &state);
+    XINPUT_GAMEPAD pad = MergedGamepad();
 
     BYTE triggers = 0;
-    if (state.Gamepad.bLeftTrigger > 128)
+    if (pad.bLeftTrigger > 128)
         triggers |= UI_TRIGGER_LEFT;
-    if (state.Gamepad.bRightTrigger > 128)
+    if (pad.bRightTrigger > 128)
         triggers |= UI_TRIGGER_RIGHT;
     return triggers;
 }

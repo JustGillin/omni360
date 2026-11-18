@@ -3178,11 +3178,9 @@ static void WaitForExit()
 {
     dprintf("\nPress B to exit\n");
 
-    XINPUT_STATE state;
     for (;;)
     {
-        ZeroMemory(&state, sizeof(state));
-        if (XInputGetState(0, &state) == ERROR_SUCCESS && (state.Gamepad.wButtons & XINPUT_GAMEPAD_B))
+        if (AnyPadButtons() & XINPUT_GAMEPAD_B)
             break;
         Sleep(50);
     }
