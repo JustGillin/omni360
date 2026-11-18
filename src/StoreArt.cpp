@@ -50,6 +50,8 @@ static void QuietPrint(const char *format, ...)
 
 #define NONE_RETRY_DAYS   7
 #define IMAGE_MAX_BYTES   (1024 * 1024)  // screenshots are about 250KB, backgrounds under 100KB
+#define WALLPAPER_MAX_W   1280.0f        // the screen; a bigger wallpaper is scaled to cover this
+#define WALLPAPER_MAX_H   720.0f
 #define CATALOG_MAX_BYTES (256 * 1024)   // a game's entry is about 13KB
 #define MAX_REQUESTS      64
 #define MAX_READY         2  // a wallpaper decoded is 3.5MB
@@ -617,8 +619,30 @@ static unsigned long *DecodeArt(unsigned long titleId, StoreArtKind kind, const 
         w /= 2;
         h /= 2;
     }
+    else
+    {
+        // A wallpaper only ever fills a 1280x720 screen, cut to fit - so one
+        // bigger than that (LaunchBox fanart is often 1920x1080 or 2560x1440)
+        // is scaled down to just cover 1280x720, keeping its shape, so its
+        // texture costs no more than the marketplace's own.
+        const float scale = max(WALLPAPER_MAX_W / (float)w, WALLPAPER_MAX_H / (float)h);
+        if (scale < 1.0f)
+        {
+            const int sw = max(1, (int)(w * scale + 0.5f)), sh = max(1, (int)(h * scale + 0.5f));
+            unsigned long *scaled = (unsigned long *)malloc((size_t)sw * sh * sizeof(unsigned long));
+            if (scaled != NULL && ScaleArgb(pixels, w, h, 0.0f, 0.0f, (float)w, (float)h, sw, sh, scaled))
+            {
+                free(pixels);
+                pixels = scaled;
+                w = sw;
+                h = sh;
+            }
+            else if (scaled != NULL)
+                free(scaled); // shown at full size instead
+        }
+    }
 
-    dprintf("[timing] %s %08lX (%dx%d, %lu KB, worker): decode %.1f + halve %.1f ms\n",
+    dprintf("[timing] %s %08lX (%dx%d, %lu KB, worker): decode %.1f + scale %.1f ms\n",
             screenshot ? "screenshot" : "wallpaper", titleId, w, h, size / 1024, decoded - started,
             ImageTimerMs() - decoded);
     *outW = w;
