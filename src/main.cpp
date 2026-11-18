@@ -5052,12 +5052,14 @@ static void OpenStoreGame(Shell &shell, const StoreGame &game)
     if (titleId != 0)
     {
         // Xbox Live's catalog has nothing for an Original Xbox game; its
-        // cover comes from xboxunity.
+        // cover comes from xboxunity, its wallpaper from LaunchBox.
         if (game.system != STORE_SYSTEM_XBOX)
         {
             RequestStoreDetails(titleId);
             RequestStoreArt(titleId, STORE_ART_BACKGROUND);
         }
+        else if (HasLaunchBoxBackground(titleId))
+            RequestStoreArt(titleId, STORE_ART_BACKGROUND);
         RequestStoreCoverArt(&titleId, 1);
     }
 }

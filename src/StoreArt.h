@@ -61,6 +61,10 @@ bool TakeStoreArt(StoreArtData *out);
 // be reached.
 bool StoreArtPending(unsigned long titleId, StoreArtKind kind);
 
+// Whether LaunchBox has a wallpaper picked for a title - the only wallpaper
+// an Original Xbox game can have, as the marketplace has none of theirs.
+bool HasLaunchBoxBackground(unsigned long titleId);
+
 // A game's catalog entry, as the game page shows it. Strings are UTF-8 and
 // may be empty.
 struct StoreDetails

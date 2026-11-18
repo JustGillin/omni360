@@ -15,20 +15,972 @@ struct LaunchBoxBackground
 
 static const LaunchBoxBackground kLaunchBoxBackgrounds[] =
 {
+    { 0x41430001, "b78c3b1a-49b7-43ee-ac82-d8b933ad8679.png" }, // Dave Mirra Freestyle BMX 2 - no region background, 1920x1080, 151 KB
+    { 0x41430002, "8455273f-d638-43c4-ab1b-6f22368770a9.png" }, // All-Star Baseball 2003 - no region screenshot, 640x480, 104 KB
+    { 0x41430003, "85c078a2-8dbf-4b10-9ab5-611be40f3673.png" }, // Legends of Wrestling - no region screenshot, 640x480, 151 KB
+    { 0x41430004, "ee0f68ed-ee36-47eb-909a-6894d7b5cdc3.jpg" }, // Turok: Evolution - no region screenshot, 639x480, 120 KB
+    { 0x41430005, "08848bcd-d9d5-483a-9542-6035a81405e2.jpg" }, // Vexx - no region background, 2560x1440, 374 KB
+    { 0x41430006, "397fa2d3-b84d-42c3-ab2c-0b8583574385.jpg" }, // Burnout - no region background, 1600x1100, 292 KB
+    { 0x41430007, "fc860f4c-ccea-4af8-bc7b-609d723e42c8.jpg" }, // Aggressive Inline - no region background, 1024x768, 232 KB
+    { 0x4143000A, "712e671f-2124-4109-8d5e-cf3d1554d4cc.png" }, // ATV: Quad Power Racing 2 - no region screenshot, 640x480, 125 KB
+    { 0x4143000B, "2ab37e7d-e3b1-4c0c-9808-0c0bc89a5220.png" }, // Speed Kings - no region screenshot, 640x480, 152 KB
+    { 0x4143000C, "817d0cea-b3f7-4335-b049-7b88f6e0383b.png" }, // Freestyle Street Soccer - no region screenshot, 640x480, 195 KB
+    { 0x4143000D, "ee12986a-a451-478e-8f08-38bff74064ff.png" }, // AFL Live 2003 - no region screenshot, 640x480, 135 KB
+    { 0x4143000E, "r2_d1ee2f58-9a13-40f8-876a-6ad6dcc214a2.jpg" }, // BMX XXX - World background, 1600x1200, 284 KB
+    { 0x4143000F, "55e73128-59df-4b9f-8c49-b4b8b44b5752.png" }, // Legends of Wrestling II - no region screenshot, 640x480, 141 KB
+    { 0x41430010, "de24d959-d988-4897-8417-9a8cb85bd9fa.png" }, // SX Superstar - no region screenshot, 640x480, 156 KB
+    { 0x41430013, "11131718-b7a1-44c7-9efd-b5581f0fa527.png" }, // NBA Jam - no region screenshot, 640x480, 147 KB
+    { 0x41430014, "8967f211-8aab-4b2a-ab5f-dc9ef435c306.png" }, // XGRA: Extreme-G Racing Association - no region screenshot, 640x480, 127 KB
+    { 0x41430016, "r2_a3190f91-96d5-40da-9049-4866cdfbdab0.jpg" }, // Alias - World background, 1920x1080, 551 KB
+    { 0x41430017, "c0ca3c24-5c5e-44fe-b579-bebb43702ca5.png" }, // Dakar 2: The World's Ultimate Rally - no region screenshot, 640x480, 196 KB
+    { 0x41430018, "b8b32086-2e23-4eb9-b6a0-b9eb8c0aef77.png" }, // All-Star Baseball 2004 - no region screenshot, 640x480, 100 KB
+    { 0x41430019, "fc859bc1-7092-40a8-b736-f91949ab86dc.jpg" }, // Burnout 2: Point of Impact: Developer's Cut - no region background, 1600x1100, 395 KB
+    { 0x4143001A, "17c9d55d-4aef-457a-ae2d-dcc2cb6f25dc.png" }, // Gladiator: Sword of Vengeance - no region screenshot, 640x480, 191 KB
+    { 0x4143001B, "322b5262-3c9c-4a8e-bfba-3c95d782da54.png" }, // AFL Live 2004 - no region screenshot, 640x480, 100 KB
+    { 0x4143001C, "3d12bc07-4449-4609-bfbb-326deb22759f.png" }, // All-Star Baseball 2005 - no region screenshot, 640x480, 134 KB
+    { 0x4143001D, "84b03771-646d-4ca9-a8af-aa0fb4d563a1.png" }, // Showdown: Legends of Wrestling - no region screenshot, 640x480, 127 KB
+    { 0x4143001F, "r2_1669da69-c16b-45d2-9ea2-a83a10fd0686.jpg" }, // WCR: World Championship Rugby - World screenshot, 640x480, 111 KB
+    { 0x41440002, "87dec798-ba26-4a72-ba33-fd09044b7567.png" }, // Pump It Up: Exceed - no region screenshot, 640x480, 90 KB
+    { 0x41480002, "r2_775cdafd-1404-44f4-9681-cfbce2eb79c1.jpg" }, // Playboy: The Mansion - World background, 1920x1080, 27 KB
+    { 0x41500001, "0a601993-710c-4d5e-9a00-04f305fb57f3.png" }, // Tenerezza - no region screenshot, 640x480, 132 KB
+    { 0x41510003, "r2_e12b4d63-0bf4-4b76-8e44-edf85bf5011c.jpg" }, // Sentou Yousei Yukikaze: Yousei no Mau Sora - Japan background, 2048x1152, 568 KB
+    { 0x41530001, "96ce4e58-895e-43d7-83ed-85ac244f34a7.jpg" }, // Break Nine - no region screenshot, 640x480, 66 KB
+    { 0x41540001, "37e58be2-a4e6-490a-af37-0fdfdc005c17.jpg" }, // Touge R - Japan screenshot, 720x480, 265 KB
+    { 0x41540003, "89c76a3a-c553-43c3-bff4-6cb37e1aa538.png" }, // Pro Fishing Challenge - no region screenshot, 640x480, 147 KB
+    { 0x41540004, "r2_bfcffe4d-0203-482d-8738-372e048f4c89.jpg" }, // Galleon - World background, 1600x1200, 191 KB
+    { 0x41560001, "63863d1f-70ba-4747-be5a-22ddb177ea89.jpg" }, // Tony Hawk's Pro Skater 2x - no region background, 1280x720, 399 KB
+    { 0x41560002, "744d076c-e25a-4aa1-b563-63b1f299152f.png" }, // Kelly Slater's Pro Surfer - no region screenshot, 640x480, 123 KB
+    { 0x41560003, "b9ee228a-e613-4471-94d1-8e0e2edb5655.png" }, // Street Hoops - no region screenshot, 640x480, 146 KB
+    { 0x41560004, "03103fdb-f0c8-4be8-a6ff-bc54958c8af0.png" }, // Tony Hawk's Pro Skater 3 - no region screenshot, 640x480, 147 KB
+    { 0x41560005, "9e5e0432-b6ae-490c-b068-044922f8828d.jpg" }, // Blade II - no region background, 1920x1080, 689 KB
+    { 0x41560006, "ec14edf3-8f34-49f4-9d21-140fae48b43c.jpg" }, // Spider-Man - no region background, 1920x1080, 541 KB
+    { 0x41560007, "e23cd4f6-41fa-437e-a7b7-09079a13287c.png" }, // X-Men: Next Dimension - no region screenshot, 640x480, 156 KB
+    { 0x41560008, "r2_edc79ae1-3c3c-4ac1-b388-0c7ac9d39388.jpg" }, // X2: Wolverine's Revenge - World background, 1920x1080, 227 KB
+    { 0x41560009, "4c38b733-53e4-4b5a-94e7-0e20389829ea.png" }, // Rally Fusion: Race of Champions - no region screenshot, 640x480, 151 KB
+    { 0x4156000A, "72ac9d64-0386-4563-965e-516ea7efe2c4.png" }, // Wreckless: The Yakuza Missions - no region screenshot, 640x480, 155 KB
+    { 0x4156000B, "e1247a09-4933-4404-84b2-a10b8c3e01a6.png" }, // Mat Hoffman's Pro BMX 2 - no region screenshot, 640x480, 139 KB
+    { 0x4156000C, "72ac9d64-0386-4563-965e-516ea7efe2c4.png" }, // Wreckless: The Yakuza Missions - no region screenshot, 640x480, 155 KB
+    { 0x4156000D, "2560595f-126b-40f2-801a-be32136789db.png" }, // Wakeboarding Unleashed Featuring Shaun Murray - no region screenshot, 640x480, 157 KB
+    { 0x4156000E, "956997b1-b471-4d41-aa79-1b5315b94a40.png" }, // True Crime: Streets of LA - no region screenshot, 640x480, 133 KB
+    { 0x41560010, "76048ab5-993a-4ff6-bf7e-abaef6c75597.png" }, // Return to Castle Wolfenstein: Tides of War - no region screenshot, 640x480, 187 KB
+    { 0x41560014, "0492f0f5-c246-4081-a693-3dcb252af183.jpg" }, // Minority Report: Everybody Runs - no region background, 1920x1080, 267 KB
+    { 0x41560017, "d7e9aec0-2211-4c47-95a7-9dc174bf36e8.png" }, // Tony Hawk's Pro Skater 4 - no region screenshot, 640x480, 168 KB
+    { 0x41560018, "222d5e3f-a5a7-4ab2-960c-5087ffb13ef2.jpg" }, // Pitfall: The Lost Expedition - North America screenshot, 640x448, 131 KB
+    { 0x41560019, "8c306b18-fdb5-4401-a36c-3b5eca1d81f0.png" }, // Cabela's Dangerous Hunts - no region screenshot, 640x480, 210 KB
+    { 0x4156001A, "7c666b49-e5da-43f9-9bc6-1a47b96dfdb7.jpg" }, // Fantastic 4 - no region background, 1920x1080, 267 KB
+    { 0x4156001B, "4c0ce6b7-ec3e-4130-8a3b-a6a120db1fb2.png" }, // Soldier of Fortune II: Double Helix - no region screenshot, 640x480, 163 KB
+    { 0x41560020, "4dd6122e-bc2a-4c57-982c-649249612081.jpg" }, // DOOM 3 - no region background, 1920x1080, 383 KB
+    { 0x41560022, "6fe91b78-4828-4d69-b745-33cf6278ce73.png" }, // MTX Mototrax - no region screenshot, 640x480, 172 KB
+    { 0x41560026, "c87126b9-1cab-4bd9-9942-ec5b7101c7f6.png" }, // Tenchu: Return From Darkness - no region screenshot, 640x480, 135 KB
+    { 0x41560027, "4950a0bc-def5-4a45-a37d-73c59ecf976f.png" }, // Disney's Extreme Skate Adventure - no region screenshot, 640x480, 145 KB
+    { 0x4156002A, "680af613-cb01-4aff-b32a-043e137099c8.png" }, // Call of Duty: Finest Hour - no region screenshot, 640x480, 157 KB
+    { 0x4156002B, "036fa84c-430d-4b64-b427-71b25a98e9d6.jpg" }, // Spider-Man 2 - no region background, 1920x1080, 518 KB
+    { 0x4156002D, "3f831c31-708f-4d31-b056-be75b7ff2ce0.png" }, // Tony Hawk's Underground - no region screenshot, 640x480, 171 KB
+    { 0x41560030, "8f30df37-a298-401b-b6fe-b8856f234b10.png" }, // Cabela's Deer Hunt: 2004 Season - no region screenshot, 640x480, 172 KB
+    { 0x41560035, "909e46c2-a096-486e-9136-4e2953bd5f4b.jpg" }, // Ultimate Spider-Man - no region background, 1920x1080, 459 KB
+    { 0x41560037, "0d3d95f7-2e6b-4f84-b890-70a78f567104.png" }, // Shrek 2 - no region screenshot, 640x480, 161 KB
+    { 0x41560038, "d512df1d-29e8-406e-9603-d4f8c22b47a6.jpg" }, // Shark Tale - no region screenshot, 259x194, 8 KB
+    { 0x4156003A, "21868d31-07a5-4be7-bc78-a6124a2c026c.png" }, // Rapala Pro Fishing - no region screenshot, 640x480, 211 KB
+    { 0x4156003B, "90e35f88-fd17-4de6-a839-0d694e5d5ac4.jpg" }, // Madagascar - no region background, 1920x1080, 786 KB
+    { 0x4156003C, "d0c5e971-59b2-456b-b0cb-5dfb832691ba.png" }, // Tony Hawk's Underground 2 - no region screenshot, 640x480, 141 KB
+    { 0x4156003D, "9223f82d-9023-4bb9-b5df-d14afe789d11.jpg" }, // American Chopper - no region background, 1920x1080, 373 KB
+    { 0x4156003E, "74f70a25-3e4b-4c03-97dd-6599dcbef42b.png" }, // Cabela's Big Game Hunter 2005 Adventures - no region screenshot, 640x480, 203 KB
+    { 0x4156003F, "5ef4cd3e-33ec-47fc-b73f-5f6aaae9817f.png" }, // Cabela's Deer Hunt: 2005 Season - no region screenshot, 640x480, 166 KB
+    { 0x41560040, "8b8dd181-8679-480a-9f98-7616c31dba37.png" }, // Bicycle Casino Includes: Texas Hold'em - no region screenshot, 640x480, 103 KB
+    { 0x41560041, "bbc42334-9250-4e99-b5a8-a3a6209e1984.png" }, // Monster Garage - no region screenshot, 640x480, 114 KB
+    { 0x41560042, "b0f060d2-3cd6-43f3-b3cb-43ad8b2e2389.png" }, // Greg Hastings' Tournament Paintball - no region screenshot, 640x480, 123 KB
+    { 0x41560045, "bd181d70-7b79-4e04-a3d1-687853a007b4.png" }, // True Crime: New York City - no region screenshot, 640x480, 176 KB
+    { 0x41560046, "r2_96316ba0-0af6-4a59-a1c7-5d6b0cee4cb1.jpg" }, // X-Men: The Official Game - World background, 1280x720, 256 KB
+    { 0x41560047, "r2_950ff187-17a8-4038-b12e-0dd3ea29a44a.png" }, // X-Men Legends II: Rise of Apocalypse - World screenshot, 1024x768, 463 KB
+    { 0x41560048, "r2_96fe6d55-a540-41a2-946f-2fc469ef79ed.jpg" }, // Shrek SuperSlam - World background, 1920x1080, 311 KB
+    { 0x41560049, "b2aeeed5-a439-43b7-8b43-0f4d046a11a4.jpg" }, // Tony Hawk's American Wasteland - no region background, 1920x1080, 565 KB
+    { 0x4156004B, "0c27952f-9455-41bc-8ab8-52e126eba1ce.png" }, // Gun - no region screenshot, 640x480, 148 KB
+    { 0x4156004D, "8d076666-2bad-4812-96a1-9d90bbbb81c5.png" }, // Cabela's Outdoor Adventures - no region screenshot, 640x480, 168 KB
+    { 0x4156004E, "39631479-29f1-4da2-a4f7-4b7a72d894e8.jpg" }, // Doom 3: Resurrection of Evil - no region background, 1920x1080, 621 KB
+    { 0x4156004F, "c2a9703a-3292-412c-bb70-027a378bd343.jpg" }, // American Chopper 2: Full Throttle - no region background, 1280x720, 382 KB
+    { 0x41560050, "r2_2539096a-32cd-409e-b609-c50d5c6914f9.jpg" }, // Shamu's Deep Sea Adventures - World background, 1600x900, 289 KB
+    { 0x41560051, "bbfe559b-9d77-4b5a-82c8-a0c59fd38e8b.png" }, // Call of Duty 2: Big Red One - no region screenshot, 640x480, 189 KB
+    { 0x41560052, "r2_e553ee92-c5fe-40f7-96dc-a10b60d6ae62.jpg" }, // Cabela's Dangerous Hunts 2 - World background, 2560x1440, 496 KB
+    { 0x41560055, "456266d6-b81d-4634-bbba-ab472fb0e418.png" }, // Ty the Tasmanian Tiger 3: Night of the Quinkan - no region screenshot, 640x480, 142 KB
+    { 0x41560057, "9cb1a052-e7ee-4d9f-ab88-40f085499201.png" }, // Greg Hastings' Tournament Paintball Max'd - no region screenshot, 640x480, 107 KB
+    { 0x41560058, "c6671fd7-58cd-49a3-be63-4abdd3f65ffa.jpg" }, // Over the Hedge - no region background, 1920x1080, 995 KB
+    { 0x4156005B, "6532dedc-956e-47e0-8ab0-fdfd1f1654f6.png" }, // The Hustle: Detroit Streets - no region screenshot, 640x480, 142 KB
+    { 0x4156005C, "6baf20d3-8a51-4ff7-bf5f-abfa27deaa18.jpg" }, // Marvel: Ultimate Alliance - no region background, 1920x1080, 664 KB
+    { 0x4156005D, "3916853c-b0b3-4e03-9d20-75a6b635dac3.png" }, // Call of Duty 3 - no region screenshot, 640x480, 184 KB
+    { 0x4156005E, "r2_e28bd5c6-dfa7-476c-8a83-22e32d0581d1.png" }, // Tony Hawk's Project 8 - World background, 1920x1200, 990 KB
+    { 0x41570001, "90f0dca2-2e59-4c9f-9fae-3a2938278ed0.png" }, // Guilty Gear Isuka - no region screenshot, 640x480, 169 KB
+    { 0x41590002, "98d6cadf-dd97-45a4-82bf-ac8e53d756a8.jpg" }, // Stubbs the Zombie in Rebel Without a Pulse - no region background, 1280x720, 137 KB
+    { 0x41590004, "5176a924-124d-40e8-a563-008da1124e80.png" }, // Dreamfall: The Longest Journey - no region screenshot, 640x480, 156 KB
+    { 0x42410001, "fdfc2746-bf72-4719-b8a7-20f07e88b8bf.png" }, // Digimon Rumble Arena 2 - no region screenshot, 640x480, 44 KB
+    { 0x42410002, "642e68c7-7a2f-4cc3-8524-25fdc7bae585.jpg" }, // Digimon World 4 - no region background, 1920x1080, 145 KB
+    { 0x424D0002, "babdbc7a-4142-49e8-9715-059aa02ea829.png" }, // Reign of Fire - no region screenshot, 640x480, 137 KB
+    { 0x424D0003, "bb0c81f1-de33-4ec3-be70-fbf6fac022ad.png" }, // Wallace & Gromit in Project Zoo - no region screenshot, 640x480, 151 KB
+    { 0x424D0006, "9feaf522-043d-4695-a1a0-aa2085fe1c51.jpg" }, // Carmen Sandiego: The Secret of the Stolen Drums - no region background, 1920x1080, 114 KB
+    { 0x42520001, "9cd89072-320c-4f0d-823a-f4632e12a26c.png" }, // Galaxy Angel - no region screenshot, 640x480, 126 KB
+    { 0x42530001, "abbf7e3d-ee73-4b4e-9a05-26d2b47ed996.png" }, // The Elder Scrolls III: Morrowind - no region screenshot, 640x480, 133 KB
+    { 0x42530004, "1d1b3a5d-4110-48ce-8928-fad2810bf5d1.jpg" }, // Pirates of the Caribbean - World background, 1920x1080, 182 KB
+    { 0x42530006, "r2_481afba0-493c-43c2-bae6-6bdb20f92d64.jpg" }, // IHRA Drag Racing 2004 - North America screenshot, 640x480, 111 KB
+    { 0x42530007, "564fe53c-7a86-436a-9b78-0b3ed6e228d4.jpg" }, // Call of Cthulhu: Dark Corners of the Earth - no region background, 1920x1080, 628 KB
+    { 0x42530009, "4a5b23d8-5d43-4052-8cb5-427669c147bb.png" }, // AMF Bowling 2004 - no region screenshot, 640x480, 124 KB
+    { 0x4253000A, "2399fce3-c06f-44c4-9ea5-d9b817e80e70.jpg" }, // Malice - no region background, 1280x720, 226 KB
+    { 0x4253000B, "3ad2f997-fa95-41e6-8963-4ca2f23548a8.png" }, // Power Drome - no region screenshot, 640x480, 110 KB
+    { 0x4253000C, "r2_08b02a32-160f-4b8d-9c84-98b15310f53e.jpg" }, // IHRA Professional Drag Racing 2005 - North America screenshot, 640x480, 156 KB
+    { 0x4253000F, "8e1089e6-ad38-4212-ad90-44e93a048ec4.png" }, // High Rollers Casino - no region screenshot, 640x480, 157 KB
+    { 0x42530011, "r2_4e5ff886-fb6d-498f-9ce4-37847c0ef99a.jpg" }, // IHRA Drag Racing: Sportsman Edition - North America screenshot, 640x480, 184 KB
+    { 0x42530012, "ff09869c-8430-4868-a228-c704900d565a.jpg" }, // Breeders' Cup World Thoroughbred Championships - no region screenshot, 640x448, 50 KB
+    { 0x42530014, "daec1621-3ff0-4306-8009-bd1ac5fc0018.png" }, // AMF Xtreme Bowling - no region screenshot, 640x480, 101 KB
+    { 0x42550001, "72ac9d64-0386-4563-965e-516ea7efe2c4.png" }, // Wreckless: The Yakuza Missions - no region screenshot, 640x480, 155 KB
+    { 0x42550004, "8858dad0-9ef0-493a-94a1-53bb0573baef.png" }, // Double S.T.E.A.L.: The Second Clash - no region screenshot, 640x480, 145 KB
+    { 0x42560001, "85d2209e-98e4-440d-adc9-1c2e8d6821ee.png" }, // Tron 2.0: Killer App - no region screenshot, 640x480, 99 KB
+    { 0x42560002, "r2_8931ea7c-afc1-47f5-89c7-d4463594a81a.jpg" }, // Chicken Little - World background, 1920x1080, 296 KB
+    { 0x42560003, "58baf5cc-cf64-4ec0-ac2f-b27abff75fcd.png" }, // The Chronicles of Narnia: The Lion, the Witch and the Wardrobe - no region screenshot, 640x480, 129 KB
+    { 0x42560004, "dab32b07-119d-4371-964e-8082cf55a4e5.png" }, // Tim Burton's The Nightmare Before Christmas: Oogie's Revenge - no region screenshot, 640x480, 153 KB
+    { 0x42570001, "r2_62f86458-dd0f-42b0-9cb1-8245344dfcef.jpg" }, // Robot Wars: Extreme Destruction - Europe screenshot, 640x480, 135 KB
+    { 0x43430001, "dfcdf9b1-940e-4ddd-8fd3-4e7d7abec4fd.jpg" }, // Genma Onimusha - no region background, 1920x1080, 145 KB
+    { 0x43430002, "ea3f77b6-779a-493e-aa0d-0f9c0e8cdfa1.png" }, // Steel Battalion - no region screenshot, 640x480, 198 KB
+    { 0x43430003, "a6878b7b-a578-47bc-ab48-a48c6d223c92.jpg" }, // Dino Crisis 3 - no region background, 1024x579, 190 KB
+    { 0x43430004, "67faa08d-e65a-426b-8deb-abf878f91b5c.png" }, // UFC: Ultimate Fighting Championship: Tapout 2 - no region screenshot, 640x480, 182 KB
+    { 0x43430005, "9c1d32b7-e6e7-4eda-ad9d-da5b41b76c55.png" }, // Group S Challenge - no region screenshot, 640x480, 134 KB
+    { 0x43430008, "190eab41-7cdd-48b2-88ff-2d4576eead63.jpg" }, // Capcom vs. SNK 2 EO - no region screenshot, 639x448, 173 KB
+    { 0x43430009, "874f4b2c-5bf5-47da-8fe0-1e5915818391.png" }, // Steel Battalion: Line of Contact - no region screenshot, 640x480, 134 KB
+    { 0x4343000B, "f07d045e-7ee6-4bac-802b-6d4a24129c3e.png" }, // Pro Cast: Sports Fishing Game - no region screenshot, 640x480, 160 KB
+    { 0x4343000C, "e2120517-9b09-4d02-aa14-a459337f2a8a.png" }, // Robin Hood: Defender of the Crown - no region screenshot, 640x480, 136 KB
+    { 0x4343000E, "814b1410-999e-46ff-8188-38197df83bed.jpg" }, // Auto Modellista - no region background, 1920x1080, 519 KB
+    { 0x4343000F, "d2e1f533-73e0-42e1-b3ec-af53ed91d614.jpg" }, // Street Fighter Anniversary Collection - no region screenshot, 480x333, 159 KB
+    { 0x43430011, "e0fc86a7-a8e2-414c-a189-1f5bb65fbe17.png" }, // Mega Man: Anniversary Collection - no region screenshot, 640x480, 125 KB
+    { 0x43430013, "a00d258a-dfff-4dcb-b2bf-b9d9b5cd7bfe.png" }, // Final Fight: Streetwise - no region screenshot, 640x480, 155 KB
+    { 0x43430014, "a996641e-c736-402b-bc09-6149e4ddd850.png" }, // Without Warning - no region screenshot, 640x480, 140 KB
+    { 0x43430015, "r2_a1b4ade7-afd7-4dc4-9930-b10480e1d595.jpg" }, // Beat Down: Fists of Vengeance - World background, 1920x1080, 242 KB
+    { 0x43430016, "r2_b3a7398d-b998-46fd-ac35-4d6e8eb8eb79.jpg" }, // Darkwatch - World background, 1280x960, 130 KB
+    { 0x43430018, "5b1b640a-0917-4aa0-9355-20de68347574.jpg" }, // Capcom Classics Collection Vol. 1 - no region background, 1920x1080, 82 KB
+    { 0x43430019, "ec1ad70e-0a2f-46ad-9b77-0f4a77d1a77c.jpg" }, // Capcom Classics Collection Vol. 2 - no region background, 1920x1080, 332 KB
+    { 0x434B0001, "63a0fc90-70ba-44f2-9237-fcb2b8a06778.png" }, // Dai Senryaku VII: Modern Military Tactics - no region screenshot, 640x480, 148 KB
+    { 0x434D0001, "8f86e3d3-3b00-402b-87c2-2d979ef1e856.jpg" }, // Colin McRae Rally 3 - no region screenshot, 628x278, 99 KB
+    { 0x434D0002, "0be0dfe1-2552-429f-8a8c-4aed9735ab84.jpg" }, // Pro Race Driver - no region screenshot, 638x510, 92 KB
+    { 0x434D0003, "e79a1e42-fca0-4319-a3bc-89f704f863d2.png" }, // Mike Tyson Heavyweight Boxing - no region screenshot, 640x480, 130 KB
+    { 0x434D0004, "aeedd866-bc29-485d-aed3-55f3e0ed74ed.png" }, // LMA Manager 2003 - no region screenshot, 640x480, 169 KB
+    { 0x434D0006, "5dd61904-1cde-4c68-97c3-5c3071763fb0.jpg" }, // IndyCar Series - no region screenshot, 1592x1173, 322 KB
+    { 0x434D0008, "eea0a559-4975-427f-954b-e09128d9254e.png" }, // Prisoner of War - no region screenshot, 640x480, 165 KB
+    { 0x434D000D, "ca1daf8f-6c2b-4601-bb61-8703f08a08c9.png" }, // World Championship Snooker 2003 - no region screenshot, 640x480, 113 KB
+    { 0x434D000E, "0be0dfe1-2552-429f-8a8c-4aed9735ab84.jpg" }, // Pro Race Driver - no region screenshot, 638x510, 92 KB
+    { 0x434D000F, "ab6ce858-e4b9-405a-ac4d-1ef2ae2f5322.png" }, // LMA Manager 2004 - no region screenshot, 640x480, 155 KB
+    { 0x434D0010, "r2_d88e5318-3574-476b-882f-b7623117ac8d.jpg" }, // Colin Mcrae Rally 04 - World background, 1920x1080, 494 KB
+    { 0x434D0024, "65f22b30-0a46-4584-b1b7-486804666f60.png" }, // IndyCar Series 2005 - no region screenshot, 640x480, 137 KB
+    { 0x434D0028, "d2aa8b53-24e9-4aa9-a87b-774a6f1a194a.png" }, // England International Football: 2004 Edition - no region screenshot, 640x480, 169 KB
+    { 0x434D0029, "cd03b0cd-e965-441c-b68e-3d7adb1f1aae.png" }, // MTV Music Generator 3: This is the Remix - no region screenshot, 640x480, 116 KB
+    { 0x434D002A, "898ef442-ae81-4730-ae27-e8ca0f528975.png" }, // World Championship Snooker 2004 - no region screenshot, 640x480, 116 KB
+    { 0x434D002B, "43e82d5e-da4d-435e-9ba9-79b36befad25.png" }, // Colin McRae Rally 2005 - no region screenshot, 640x480, 165 KB
+    { 0x434D0039, "9deb32db-8318-48a7-80c1-ea0626c9b62c.jpg" }, // Club Football 2005: AJAX Amsterdam - no region background, 1920x1080, 132 KB
+    { 0x434D0046, "c420bfe3-6ec4-4f96-872b-15fd7e8e6e5e.png" }, // LMA Manager 2005 - no region screenshot, 640x480, 146 KB
+    { 0x434D0047, "r2_64bdec38-35a7-42eb-8c77-c848bea5db2f.jpg" }, // Second Sight - World background, 1920x1080, 59 KB
+    { 0x434D0049, "f9e99ae8-6993-41bd-bbf2-aa6b5329c436.jpg" }, // Manchester United Manager 2005 - no region screenshot, 320x200, 29 KB
+    { 0x434D004A, "c420bfe3-6ec4-4f96-872b-15fd7e8e6e5e.png" }, // LMA Manager 2005 - no region screenshot, 640x480, 146 KB
+    { 0x434D004B, "c420bfe3-6ec4-4f96-872b-15fd7e8e6e5e.png" }, // LMA Manager 2005 - no region screenshot, 640x480, 146 KB
+    { 0x434D004C, "c420bfe3-6ec4-4f96-872b-15fd7e8e6e5e.png" }, // LMA Manager 2005 - no region screenshot, 640x480, 146 KB
+    { 0x434D004D, "c420bfe3-6ec4-4f96-872b-15fd7e8e6e5e.png" }, // LMA Manager 2005 - no region screenshot, 640x480, 146 KB
+    { 0x434D004E, "98448639-4015-4e2a-9bfd-d4d1bc86af3f.png" }, // Brian Lara International Cricket 2005 - no region screenshot, 640x480, 151 KB
+    { 0x434D0050, "527bd132-0130-4e4c-93a1-20812e441771.png" }, // TOCA Race Driver 3 - no region screenshot, 640x480, 114 KB
+    { 0x434D0054, "f6dbb19f-84f9-4750-8864-f416f1270314.png" }, // LMA Manager 2006 - no region screenshot, 640x480, 131 KB
+    { 0x434D0057, "98448639-4015-4e2a-9bfd-d4d1bc86af3f.png" }, // Brian Lara International Cricket 2005 - no region screenshot, 640x480, 151 KB
+    { 0x434D005A, "4c850bec-87b5-4314-b2cd-84ecf74bc920.png" }, // Operation Flashpoint: Elite - no region screenshot, 640x480, 156 KB
+    { 0x434D005B, "086326b8-2821-4a6c-b908-fa785240339f.png" }, // Sensible Soccer 2006 - no region screenshot, 640x480, 93 KB
+    { 0x43560001, "a9cb58c6-d1e6-4173-913b-2ca8d76175a4.jpg" }, // Kabuki Warriors - North America background, 1920x1080, 205 KB
+    { 0x43560002, "a1058e98-33df-454d-b86d-0964373b83f8.jpg" }, // UFC: Ultimate Fighting Championship: Tapout - no region screenshot, 1280x720, 281 KB
+    { 0x43560005, "13a53522-d774-4673-a1dc-34b0b10a0e54.png" }, // Mojo! - no region screenshot, 640x480, 166 KB
+    { 0x43560006, "e83c498c-06e0-4fc9-9c80-a42f489f24ae.jpg" }, // Intellivision Lives! - no region background, 1280x720, 516 KB
+    { 0x43560007, "a1545a33-ffd4-4d33-acdc-870689840806.png" }, // Future Tactics: The Uprising - no region screenshot, 640x480, 101 KB
+    { 0x43560008, "3d837b45-f852-4d61-a007-78c7d6130d63.png" }, // Strike Force Bowling - no region screenshot, 640x480, 153 KB
+    { 0x43560009, "9da5d101-818a-4000-88f1-ed5de1c89ae2.png" }, // Trigger Man - no region screenshot, 640x480, 101 KB
+    { 0x4356000A, "e4f38929-1d7d-470c-82ed-bb468661a9b0.png" }, // Pinball Hall of Fame: The Gottlieb Collection - no region screenshot, 640x480, 144 KB
+    { 0x4356000D, "151b8788-edcf-4020-b683-be88e6c4a3c7.png" }, // World Championship Poker - no region screenshot, 640x480, 115 KB
+    { 0x4356000E, "01310ebb-0b8a-4ae4-a0b1-50e5abfdfd56.png" }, // MX World Tour Featuring Jamie Little - no region screenshot, 640x480, 146 KB
+    { 0x43560011, "1db74139-08b9-42e3-a8d7-0579175b2519.jpg" }, // The Bible Game - no region screenshot, 500x350, 59 KB
+    { 0x44430002, "2bbf5f44-81d4-4254-bf75-1a2a11664ddf.jpg" }, // Arx Fatalis - no region screenshot, 720x480, 50 KB
+    { 0x44430003, "85b9a11b-c614-48cb-b999-265e1021e920.png" }, // Painkiller: Hell Wars - no region screenshot, 640x480, 196 KB
+    { 0x44430004, "49a2ebc7-f292-4d3f-b613-646c93b97ab9.png" }, // Cold War - no region screenshot, 640x480, 123 KB
+    { 0x44580001, "33de6d4d-f2d7-4502-90ea-f9790b3b44a6.jpg" }, // Miami Vice - no region background, 1920x1080, 83 KB
+    { 0x45410001, "86028749-7ce2-41ce-b7be-e4c5d4bb21fe.png" }, // Madden NFL 2002 - no region background, 1366x768, 626 KB
+    { 0x45410002, "dea98f35-11cc-46de-b244-93e1b49f6a25.jpg" }, // NASCAR Thunder 2002 - no region background, 1920x1080, 251 KB
+    { 0x45410003, "5a34a41e-dddf-48a5-adf2-ecfa2f77720a.jpg" }, // NBA Live 2002 - no region background, 1366x768, 202 KB
+    { 0x45410004, "e9020347-989c-41f0-b935-f2ce47be7ff3.png" }, // SSX Tricky - no region screenshot, 640x480, 124 KB
+    { 0x45410005, "6b29e60b-e002-4ac3-8b88-0277a80ffeb2.jpg" }, // NHL 2002 - no region background, 1920x1080, 100 KB
+    { 0x45410007, "cc67bc22-eaad-4b03-8207-1c663e8f444a.png" }, // F1 2001 - no region screenshot, 640x480, 139 KB
+    { 0x4541000A, "ceac5f32-151c-48fb-8a9c-a92caf42862a.png" }, // Knockout Kings 2002 - no region screenshot, 640x480, 109 KB
+    { 0x4541000B, "eaf07947-2565-41cc-8bb8-df65e0cada6b.png" }, // 2002 FIFA World Cup - no region screenshot, 640x480, 138 KB
+    { 0x4541000D, "fad8ac17-28b1-4837-a731-65e26b645e70.jpg" }, // 007: Agent Under Fire - World background, 1920x1080, 201 KB
+    { 0x4541000E, "df38b452-9bbd-4fcc-af19-8f3b1463e1f6.jpg" }, // Harry Potter and the Chamber of Secrets - no region background, 1920x1080, 249 KB
+    { 0x45410011, "2070d5de-d2ab-49bb-9142-d9ee643388a6.png" }, // Cel Damage - no region screenshot, 640x480, 90 KB
+    { 0x45410012, "d9a859dd-98f8-452c-9169-d13e0c55167d.jpg" }, // Buffy the Vampire Slayer - no region background, 1920x1080, 756 KB
+    { 0x45410013, "e3086ee2-9bc4-4d29-b98f-15edd53232ed.png" }, // The Simpsons: Road Rage - no region screenshot, 640x480, 125 KB
+    { 0x45410014, "r2_e5ab5b7c-5f65-4447-8a6d-9544681a2c70.jpg" }, // F1 2002 - World background, 1920x1080, 484 KB
+    { 0x45410015, "c07728c3-c344-41b5-8ae6-0e6ee2e2a9e9.jpg" }, // Pirates: The Legend of Black Kat - no region screenshot, 720x576, 51 KB
+    { 0x45410017, "5439a51c-bad0-41dd-b81a-a309446f0a11.png" }, // FIFA Soccer 2003 - no region screenshot, 640x480, 156 KB
+    { 0x45410019, "2d9dfe47-92d7-401d-aaba-8093655c4b55.png" }, // Madden NFL 2003 - no region background, 1366x768, 481 KB
+    { 0x4541001A, "6d9d4b92-3a4a-4246-9365-1d01599d6fe1.png" }, // Medal of Honor: Frontline - no region screenshot, 640x480, 171 KB
+    { 0x4541001B, "4d5c82a1-5ee7-4c82-b51b-4f2d3164600e.png" }, // NASCAR Thunder 2003 - no region screenshot, 640x480, 167 KB
+    { 0x4541001C, "149dd508-ba60-4dd7-9247-234776aa77d7.png" }, // NBA Live 2003 - no region screenshot, 640x480, 176 KB
+    { 0x4541001D, "ed34f0cc-7dfb-4179-9164-bc6e9ad56b80.png" }, // NCAA Football 2003 - no region screenshot, 640x480, 154 KB
+    { 0x4541001E, "8a23bea8-ecb6-4ca9-a85a-54221fee396a.png" }, // NHL 2003 - no region screenshot, 640x480, 124 KB
+    { 0x45410021, "2985e484-2a54-411f-bc91-b75b14edb0ce.png" }, // Tiger Woods PGA Tour 2003 - no region screenshot, 640x480, 109 KB
+    { 0x45410026, "r2_674a6fd7-b0c7-4db9-8156-f8f6bfb44580.jpg" }, // 007: Nightfire - World background, 1920x1080, 118 KB
+    { 0x45410027, "9f33e572-04f3-4b53-88c5-f5f9f4bc62be.png" }, // NBA Street Vol. 2 - no region screenshot, 640x480, 162 KB
+    { 0x45410028, "a236f82d-47e0-4718-ba9e-17f61f8dbf18.jpg" }, // Need for Speed: Hot Pursuit 2 - no region background, 1920x1080, 266 KB
+    { 0x45410029, "ece5032e-9e1a-445e-bc59-bf753d1498a3.png" }, // Ty the Tasmanian Tiger - no region screenshot, 640x480, 121 KB
+    { 0x4541002D, "e5a6c4ef-3bfb-4195-85b7-ac684e58b1d3.png" }, // MVP Baseball 2003 - no region screenshot, 640x480, 114 KB
+    { 0x4541002E, "r2_55ffe20d-11e9-4570-a854-0ed96b5b31ba.jpg" }, // Freedom Fighters - World background, 1920x1080, 732 KB
+    { 0x45410030, "db2caccc-9190-4a0e-859e-638aa16355ef.jpg" }, // NHL 2004 - no region background, 1920x1080, 326 KB
+    { 0x45410031, "66a8dc89-1b07-4de2-b5da-db5fcdb0ffd3.png" }, // NASCAR Thunder 2004 - no region screenshot, 640x480, 131 KB
+    { 0x45410032, "r2_b811e0e2-7b0d-48ed-98ed-040f56badcba.jpg" }, // F1 Career Challenge - Europe background, 1920x1080, 734 KB
+    { 0x45410035, "d25911b2-9e29-4367-a3a8-dd25f0f41252.png" }, // NCAA Football 2004 - no region screenshot, 640x480, 173 KB
+    { 0x45410036, "2af9d6f7-a609-4191-9d37-9a4e74c7bd54.png" }, // Madden NFL 2004 - no region screenshot, 640x480, 156 KB
+    { 0x45410037, "85f5f489-23f0-4306-857c-13790a7733d2.jpg" }, // Harry Potter and the Sorcerer's Stone - no region background, 1920x1080, 536 KB
+    { 0x45410038, "2bbabfbd-627c-48fc-abac-c70d49466941.jpg" }, // NBA Live 2004 - no region background, 1366x768, 145 KB
+    { 0x45410039, "0ae986f6-4c55-461d-bbca-476ce37f682b.png" }, // Bionicle - no region screenshot, 640x480, 157 KB
+    { 0x4541003A, "bf727d76-1893-467b-b140-23fbfa0e5695.png" }, // Tiger Woods PGA Tour 2004 - no region screenshot, 640x480, 115 KB
+    { 0x4541003B, "r2_47e4307a-d21d-4ce0-90ee-be9d1e199613.jpg" }, // FIFA Soccer 2004 - World background, 1920x1080, 528 KB
+    { 0x4541003C, "7e6bb6c2-cfab-44b5-ac48-d0cc1550a91f.png" }, // SSX 3 - no region screenshot, 640x480, 145 KB
+    { 0x4541003D, "db841035-edaa-4503-8dba-77479f7bb344.png" }, // Harry Potter: Quidditch World Cup - no region screenshot, 640x480, 138 KB
+    { 0x4541003E, "d0302683-ee9c-4f74-b467-9fc285086844.jpg" }, // The Lord of the Rings: The Return of the King - no region background, 1920x1080, 423 KB
+    { 0x4541003F, "6ba7225e-fa27-4d2d-9be1-4b3af4dbb7e6.jpg" }, // Medal of Honor: Rising Sun - no region background, 1920x1080, 304 KB
+    { 0x45410041, "297059fb-8a37-419f-b670-fc2e39706371.png" }, // Total Club Manager 2004 - no region screenshot, 640x480, 96 KB
+    { 0x45410042, "4ef236f8-8802-4e24-9e06-af2e20ab0989.jpg" }, // 007: Everything or Nothing - World background, 1920x1080, 339 KB
+    { 0x45410043, "ab301fb6-57ed-4249-a1a6-dd1acc7e9968.png" }, // The Sims: Bustin' Out - no region screenshot, 640x480, 159 KB
+    { 0x45410044, "d1f59627-9368-4cdc-a57c-4226c8b8a6cf.png" }, // NCAA March Madness 2004 - no region screenshot, 640x480, 159 KB
+    { 0x45410045, "1f017eca-7cc5-4dc4-a109-2d62139333a7.png" }, // MVP Baseball 2004 - no region screenshot, 640x480, 176 KB
+    { 0x45410047, "1ad26475-17e6-4bf8-aeca-dc83ebe12c98.jpg" }, // Need for Speed: Underground - no region background, 1920x1080, 471 KB
+    { 0x45410048, "70d8e2aa-ff33-4e6e-8840-9ad10d6276d1.png" }, // NFL Street - no region screenshot, 640x480, 145 KB
+    { 0x45410049, "7e8208c7-cfa4-41ac-8c34-94732f855388.jpg" }, // Def Jam: Fight for NY - no region background, 2560x1440, 698 KB
+    { 0x4541004A, "a1087721-265f-48c5-bd08-b93102960313.png" }, // UEFA Euro 2004: Portugal - no region screenshot, 640x480, 171 KB
+    { 0x4541004B, "450b94b7-1d0f-4bbb-9a2c-4a0eeb33f664.jpg" }, // Fight Night 2004 - no region background, 1280x720, 186 KB
+    { 0x4541004C, "62e3ad65-d3fa-4273-a9b4-ff59ce5832bc.jpg" }, // Harry Potter and the Prisoner of Azkaban - no region background, 1920x1080, 738 KB
+    { 0x4541004D, "d5d65f9a-1990-405b-a481-b46e9813fd14.png" }, // Madden NFL 2005 - no region screenshot, 640x480, 172 KB
+    { 0x4541004E, "9ee65484-9d8e-48d2-9441-684f22fbd833.png" }, // FIFA Soccer 2005 - no region screenshot, 640x480, 132 KB
+    { 0x4541004F, "c6423a43-c5fd-45e4-a8f5-2af4e0c0e95c.png" }, // NHL 2005 - no region screenshot, 640x480, 138 KB
+    { 0x45410050, "2d0c01d8-a28d-4622-a773-08dac0fb2a11.png" }, // NBA Live 2005 - no region screenshot, 640x480, 135 KB
+    { 0x45410051, "a7616472-357c-42ee-9933-bce1367a9526.png" }, // NCAA Football 2005 - no region screenshot, 640x480, 168 KB
+    { 0x45410052, "ecd116d8-728c-4fe2-9b0e-5c950641444c.png" }, // NCAA March Madness 2005 - North America screenshot, 640x480, 136 KB
+    { 0x45410053, "3ba4e5de-d01a-48cb-b0ff-f6076ee78509.jpg" }, // NASCAR 2005: Chase for the Cup - no region background, 1920x1080, 418 KB
+    { 0x45410054, "22048490-8808-4b9f-8848-9aec65d4cef7.png" }, // Tiger Woods PGA Tour 2005 - no region screenshot, 640x480, 99 KB
+    { 0x45410055, "80e9fb52-69dd-40ab-b66c-e61a57ed457d.jpg" }, // Fight Night Round 2 - no region background, 1280x720, 151 KB
+    { 0x45410056, "62ecc397-7921-46f1-8852-1baabd3187d4.png" }, // MVP Baseball 2005 - no region screenshot, 640x480, 152 KB
+    { 0x45410057, "ab75f906-8ebf-4f1c-af0f-d6d74b927d95.png" }, // NFL Street 2 - no region screenshot, 640x480, 174 KB
+    { 0x45410058, "27bf5906-9459-4a05-9c06-c0ef57869817.png" }, // NBA Street V3 - no region screenshot, 640x480, 177 KB
+    { 0x4541005A, "b88b01f7-1faa-48e7-914a-302e01d72a4f.jpg" }, // Need for Speed: Underground 2 - no region background, 1920x1080, 360 KB
+    { 0x4541005B, "6f7a661d-a87c-436a-a6c5-3c81706bf217.jpg" }, // Burnout 3: Takedown - no region background, 1920x1080, 387 KB
+    { 0x4541005C, "df8322a5-0c26-41c7-be0e-342a8fb5a96a.jpg" }, // Catwoman - no region background, 1920x1080, 190 KB
+    { 0x4541005D, "261b03e9-8ca7-4817-990f-02ce2c415cb6.jpg" }, // GoldenEye: Rogue Agent - no region background, 1600x1173, 616 KB
+    { 0x4541005E, "9271a8a9-9013-4b3b-901a-f83dd7f8f98f.png" }, // Medal of Honor: European Assault - no region screenshot, 640x480, 172 KB
+    { 0x4541005F, "44dc1498-c53b-4ab9-9cfb-38db9bfd867a.jpg" }, // The Lord of the Rings: The Third Age - no region background, 1920x1080, 319 KB
+    { 0x45410060, "40f39839-3b06-414b-9aca-2ff1e605d5fb.png" }, // The Urbz: Sims in the City - no region screenshot, 640x480, 153 KB
+    { 0x45410061, "410c9a78-d06b-424f-80a4-33e6d19fdca6.png" }, // Rugby 2005 - no region screenshot, 640x480, 149 KB
+    { 0x45410062, "54da3645-51bb-4df1-8a08-80ebc490a342.jpg" }, // Battlefield 2: Modern Combat - no region background, 1920x1080, 464 KB
+    { 0x45410063, "91f7d681-46f1-4416-ac85-996e123b7823.png" }, // Ty the Tasmanian Tiger 2: Bush Rescue - no region screenshot, 640x480, 211 KB
+    { 0x45410065, "724d7016-5a63-47c4-8946-6428a451a69c.png" }, // Total Club Manager 2005 - no region screenshot, 640x480, 122 KB
+    { 0x45410066, "812941ba-82cc-4624-9105-fbb61dd5859d.jpg" }, // TimeSplitters: Future Perfect - no region background, 1920x1080, 292 KB
+    { 0x4541006D, "f78f90b3-6721-4aa1-a9d4-58b6b3535d67.jpg" }, // Oddworld: Stranger's Wrath - no region background, 1920x1200, 607 KB
+    { 0x45410070, "94bbf1e6-fa67-41f8-9ec7-de580f59322e.png" }, // UEFA Champions League 2004-2005 - no region screenshot, 640x480, 124 KB
+    { 0x45410072, "67acb60c-4fcf-4eb9-a3cf-8337e268ec78.png" }, // FIFA Street - no region screenshot, 640x480, 145 KB
+    { 0x45410074, "1ab3ff99-752f-4291-9cb4-61c4832be838.png" }, // Cricket 2005 - no region screenshot, 640x480, 161 KB
+    { 0x45410075, "527a6389-ae03-4be2-9b1c-a279f767271b.png" }, // Madden NFL 06 - no region background, 1366x768, 533 KB
+    { 0x45410076, "34f4397e-089d-44ed-8fdd-adac6f1a1608.jpg" }, // Burnout Revenge - no region background, 1920x1080, 465 KB
+    { 0x45410077, "62b15c9d-1937-442d-b2ae-b1f994bbbe01.jpg" }, // Harry Potter and the Goblet of Fire - no region background, 1920x1080, 469 KB
+    { 0x45410078, "742e63ae-465b-4944-a4a7-5bd52c8c7914.png" }, // FIFA Soccer 06 - no region screenshot, 640x480, 139 KB
+    { 0x45410079, "4f4eb038-b095-4b6a-a9c9-348ead74b1c6.jpg" }, // 007: From Russia with Love - no region background, 1280x720, 221 KB
+    { 0x4541007A, "d7a7a619-fa7c-43a8-85bd-5e68a85c1ea3.png" }, // NBA Live 06 - no region screenshot, 640x480, 155 KB
+    { 0x4541007B, "8b5b64c5-07e2-4d8b-bdbf-5a93289e8c4f.png" }, // Need for Speed: Most Wanted - no region screenshot, 640x480, 157 KB
+    { 0x4541007C, "493a8134-17e2-41d0-8881-b14125a857dd.png" }, // NHL 06 - no region screenshot, 640x480, 143 KB
+    { 0x4541007D, "dbcf4920-1793-428e-bb23-886b78b91751.jpg" }, // The Godfather: The Game - no region background, 1920x1080, 125 KB
+    { 0x4541007E, "r2_fc2fe3d9-d680-4875-bb66-ce18b6652f85.jpg" }, // Tiger Woods PGA Tour 06 - World background, 1920x1080, 284 KB
+    { 0x45410080, "f7d7c180-a7c4-4e6a-93a2-5eb5ec813303.png" }, // NCAA Football 06 - no region screenshot, 640x480, 140 KB
+    { 0x45410082, "f52381b9-5d78-4356-aeea-745905296c42.png" }, // SSX on Tour - no region screenshot, 640x480, 149 KB
+    { 0x45410083, "9f49e678-b053-44c3-a595-51ea09da30d6.png" }, // Black - no region screenshot, 640x480, 117 KB
+    { 0x45410085, "714460a0-79a4-4c53-a188-50d7e4596929.png" }, // FIFA Street 2 - no region screenshot, 640x480, 155 KB
+    { 0x45410086, "d10d88f4-f8e3-495e-bcc1-d604a0be6ab2.jpg" }, // Fight Night Round 3 - no region screenshot, 1280x720, 85 KB
+    { 0x45410087, "2ab66eff-e5c3-470d-8824-d69e7829a636.png" }, // Rugby 06 - no region screenshot, 640x480, 147 KB
+    { 0x4541008B, "a323c555-d6d7-4fbb-8b1f-afc3e554371d.png" }, // NASCAR 06: Total Team Control - no region screenshot, 640x480, 159 KB
+    { 0x4541008D, "49f0dd21-304e-4511-ad20-c94c7a0bed24.png" }, // MVP 06 NCAA Baseball - no region screenshot, 640x480, 148 KB
+    { 0x4541008E, "500ed684-9845-451b-b504-7c4799123511.png" }, // NFL Head Coach - no region screenshot, 640x480, 136 KB
+    { 0x45410090, "d6a38421-3bc9-4970-b969-9d1782793c36.png" }, // NCAA March Madness 06 - no region screenshot, 640x480, 133 KB
+    { 0x45410091, "ec5a2772-8261-4edd-a9e6-a28fe6ae1376.png" }, // Half-Life 2 - no region screenshot, 640x480, 138 KB
+    { 0x45410094, "6fd033ad-5dbc-4f76-ad77-db8aabdc7f7c.png" }, // Arena Football - no region screenshot, 640x480, 104 KB
+    { 0x4541009C, "r2_a1334e35-a2cd-442c-828e-bfe9a0766e9a.jpg" }, // FIFA World Cup: Germany 2006 - World background, 1920x1080, 214 KB
+    { 0x4541009E, "18785e91-0c92-493b-9f48-a37ba8c903b3.jpg" }, // Need for Speed: Carbon - no region background, 1920x1080, 626 KB
+    { 0x4541009F, "c19395a8-591a-48b8-91d4-af6b3cb5a24a.png" }, // Madden NFL 07 - no region screenshot, 640x480, 169 KB
+    { 0x454100A0, "r2_37a79101-cb4a-4029-9e4e-ce5e63a9e0b0.jpg" }, // Superman Returns - World background, 1920x1080, 424 KB
+    { 0x454100A1, "554eec76-e54f-4d2b-8cce-fb01d6124514.png" }, // NBA Live 07 - no region screenshot, 640x480, 175 KB
+    { 0x454100A2, "6bc6b41f-eba8-46f3-b9c0-e11b705a56ad.png" }, // NCAA Football 07 - no region screenshot, 640x480, 152 KB
+    { 0x454100A3, "a8908ac4-f2a5-4fad-8756-013a4b230f06.png" }, // NASCAR 07 - no region screenshot, 640x480, 148 KB
+    { 0x454100A4, "r2_3e6a29b2-1c78-42d3-9211-c15dd6a9dad5.jpg" }, // Tiger Woods PGA Tour 07 - World background, 1920x1080, 914 KB
+    { 0x454100A5, "22391b6f-e745-49cd-aca5-3e4dcb82c794.png" }, // NHL 07 - no region screenshot, 640x480, 149 KB
+    { 0x454100A6, "863b704d-c265-4a43-a095-5ee022f4379a.png" }, // FIFA Soccer 07 - no region screenshot, 640x480, 149 KB
+    { 0x454100AB, "b5ca00b8-2fe8-4da5-a53d-f530c671c6e7.png" }, // NCAA Football 08 - no region screenshot, 640x480, 187 KB
+    { 0x454100AC, "5744f16c-b7eb-4e18-bbc6-8af3616009df.png" }, // Madden NFL 08 - no region background, 1366x768, 998 KB
+    { 0x45410389, "e40275d1-a173-4a07-836c-5ab5f303ef03.jpg" }, // Batman Begins - no region background, 1920x1080, 356 KB
+    { 0x4541038A, "238a6b86-7ec3-4fff-b686-9121a9889f9e.jpg" }, // Marvel Nemesis: Rise of the Imperfects - no region background, 1920x1080, 345 KB
+    { 0x4541038B, "e3b67177-53fc-43e2-a703-6cbd38be7ee2.jpg" }, // The Sims 2 - no region background, 1920x1080, 426 KB
     { 0x454108DD, "r2_360d79e9-f28c-4401-97fa-94ea300a2d11.jpg" }, // Hasbro Family Game Night (no region) - World background, 479 KB
+    { 0x45430001, "ced6fcde-69a1-4fd6-b20f-2a7dc03fa116.png" }, // Circus Maximus: Chariot Wars - no region screenshot, 640x480, 140 KB
+    { 0x45430002, "f70223da-642e-4d5d-9838-593b98573e37.png" }, // GrooveRider: Slot Car Thunder - no region screenshot, 640x480, 176 KB
+    { 0x45430004, "ab06ccb0-31a5-4e7b-aba9-b74ba9136991.png" }, // Heroes of the Pacific - no region screenshot, 640x480, 86 KB
+    { 0x454C0001, "831813f8-2378-4b16-b754-4033fe2a3497.jpg" }, // Scrapland - no region background, 1920x1080, 366 KB
+    { 0x454D0002, "ccae0e64-d85f-4654-9326-745afea57ae1.png" }, // Big Mutha Truckers - no region screenshot, 640x480, 162 KB
+    { 0x454D0004, "r2_6e0efa61-1d84-49ab-bfdb-683aa0281214.jpg" }, // Ghost Master: The Gravenville Chronicles - World background, 1920x1080, 223 KB
+    { 0x454D0005, "a4fa2aeb-7c22-4711-ac37-a4d19a57758e.png" }, // Starsky & Hutch - no region screenshot, 640x480, 150 KB
+    { 0x454D0007, "871d2b00-fb29-4bb1-8c1d-8290f84ce9ec.png" }, // Ford Racing 2 - no region screenshot, 640x480, 158 KB
+    { 0x454D0008, "9598a283-c29a-4bce-8995-2919ed6c6894.png" }, // Bad Boys: Miami Takedown - no region screenshot, 640x480, 128 KB
+    { 0x454D0009, "f0ee6f06-8b6e-4930-9e3c-bf43e745320b.jpg" }, // FlatOut - no region background, 1600x900, 600 KB
+    { 0x454D000A, "6e2e147f-aa0c-483a-ad02-e1e34774e8a8.png" }, // Mashed: Drive to Survive - no region screenshot, 640x480, 153 KB
+    { 0x454D000D, "r2_b621f028-6307-441b-affc-ae2ef90c996e.png" }, // Ford Racing 3 - World screenshot, 640x480, 608 KB
+    { 0x454D0016, "9598a283-c29a-4bce-8995-2919ed6c6894.png" }, // Bad Boys: Miami Takedown - no region screenshot, 640x480, 128 KB
+    { 0x454D0017, "1394f7d2-7f62-45fd-b0fe-bb4c64e36ad3.png" }, // Big Mutha Truckers 2 - no region screenshot, 640x480, 157 KB
+    { 0x454D001C, "7481411d-ebcf-4b6b-8840-c9ad51971c8a.jpg" }, // Taito Legends - no region background, 1920x1080, 320 KB
+    { 0x454D001D, "3eed92f2-12e2-4a00-af81-147f3edc9922.jpg" }, // Ultimate Pro Pinball - no region background, 1920x1080, 614 KB
+    { 0x454D001E, "8618a068-08d1-4432-ae20-78438c5b67a9.png" }, // Jacked - no region screenshot, 640x480, 162 KB
+    { 0x454D001F, "cad7f314-e002-47a7-95e3-1e0c6647a123.png" }, // Ford Bold Moves Street Racing - no region screenshot, 640x480, 153 KB
+    { 0x454D0020, "add1f5f2-c9e6-4821-8545-f3a3e28651dd.jpg" }, // FlatOut 2 - no region background, 1920x1080, 486 KB
+    { 0x454D0022, "91292c1d-7e4a-4e24-91eb-2b87dde11292.jpg" }, // Taito Legends 2 - no region background, 1920x1080, 541 KB
+    { 0x45530001, "6b125e92-7d61-49e4-8526-bfc233f5ae8a.jpg" }, // Mad Dash Racing - no region background, 1280x720, 512 KB
+    { 0x45530002, "719627ce-8abf-45ed-b222-a7d549314ab5.png" }, // Championship Manager: Season 01/02 - no region screenshot, 640x480, 129 KB
+    { 0x45530004, "1755c691-96e1-4eef-98d8-b9f36c611c50.jpg" }, // Thief: Deadly Shadows - no region background, 1920x1080, 220 KB
+    { 0x45530005, "78a946ed-ea12-489f-9fb0-71f52b491ae3.png" }, // Deus Ex: Invisible War - no region screenshot, 640x480, 150 KB
+    { 0x45530006, "27b27001-e551-4729-8e3c-8928ee17d122.png" }, // The Legacy of Kain: Blood Omen 2 - no region screenshot, 640x480, 176 KB
+    { 0x45530008, "bf064661-338a-46a3-a180-5a93a32889dd.jpg" }, // Commandos 2: Men of Courage - no region background, 1280x720, 173 KB
+    { 0x45530009, "e91a1bb6-e29b-47f7-9640-d86ef17afa94.png" }, // Hitman 2: Silent Assassin - no region screenshot, 640x480, 170 KB
+    { 0x4553000A, "973ca292-26d5-46d8-950b-d8cbfac9c7f9.png" }, // TimeSplitters 2 - no region screenshot, 640x480, 143 KB
+    { 0x4553000C, "58fdf788-8f4c-4971-8fbd-b2054409d27e.png" }, // Championship Manager: Season 02/03 - no region screenshot, 640x480, 154 KB
+    { 0x4553000D, "38993432-cb37-4c2d-b50b-cda52466c7f3.png" }, // Backyard Wrestling: Don't Try This at Home - no region screenshot, 640x480, 131 KB
+    { 0x4553000E, "633bce2e-1751-4b68-adb7-3576f1c9c389.png" }, // The Italian Job - no region screenshot, 640x480, 137 KB
+    { 0x4553000F, "aac01111-278b-4647-a00c-3a3b6cf2966b.png" }, // Legacy of Kain: Defiance - no region screenshot, 640x480, 229 KB
+    { 0x45530011, "589d1df4-5c52-4f57-9ebc-69a89bbf571a.png" }, // Whiplash - no region screenshot, 640x480, 80 KB
+    { 0x45530012, "c433787c-2672-425c-9c40-a40aa4ec1d29.png" }, // Hitman: Contracts - no region screenshot, 640x480, 181 KB
+    { 0x45530013, "ba8d777b-f81b-4da9-83ff-918a4093b6a6.jpg" }, // ShellShock: Nam '67 - no region background, 1920x1080, 492 KB
+    { 0x45530014, "0008af2d-fe11-4a03-a67b-93fb7182b86d.png" }, // Crash 'n Burn - no region screenshot, 640x480, 123 KB
+    { 0x45530016, "ade98c05-cd76-4549-a4a4-42b724139e6f.png" }, // Backyard Wrestling 2: There Goes the Neighborhood - no region screenshot, 640x480, 121 KB
+    { 0x45530018, "00a142e0-a76f-4377-a5e1-e15bb46d6dcf.jpg" }, // 25 To Life - no region background, 1920x1080, 509 KB
+    { 0x45530019, "0f51e612-0011-4537-989a-77f9e0608cee.png" }, // Project: Snowblind - no region screenshot, 640x480, 157 KB
+    { 0x4553001A, "69f658da-5778-45ca-979e-74e481ffb33a.png" }, // Championship Manager 5 - no region screenshot, 640x480, 165 KB
+    { 0x464C0002, "f770ef55-668e-4b9b-ab18-1793c266e743.png" }, // Crusty Demons - no region screenshot, 640x480, 141 KB
     { 0x464F07DC, "d6fa2d4c-2f33-45b5-9dfb-c8146a738a01.jpg" }, // All Round Hunter (United Kingdom, Wii) - no region screenshot, 80 KB
+    { 0x46530002, "r2_69729de5-5924-4034-bbe4-ea01bc596347.jpg" }, // Otogi: Myth of Demons - World background, 1920x1080, 141 KB
+    { 0x46530003, "020466e1-ce68-46c4-8604-3c26dd7a2311.png" }, // Thousand Land - no region screenshot, 640x480, 104 KB
+    { 0x46530004, "ea563732-668e-41f4-b462-136e86361692.jpg" }, // Otogi 2: Immortal Warriors - no region background, 1920x1080, 494 KB
+    { 0x46530006, "6f19ed32-b4ab-4fcb-adbb-8699a1883867.png" }, // Metal Wolf Chaos - no region screenshot, 640x480, 138 KB
+    { 0x47450001, "a9cb58c6-d1e6-4173-913b-2ca8d76175a4.jpg" }, // Kabuki Warriors - North America background, 1920x1080, 205 KB
+    { 0x47560001, "1fec57a0-92e0-467b-9e75-08696945a3ea.jpg" }, // Pariah - no region background, 2048x1152, 735 KB
+    { 0x47560003, "91ab72d4-38a8-4ee4-8c40-5f0b8e3aea34.png" }, // Combat: Task Force 121 - no region screenshot, 640x480, 180 KB
+    { 0x47560004, "d16f0f45-ecc6-4806-8211-25ddf445ae0a.png" }, // Land of the Dead: Road to Fiddler's Green - no region screenshot, 640x480, 114 KB
+    { 0x47560009, "08e448dd-3aea-496b-9777-fdde822606b4.png" }, // World War II Combat: Road to Berlin - no region screenshot, 640x480, 111 KB
+    { 0x4756000A, "r2_453ddca2-2753-49f9-bc0a-8641ffbd11df.jpg" }, // Warpath - North America screenshot, 640x480, 122 KB
+    { 0x4756000B, "0e799568-9687-4d6d-a266-9da55166dd90.png" }, // World War II Combat: Iwo Jima - no region screenshot, 640x480, 125 KB
+    { 0x48450004, "f5f05628-801c-4466-afb8-97dde3837113.png" }, // Frankie Dettori Racing - no region screenshot, 640x480, 112 KB
+    { 0x48450005, "a0aebfbe-1b5d-4d81-bb3c-3e82001b9957.png" }, // Rugby League 2 - no region screenshot, 640x480, 140 KB
+    { 0x48500001, "edd8ceec-10ef-4a16-8f2e-eb521c726c1d.png" }, // Stolen - no region screenshot, 640x480, 162 KB
+    { 0x48500002, "73ca27a7-4d5f-416f-8334-216b9e3cdd66.png" }, // Special Forces: Nemesis Strike - no region screenshot, 640x480, 173 KB
+    { 0x48500005, "ddbe30bf-4cc4-4669-8139-c0fe83c1cedd.jpg" }, // Rugby Challenge 2006 - no region screenshot, 1223x720, 154 KB
+    { 0x48550001, "r2_690644cb-7dc7-41d5-940e-5f156f58bfab.jpg" }, // Bloody Roar Extreme - World background, 1600x1173, 206 KB
+    { 0x48570001, "a8d068ea-134e-44e5-9802-496b368ed3b5.jpg" }, // Drihoo - Japan screenshot, 400x300, 37 KB
+    { 0x49410001, "80c146aa-0fb0-477e-b078-aa52f1fbc5c4.png" }, // Real World Golf - no region screenshot, 640x480, 92 KB
+    { 0x49460001, "21dd6767-5193-4bf0-837c-50cc83357e8a.png" }, // Black Stone: Magic & Steel - no region background, 1920x1080, 127 KB
+    { 0x49470001, "6806b6f1-06c6-4505-80bc-da810310efe6.png" }, // Test Drive: Off-Road Wide Open - no region screenshot, 640x480, 147 KB
+    { 0x49470004, "e992af66-f86c-4c96-ab8c-0a2a5bbb26ca.png" }, // TransWorld Snowboarding - no region screenshot, 640x480, 153 KB
+    { 0x49470005, "3ea157fd-5319-43d7-91a4-64568899252b.png" }, // TransWorld Surf - no region screenshot, 640x480, 80 KB
+    { 0x49470006, "75b0bd9c-c644-47a5-bfa9-7b947197758a.png" }, // Loons: The Fight for Fame - no region screenshot, 640x480, 98 KB
+    { 0x49470007, "33044f98-21e5-4ce3-8ef7-1da6b317c1eb.png" }, // Test Drive - no region screenshot, 640x480, 120 KB
+    { 0x49470009, "b6300b6f-f66e-40ba-968c-0bac7347fa01.jpg" }, // NASCAR Heat 2002 - no region background, 1920x1080, 130 KB
+    { 0x4947000B, "98ee286d-d0d5-488f-b957-d33509712385.png" }, // Furious Karting - no region screenshot, 640x480, 141 KB
+    { 0x4947000D, "r2_a03eab1a-ac3f-45c0-88ae-6b751150336f.jpg" }, // Taz: Wanted - World screenshot, 720x576, 189 KB
+    { 0x4947000E, "3ad17b88-b7cc-482e-bfce-99b913506265.png" }, // Magic: The Gathering: Battlegrounds - no region screenshot, 640x480, 143 KB
+    { 0x4947000F, "0d5337e6-4446-410f-9f0d-73f45ab59645.png" }, // Monopoly Party! - no region screenshot, 640x480, 157 KB
+    { 0x49470010, "38fa25eb-8d5b-4c52-9e32-6cad5f167d19.png" }, // Battle Engine Aquila - no region screenshot, 640x480, 114 KB
+    { 0x49470011, "486f4a6c-edb1-4363-a486-ed84a515435a.png" }, // Slam Tennis - no region screenshot, 640x480, 132 KB
+    { 0x49470012, "bea37d5d-f0ca-45b0-b25f-d48274428471.png" }, // Zapper: One Wicked Cricket! - no region screenshot, 640x480, 187 KB
+    { 0x49470013, "390e1df3-b4be-4c22-bbb1-1a5270ae61e4.jpg" }, // Dungeons & Dragons: Heroes - World screenshot, 640x480, 110 KB
+    { 0x49470015, "c094f280-4f42-4331-9353-5b4c11e4c983.png" }, // Apex - no region screenshot, 640x480, 161 KB
+    { 0x4947001B, "3299610e-2e3e-4878-9ab6-5af6161a1f49.png" }, // Splashdown - no region screenshot, 640x480, 143 KB
+    { 0x4947001C, "6c69ab39-e00b-48dd-b4a9-db2c9bbf248d.jpg" }, // Micro Machines - Europe screenshot, 640x480, 134 KB
+    { 0x4947001F, "de59d5a9-958e-431c-84e3-32e88a33c37c.png" }, // Mission: Impossible: Operation Surma - no region screenshot, 640x480, 144 KB
+    { 0x49470022, "1bcdf083-2874-4048-a9ce-e3b4c2121c24.jpg" }, // Enter the Matrix - no region background, 1920x1080, 843 KB
+    { 0x49470023, "1c1506c7-ad4f-41e5-9067-910f823adbb8.png" }, // Crazy Taxi 3: High Roller - North America screenshot, 640x480, 334 KB
+    { 0x49470024, "c29a551e-7209-454f-8196-8046c8f81381.png" }, // Unreal Championship - no region screenshot, 640x480, 181 KB
+    { 0x49470025, "r2_4643522a-06ba-4c6b-88c7-42f9fe67f9fc.png" }, // Shadow Ops: Red Mercury - World screenshot, 1024x768, 440 KB
+    { 0x49470026, "9dbaf675-a1cb-431d-9bd3-8bbe619411d4.jpg" }, // The Terminator: Dawn of Fate - no region background, 1600x1173, 215 KB
+    { 0x49470027, "d14a918f-5537-4182-9b51-cb09088daceb.png" }, // Dead Man's Hand - no region screenshot, 640x480, 172 KB
+    { 0x49470028, "1ca84d8a-b553-4bfa-8954-7bb06192911b.png" }, // Nickelodeon Party Blast - no region screenshot, 640x480, 132 KB
+    { 0x4947002E, "a488d1a0-d2ea-47b8-a25f-d1d4c0eb4d94.jpg" }, // RollerCoaster Tycoon - no region background, 1383x780, 311 KB
+    { 0x49470034, "b72409b3-65f0-4b4b-9bbb-f97a9e796386.png" }, // V-Rally 3 - no region screenshot, 640x480, 188 KB
+    { 0x49470038, "dbf4b001-5a32-4b51-b6fd-b9984980db57.jpg" }, // Driv3r - no region background, 1920x1080, 402 KB
+    { 0x49470039, "3cf9266b-a622-4e3c-8ec6-a5d7cd96ce82.png" }, // Godzilla: Destroy All Monsters Melee - no region screenshot, 640x480, 139 KB
+    { 0x4947003B, "dc5231b6-77c1-4af3-8414-190c896ff57b.png" }, // Terminator 3: Rise of the Machines - no region screenshot, 640x480, 174 KB
+    { 0x4947003C, "2bf32c0a-2569-4e10-adf0-305eb95b0429.jpg" }, // Unreal II: The Awakening - no region screenshot, 640x480, 104 KB
+    { 0x4947003D, "3ebaa92c-e0d7-419d-befb-13b30f2c4f88.png" }, // Trivial Pursuit: Unhinged - no region screenshot, 640x480, 125 KB
+    { 0x4947003E, "06a851a1-ef6d-4265-823e-8647869e9b83.jpg" }, // Terminator 3: The Redemption - no region background, 1920x1080, 356 KB
+    { 0x49470073, "e97e0b6e-cc2a-4d85-9468-1a3943007670.png" }, // Godzilla: Save the Earth - no region screenshot, 640x480, 164 KB
+    { 0x49470074, "7808c29f-3d6c-4813-abe5-70578466873e.jpg" }, // Forgotten Realms: Demon Stone - no region background, 1920x1080, 545 KB
+    { 0x49470075, "953aef0d-48d3-44a9-baf9-9a9334700ede.png" }, // Test Drive: Eve of Destruction - no region screenshot, 640x480, 115 KB
+    { 0x49470079, "76e03717-e231-49d5-80a7-eda8898ee001.png" }, // Atari Anthology - no region screenshot, 640x480, 17 KB
+    { 0x4947007A, "a6ceb9d2-c854-491a-bd6f-cc242c39f112.png" }, // Dragon Ball Z: Sagas - no region screenshot, 640x480, 102 KB
+    { 0x4947007B, "9b9c901d-4ddb-4d49-ad55-cd22342b2f4f.jpg" }, // Indigo Prophecy - no region background, 1280x720, 276 KB
+    { 0x4947007C, "e0b02e0f-a2f9-428e-aff4-b7fd22fcf926.jpg" }, // The Matrix: Path of Neo - no region screenshot, 440x350, 25 KB
+    { 0x4947007D, "001b3813-8562-473e-9edb-8a519f279e60.png" }, // Marc Ecko's Getting Up: Contents Under Pressure - no region screenshot, 640x480, 196 KB
+    { 0x4947007F, "577a6a08-bbb1-421a-ab01-b6ac24c0208f.png" }, // Driver: Parallel Lines - no region screenshot, 640x480, 135 KB
     { 0x494707FE, "24690d19-9c11-4297-84f0-35e294f8b2b3.jpg" }, // Qubed (North America) - no region background, 755 KB
+    { 0x494C0006, "r2_1469fdbc-9b5a-4f1e-9407-f0644a883190.jpg" }, // Aoi Namida - Japan screenshot, 640x480, 177 KB
+    { 0x494F0003, "3b28f6af-52ef-4dfc-aa0c-d62118bb159f.png" }, // Animaniacs: The Great Edgar Hunt - no region screenshot, 640x480, 130 KB
+    { 0x49500006, "f1eeb7cd-2852-4f6f-b9c0-74e57ac997dc.png" }, // Run Like Hell: Hunt or Be Hunted - no region screenshot, 640x480, 149 KB
+    { 0x49500008, "efe99fa1-6c77-4499-a2d6-87e7a5749f28.jpg" }, // Fallout: Brotherhood of Steel - no region background, 1920x1080, 799 KB
+    { 0x4950000A, "r2_1666d4f0-5999-499f-98b6-0e63c5374453.jpg" }, // Baldur's Gate: Dark Alliance II - World background, 1920x1080, 185 KB
+    { 0x49580001, "7f3e4f1b-1539-49e9-9d79-51de499e915e.jpg" }, // The Bard's Tale - no region background, 1920x1080, 347 KB
+    { 0x4A410001, "40e4645f-acdf-4862-9558-8fb74311b4ea.png" }, // Pulse Racer - no region screenshot, 640x480, 135 KB
+    { 0x4A410002, "6b922953-5fda-4a92-8552-51714357148d.png" }, // NightCaster II: Equinox - no region screenshot, 640x480, 222 KB
+    { 0x4A410004, "99a15ffe-2094-4f17-a489-8528283590b2.png" }, // Super Bubble Pop - no region screenshot, 640x480, 137 KB
+    { 0x4A410005, "3588c845-8425-4e06-a9bd-293a48bfb760.jpg" }, // Goblin Commander: Unleash the Horde - no region screenshot, 512x308, 34 KB
+    { 0x4A410006, "r2_7b2c7d5c-46bd-41f0-8fcf-dff0197ff3f2.jpg" }, // Room Zoom: Race for Impact - Europe screenshot, 640x480, 150 KB
+    { 0x4A410007, "18d45a0e-47b9-45d4-8df8-98c709074ed7.png" }, // World Championship Pool 2004 - no region screenshot, 640x480, 100 KB
+    { 0x4A570002, "a9ec3c20-b51c-4fe4-8788-8d5b8a3cd614.png" }, // Neighbours from Hell - no region screenshot, 640x480, 196 KB
+    { 0x4A570003, "9d64af1b-0657-417f-9286-d00b06f4eaf2.png" }, // Kao the Kangaroo: Round 2 - no region screenshot, 640x480, 113 KB
+    { 0x4A570004, "8ebb23e0-9ea6-42f2-9c7a-2d1b51ba4ae5.png" }, // Yetisports - no region screenshot, 640x480, 126 KB
+    { 0x4A570005, "0c2dea82-09ff-4b58-91d8-857735e35a27.png" }, // Ski Racing 2005 - no region screenshot, 640x480, 140 KB
+    { 0x4A570009, "ee8d6bf4-e684-404d-b793-5d068f28d678.png" }, // Panzer Elite Action: Fields of Glory - no region screenshot, 640x480, 153 KB
+    { 0x4B410001, "20d469c3-e04e-4e88-bbb8-7bb00a592955.png" }, // Jikkyou World Soccer 2002 - no region screenshot, 640x480, 141 KB
+    { 0x4B420002, "150151d3-5afd-42a5-a080-9c3669741361.png" }, // Egg Mania: Eggstreme Madness - no region screenshot, 640x480, 146 KB
+    { 0x4B420004, "fde15c17-8c65-4435-90a4-1edba9783a7e.png" }, // Rogue Ops - no region screenshot, 640x480, 183 KB
+    { 0x4B420005, "71dbef5b-7324-4771-9d34-74196ac61de1.png" }, // Chicago Enforcer - no region screenshot, 640x480, 149 KB
+    { 0x4B420006, "3ce5f065-d4e2-4053-8059-ff87ac013d2f.png" }, // Yager - no region screenshot, 640x480, 110 KB
+    { 0x4B420007, "cd232fda-ea03-418b-b4c5-1398e09a2439.png" }, // Top Gear: RPM Tuning - no region screenshot, 640x480, 139 KB
+    { 0x4B490001, "4b915a8c-bbbb-4444-8126-d3c6e756436e.png" }, // Shikigami no Shiro Evolution - Japan screenshot, 640x480, 449 KB
+    { 0x4B490002, "r2_d4176adb-d5f2-4bc5-8bad-04ea3beb1d19.jpg" }, // Shikigami no Shiro II - Japan screenshot, 480x640, 194 KB
+    { 0x4B4B0002, "6ba4bc23-2484-4909-b079-5f2e65d02c07.png" }, // Triangle Again 2 - no region screenshot, 640x480, 116 KB
+    { 0x4B4E0001, "61cc0684-2df1-47d3-aa77-f4f3c3d5e2f4.png" }, // WhiteOut - no region screenshot, 640x480, 490 KB
+    { 0x4B4E0002, "c9dcc586-0e1d-4205-8706-ecae3f4ff743.png" }, // AirForce Delta Storm - no region screenshot, 640x480, 156 KB
+    { 0x4B4E0003, "93bf49bb-d525-445e-9535-6c1480977716.png" }, // ESPN NFL PrimeTime 2002 - no region screenshot, 640x480, 152 KB
+    { 0x4B4E0004, "7b6bd2ab-3b6d-479f-ac24-549a0eab311f.jpg" }, // Silent Hill 2: Restless Dreams - no region screenshot, 1280x720, 562 KB
+    { 0x4B4E0005, "b791d3bc-0901-400a-9da2-2b06ec46ebd4.png" }, // ESPN MLS ExtraTime 2002 - no region screenshot, 640x480, 150 KB
+    { 0x4B4E0006, "455f8ab2-7b49-48d8-9441-61155d474dd7.png" }, // ESPN NBA 2Night 2002 - no region screenshot, 640x480, 142 KB
+    { 0x4B4E0007, "f5f000c0-736d-47fa-b4df-0d0f3a550525.png" }, // Metal Gear Solid 2: Substance - no region background, 1366x768, 441 KB
+    { 0x4B4E0008, "11551336-5adc-405a-ad10-f0c8cea0f257.png" }, // International Superstar Soccer 2 - no region screenshot, 640x480, 161 KB
+    { 0x4B4E000A, "2221eef6-3b5e-4f60-b36b-900f0a1d9f17.png" }, // ESPN International Winter Sports 2002 - no region screenshot, 640x480, 109 KB
+    { 0x4B4E000B, "2221eef6-3b5e-4f60-b36b-900f0a1d9f17.png" }, // ESPN International Winter Sports 2002 - no region screenshot, 640x480, 109 KB
+    { 0x4B4E000E, "998c355e-2d82-43ab-80ae-d1f93dad85f2.png" }, // Shadow of Destiny - United States screenshot, 640x480, 123 KB
+    { 0x4B4E0010, "247e4724-8931-4f88-86e5-21f0c66cc79f.jpg" }, // WTA Tour Tennis - no region screenshot, 640x480, 93 KB
+    { 0x4B4E0011, "50a0a403-95b3-46f7-9aa7-436c2513db42.png" }, // Crash Bandicoot: The Wrath of Cortex - no region screenshot, 640x480, 163 KB
+    { 0x4B4E0012, "fbd7a333-1166-4446-8544-e2d2ab6ef1e7.png" }, // NBA Starting Five - no region screenshot, 640x480, 136 KB
+    { 0x4B4E0013, "c1ff331a-42ff-4b55-b594-c1c0689f20f1.png" }, // Frogger Beyond - no region screenshot, 640x480, 123 KB
+    { 0x4B4E0019, "d6c31086-a554-4c37-a154-9fec99815cc2.jpg" }, // Dance Dance Revolution: Ultramix - no region background, 1920x1080, 969 KB
+    { 0x4B4E001A, "17d7be70-ab4b-480d-897b-5447ee95c4f8.png" }, // Silent Scope Complete - no region screenshot, 640x480, 215 KB
+    { 0x4B4E001B, "910ef987-0475-46e1-bed1-215a817e23aa.jpg" }, // Teenage Mutant Ninja Turtles - no region background, 1280x720, 514 KB
+    { 0x4B4E001C, "aa9eab09-0056-471f-b8c6-e8c6d76eddb7.png" }, // Crime Life: Gang Wars - no region screenshot, 640x480, 230 KB
+    { 0x4B4E001D, "d6c31086-a554-4c37-a154-9fec99815cc2.jpg" }, // Dance Dance Revolution: Ultramix - no region background, 1920x1080, 969 KB
+    { 0x4B4E001E, "433116a3-cbd7-437b-8d13-e6a2968f9117.jpg" }, // Yu-Gi-Oh! The Dawn of Destiny - no region background, 1920x1080, 337 KB
+    { 0x4B4E001F, "bea0e8e1-a235-413e-9df1-8f84aece2c97.png" }, // Silent Hill 4: The Room - no region screenshot, 640x480, 174 KB
+    { 0x4B4E0021, "be270ddc-940d-4907-bfce-87d279e93c5e.png" }, // Dance Dance Revolution: Ultramix 2 - no region screenshot, 640x480, 128 KB
+    { 0x4B4E0022, "0399de33-2685-4846-90ba-b9da28c7c2c5.png" }, // World Soccer: Winning Eleven 8 - no region screenshot, 640x480, 155 KB
+    { 0x4B4E0023, "d324f430-0abf-499d-9f2b-c58daff1b454.jpg" }, // Teenage Mutant Ninja Turtles 2: Battle Nexus - no region background, 1280x720, 514 KB
+    { 0x4B4E0024, "b770aada-5348-4ca0-a027-ea35de0e92c0.png" }, // King Arthur - no region screenshot, 640x480, 203 KB
+    { 0x4B4E0025, "4e631e2c-fa6c-4760-ad1e-7cafb6d1ddb5.png" }, // Karaoke Revolution - no region screenshot, 640x480, 128 KB
+    { 0x4B4E0027, "r2_5f3578e2-2da3-4a9f-bddb-c85517a7cadc.jpg" }, // World Soccer: Winning Eleven 8 International - World background, 1920x1080, 550 KB
+    { 0x4B4E0029, "f9766259-237d-4725-9677-81f857e045fc.png" }, // Dancing Stage Unleashed 3 - no region screenshot, 640x480, 102 KB
+    { 0x4B4E002C, "e4a34e9c-f08a-4bc1-858f-6720e2782a32.png" }, // Frogger: Ancient Shadow - no region background, 1366x768, 804 KB
+    { 0x4B4E002D, "df57d5c3-3be5-4fbb-9050-499a48151833.jpg" }, // Castlevania: Curse of Darkness - no region background, 2560x1440, 833 KB
+    { 0x4B4E002E, "5636c776-8b25-44cd-9161-a2de5fd2f3e5.png" }, // Karaoke Revolution Party - no region screenshot, 640x480, 143 KB
+    { 0x4B4E002F, "8a479498-163d-408b-81e5-a6cec338bf12.png" }, // World Soccer: Winning Eleven 9 - no region screenshot, 640x480, 152 KB
+    { 0x4B4E0030, "8a479498-163d-408b-81e5-a6cec338bf12.png" }, // World Soccer: Winning Eleven 9 - no region screenshot, 640x480, 152 KB
+    { 0x4B4E0034, "r2_ee7ac607-a382-4c79-879e-2e13e8e53dcd.jpg" }, // Wallace & Gromit: The Curse of the Were-Rabbit - World screenshot, 640x480, 162 KB
+    { 0x4B4E0037, "d2794ec6-4a42-4c15-b403-a5cf0756d6f2.png" }, // Dance Dance Revolution: Ultramix 4 - no region screenshot, 640x480, 106 KB
+    { 0x4B4E0038, "360a1620-02ad-4c3c-9915-690c25fe646b.jpg" }, // Xiaolin Showdown - no region background, 1920x1080, 738 KB
+    { 0x4B4F0001, "b4397bdf-a85f-4628-a847-d29289d04cd3.png" }, // Nobunaga no Yabou: Ranseiki - no region screenshot, 640x480, 194 KB
+    { 0x4B4F0002, "r2_463bf248-8aca-4010-800e-6ec902213eeb.jpg" }, // Crimson Sea - World background, 1250x828, 282 KB
+    { 0x4B4F0003, "94dfe3bb-3bde-490b-ae5d-a6d0709c5989.png" }, // Dynasty Warriors 3 - no region screenshot, 640x480, 143 KB
+    { 0x4B4F0004, "56d3ce9f-fe4d-4d0b-b76f-48236b1aa452.png" }, // Dynasty Warriors 4 - no region screenshot, 640x480, 123 KB
+    { 0x4B4F0007, "a9d6bb63-85c7-4b6f-aee5-371bb3ee75e1.png" }, // Dynasty Warriors 5 - no region screenshot, 640x480, 217 KB
+    { 0x4B4F0008, "49521595-02e3-4ee6-8c46-5bb80cab26e9.png" }, // WinBack 2: Project Poseidon - no region screenshot, 640x480, 124 KB
+    { 0x4B540001, "7b6bd2ab-3b6d-479f-ac24-549a0eab311f.jpg" }, // Silent Hill 2: Restless Dreams - no region screenshot, 1280x720, 562 KB
+    { 0x4B550001, "8158b174-7244-4307-baf2-55a03ca03b63.png" }, // Innocent Tears - no region screenshot, 640x480, 187 KB
+    { 0x4C410001, "ef2a6b35-2c15-4b72-8c1b-da32a903c6ad.png" }, // Star Wars: Obi-Wan - no region background, 1366x768, 524 KB
+    { 0x4C410002, "09d9468b-a4c0-47d6-bbf8-c0fe05cded7b.jpg" }, // Star Wars: Starfighter Special Edition - no region background, 2048x1365, 158 KB
+    { 0x4C410003, "c63b8dd6-d3b9-4f9b-abef-3ea22058561c.jpg" }, // Star Wars: Knights of the Old Republic - no region background, 1600x1263, 371 KB
+    { 0x4C410004, "fa433dc9-a516-42f5-9e28-5f1a3e4be751.jpg" }, // Star Wars: The Clone Wars - no region background, 1680x1050, 394 KB
+    { 0x4C410005, "0f759b28-3924-4c69-8c85-3721a8bd2780.jpg" }, // Star Wars: Jedi Starfighter - no region screenshot, 640x480, 158 KB
+    { 0x4C410006, "1bfc0a52-6cf8-46d8-94c6-2049e4be04dc.png" }, // Secret Weapons Over Normandy - no region screenshot, 640x480, 102 KB
+    { 0x4C410007, "78b5310b-8af8-449e-b903-0a5172df3295.jpg" }, // Indiana Jones and the Emperor's Tomb - World background, 2560x1440, 417 KB
+    { 0x4C410008, "5801a296-1e0d-440d-90cb-fff96e414a1e.png" }, // Gladius - no region screenshot, 640x480, 142 KB
+    { 0x4C410009, "4b041ba1-6642-4f94-88b4-33e45376637d.jpg" }, // Star Wars: Jedi Knight II: Jedi Outcast - no region background, 1280x720, 118 KB
+    { 0x4C41000B, "817d5366-8b35-437c-9551-d4f8378bfdd2.png" }, // Star Wars: Jedi Knight: Jedi Academy - no region screenshot, 640x480, 133 KB
+    { 0x4C41000D, "1d40809f-7956-4a26-92e3-ad05596512eb.png" }, // Armed and Dangerous - no region screenshot, 640x480, 119 KB
+    { 0x4C41000F, "976b8b35-9699-4a90-905d-980e65b5b544.jpg" }, // Wrath Unleashed - no region background, 1600x1170, 424 KB
+    { 0x4C410011, "fe0666a8-3c5f-44f7-ba52-233f3ddf8c23.jpg" }, // Star Wars: Battlefront - no region background, 1920x1080, 553 KB
+    { 0x4C410013, "15fbace5-89a1-4bbf-a85c-062d2a28d88f.jpg" }, // Star Wars: Republic Commando - no region background, 1920x1080, 505 KB
+    { 0x4C410014, "1313fdb3-6f25-4df7-a478-15ab287e46a2.png" }, // Star Wars: Knights of the Old Republic II: The Sith Lords - no region screenshot, 640x480, 115 KB
+    { 0x4C410015, "8614fcaf-953e-4e46-914d-33ba21372dc4.jpg" }, // Mercenaries: Playground of Destruction - no region background, 1920x1080, 361 KB
+    { 0x4C410017, "259adba8-682b-43d0-b9e6-25668906db17.jpg" }, // Star Wars: Episode III: Revenge of the Sith - no region background, 1280x720, 362 KB
+    { 0x4C41001A, "79dc7888-e152-432d-94c7-6f1a641ad019.jpg" }, // Star Wars: Battlefront II - no region background, 1920x1080, 669 KB
+    { 0x4C41001F, "d4b6a9c3-8617-4053-a49a-11238a473249.jpg" }, // LEGO Star Wars II: The Original Trilogy - no region background, 1920x1080, 520 KB
+    { 0x4C410022, "caad456b-b9e7-4c54-bea4-2dd70d20dc83.png" }, // Thrillville - no region screenshot, 640x480, 121 KB
+    { 0x4C530002, "a30721ab-9e56-4534-9b2d-ff1269c09c66.png" }, // S.C.A.R. : Squadra Corse Alfa Romeo - no region screenshot, 640x480, 113 KB
+    { 0x4D440003, "r2_6c2a92f2-5d57-4e0e-bf08-8587dcac2697.jpg" }, // Dennou Taisen DroneZ - World background, 1600x900, 275 KB
+    { 0x4D440004, "9212945a-6fd7-43b3-9f86-ea91f42a61b3.png" }, // Stake: Fortune Fighters - no region screenshot, 640x480, 199 KB
+    { 0x4D450001, "f404a201-7dbd-4abb-870f-17eb398d4d22.png" }, // C.A.T.: Cyber Attack Team - no region screenshot, 640x480, 264 KB
+    { 0x4D490003, "d8a0601a-2a79-4150-936d-497218c2376c.png" }, // Tennis Masters Series 2003 - no region screenshot, 640x480, 187 KB
+    { 0x4D490006, "765cb7f1-b41c-4416-a450-7ba9a6e1fe35.png" }, // Syberia - no region screenshot, 640x480, 165 KB
+    { 0x4D490008, "0379d091-2f64-49c8-9a55-cbe2d54b3b26.png" }, // Syberia II - no region screenshot, 640x480, 213 KB
+    { 0x4D490009, "57204ccd-cc85-45ae-845e-287c91780d2a.jpg" }, // ObsCure - no region background, 1280x720, 156 KB
+    { 0x4D49000B, "9bd6f858-1ccf-4b35-bfd0-b389e495706f.png" }, // Still Life - no region screenshot, 640x480, 129 KB
+    { 0x4D49000C, "cd232fda-ea03-418b-b4c5-1398e09a2439.png" }, // Top Gear: RPM Tuning - no region screenshot, 640x480, 139 KB
+    { 0x4D49000D, "54d6812e-9310-417e-9d50-e3454da14c97.jpg" }, // Sniper Elite - no region background, 2048x1152, 830 KB
+    { 0x4D4A0001, "452654c7-31ef-463b-851c-8d0cb8716abb.jpg" }, // BloodRayne - no region background, 1920x1080, 377 KB
+    { 0x4D4A0002, "fd41815e-b4ba-4f08-aa6c-047c299f3f3a.png" }, // Totaled! - no region screenshot, 640x480, 137 KB
+    { 0x4D4A0003, "b0183d9f-e014-4d1b-8af6-58354ed691be.png" }, // Gun Metal - no region screenshot, 640x480, 135 KB
+    { 0x4D4A0008, "a97e95a4-59ee-4245-ab23-1d9e66889d51.jpg" }, // Blowout - no region screenshot, 468x292, 51 KB
+    { 0x4D4A0009, "8d911531-56cf-444d-ae27-875cf85d8991.jpg" }, // Advent Rising - no region background, 1920x1080, 738 KB
+    { 0x4D4A000B, "e07b8067-5eb8-43b4-abee-db0de6d592f4.png" }, // Drake of the 99 Dragons - no region screenshot, 640x480, 132 KB
+    { 0x4D4A000C, "b78d9fb6-1229-420f-a32d-d6fa96a829a4.png" }, // Ultra Bust-A-Move - no region screenshot, 640x480, 107 KB
+    { 0x4D4A000D, "df285f5c-ba57-4266-b81f-8a63aa422267.jpg" }, // BloodRayne 2 - no region background, 1920x1080, 764 KB
+    { 0x4D4A000F, "08781a98-1abe-48fb-855d-b4c1612a99b9.jpg" }, // Jaws Unleashed - no region background, 1920x1080, 63 KB
+    { 0x4D4A0011, "dbcd150d-eaee-420f-86e1-faa997661c43.jpg" }, // Raze's Hell - no region background, 1920x1080, 555 KB
+    { 0x4D4A0012, "717e0bc6-287d-45f4-8edd-1d37909a1f00.png" }, // Psychonauts - no region screenshot, 640x480, 117 KB
+    { 0x4D4A0013, "9b0e5d93-d17b-4d20-937f-464622b91d26.jpg" }, // Teen Titans - no region background, 1280x720, 435 KB
+    { 0x4D4A0014, "338c20b1-b7d6-43b6-8d78-0f8c5b1a3eac.png" }, // Æon Flux - no region screenshot, 640x480, 147 KB
+    { 0x4D4A0017, "b381c645-0f20-405a-9ea6-13cda0da8d6d.png" }, // Worms 4: Mayhem - no region screenshot, 640x480, 122 KB
+    { 0x4D4D0001, "b7fe6216-3a67-4b1d-bbd0-1bcd2b033c08.png" }, // Stacked with Daniel Negreanu - no region screenshot, 640x480, 128 KB
+    { 0x4D530001, "8586c865-5684-46f8-899a-528588a3aef6.jpg" }, // Oddworld: Munch's Oddysee - no region background, 1920x1080, 326 KB
+    { 0x4D530002, "b2a72559-f0eb-4d4b-aeb5-877ccb74144a.png" }, // Fuzion Frenzy - no region screenshot, 640x480, 131 KB
+    { 0x4D530003, "2fe3f6e2-68e1-4e9a-bee5-983fcbc187ba.jpg" }, // Project Gotham Racing - North America screenshot, 640x480, 120 KB
+    { 0x4D530004, "de4c24e3-fd24-4a19-ba2c-a66abd068541.jpg" }, // Halo: Combat Evolved - no region background, 1920x1080, 295 KB
+    { 0x4D530005, "e154df59-b4a7-47f1-9b9b-74981ccdcbf5.png" }, // Amped: Freestyle Snowboarding - no region screenshot, 640x480, 116 KB
+    { 0x4D530006, "f325d3b4-8179-42c4-b4b1-b91552fe641b.png" }, // NFL Fever 2002 - no region screenshot, 640x480, 164 KB
+    { 0x4D530007, "92ddd4a9-2659-43a8-882f-1aca9abe8bea.png" }, // Azurik: Rise of Perathia - no region screenshot, 640x480, 128 KB
+    { 0x4D530008, "43f43204-e449-4595-aeaa-d8cd8f521f2b.png" }, // NightCaster: Defeat the Darkness - no region screenshot, 640x480, 198 KB
+    { 0x4D53000A, "2b908515-6a3a-414d-bf48-dcc8b8aaf857.jpg" }, // Sudeki - no region background, 1600x1174, 134 KB
+    { 0x4D53000B, "7c80fe94-6260-4305-bfed-00dad00d4354.png" }, // NBA Inside Drive 2004 - no region screenshot, 640x480, 145 KB
+    { 0x4D53000C, "878cb4fc-a396-4639-951e-b70b1285b43c.jpg" }, // Kakuto Chojin - no region background, 1920x1080, 85 KB
+    { 0x4D53000D, "r2_c4e8c677-a27a-47dc-a7ba-22f8ef8aec06.jpg" }, // Fable - World background, 1820x1024, 294 KB
+    { 0x4D53000F, "38ae61d2-affa-45bc-abe1-5c5838fbeb14.png" }, // RalliSport Challenge - no region screenshot, 640x480, 165 KB
+    { 0x4D530010, "r2_eddb2eb5-b366-4777-b28c-a0cae1c2aa1c.jpg" }, // Blood Wake - World background, 1024x768, 72 KB
+    { 0x4D530011, "93e79a5b-3411-4888-87da-d75c65f083e4.png" }, // NBA Inside Drive 2002 - no region screenshot, 640x480, 152 KB
+    { 0x4D530013, "e13b961b-169c-4c24-adb9-f51996f94368.jpg" }, // Blinx: The Time Sweeper - no region background, 1280x720, 104 KB
+    { 0x4D530014, "r2_2e05c0a1-ff85-4248-8191-58e80bdaab2a.jpg" }, // Tao Feng: Fist of the Lotus - World screenshot, 640x480, 186 KB
+    { 0x4D530015, "r2_902db819-6285-43da-a7a8-861292d76d7e.jpg" }, // Quantum Redshift - World background, 1600x1200, 152 KB
+    { 0x4D530017, "72b1070f-ca60-4f91-9dd1-a163f54d441c.jpg" }, // MechAssault - World background, 1920x1080, 558 KB
+    { 0x4D53001E, "9e1ca2df-5954-4774-96fd-9545997b6e70.png" }, // Brute Force - no region screenshot, 640x480, 172 KB
+    { 0x4D530021, "445f771a-6814-446b-9fd8-50a43366761d.jpg" }, // Crimson Skies: High Road to Revenge - no region background, 1920x1080, 163 KB
+    { 0x4D530023, "4af1f77e-c44f-45a9-86e6-c6274572f840.png" }, // Sneakers - no region screenshot, 640x480, 153 KB
+    { 0x4D530027, "0bdbc526-9c16-4a14-99eb-de7f0f12d150.png" }, // Whacked! - no region screenshot, 640x480, 157 KB
+    { 0x4D530028, "0f70d2e0-26e7-4645-8b54-43941e1db53b.jpg" }, // NFL Fever 2003 - no region background, 1920x1080, 436 KB
+    { 0x4D53002A, "r2_25fa64a5-c47d-4f32-9b54-a0366b6bad5f.jpg" }, // Midtown Madness 3 - World background, 1920x1080, 312 KB
+    { 0x4D53002E, "d66195a7-5fc0-4651-b52d-fa9d3fd22d0a.png" }, // Maximum Chase - no region screenshot, 640x480, 87 KB
+    { 0x4D53002F, "e154df59-b4a7-47f1-9b9b-74981ccdcbf5.png" }, // Amped: Freestyle Snowboarding - no region screenshot, 640x480, 116 KB
+    { 0x4D530030, "3fe20dab-e250-4217-af5c-e51aaa49fd7c.png" }, // Jockey's Road - no region screenshot, 640x480, 139 KB
+    { 0x4D530031, "c93ac7d1-ee68-4f06-90a3-509fab437c59.png" }, // Kung Fu Chaos - no region screenshot, 640x480, 160 KB
+    { 0x4D530032, "b12f0df2-232c-49d6-9ad9-85b726c778d7.jpg" }, // Shenmue II - no region background, 1920x1080, 539 KB
+    { 0x4D530034, "6388da14-b306-47ff-8d8e-2d061980fcdd.png" }, // Inside Pitch 2003 - no region screenshot, 640x480, 124 KB
+    { 0x4D530036, "d551539f-84d3-4ceb-be94-3f453ec60f58.jpg" }, // Counter-Strike - no region background, 1920x1080, 350 KB
+    { 0x4D530039, "e362643e-c3d1-4c7c-b95f-6e29919d3f76.jpg" }, // RalliSport Challenge 2 - no region screenshot, 958x715, 167 KB
+    { 0x4D53003C, "b7fc6f27-ccd3-47db-bf9d-da4a34b64c94.png" }, // N.U.D.E.@ Natural Ultimate Digital Experiment - no region screenshot, 640x480, 132 KB
+    { 0x4D530041, "7f1c1aca-c567-40ec-8bec-f19d7dddb711.png" }, // Amped 2 - no region screenshot, 640x480, 153 KB
+    { 0x4D530045, "2c0ab470-bbe6-47b9-9665-ea51caedf9be.png" }, // NBA Inside Drive 2003 - no region screenshot, 640x480, 174 KB
+    { 0x4D530046, "653d7b75-ea29-4a8c-9de6-d7648cb044a7.jpg" }, // Phantom Dust - no region screenshot, 638x442, 59 KB
+    { 0x4D530048, "2abdc088-357f-411e-be77-197948937a8c.png" }, // The Wild Rings - no region screenshot, 640x480, 161 KB
+    { 0x4D53004A, "77862db9-db66-4e0c-99db-63c52a971db9.jpg" }, // Phantasy Star Online Episode I & II - no region background, 1920x1080, 544 KB
+    { 0x4D53004B, "958cf5d0-4442-42e3-96fd-8ca890b771e8.jpg" }, // Project Gotham Racing 2 - no region background, 1920x1080, 527 KB
+    { 0x4D53004D, "f8bdf604-51a0-43ca-893e-2c5a0f62fae1.png" }, // NFL Fever 2004 - no region screenshot, 640x480, 157 KB
+    { 0x4D53004E, "443b5e5c-e749-47dc-964c-dbfe607d45e9.png" }, // NHL Rivals 2004 - no region screenshot, 640x480, 179 KB
+    { 0x4D530051, "6e1b28ce-1bba-459a-9fbc-4d98bdd12415.jpg" }, // Conker: Live & Reloaded - no region background, 1280x720, 87 KB
+    { 0x4D530053, "r2_3ff9f085-1229-4820-b911-3d5da85ff5bc.jpg" }, // Grabbed by the Ghoulies - World background, 800x600, 374 KB
+    { 0x4D530058, "de4c24e3-fd24-4a19-ba2c-a66abd068541.jpg" }, // Halo: Combat Evolved - no region background, 1920x1080, 295 KB
+    { 0x4D530059, "e5eeb7b8-8ea9-409d-9f64-503d22e1939c.png" }, // Fatal Frame - no region screenshot, 640x480, 124 KB
+    { 0x4D53005A, "f879993c-ae66-4fd3-aa77-2e261e9fcf48.png" }, // Xbox Music Mixer - no region screenshot, 640x480, 134 KB
+    { 0x4D53005D, "b2d72ba5-cf9f-4d6d-9a6b-05fa6fe1def1.jpg" }, // Links 2004 - no region screenshot, 1024x768, 101 KB
+    { 0x4D53005F, "225504c2-d7a1-4cfc-896e-bf263f7e92c6.jpg" }, // Voodoo Vince - no region background, 2560x1440, 636 KB
+    { 0x4D530064, "be4570c7-554e-4692-af5d-88aa54eb5b09.jpg" }, // Halo 2 - no region background, 1920x1080, 422 KB
+    { 0x4D530066, "40fbb8b0-5bbc-4591-a785-74e4830f0a61.png" }, // Magatama - no region screenshot, 640x480, 210 KB
+    { 0x4D530069, "87a2d652-3e94-47e0-a4e5-7d4069837221.png" }, // Dinosaur Hunting - no region screenshot, 640x480, 194 KB
+    { 0x4D53006D, "3c95ba78-fbf3-47b9-8de4-288402f2be3b.jpg" }, // Jade Empire - no region background, 1920x1080, 999 KB
+    { 0x4D53006E, "02debafa-c733-4320-a804-c9e52a774404.jpg" }, // Forza Motorsport - no region background, 1920x1080, 254 KB
+    { 0x4D5300D1, "r2_b8ce4b9a-4caa-4104-98a7-1acfab6003bd.jpg" }, // Fable: The Lost Chapters - World background, 1920x1080, 237 KB
+    { 0x4D5300D2, "r2_31675d2e-df89-4405-8913-fd95944ced08.jpg" }, // Big Bumpin' - North America background, 1280x720, 314 KB
+    { 0x4D5300D3, "6c6e10c7-2750-4da5-91c0-ceced7f7ce07.jpg" }, // Sneak King - no region background, 1920x1080, 314 KB
+    { 0x4D5300D4, "439c9882-58be-4c13-a690-f5b6e4682c91.png" }, // PocketBike Racer - no region screenshot, 640x480, 132 KB
     { 0x4D5307FC, "98781e21-a1c7-4283-9b41-7edfa9c39d73.jpg" }, // Xbox Live Arcade Unplugged: Volume 1 (North America) - no region background, 173 KB
     { 0x4D530837, "1407a4d1-67d8-4f66-80eb-902ede2a11e4.jpg" }, // XBOX Live Arcade Compilation Disc (North America) - no region screenshot, 110 KB
     { 0x4D5387FC, "98781e21-a1c7-4283-9b41-7edfa9c39d73.jpg" }, // Xbox Live Arcade Unplugged: Volume 1 (North America) - no region background, 173 KB
     { 0x4D538837, "1407a4d1-67d8-4f66-80eb-902ede2a11e4.jpg" }, // XBOX Live Arcade Compilation Disc (North America) - no region screenshot, 110 KB
+    { 0x4D570001, "83f94032-a61a-40d0-920b-2cf4b96ad04c.jpg" }, // NFL Blitz 2002 - no region background, 1920x1080, 354 KB
+    { 0x4D570002, "f41a715a-ca76-4686-a42a-bd10534aaf48.png" }, // Arctic Thunder - no region screenshot, 640x480, 137 KB
+    { 0x4D570003, "c5a45f63-7d9b-46f2-88ac-e44cdfe60961.jpg" }, // NHL Hitz 2002 - no region background, 1366x768, 123 KB
+    { 0x4D570004, "r2_8a96a825-ac22-4dd2-a4b1-418809088bfe.jpg" }, // SpyHunter - World screenshot, 640x447, 137 KB
+    { 0x4D570005, "c0be5793-adfa-42d7-8f3e-428615e33486.jpg" }, // Area-51 - no region background, 1920x1080, 162 KB
+    { 0x4D570006, "8f679c4a-d9b2-41b1-99cc-1fa4924f1a6d.png" }, // Defender - no region screenshot, 640x480, 125 KB
+    { 0x4D570007, "a9805fdf-4d0d-4955-bfa1-d9a553270ceb.png" }, // Freaky Flyers - no region screenshot, 640x480, 145 KB
+    { 0x4D570008, "8b9fd960-ad1c-4b91-9e82-7b028771dbd2.png" }, // MLB SlugFest 20-03 - no region screenshot, 640x480, 137 KB
+    { 0x4D570009, "fbaf1fb8-7719-444d-b16f-212af8967e54.png" }, // MLB SlugFest 2004 - no region screenshot, 640x480, 101 KB
+    { 0x4D57000A, "d50df95a-2d23-47a1-9b72-b415b089d250.jpg" }, // NFL Blitz 2003 - no region background, 1920x1080, 298 KB
+    { 0x4D57000B, "8db0df19-dac5-4d2b-9f0a-d10f1b6f47f2.png" }, // NHL Hitz 2003 - no region screenshot, 640x480, 167 KB
+    { 0x4D57000C, "49e81006-6e12-458b-b84e-d0c94d8246f4.jpg" }, // Mortal Kombat: Deadly Alliance - no region background, 1920x1080, 359 KB
+    { 0x4D57000D, "6763c7e5-bfe5-4bb6-b1bf-bd7881bd7c85.png" }, // Gravity Games Bike: Street Vert Dirt - no region screenshot, 640x480, 152 KB
+    { 0x4D57000E, "e98e8402-bac6-43ab-b0b4-db6909aa2062.jpg" }, // Gauntlet: Dark Legacy - no region screenshot, 1024x576, 94 KB
+    { 0x4D57000F, "3d18da0e-5b23-430c-86ba-8e0cc27126b5.png" }, // Red Card 2003 - no region screenshot, 640x480, 184 KB
+    { 0x4D570010, "5d63a4a8-e88a-452b-840c-4273c8bf418f.png" }, // NBA Ballers - no region screenshot, 640x480, 112 KB
+    { 0x4D570011, "9021a598-6ece-4058-8b6c-4f4950ce4009.png" }, // Dr. Muto - no region screenshot, 640x480, 134 KB
+    { 0x4D570012, "b2b6db68-1b39-4c47-96a0-5b147d039a14.png" }, // Fireblade - no region screenshot, 640x480, 125 KB
+    { 0x4D570014, "49233c16-2dac-4c32-a1c2-e985f040ee7a.jpg" }, // NFL Blitz Pro - no region background, 1920x1080, 119 KB
+    { 0x4D570015, "r2_07414908-3ee9-4458-bbf0-23a065b848db.jpg" }, // The Suffering - World background, 1280x720, 71 KB
+    { 0x4D570016, "b25e5d72-2c81-49f3-b484-0eea1bd1358a.jpg" }, // Psi-Ops: The Mindgate Conspiracy - no region background, 1600x1200, 244 KB
+    { 0x4D570017, "r2_abd288db-a350-460d-a6a6-69afc5f774be.jpg" }, // Freestyle MetalX - World background, 2560x1440, 215 KB
+    { 0x4D570018, "8d655678-d8a7-44df-93c5-f65a233c3a63.png" }, // RoadKill - no region screenshot, 640x480, 135 KB
+    { 0x4D570019, "66b12b6b-7c09-46e9-b4da-b1bb4336deaa.jpg" }, // Mortal Kombat: Deception - no region background, 1920x1080, 213 KB
+    { 0x4D57001A, "644556b7-f060-488f-9ac1-17e0875155aa.png" }, // NHL Hitz Pro - no region screenshot, 640x480, 100 KB
+    { 0x4D57001B, "194cbb3d-da74-433a-883c-0b633968f2f5.png" }, // SpyHunter 2 - no region screenshot, 640x480, 138 KB
+    { 0x4D57001C, "r2_66948dfb-7146-4aaa-930f-45bb9166e488.jpg" }, // Midway Arcade Treasures - North America screenshot, 720x480, 18 KB
+    { 0x4D57001D, "dcc6d646-5051-45a2-ad70-7f5c75c9f16a.png" }, // MLB SlugFest: Loaded - no region screenshot, 640x480, 131 KB
+    { 0x4D570020, "35fe80c6-4eef-4bdf-adca-0b8eea0d11ed.png" }, // Midway Arcade Treasures 2 - no region screenshot, 640x480, 65 KB
+    { 0x4D570021, "0d0f8569-3efc-4765-90f0-0e646975d03b.jpg" }, // Unreal Championship 2: The Liandri Conflict - no region background, 1600x1170, 563 KB
+    { 0x4D570022, "2986a627-f025-448f-924b-0a2d88e385b7.jpg" }, // Gauntlet: Seven Sorrows - no region background, 1920x1080, 492 KB
+    { 0x4D570024, "e122cf26-4138-4f4d-8ed9-7d2c5d39fa83.jpg" }, // NARC - no region background, 1920x1080, 445 KB
+    { 0x4D570025, "f8831e0c-2d9e-4365-9f35-b41e7eda4d47.png" }, // L.A. Rush - no region screenshot, 640x480, 144 KB
+    { 0x4D570026, "c469eb6a-765f-42c4-ba5d-399845c54223.png" }, // Blitz: The League - no region screenshot, 640x480, 182 KB
+    { 0x4D570029, "9599787e-3950-4ad5-ad94-a0c867ce57db.jpg" }, // Mortal Kombat: Shaolin Monks - no region background, 1920x1080, 315 KB
+    { 0x4D57002D, "389f00d5-ac06-45d2-ae9f-dead18b9d797.png" }, // Midway Arcade Treasures 3 - no region screenshot, 640x480, 140 KB
+    { 0x4D57002E, "b19263b2-9f81-4b65-8360-50b100c58835.png" }, // NBA Ballers: Phenom - no region screenshot, 640x480, 129 KB
+    { 0x4D570032, "50874c0a-8678-403e-81e1-eabc61c6c8dc.jpg" }, // Ed, Edd n Eddy: The Mis-Edventures - no region background, 1280x720, 154 KB
+    { 0x4D570034, "0bfc08d1-1861-4d57-86a7-69fbd709b22a.jpg" }, // Mortal Kombat: Armageddon - no region background, 1920x1080, 484 KB
+    { 0x4D570037, "r2_5e97613a-fbb1-4b60-83d8-9dc1405d3828.jpg" }, // SpyHunter: Nowhere to Run - North America background, 2560x1440, 450 KB
+    { 0x4D570038, "bc2c4b26-8b85-49a4-a6f1-a9da396fb4e3.png" }, // MLB SlugFest 2006 - no region screenshot, 640x480, 142 KB
+    { 0x4E4B0001, "dc2e9a2f-076c-4f85-9496-6f77a9d3b6ce.png" }, // Tom & Jerry in War of the Whiskers - no region screenshot, 640x480, 111 KB
+    { 0x4E4C0002, "a4a07614-b5c4-4936-afe1-b84c9dab81eb.png" }, // Delta Force: Black Hawk Down - no region screenshot, 640x480, 143 KB
+    { 0x4E4D0001, "r2_a44d69df-2814-456c-a0d2-c8f1461dee71.jpg" }, // Smashing Drive - North America background, 1920x1080, 406 KB
+    { 0x4E4D0003, "r2_0221b5a9-bf09-44c8-ab68-a9ddd4e207fc.jpg" }, // SoulCalibur II - World background, 2560x1440, 722 KB
+    { 0x4E4D0005, "c7a3ba4e-b9d8-428c-8439-c759cc3b5b89.png" }, // Dead to Rights - no region screenshot, 640x480, 162 KB
+    { 0x4E4D0006, "e0398fe8-c0d7-40d7-938e-5eb65e8109f4.jpg" }, // Pac-Man World 2 - no region background, 1920x1080, 349 KB
+    { 0x4E4D0007, "31937561-f48e-4574-8461-a4f8c092b0b5.jpg" }, // Namco Museum - no region background, 1920x1080, 195 KB
+    { 0x4E4D0008, "fbcff772-8c75-479f-ba9a-845ea43b2968.png" }, // R: Racing Evolution - no region screenshot, 640x480, 138 KB
+    { 0x4E4D0009, "32b5493d-46da-4828-91ee-23644e6f8aa5.png" }, // Breakdown - no region screenshot, 640x480, 116 KB
+    { 0x4E4D000C, "a4ff12d7-908a-4165-b35a-5162566bd14a.jpg" }, // Spawn: Armageddon - no region background, 1920x1080, 504 KB
+    { 0x4E4D000F, "01def4eb-a83a-4db3-98c3-db36d6496cd8.png" }, // I-Ninja - no region background, 1366x768, 944 KB
+    { 0x4E4D0013, "98f76814-0d60-4749-b368-a847f1b6084d.png" }, // SRS: Street Racing Syndicate - no region background, 1366x768, 885 KB
+    { 0x4E4D0015, "b952165f-ed3a-429b-8a8f-dfb742109a34.png" }, // Dead to Rights II - no region screenshot, 640x480, 182 KB
+    { 0x4E4D0016, "7078e149-a2cd-4ca5-8439-c61b8af360c5.jpg" }, // Namco Museum: 50th Anniversary Arcade Collection - no region background, 1920x1080, 195 KB
+    { 0x4E4D0017, "16eae4ae-d621-423c-b97d-0d0ecf00fa04.png" }, // Pac-Man World 3 - no region screenshot, 640x480, 114 KB
+    { 0x4E4D0019, "r2_86b90d8a-ea55-41f3-9082-d3c75c71add9.jpg" }, // Curious George - North America background, 1920x1080, 383 KB
     { 0x4E4D07F3, "eff7d090-3991-4fbd-b70d-3692812729fc.jpg" }, // Namco Museum: Virtual Arcade (Germany) - the North America scan is 2.2 MB - no region background, 668 KB
+    { 0x4F580001, "2ac3ef95-4cb6-416a-ad5c-a4d7dae86a55.png" }, // Conspiracy: Weapons of Mass Destruction - no region screenshot, 640x480, 122 KB
+    { 0x4F580004, "d6b7d50b-0248-4bbf-be28-5a13145cec75.png" }, // ProStroke Golf: World Tour 2007 - no region screenshot, 640x480, 174 KB
+    { 0x50430001, "3130099f-7e1f-4df7-abc1-6a6741147597.png" }, // Xyanide - no region screenshot, 2560x1920, 958 KB
     { 0x504707D1, "f682a344-3661-4b54-9c1c-0deaa24ce362.jpg" }, // PopCap Arcade Vol 1 (North America) - no region background, 128 KB
     { 0x504707D4, "37ee1abf-9d29-400f-80a3-a30ff6ff6af2.jpg" }, // PopCap Arcade Vol 2 (North America) - no region background, 612 KB
     { 0x504787D1, "f682a344-3661-4b54-9c1c-0deaa24ce362.jpg" }, // PopCap Arcade Vol 1 (North America) - no region background, 128 KB
     { 0x504787D4, "37ee1abf-9d29-400f-80a3-a30ff6ff6af2.jpg" }, // PopCap Arcade Vol 2 (North America) - no region background, 612 KB
+    { 0x504C0001, "r2_62313754-3ea2-4c83-9639-dd0b0a2f6351.jpg" }, // Phantom Crash - World background, 1024x768, 177 KB
+    { 0x504C0002, "bb25b484-ec85-42eb-b86d-392ff8ba95bb.jpg" }, // Kingdom Under Fire: The Crusaders - no region background, 1280x720, 334 KB
+    { 0x504C0006, "b5c44aaa-9d2d-453c-aa4b-fc7052e582cb.jpg" }, // Kingdom Under Fire: Heroes - no region background, 1920x1080, 558 KB
+    { 0x52410006, "fd41815e-b4ba-4f08-aa6c-047c299f3f3a.png" }, // Totaled! - no region screenshot, 640x480, 137 KB
+    { 0x52440001, "5695790d-027b-401b-a60a-9edc13167a7f.jpg" }, // Yourself! Fitness - no region screenshot, 405x285, 44 KB
+    { 0x53410002, "ead7efbc-a58a-442c-8e8c-8409649e3280.png" }, // Guilty Gear X2 #Reload - no region screenshot, 640x480, 396 KB
+    { 0x53410003, "93a8e548-de36-4f07-96a4-c45161cea101.png" }, // Iron Phoenix - no region screenshot, 640x480, 148 KB
+    { 0x53430003, "ebe3232a-a0a4-49ba-8cc5-e62cbc832028.png" }, // The Great Escape - no region screenshot, 640x480, 158 KB
+    { 0x53430005, "9c67b86a-dbe5-447d-8d55-ac51c8ed32b9.png" }, // Richard Burns Rally - no region screenshot, 640x480, 159 KB
+    { 0x53430006, "d6de8dcb-18c8-45c7-a25d-6b2db0f41937.png" }, // Conflict: Desert Storm II: Back to Baghdad - no region screenshot, 640x480, 136 KB
+    { 0x53430007, "02d16e18-b192-47a6-8942-f000b2016490.png" }, // Rolling - no region screenshot, 640x480, 165 KB
+    { 0x5343000A, "4da6a022-8943-4c59-b387-3a54cd868d16.png" }, // Conflict: Vietnam - no region screenshot, 640x480, 149 KB
+    { 0x5343000C, "13762261-e387-462a-af6d-178f805b4429.png" }, // Conflict: Global Terror - no region screenshot, 640x480, 149 KB
+    { 0x5343000E, "b3d3aae1-75c1-4f5d-ba51-68735bb67244.png" }, // Rogue Trooper - no region screenshot, 640x480, 127 KB
+    { 0x5343000F, "ee84dba5-e9b1-4b22-8b48-453e46bccbd5.png" }, // Constantine - no region screenshot, 640x480, 109 KB
+    { 0x53430010, "19faa8bc-d132-40b8-b5d7-be583e7a3439.png" }, // Total Overdose: A Gunslinger's Tale in Mexico - no region screenshot, 640x480, 132 KB
+    { 0x534300F7, "0328c6ee-37c2-4c67-85ac-8d70062737ef.png" }, // Urban Chaos: Riot Response - no region screenshot, 640x480, 145 KB
+    { 0x534300F9, "59c70818-c0c1-43e9-b50f-8b076ffc06f6.png" }, // Commandos: Strike Force - no region screenshot, 640x480, 176 KB
+    { 0x534300FA, "8316ee01-8c61-4236-89b7-9613f446c63e.png" }, // Hitman: Blood Money - no region background, 1920x1080, 994 KB
+    { 0x534300FB, "5d526f3a-74fb-40a8-9a56-ca39b359e0aa.jpg" }, // Just Cause - no region background, 1280x720, 144 KB
+    { 0x534300FD, "c1567d61-8c0f-4002-974b-52c978fa73d7.jpg" }, // Lara Croft Tomb Raider: Legend - no region background, 1920x1080, 531 KB
+    { 0x534300FF, "0e41ab39-15cf-4079-b5e4-4c31900f3515.png" }, // Reservoir Dogs - no region screenshot, 640x480, 136 KB
+    { 0x53430100, "04b72c14-a532-4a4f-b72f-cde839f9a3f9.png" }, // Championship Manager 2006 - no region screenshot, 640x480, 126 KB
+    { 0x53450002, "00f1c3f5-d9ff-4820-abed-d262287e099b.png" }, // NBA 2K2 - no region screenshot, 640x480, 164 KB
+    { 0x53450003, "c15bef96-72be-4acf-95d1-89cdb5a17668.png" }, // Sega GT 2002 - no region screenshot, 640x480, 149 KB
+    { 0x53450004, "1c1506c7-ad4f-41e5-9067-910f823adbb8.png" }, // Crazy Taxi 3: High Roller - North America screenshot, 640x480, 334 KB
+    { 0x53450006, "6a26332a-722a-4c8a-b803-bedc8d9e6ba0.png" }, // NFL 2K2 - no region screenshot, 640x480, 155 KB
+    { 0x53450007, "b2c96f41-7cfa-4079-a9f3-0a644fa33a1b.jpg" }, // Panzer Dragoon Orta - no region background, 1920x1080, 246 KB
+    { 0x53450008, "c592a6d9-f0a5-41be-9ba3-f005b99a8018.jpg" }, // The House of the Dead III - no region background, 1920x1080, 212 KB
+    { 0x5345000A, "fbbd0b41-511b-4db6-923f-0d0e0d0b0184.png" }, // JSRF: Jet Set Radio Future - no region screenshot, 640x480, 164 KB
+    { 0x5345000E, "d31d93a3-a4e7-41e3-aaba-b63670b04cd5.png" }, // World Series Baseball - no region screenshot, 640x480, 138 KB
+    { 0x5345000F, "r2_1e85051b-18fc-48ae-a447-08b69878f53d.jpg" }, // ToeJam & Earl III: Mission to Earth - North America screenshot, 640x480, 90 KB
+    { 0x53450010, "a2ad79e8-7f7b-4c12-8de7-77ff660c5ea4.png" }, // NCAA College Football 2K3 - no region screenshot, 640x480, 176 KB
+    { 0x53450011, "6a63c911-dc91-48f9-941e-dbb800360464.png" }, // NFL 2K3 - no region screenshot, 640x480, 158 KB
+    { 0x53450013, "21791e19-c082-4044-a61a-392999e1117d.jpg" }, // NBA 2K3 - no region screenshot, 640x480, 102 KB
+    { 0x53450014, "05bfcc93-abae-4ea4-83b6-de6e2564393b.png" }, // Sega Soccer Slam - no region screenshot, 640x480, 130 KB
+    { 0x53450017, "008fb80c-83fb-4ea5-ae8e-a6a006f6f698.png" }, // NHL 2K3 - no region screenshot, 640x480, 143 KB
+    { 0x53450018, "55c3d005-080e-40d0-b006-b49589a7374c.png" }, // NCAA College Basketball 2K3 - no region screenshot, 640x480, 185 KB
+    { 0x5345001A, "cc8bbd93-72d5-4465-a3d9-de76ec2b041a.png" }, // World Series Baseball 2K3 - no region screenshot, 640x480, 118 KB
+    { 0x5345001D, "d12ba9fa-0777-4fca-b5ab-baaa55f4d8e2.png" }, // Rent-A-Hero No. 1 - Japan screenshot, 640x480, 135 KB
+    { 0x53450021, "843b2620-fedd-4d4d-8015-f79b280c7749.png" }, // Sega GT Online - no region screenshot, 640x480, 131 KB
+    { 0x53450022, "abaaa1a5-9289-4c82-991c-1f4faa73c151.png" }, // ESPN NFL Football 2K4 - no region screenshot, 640x480, 171 KB
+    { 0x53450023, "1ddf35d6-02c6-4e6d-87fb-8a2df806cea8.png" }, // ESPN NBA Basketball - no region screenshot, 640x480, 155 KB
+    { 0x53450024, "0884e451-378e-441e-b9df-ab8ea9efbf85.png" }, // ESPN College Hoops 2K4 - no region screenshot, 640x480, 145 KB
+    { 0x53450025, "d5796c6c-3ae5-49cf-84c9-91659304c545.png" }, // Headhunter: Redemption - no region screenshot, 640x480, 161 KB
+    { 0x53450026, "6304dccb-2ed6-4e27-a5d8-725519a45ec1.png" }, // ESPN NHL Hockey - no region screenshot, 640x480, 159 KB
+    { 0x53450027, "6b5c49c4-1c5f-45d3-8ad1-86626d82e286.jpg" }, // Puyo Pop Fever - no region background, 1280x720, 128 KB
+    { 0x53450028, "8c6805b9-fb5f-418b-afd8-ce4514f4cd55.png" }, // ESPN Major League Baseball - no region screenshot, 640x480, 164 KB
+    { 0x53450029, "a26e580b-6ad7-4d78-9e47-0d6167c50a1d.jpg" }, // Spikeout: Battle Street - no region background, 1920x1080, 711 KB
+    { 0x5345002A, "7d4f7118-55ae-460f-a025-8c875bf668a2.jpg" }, // Worms 3D - no region background, 2560x1440, 610 KB
+    { 0x5345002B, "195976e2-a0ff-4f94-be4a-74ec4a0dac13.jpg" }, // Sonic Heroes - no region background, 1920x1080, 278 KB
+    { 0x53450030, "b5439536-0aa2-4978-9f0b-346c831359c9.png" }, // ESPN NFL 2K5 - no region screenshot, 640x480, 172 KB
+    { 0x53450031, "f70e8ca5-890c-43e7-a346-bf2ddc81f731.png" }, // ESPN NBA 2K5 - no region screenshot, 640x480, 158 KB
+    { 0x53450032, "71561d4c-95f9-443a-a6dc-fe0cac3802dd.png" }, // ESPN NHL 2K5 - no region screenshot, 640x480, 147 KB
+    { 0x53450033, "d88c1ef7-4df6-4dd9-9e1e-0cd232e2ad4d.png" }, // ESPN College Hoops 2K5 - no region screenshot, 640x480, 129 KB
+    { 0x53450035, "91ae6ea4-5e4f-437f-a44d-83eb0048001c.png" }, // Worms Forts: Under Siege - no region screenshot, 640x480, 154 KB
+    { 0x53450036, "c322b1db-ff30-407e-bbca-c82e4c71f77c.jpg" }, // OutRun 2 - no region background, 1920x1080, 547 KB
+    { 0x53450038, "9d0fbc14-6964-4572-82f7-ba76f02d26ca.jpg" }, // Super Monkey Ball Deluxe - North America screenshot, 640x480, 202 KB
+    { 0x5345003C, "e0bd6eba-fd75-4a87-91b9-f09d7e61cf74.jpg" }, // Sonic Mega Collection Plus - no region background, 1920x1080, 580 KB
+    { 0x53450081, "4ebc978d-1093-4e66-9ac1-6a9c6f2b95b8.png" }, // World Snooker Championship 2005 - no region screenshot, 640x480, 99 KB
+    { 0x53450086, "ea83a9ac-ed3f-480a-99ed-22354654b53d.jpg" }, // Shadow the Hedgehog - no region background, 1920x1080, 607 KB
+    { 0x53450087, "2cede719-6757-453a-a201-b1389044de24.jpg" }, // Sonic Riders - no region background, 1920x1080, 351 KB
+    { 0x53450088, "2ee30a47-c204-4aea-afd4-8c0d9c84a5b9.jpg" }, // OutRun 2006: Coast 2 Coast - no region background, 1280x720, 884 KB
+    { 0x5345008B, "r2_b6e3eb3b-4bc0-4bc8-95f8-432e372620c6.jpg" }, // Spartan: Total Warrior - World background, 1920x1200, 95 KB
+    { 0x534E0001, "266bf923-0689-4696-962e-d5a817135fcd.jpg" }, // SVC Chaos: SNK vs. Capcom - no region background, 1920x1080, 509 KB
+    { 0x534E0002, "ae0e936c-6d58-4877-abef-47099539d498.jpg" }, // Metal Slug 3 - no region background, 1920x1080, 340 KB
+    { 0x534E0003, "9455af2f-2599-475a-8cc2-9788023aba53.jpg" }, // The King of Fighters 2003 - no region background, 1920x1080, 299 KB
+    { 0x534E0004, "7fa142ae-8d3c-451c-a833-b2ad3b41ff5e.jpg" }, // Samurai Shodown V - no region background, 1920x1080, 839 KB
+    { 0x534E0005, "09ac5ce7-a4fe-4868-80f6-a8cb8b5d50f9.jpg" }, // Metal Slug 4 - no region background, 1920x1080, 491 KB
+    { 0x534E0006, "d2d3c855-a976-491d-9cca-26c75a38a315.jpg" }, // The King of Fighters 2002 - no region background, 1920x1080, 155 KB
+    { 0x534E0007, "c66bfe34-3030-40d2-96c7-56b92d829d1a.jpg" }, // KOF: Maximum Impact: Maniax - North America background, 1920x1080, 606 KB
+    { 0x534E0008, "2d2bd4f9-73de-4387-afc5-839014913af9.jpg" }, // Metal Slug 5 - no region background, 1920x1080, 403 KB
+    { 0x534E000A, "3b97fa4b-c883-4e13-bda5-75b1746e6a69.png" }, // The King of Fighters: Neowave - no region screenshot, 640x480, 156 KB
+    { 0x53500001, "591e8668-76ef-4b4f-b50e-9d22b4e51eda.png" }, // Combat Elite: WWII Paratroopers - no region screenshot, 640x480, 229 KB
+    { 0x53530003, "06a0674a-21e1-4395-a309-e0ae4b311a48.jpg" }, // Outlaw Volleyball - no region background, 1280x720, 155 KB
+    { 0x53530006, "edfc8014-9951-447b-961a-9e31850ae39a.png" }, // Outlaw Golf: 9 More Holes of X-Mas - no region screenshot, 640x480, 687 KB
+    { 0x53540001, "cf82c051-d660-45fb-843c-4c420ae4138f.png" }, // ZillerNet - no region screenshot, 640x480, 424 KB
+    { 0x53550001, "416f03ee-c33f-471e-bd7d-c7f3f04eec2b.png" }, // Bistro Cupid - no region screenshot, 640x480, 169 KB
+    { 0x53550002, "a0a90629-7997-402a-8036-e24af7d72ef4.jpg" }, // Nakajima Tetsuya no Othello Seminar - Japan screenshot, 640x480, 117 KB
+    { 0x53550003, "1a0e9263-8f0e-43bc-affa-33ec249005e1.png" }, // Umesawa Yukari no Igo Seminar - no region screenshot, 640x480, 519 KB
+    { 0x53550004, "d4d62de9-b20e-4e6a-a42a-3e704aa54b28.png" }, // Yonenaga Kunio no Shougi Seminar - no region screenshot, 640x480, 456 KB
+    { 0x53550007, "r2_0b15e6de-3611-43fd-906c-b7b66a64c9f9.jpg" }, // Angelic Concert - Japan screenshot, 640x480, 152 KB
+    { 0x53550008, "0c408554-8edb-4850-bc1d-a004e4039936.jpg" }, // Bistro Cupid 2 - no region background, 850x1234, 238 KB
+    { 0x54410001, "68396eae-8c90-407e-ab40-a24a60706a2c.png" }, // Kikou Heidan J-Phoenix + - Japan screenshot, 640x480, 421 KB
+    { 0x54430001, "29ade544-6a77-4c15-9b69-283a3af89f4f.jpg" }, // Dead or Alive 3 - no region background, 1280x960, 299 KB
+    { 0x54430003, "eb63ed48-6126-4148-a3c7-c79653d17f39.jpg" }, // Ninja Gaiden - no region background, 1280x720, 49 KB
+    { 0x54430004, "e5eeb7b8-8ea9-409d-9f64-503d22e1939c.png" }, // Fatal Frame - no region screenshot, 640x480, 124 KB
+    { 0x54430006, "2d1ab213-45c2-4f7e-a027-28d337e6f2b2.jpg" }, // Dead or Alive Ultimate - no region background, 1600x1200, 273 KB
+    { 0x54430007, "76f263ae-ae83-43cf-9ef2-8dd472629ca3.jpg" }, // Dead or Alive: Xtreme Beach Volleyball - no region background, 1600x1150, 218 KB
+    { 0x54430009, "20760a45-4d55-401e-8834-12df985289af.png" }, // Gungriffon: Allied Strike - no region screenshot, 640x480, 181 KB
+    { 0x5443000A, "40783546-8161-4e7d-85ee-1904dd019495.jpg" }, // Fatal Frame II: Crimson Butterfly: Director's Cut - no region background, 1920x1080, 180 KB
+    { 0x5443000D, "f28efd33-aa8e-463e-87ff-0326378dedad.jpg" }, // Ninja Gaiden Black - no region background, 1920x1080, 123 KB
+    { 0x5443000E, "18729ed7-2294-4100-af4e-bd77b43f35e3.png" }, // Tecmo Classic Arcade - no region screenshot, 640x480, 177 KB
+    { 0x54440006, "r2_55cccc94-b223-46f1-9d4f-56d193ac0bfd.jpg" }, // High Heat Major League Baseball 2004 - North America background, 1920x1080, 352 KB
+    { 0x544D0001, "3392b2a0-ac3a-4676-8403-7e42daec732a.png" }, // Shrek - no region screenshot, 640x480, 207 KB
+    { 0x544D0002, "d5d0b135-7a55-4a53-86d2-2e482623bd6b.png" }, // Robotech: Battlecry - no region screenshot, 640x480, 146 KB
+    { 0x544D0003, "r2_308f3471-8cfa-414c-90b9-5a608533045d.jpg" }, // Aquaman: Battle for Atlantis - North America screenshot, 640x480, 71 KB
+    { 0x544D0004, "289e87a6-3e6e-4b3f-ac36-f46fb93b090f.png" }, // Shrek Super Party - no region screenshot, 640x480, 180 KB
+    { 0x544D0005, "r2_67394807-1671-4f92-aab5-590ab31584aa.png" }, // World Racing - World screenshot, 1920x1440, 656 KB
+    { 0x544D0007, "7912de59-ea81-426a-baf7-2021730803f5.png" }, // Knights of the Temple: Infernal Crusade - no region screenshot, 640x480, 219 KB
+    { 0x544D0008, "0bfcd57f-8154-4947-8968-b0a50aa29403.png" }, // Conan - no region screenshot, 640x480, 121 KB
+    { 0x544D000A, "67faa08d-e65a-426b-8deb-abf878f91b5c.png" }, // UFC: Ultimate Fighting Championship: Tapout 2 - no region screenshot, 640x480, 182 KB
+    { 0x544D000B, "d8e1f1c2-4ac6-4e09-8ec4-1b74d1a8ac03.png" }, // Corvette - no region screenshot, 640x480, 156 KB
+    { 0x544D000D, "5841da1e-771c-4d87-b13e-eaeb0d79b359.png" }, // The Haunted Mansion - no region screenshot, 640x480, 192 KB
+    { 0x544D000F, "98812043-0d45-4a74-9e14-c5e9544027a6.png" }, // Dinotopia: The Sunstone Odyssey - no region screenshot, 640x480, 135 KB
+    { 0x544D0010, "55d2c66b-fc9a-4d92-ac74-01046ec2e1d3.png" }, // Star Trek: Shattered Universe - no region screenshot, 640x480, 122 KB
+    { 0x544D0012, "r2_4818b8f8-bc9e-4a09-b613-65b4f7e3a304.png" }, // World Racing 2 - World screenshot, 1920x1440, 736 KB
+    { 0x54510001, "f68ed023-72bb-43c3-b8ba-d74b15eca2f6.png" }, // New Legends - no region screenshot, 640x480, 129 KB
+    { 0x54510002, "066fd05b-220e-4e3b-913c-fe21317dbf4c.png" }, // WWF Raw - no region screenshot, 640x480, 124 KB
+    { 0x54510003, "f642be31-ed3a-4e84-b134-80c6642125e2.png" }, // MX 2002 featuring Ricky Carmichael - no region screenshot, 640x480, 150 KB
+    { 0x54510004, "r2_9ec130c8-3299-4a33-b42c-ff276089b0aa.jpg" }, // Dark Summit - World background, 1920x1200, 256 KB
+    { 0x54510005, "8c694a9d-d3e3-43b2-875c-ae32a7f6266f.png" }, // Red Faction II - no region screenshot, 640x480, 164 KB
+    { 0x54510007, "45b27277-25cb-4079-876b-291f8d0af548.png" }, // Toxic Grind - no region screenshot, 640x480, 179 KB
+    { 0x54510008, "fbf4cc6c-638a-40c7-ade2-4b7ff2b41094.png" }, // MotoGP - no region screenshot, 640x480, 131 KB
+    { 0x5451000A, "b5bd9ec0-55d3-4f33-b909-98f0bec1799c.png" }, // Tetris Worlds - no region screenshot, 640x480, 131 KB
+    { 0x5451000B, "fda38bd2-fb38-4158-b129-b2f801ea1f97.jpg" }, // Evil Dead: A Fistful of Boomstick - no region background, 1920x1080, 391 KB
+    { 0x5451000D, "97e9d97c-278d-465d-a24f-7c4070248fa1.png" }, // WWE Raw 2 - no region screenshot, 900x500, 731 KB
+    { 0x5451000E, "1930ff59-5587-4725-a803-a5eeed5d798f.png" }, // Scooby-Doo! Mystery Mayhem - no region screenshot, 640x480, 132 KB
+    { 0x5451000F, "035af371-d0e6-4026-a8fe-646b81361346.png" }, // Alter Echo - no region screenshot, 640x480, 109 KB
+    { 0x54510010, "e90a7192-0e7b-4297-9ac3-9c40f73f816a.jpg" }, // MX Superfly - no region background, 1920x1080, 743 KB
+    { 0x54510016, "0f1c4e64-ec07-4be0-8949-3169fdc58457.png" }, // MotoGP 2 - no region screenshot, 640x480, 147 KB
+    { 0x54510018, "9722e06d-d540-4219-91c7-9e41910dacd9.jpg" }, // The Punisher - no region background, 1920x1080, 233 KB
+    { 0x5451001A, "e43e604f-eeeb-4565-a4f4-b03f0d793d8f.png" }, // SpongeBob SquarePants: Battle for Bikini Bottom - no region screenshot, 640x480, 131 KB
+    { 0x5451001D, "1827b569-3b18-401e-9163-e177630d641a.png" }, // Broken Sword: The Sleeping Dragon - no region screenshot, 640x480, 142 KB
+    { 0x5451001E, "cdb0f1ec-79b0-42f1-9a9e-665521cfbb8d.jpg" }, // Finding Nemo - no region background, 1920x1080, 412 KB
+    { 0x5451001F, "e20b5d69-3bb6-49d3-ab9f-b47dad66dc2d.png" }, // Scooby-Doo! Night of 100 Frights - no region screenshot, 640x480, 112 KB
+    { 0x54510020, "ea52c2b4-4c22-4264-968f-589b2a7883ee.png" }, // The Fairly Oddparents: Breakin' Da Rules - no region screenshot, 640x480, 71 KB
+    { 0x54510021, "d13b37cd-b1b3-40be-af2e-a894853155d8.png" }, // MX Unleashed - no region screenshot, 640x480, 140 KB
+    { 0x54510022, "29a5c797-4f98-4edf-9105-4ff477c094a9.png" }, // Full Spectrum Warrior - no region screenshot, 640x480, 139 KB
+    { 0x54510023, "4282f6ad-0451-430b-8e5f-a8a2d7428721.png" }, // Sphinx and the Cursed Mummy - no region screenshot, 640x480, 137 KB
+    { 0x54510024, "f535bd9d-8755-412c-b520-f38902b05a83.png" }, // WrestleMania 21 - no region screenshot, 640x480, 126 KB
+    { 0x54510025, "392c1e61-ce09-40de-8cf8-ed0b1082f867.png" }, // Evil Dead: Regeneration - no region screenshot, 640x480, 147 KB
+    { 0x54510026, "ab63d4d8-65e4-4329-afbb-930bd763736b.jpg" }, // Destroy All Humans! - no region background, 1920x1080, 825 KB
+    { 0x54510027, "55368778-18f8-4ba6-8e5c-2d64fe3ed3de.png" }, // The SpongeBob Squarepants Movie - no region screenshot, 640x480, 126 KB
+    { 0x54510028, "1c189ded-b2bb-4c2a-a92a-54aae68df823.jpg" }, // The Incredibles - no region background, 1920x1080, 617 KB
+    { 0x54510088, "99d98115-bb72-439f-8de0-ac33b077d700.jpg" }, // MotoGP 3 - no region background, 1920x1080, 347 KB
+    { 0x54510089, "18ccd67f-46a9-4aa3-bde2-156c6c9e2861.png" }, // Hot Wheels: Stunt Track Challenge - no region screenshot, 640x480, 153 KB
+    { 0x5451008B, "fd92c4ce-eda8-4cc0-ba1f-1aa50ac7ac61.png" }, // Tak 2: The Staff of Dreams - no region screenshot, 640x480, 135 KB
+    { 0x545100ED, "7a0bdd73-c744-44ce-ac75-92b6f0a2f63c.png" }, // MX vs. ATV Unleashed - no region screenshot, 640x480, 155 KB
+    { 0x545100EF, "d8c7f378-fda6-4516-97ad-92b26381dd07.jpg" }, // Juiced - no region background, 1920x1080, 350 KB
+    { 0x545100F2, "bea4940d-8452-4bdb-8fac-a45855cf50b7.jpg" }, // Disney-Pixar Cars - no region background, 2560x1600, 445 KB
+    { 0x545100F4, "r2_6366b5ae-8027-44d2-8adb-5214587ba6bb.jpg" }, // Tak: The Great Juju Challenge - World background, 2400x1352, 640 KB
+    { 0x545100F6, "2e580d67-5767-446f-98aa-0acc4b9013ee.jpg" }, // The Incredibles: Rise of the Underminer - no region background, 1920x1080, 617 KB
+    { 0x545100F7, "7b08b18f-6e58-4a36-b82f-e73f8ab2781c.png" }, // Scooby-Doo! Unmasked - no region screenshot, 640x480, 115 KB
+    { 0x545100F8, "335ddc85-eb46-4cad-9d74-e31ef3e1850c.png" }, // Full Spectrum Warrior: Ten Hammers - no region screenshot, 640x480, 186 KB
+    { 0x545100FA, "293070f5-f7fb-4bbc-90d2-c65032b05ebe.png" }, // SpongeBob SquarePants: Lights, Camera, Pants! - no region screenshot, 640x480, 99 KB
+    { 0x54510105, "r2_93875adf-59ae-43f7-a2d7-d13771a08d1d.jpg" }, // Avatar: The Last Airbender - World background, 1920x1080, 210 KB
+    { 0x54510106, "a53e50f6-9bf3-4faf-828d-dd8ee3746841.jpg" }, // Destroy All Humans! 2 - no region background, 1920x1080, 367 KB
+    { 0x54510109, "34319316-fb4d-4dc1-87a1-1c28be0831d2.jpg" }, // Ratatouille - no region background, 1920x1080, 333 KB
+    { 0x54530002, "7475f1c0-d24f-4c15-9365-2ef24ea816db.jpg" }, // Barbarian - no region screenshot, 460x345, 59 KB
+    { 0x54530005, "dace6960-e710-4ffa-adef-fa8b36fc44f7.jpg" }, // RoboCop - no region background, 1920x1080, 332 KB
+    { 0x54540001, "814a7106-2858-4ba1-944f-4dce4b116f31.png" }, // 4x4 EVO 2 - no region screenshot, 640x480, 181 KB
+    { 0x54540003, "70e5999a-10cb-4661-ba78-94878987453f.jpg" }, // Max Payne - no region background, 1600x1170, 355 KB
+    { 0x54540004, "r2_3a8dc34d-7e4d-45a9-aebf-b1cca72075ea.jpg" }, // Serious Sam - World background, 1920x1080, 307 KB
+    { 0x54540005, "4dcf5449-ae24-4c4d-bdb1-9c22f723dbe2.png" }, // Conflict: Desert Storm - no region screenshot, 640x480, 144 KB
+    { 0x54540006, "e159f309-5d08-4d3d-81cb-c746fa019f96.png" }, // State of Emergency - no region screenshot, 640x480, 150 KB
+    { 0x54540008, "31cb67ce-1e1c-4986-8f59-e376f212c0f8.jpg" }, // Midnight Club II - no region background, 1920x1080, 214 KB
+    { 0x54540009, "8d77f472-ed68-47cd-b527-3913f4135cff.jpg" }, // Mafia - no region background, 1920x1080, 82 KB
+    { 0x5454000A, "b6e0258e-004a-4dc9-bb8b-9e89a78b754c.png" }, // Vietcong: Purple Haze - no region screenshot, 640x480, 169 KB
+    { 0x5454000B, "93339012-2180-4105-a957-f45105f74723.png" }, // MTV Celebrity Deathmatch - no region screenshot, 640x480, 128 KB
+    { 0x5454000C, "dcb54e87-0ff0-4877-b834-051d63897377.jpg" }, // Max Payne 2: The Fall of Max Payne - no region background, 1920x1080, 642 KB
+    { 0x5454000D, "r2_a2342148-7448-439e-868b-aa8ef8ed5326.png" }, // Serious Sam II - World screenshot, 1024x768, 499 KB
+    { 0x5454000E, "1e7e90f9-763c-41c8-9f86-9a9bc8e4db0f.jpg" }, // Grand Theft Auto III - no region screenshot, 1280x720, 313 KB
+    { 0x5454000F, "r2_fe5551b5-b847-42a5-9a97-134ecab03615.jpg" }, // Grand Theft Auto: Vice City - World background, 1280x720, 243 KB
+    { 0x54540010, "4eade799-66a1-4324-a349-6ec7e82e8fb8.png" }, // Carve - no region screenshot, 640x480, 155 KB
+    { 0x54540011, "39bd504e-0b02-485b-90c3-51a570afa88b.jpg" }, // Pure Pinball - no region background, 1366x768, 508 KB
+    { 0x54540012, "944dea22-6e35-4a6f-a43d-e9f971a9a518.png" }, // Close Combat: First to Fight - no region screenshot, 640x480, 160 KB
+    { 0x54540014, "8df81cf8-f824-4fcf-80aa-62e58856ca27.jpg" }, // Army Men: Sarge's War - no region background, 1920x1080, 755 KB
+    { 0x54540015, "27541a4c-6b31-49c4-93fe-ca89468dd875.png" }, // Motocross Mania 3 - no region screenshot, 640x480, 176 KB
+    { 0x54540016, "ab38402c-8a46-4470-accc-5cae71738ca7.jpg" }, // Virtual Pool: Tournament Edition - no region screenshot, 1280x720, 73 KB
+    { 0x54540017, "201d958a-ec35-4c86-83f7-92b94c93405d.png" }, // Outlaw Golf 2 - no region screenshot, 640x480, 149 KB
+    { 0x54540018, "fa50f6f9-be39-4626-80b0-c188a4d93421.png" }, // Wings of War - no region screenshot, 640x480, 120 KB
+    { 0x54540019, "e0d5d73d-757e-4c7b-91a0-f58db8d1b093.png" }, // Manhunt - no region screenshot, 640x480, 146 KB
+    { 0x5454001A, "2f29b16a-5f79-452c-89c2-6f0d211e67e3.jpg" }, // Red Dead Revolver - no region background, 1920x1080, 290 KB
+    { 0x5454001B, "8823121b-136d-4e66-b3a5-bc33b2c42510.png" }, // Robotech: Invasion - no region screenshot, 640x480, 145 KB
+    { 0x54540076, "3ad10a83-5c65-48e7-9ec6-b1f463a608e0.png" }, // Outlaw Tennis - no region screenshot, 640x480, 142 KB
+    { 0x54540077, "00f3a4fa-dbb7-4378-b615-0236351e51a7.png" }, // Ford Mustang: The Legend Lives - no region screenshot, 640x480, 152 KB
+    { 0x54540079, "36a219dd-07de-457e-a59b-36b92421ffd6.jpg" }, // Midnight Club 3: Dub Edition - no region background, 1920x1080, 500 KB
+    { 0x5454007A, "f6635c7b-4bd7-4a8f-a073-eb9056a421ce.jpg" }, // Scaler - no region background, 1280x720, 676 KB
+    { 0x5454007B, "4511d455-bcd3-4c68-ba84-cd25619d750a.png" }, // The Guy Game - no region screenshot, 640x480, 79 KB
+    { 0x5454007C, "399eea35-c84d-4307-9626-fdc6addc9453.jpg" }, // Spy vs Spy - no region background, 1920x1080, 282 KB
+    { 0x5454007D, "0fbc26bd-2ed1-41d3-b973-f56d08188f58.png" }, // Classified: The Sentinel Crisis - no region screenshot, 640x480, 157 KB
+    { 0x5454007E, "21108661-172e-49e4-8406-f8aa2d9eebe8.png" }, // Gotcha! - no region screenshot, 640x480, 140 KB
+    { 0x54540081, "r2_470ec43d-f8ee-45f0-b42b-3e3770026df9.jpg" }, // Charlie and the Chocolate Factory - North America background, 1920x1080, 294 KB
+    { 0x54540082, "ee3bf9b2-f5b4-4be8-8b39-8466f469ec25.png" }, // Grand Theft Auto: San Andreas - no region screenshot, 640x480, 119 KB
+    { 0x54540083, "r2_36ffc7dd-4d73-47fc-ac64-845352762237.png" }, // Shattered Union - World screenshot, 1024x768, 521 KB
+    { 0x54540087, "9189db28-f6b6-4fc8-ba07-62dc0a6e68e9.png" }, // World Poker Tour - no region screenshot, 640x480, 140 KB
+    { 0x54540088, "5b2a657b-7659-4963-a93e-e1161203ae52.png" }, // Army Men: Major Malfunction - no region screenshot, 640x480, 97 KB
+    { 0x54540089, "4a7d354f-8d65-4be1-8201-1d07fb282222.png" }, // Ford vs. Chevy - no region screenshot, 640x480, 145 KB
+    { 0x5454008A, "d01b43ae-a4cc-4018-bb25-f94da3c12e7a.png" }, // Codename: Kids Next Door: Operation: V.I.D.E.O.G.A.M.E. - no region screenshot, 640x480, 125 KB
+    { 0x5454008C, "31ffac6d-37d4-4c22-aac1-8269a777713f.png" }, // Zathura - no region screenshot, 640x480, 182 KB
+    { 0x5454008D, "c6f2122f-09c8-45c4-9523-376868d39342.jpg" }, // NHL 2K6 - no region screenshot, 480x289, 58 KB
+    { 0x5454008F, "dabedd71-1688-4f2d-93b3-5accc5f20fdf.png" }, // Sid Meier's Pirates!: Live the Life - no region screenshot, 640x480, 190 KB
+    { 0x54540090, "2f2abdae-c7bb-4f22-b17f-03592dc1909c.png" }, // NBA 2K6 - no region screenshot, 640x480, 154 KB
+    { 0x54540091, "50bccf37-85c8-495d-9e71-97ce3d662321.png" }, // College Hoops 2K6 - no region screenshot, 640x480, 183 KB
+    { 0x54540092, "11be971e-7112-4c2c-b52c-56ddb44bc92f.png" }, // Major League Baseball 2K6 - no region screenshot, 640x480, 139 KB
+    { 0x54540093, "c577debf-a2b2-4c30-8746-7d2f1ce0023f.png" }, // SPLAT Magazine Renegade Paintball - no region screenshot, 640x480, 148 KB
+    { 0x5454009B, "d5eb7c67-ae58-4632-82f7-b1d76ac1197f.jpg" }, // The Warriors - no region background, 1920x1080, 798 KB
+    { 0x5454009C, "3a54fde2-1c26-48ed-a75d-31e87e1e994a.png" }, // Hummer: Badlands - no region screenshot, 640x480, 145 KB
+    { 0x545400A9, "453de34e-91c9-4273-8532-0ae233a192f1.png" }, // Torino 2006 - no region screenshot, 640x480, 157 KB
+    { 0x545400AB, "d321c1a6-5af6-48b5-9c17-1c311fb45e9a.png" }, // The Da Vinci Code - no region screenshot, 640x480, 168 KB
+    { 0x545400AD, "9cfc832e-c8b6-4141-ba92-bd2ff1e4f6e6.png" }, // NHL 2K7 - no region screenshot, 640x480, 161 KB
+    { 0x545400AE, "b274c498-9980-4a0d-8bfb-a32f8a0903cd.jpg" }, // NBA 2K7 - no region background, 1366x768, 77 KB
+    { 0x545400AF, "6801c6e2-0b53-4e38-901c-d442c5274f92.png" }, // College Hoops 2K7 - no region screenshot, 640x480, 138 KB
+    { 0x545400B0, "r2_11a0aa73-457e-4e19-8167-ba62a7d9cbd5.jpg" }, // Family Guy Video Game! - World background, 1920x1080, 493 KB
+    { 0x55530001, "786558f0-cefb-4fbb-a68c-756d3716eb0a.jpg" }, // Batman: Vengeance - no region background, 1920x1080, 247 KB
+    { 0x55530002, "a7d65b8e-b714-46ff-9e45-f6985db347b4.jpg" }, // Rayman 3: Hoodlum Havoc - no region background, 1920x1080, 313 KB
+    { 0x55530003, "302945d0-50e3-4be8-87dc-3c631279240d.png" }, // Rayman Arena - no region screenshot, 640x480, 171 KB
+    { 0x55530004, "1aaccdf0-a77f-4986-b228-3474c7bac861.png" }, // Deathrow - no region screenshot, 640x480, 223 KB
+    { 0x55530005, "63b5fb44-e7bd-4a9a-8fc3-8692776c625e.jpg" }, // Tom Clancy's Ghost Recon 2 - no region background, 1920x1080, 199 KB
+    { 0x55530006, "16beb04f-75dc-4969-8050-fa76eb7c87a5.png" }, // Tom Clancy's Ghost Recon - no region screenshot, 640x480, 130 KB
+    { 0x55530007, "07c2aa35-e942-43f7-a2ab-a23f28d63357.png" }, // Tom Clancy's Ghost Recon: Island Thunder - no region screenshot, 640x480, 190 KB
+    { 0x55530008, "24cf6639-6f8a-4e05-9ccb-c7ce1d84acea.jpg" }, // Far Cry Instincts - no region background, 1920x1080, 822 KB
+    { 0x55530009, "7fb9f7d4-d159-4771-a8b6-ca62e1323fe8.png" }, // XIII - no region screenshot, 640x480, 129 KB
+    { 0x5553000B, "e8549b4e-1054-445d-860a-2f7bef8f1e2f.png" }, // Largo Winch: Empire Under Threat - no region screenshot, 640x480, 167 KB
+    { 0x5553000C, "4648f2cc-ca34-4045-b321-641a7b7b52bb.jpg" }, // Tom Clancy's Splinter Cell - no region background, 1600x1200, 300 KB
+    { 0x55530011, "1eeed5d4-8985-4195-84a8-ef2508cd5a87.png" }, // Myst III: Exile - no region screenshot, 640x480, 118 KB
+    { 0x55530012, "87dda609-0042-4dd6-bb38-3a7d67a968fc.png" }, // Dragon's Lair 3D: Return to the Lair - no region screenshot, 640x480, 129 KB
+    { 0x55530013, "4d5f4656-8104-436a-b528-22a48d1a3459.jpg" }, // Tom Clancy's Rainbow Six 3 - no region background, 1366x768, 93 KB
+    { 0x55530014, "d042c0f2-1c7f-47fe-991e-25537b58b9c2.jpg" }, // Rocky - no region background, 1920x1080, 208 KB
+    { 0x55530018, "f517e38e-2ae3-4e4f-b0e6-9402ee75d6c7.jpg" }, // Beyond Good & Evil - no region background, 1920x1080, 109 KB
+    { 0x55530019, "84bfd46a-5006-4c7d-8742-d9a60d0c1297.jpg" }, // Tom Clancy's Splinter Cell: Pandora Tomorrow - no region background, 1920x1080, 604 KB
+    { 0x5553001C, "6bb0f4d0-8910-4176-8aab-aba0289d74db.jpg" }, // Batman: Rise of Sin Tzu - no region background, 1400x700, 382 KB
+    { 0x5553001D, "f8dbe6fe-4431-48fd-86de-c01bd1979b30.jpg" }, // Prince of Persia: The Sands of Time - no region background, 1920x1080, 303 KB
+    { 0x55530020, "63cb7df4-6790-4e44-bdf8-527e1b00544d.jpg" }, // Crouching Tiger, Hidden Dragon - no region background, 1920x1080, 574 KB
+    { 0x55530034, "6eeb52d4-d43f-4c0f-a583-8a36f6d225c8.jpg" }, // Rocky Legends - no region background, 1920x1080, 466 KB
+    { 0x55530036, "8f7b9937-4da1-47a4-a450-50589bee775f.jpg" }, // 187: Ride or Die - no region background, 1920x1080, 752 KB
+    { 0x55530037, "a8c73cd7-3ebd-4208-b564-7c8c1eb087d7.jpg" }, // Tom Clancy's Rainbow Six 3: Black Arrow - no region background, 1920x1080, 270 KB
+    { 0x55530038, "30539bb4-d503-4b42-aaf9-a87785565416.jpg" }, // Tom Clancy's Splinter Cell: Chaos Theory - no region background, 1600x1171, 397 KB
+    { 0x55530039, "18c8ef65-4b07-45b5-9e03-8af4e5e4a1dc.png" }, // Chessmaster - no region screenshot, 640x480, 164 KB
+    { 0x5553003A, "68ea2209-0fe4-443c-90fe-d022b6d4e36d.png" }, // The Dukes of Hazzard: Return of the General Lee - no region screenshot, 640x480, 116 KB
+    { 0x5553003B, "cad1f3a7-f4db-4e09-a08f-168cf5847959.jpg" }, // Prince of Persia: Warrior Within - no region background, 1920x1080, 321 KB
+    { 0x5553003C, "d6625d07-93e4-438f-a9fb-d16f0623df7f.jpg" }, // Brothers in Arms: Road to Hill 30 - World background, 1920x1080, 615 KB
+    { 0x5553003D, "7fb9f7d4-d159-4771-a8b6-ca62e1323fe8.png" }, // XIII - no region screenshot, 640x480, 129 KB
+    { 0x5553003F, "ac44b2ef-abe5-4641-a787-435c5f26163e.jpg" }, // CSI: Crime Scene Investigation - no region background, 1920x1080, 429 KB
+    { 0x55530040, "a543f854-d0f0-42f0-a638-92aff195a99a.jpg" }, // Tork: Prehistoric Punk - North America screenshot, 640x479, 92 KB
+    { 0x55530043, "b5368be0-c89d-4af5-9008-c5b33fd5795d.png" }, // America's Army: Rise of a Soldier - no region screenshot, 640x480, 124 KB
+    { 0x55530048, "ab0ea038-ade1-4479-ac40-47918cee49be.jpg" }, // Tom Clancy's Rainbow Six: Lockdown - no region background, 1920x1080, 460 KB
+    { 0x55530049, "85d25055-ce78-447f-bf02-699c4053b7fe.png" }, // Monster 4x4: World Circuit - no region screenshot, 640x480, 168 KB
+    { 0x5553004A, "8a704cdb-5a15-46a8-a624-de4c7eb79d9d.png" }, // Myst IV: Revelation - no region screenshot, 640x480, 175 KB
+    { 0x5553004B, "47256062-a626-4bd3-920c-24927d3dee7c.jpg" }, // Cold Fear - no region background, 1280x720, 326 KB
+    { 0x5553004C, "41ec5a83-c50c-4392-8a70-7aa46f627ffc.jpg" }, // Peter Jackson's King Kong: The Official Game of the Movie - World background, 1920x1080, 230 KB
+    { 0x5553004D, "0b638139-f903-435e-928a-5f89f4ad1a91.png" }, // Tom Clancy's Ghost Recon 2: Summit Strike - no region screenshot, 640x480, 155 KB
+    { 0x55530054, "5038dbd3-6728-4583-8c91-f41f2a6e9bdd.jpg" }, // Tom Clancy's Ghost Recon: Advanced Warfighter - no region background, 1920x1080, 400 KB
+    { 0x55530056, "636a98ae-0d4d-4168-bb4c-a21ff8420906.png" }, // AND 1 Streetball - no region screenshot, 640x480, 138 KB
+    { 0x55530057, "6430557c-57bb-43ab-87e7-3ceb12e819b6.png" }, // Blazing Angels: Squadrons of WWII - no region screenshot, 640x480, 182 KB
+    { 0x55530058, "cebacba3-63a6-4239-9e6f-7640b37dc284.jpg" }, // Prince of Persia: The Two Thrones - no region background, 1920x1080, 647 KB
+    { 0x5553005A, "a6cd9959-b665-44a1-bc3d-1720e2667d39.png" }, // Brothers in Arms: Earned in Blood - no region screenshot, 640x480, 149 KB
+    { 0x5553005E, "a9f858b8-d4b3-49c8-8862-086996fa8911.jpg" }, // Tom Clancy's Splinter Cell: Double Agent - no region background, 1920x1080, 348 KB
+    { 0x5553005F, "ec328bae-26ef-4bfc-ad1b-254c0f2acb1b.png" }, // Tom Clancy's Rainbow Six: Critical Hour - no region screenshot, 640x480, 139 KB
+    { 0x55530060, "1c23fe80-48fb-4287-8443-7b19a75018ef.png" }, // Far Cry Instincts: Evolution - no region screenshot, 640x480, 120 KB
+    { 0x55530061, "r2_95994d84-f11c-457b-92ae-1b23c980aa4b.jpg" }, // Open Season - World background, 1920x1200, 979 KB
     { 0x555308AC, "r2_f524d1bd-ce81-43bf-9878-2a28c6be91f5.jpg" }, // Triple Pack: Outland / From Dust / Beyond Good & Evil HD (Europe) - Europe background
+    { 0x56550003, "50a0a403-95b3-46f7-9aa7-436c2513db42.png" }, // Crash Bandicoot: The Wrath of Cortex - no region screenshot, 640x480, 163 KB
+    { 0x56550004, "d68368f5-8987-4c49-9437-323e6a81a1a0.jpg" }, // The Lord of the Rings: The Fellowship of the Ring - no region background, 1920x1080, 258 KB
+    { 0x56550005, "2b2ebf23-483e-40d0-bce7-9f4576b23566.jpg" }, // Buffy the Vampire Slayer: Chaos Bleeds - no region background, 1920x1080, 646 KB
+    { 0x56550007, "r2_e9281db7-1102-4a76-bab9-96f27fc985c4.jpg" }, // Hunter: The Reckoning - World screenshot, 640x480, 124 KB
+    { 0x56550008, "a16b40ab-4a7c-449d-87c1-ac19b202b3e9.jpg" }, // Futurama - no region background, 1920x1080, 404 KB
+    { 0x56550009, "r2_352a0a76-e917-4f9c-b546-47d76c1b2216.jpg" }, // Antz Extreme Racing - World background, 1280x720, 302 KB
+    { 0x5655000A, "23ede254-3ee1-45c0-ac8d-276f655d8be0.png" }, // Metal Arms: Glitch in the System - no region screenshot, 640x480, 148 KB
+    { 0x5655000D, "r2_6626da39-a535-4ff3-8ed8-71c2d469c471.jpg" }, // The Thing - World background, 1920x1080, 533 KB
+    { 0x5655000E, "94795aa1-91af-4426-af65-d3339352e83f.png" }, // Enclave - no region screenshot, 640x480, 225 KB
+    { 0x5655000F, "r2_46fb58fc-2799-4fd5-9e73-0d81bd3fd2a8.jpg" }, // Battlestar Galactica - World background, 1920x1080, 107 KB
+    { 0x56550010, "r2_c05afb6b-5c57-4d6f-a791-796e8bb53379.jpg" }, // Outlaw Golf - North America background, 1920x1080, 359 KB
+    { 0x56550011, "15084937-ce3f-49ab-9bf6-59bfe424fef9.jpg" }, // Hulk - no region background, 1920x1080, 399 KB
+    { 0x56550013, "bc71dc7a-523b-4c64-81c6-b63de0342642.png" }, // Total Immersion Racing - no region screenshot, 640x480, 146 KB
+    { 0x56550014, "5db87fb5-a6c4-4a01-b85b-eec6ee5179a3.jpg" }, // James Cameron's Dark Angel - no region background, 1920x1080, 590 KB
+    { 0x56550015, "a0019cfb-ea78-4ff8-a801-2dd5893f07a8.png" }, // The Simpsons: Hit & Run - no region screenshot, 640x480, 112 KB
+    { 0x56550016, "888c3bfa-174f-479c-8bc4-bf129be9317a.jpg" }, // Bruce Lee: Quest of the Dragon - no region background, 1920x1080, 341 KB
+    { 0x56550017, "r2_910abdb2-28a7-47e9-8e7b-ad72436cf519.jpg" }, // SeaBlade - World background, 2560x1440, 292 KB
+    { 0x56550019, "514cb2cc-3326-4779-857e-9ad22caba901.png" }, // Men of Valor - no region screenshot, 640x480, 166 KB
+    { 0x5655001A, "cdbf3c3e-f83c-4513-a400-b2db7d27d1fb.jpg" }, // Baldur's Gate: Dark Alliance - no region background, 1920x1080, 657 KB
+    { 0x5655001F, "bf7724b4-65d3-4738-9768-b85f97dea5bd.png" }, // Crash Nitro Kart - no region screenshot, 640x480, 168 KB
+    { 0x56550021, "d7ac1bcd-fa23-4e2d-ac4a-c3da44cac2c4.jpg" }, // Jurassic Park: Operation Genesis - no region background, 1920x1080, 275 KB
+    { 0x56550022, "0fa0d841-4015-426c-9302-c008838194b1.jpg" }, // Aliens Versus Predator: Extinction - no region background, 1920x1080, 176 KB
+    { 0x56550023, "a45d5fd8-a4e2-4d95-9c1b-ca3292030157.jpg" }, // The Hobbit: The Prelude to the Lord of the Rings - no region background, 1920x1080, 905 KB
+    { 0x56550026, "9f25fbf2-d76b-4109-9971-98dcfade8e12.jpg" }, // The Chronicles of Riddick: Escape from Butcher Bay - no region background, 1920x1080, 329 KB
+    { 0x56550027, "r2_10889355-3bde-49cf-9fcb-899335957d8d.jpg" }, // Red Ninja: End of Honor - World background, 1600x1183, 502 KB
+    { 0x56550028, "2a40d9d8-568d-4a97-98d7-e574234e2143.png" }, // Dr. Seuss' The Cat in the Hat - no region screenshot, 640x480, 138 KB
+    { 0x56550029, "499bb6ba-d481-4f8b-97a6-43366acc37c5.png" }, // Van Helsing - no region screenshot, 640x480, 200 KB
+    { 0x5655002A, "d9938d3d-e4e4-4777-a372-c2b736c4e906.png" }, // Barbie Horse Adventures: Wild Horse Rescue - no region screenshot, 640x480, 166 KB
+    { 0x5655002D, "r2_78f13c62-f077-4148-bf5e-9f4a65b6f2f1.jpg" }, // Hunter: The Reckoning: Redeemer - World screenshot, 640x480, 181 KB
+    { 0x5655002F, "095735e8-24e1-42bd-9467-aef0f3c61468.png" }, // Fight Club - no region screenshot, 640x480, 157 KB
+    { 0x56550030, "ff250bba-4a89-486e-a1de-ffcd607f662f.jpg" }, // Predator: Concrete Jungle - no region background, 1920x1080, 217 KB
+    { 0x56550031, "0cc26eec-9704-49dc-86d7-1d385bdf5b80.jpg" }, // Leisure Suit Larry: Magna Cum Laude - no region background, 1920x1080, 718 KB
+    { 0x56550034, "r2_69a3e194-0992-4bb0-a2a8-edc3d124e754.jpg" }, // Spyro: A Hero's Tail - World background, 1920x1079, 272 KB
+    { 0x56550036, "65bc25e6-712c-4d6d-bf59-22fa09e62f63.png" }, // Crash Twinsanity - no region screenshot, 640x480, 157 KB
+    { 0x56550037, "20b82610-b195-4ae3-ae9e-9b0574740550.jpg" }, // Robots - no region background, 1920x1080, 440 KB
+    { 0x56550039, "r2_e137fecc-56e7-4537-b478-d99ec0a6fc67.jpg" }, // The Incredible Hulk: Ultimate Destruction - World screenshot, 640x480, 165 KB
+    { 0x5655003F, "827a84ee-77d5-4b77-85b9-19dd8952ab74.png" }, // Scarface: The World Is Yours - no region screenshot, 640x480, 147 KB
+    { 0x56550041, "dd9bc8e6-2088-4e4c-bf5e-1833dd81a133.jpg" }, // Crash Tag Team Racing - no region background, 1280x720, 133 KB
+    { 0x56550042, "1090b0ee-1e44-43b7-a250-9248cfb0f4e6.png" }, // 50 Cent: Bulletproof - no region screenshot, 640x480, 140 KB
+    { 0x56550043, "de9b5869-98a0-4234-ad5e-36890848d295.png" }, // Eragon - no region screenshot, 640x480, 203 KB
+    { 0x56550048, "r2_9fe6d333-17a6-4a59-a7cf-1d579046a482.jpg" }, // Bass Pro Shops: Trophy Hunter 2007 - World background, 1366x768, 162 KB
+    { 0x56550049, "eaf69338-2490-4cda-8d2f-19a0c1cc427e.png" }, // Bass Pro Shops: Trophy Bass 2007 - no region screenshot, 640x480, 139 KB
+    { 0x5655004A, "r2_71d7ae5c-a6c7-4d34-855c-c68c3a4b7bb1.jpg" }, // The Legend of Spyro: A New Beginning - World background, 1920x1080, 373 KB
+    { 0x5655004B, "bab4816b-02eb-4288-b715-3d0f820cdcea.jpg" }, // Ice Age 2: The Meltdown - World background, 1920x1080, 502 KB
+    { 0x56560011, "88dde898-9e8d-4235-869e-e107e6350bea.png" }, // Mace Griffin: Bounty Hunter - no region screenshot, 640x480, 174 KB
+    { 0x56560025, "a437bb8e-0e19-4791-b9f1-c4a1fbfce5ee.png" }, // SWAT: Global Strike Team - World screenshot, 640x480, 180 KB
+    { 0x56560029, "b1cb34ef-084e-4dbf-8e0b-f9b688115e69.jpg" }, // Die Hard: Vendetta - no region screenshot, 1280x720, 155 KB
+    { 0x57450001, "104df996-c01f-4129-8766-bd0da44a22bd.png" }, // Ultimate Beach Soccer - no region screenshot, 640x480, 195 KB
+    { 0x57450005, "d2224dba-2e4c-409b-851e-d24565af2885.jpg" }, // Curse: The Eye of Isis - no region background, 1920x1080, 596 KB
+    { 0x57520001, "7b78eba9-2066-48cd-9600-50fd8f9e24fa.png" }, // Justice League Heroes - no region screenshot, 640x480, 160 KB
     { 0x575207EA, "e85837e4-a2b6-485e-b6f5-42d049870822.jpg" }, // Watchmen: The End Is Nigh: Parts 1 and 2 (North America) - North America background, 101 KB
+    { 0x58490001, "29048c49-004f-46f2-af43-523cc30c50fb.png" }, // Metal Dungeon - no region screenshot, 640x480, 157 KB
+    { 0x58490004, "21dd6767-5193-4bf0-837c-50cc83357e8a.png" }, // Black Stone: Magic & Steel - no region background, 1920x1080, 127 KB
+    { 0x58490005, "bef4bdc2-c68f-4d07-a102-ed01f846845b.png" }, // Motor Trend Presents: Lotus Challenge - no region screenshot, 640x480, 145 KB
+    { 0x58490007, "27bfa02c-61e8-45bc-8598-10a977ffe8ac.png" }, // Judge Dredd: Dredd vs. Death - no region screenshot, 640x480, 137 KB
+    { 0x584D0003, "71dcab78-83cb-4c4b-87f2-2152fca29fe0.png" }, // Championship Bowling - no region screenshot, 640x480, 128 KB
+    { 0x58500001, "80123ccf-ffa2-4905-a25d-9e7b735145db.png" }, // Daemon Vector - no region screenshot, 640x480, 183 KB
+    { 0x58500004, "0ad720a6-d2ce-47b8-a367-634ef25bb73c.png" }, // Hello Kitty: Roller Rescue - no region screenshot, 640x480, 109 KB
+    { 0x5A440001, "32f02171-472c-45a9-a79e-704e0a4f8e9b.png" }, // Pool Shark 2 - no region screenshot, 640x480, 123 KB
+    { 0x5A440004, "r2_52a8dc34-1d98-4902-9ca8-77e46116c10a.png" }, // Alien Hominid - Europe background, 2560x1440, 605 KB
 };
 
 #endif

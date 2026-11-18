@@ -205,6 +205,11 @@ static const char *LaunchBoxBackgroundFile(unsigned long titleId)
     return NULL;
 }
 
+bool HasLaunchBoxBackground(unsigned long titleId)
+{
+    return LaunchBoxBackgroundFile(titleId) != NULL;
+}
+
 // The LaunchBox wallpaper, over HTTPS, kept at path as the marketplace's
 // would be - so it's asked for once. NULL if it can't be had now; it is
 // asked again next time, as a failure here says nothing about LaunchBox.
@@ -246,11 +251,11 @@ static unsigned char *LoadArt(unsigned long titleId, StoreArtKind kind, unsigned
     if (bytes != NULL)
         return bytes;
 
-    // A wallpaper LaunchBox has, for a game the marketplace has none for:
-    // asked even past a marker, as the marker only says the marketplace
-    // had nothing.
+    // A wallpaper LaunchBox has is for a game the marketplace has none for -
+    // every Original Xbox game, and the 360's in the table - so it goes
+    // straight there.
     const char *launchBox = (kind == STORE_ART_BACKGROUND) ? LaunchBoxBackgroundFile(titleId) : NULL;
-    if (launchBox != NULL && WrittenRecently(marker))
+    if (launchBox != NULL)
         return FetchLaunchBoxBackground(titleId, launchBox, path, outSize);
     if (WrittenRecently(marker))
         return NULL;
@@ -272,11 +277,7 @@ static unsigned char *LoadArt(unsigned long titleId, StoreArtKind kind, unsigned
         // The marketplace answering is the only sign it has nothing; a
         // network failure is tried again next time.
         if (status == 404 || status == 403)
-        {
             WriteWholeFile(marker, NULL, 0);
-            if (launchBox != NULL)
-                return FetchLaunchBoxBackground(titleId, launchBox, path, outSize);
-        }
         return NULL;
     }
 
