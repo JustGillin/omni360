@@ -48,6 +48,7 @@ end-to-end on real hardware against a real 27-game library.
 #include "ClockSync.h"   // SyncClock, StartClockSync
 #include "Profiles.h"    // ListProfiles, SignInProfile - auto sign-in
 #include "GameMarks.h"   // favourites and renamed games
+#include "FolderBrowse.h" // drives and folders, for the folder picker
 #include "UpdateCheck.h"
 #include "ArchiveOrgDLC.h"
 #include "downloadFile.h" // DownloadProgressFn + FormatBytes, for the progress callback
@@ -1888,12 +1889,112 @@ static void StepFolderKind(int index, int step, Library &lib, const char *gamesP
 
 // "Add folder": one typed, for a folder somewhere the list doesn't look -
 // then what's in it, as Aurora asks.
+// ---------------------------------------------------------------------------
+// The folder picker
+// ---------------------------------------------------------------------------
+//
+// Choosing a folder by going to it, rather than typing its path: the drives,
+// then a drive's folders, then theirs. A opens a folder, or - on the first
+// row - picks the one you're in; B goes back up, and out from the drives.
+// FolderBrowse.h does the listing; this is the same list screen Settings'
+// other choices use, shown again for each folder.
+//
+// The drives list ends with "Type a path", the on-screen keyboard as Add
+// Folder had before, for a folder on a drive the list doesn't know.
+
+#define FOLDER_PICKER_MAX 256
+
+enum FolderPickResult
+{
+    FOLDER_PICKED,
+    FOLDER_TYPED,    // the keyboard instead: out is what was typed, not checked
+    FOLDER_CANCELLED
+};
+
+static FolderPickResult PickFolder(const char *heading, char *out, size_t outSize)
+{
+    static FolderEntry entries[FOLDER_PICKER_MAX];
+    static const char *labels[FOLDER_PICKER_MAX + 1];
+    static const char *sublabels[FOLDER_PICKER_MAX + 1];
+    char path[MAX_TEXT_LENGTH] = "";
+
+    for (;;)
+    {
+        int count = 0;
+        if (path[0] == '\0')
+        {
+            const int drives = ListDrives(entries, FOLDER_PICKER_MAX);
+            for (int i = 0; i < drives; ++i)
+            {
+                labels[count] = entries[i].name;
+                sublabels[count++] = DriveKind(entries[i].name) != NULL ? DriveKind(entries[i].name) : "";
+            }
+            labels[count] = Tr(STR_TYPE_A_PATH);
+            sublabels[count++] = Tr(STR_FOR_A_FOLDER_NOT_LISTED_HERE);
+
+            const int chosen = ShowChoiceUI(heading, Tr(STR_CHOOSE_A_DRIVE), labels, sublabels, count, TrW(STR_OPEN));
+            if (chosen < 0)
+                return FOLDER_CANCELLED;
+            if (chosen == drives)
+            {
+                WCHAR title[64];
+                Utf8ToWideText(heading, title, 64);
+                std::string typed;
+                if (OpenKeyboardToString(XUSER_INDEX_ANY, &typed, title, TrW(STR_A_FOLDER_OF_GAMES_HOMEBREW),
+                                         L"Usb0:\\") != ERROR_SUCCESS)
+                    continue; // back to the drives
+                _snprintf(out, outSize, "%s", typed.c_str());
+                out[outSize - 1] = '\0';
+                return FOLDER_TYPED;
+            }
+            _snprintf(path, sizeof(path), "%s", entries[chosen].name);
+            path[sizeof(path) - 1] = '\0';
+            continue;
+        }
+
+        const int folders = ListFolder(path, false, entries, FOLDER_PICKER_MAX);
+        if (folders < 0)
+        {
+            ShowMessageUI(Tr(STR_COULDNT_OPEN_THIS_FOLDER), path, NULL);
+            FolderParent(path, path, sizeof(path));
+            continue;
+        }
+
+        // The first row picks the folder you're in; the rest go further in.
+        labels[count] = Tr(STR_USE_THIS_FOLDER);
+        sublabels[count++] = path;
+        for (int i = 0; i < folders; ++i)
+        {
+            labels[count] = entries[i].name;
+            sublabels[count++] = "";
+        }
+
+        const int chosen = ShowChoiceUI(heading, path, labels, sublabels, count, TrW(STR_OPEN));
+        if (chosen < 0)
+        {
+            FolderParent(path, path, sizeof(path)); // B: up a level
+            continue;
+        }
+        if (chosen == 0)
+        {
+            _snprintf(out, outSize, "%s", path);
+            out[outSize - 1] = '\0';
+            return FOLDER_PICKED;
+        }
+        char child[MAX_TEXT_LENGTH];
+        if (FolderChild(path, entries[chosen - 1].name, child, sizeof(child)))
+            _snprintf(path, sizeof(path), "%s", child);
+        path[sizeof(path) - 1] = '\0';
+    }
+}
+
 static void AddLibraryFolder(Library &lib, const char *gamesPath, SettingsOutcome &outcome)
 {
-    std::string typed;
-    if (OpenKeyboardToString(XUSER_INDEX_ANY, &typed, TrW(STR_ADD_FOLDER),
-                             TrW(STR_A_FOLDER_OF_GAMES_HOMEBREW), L"Usb0:\\") != ERROR_SUCCESS)
-        return; // cancelled
+    char picked[MAX_TEXT_LENGTH];
+    const FolderPickResult result = PickFolder(Tr(STR_ADD_FOLDER), picked, sizeof(picked));
+    if (result == FOLDER_CANCELLED)
+        return;
+    const std::string typed = picked;
 
     char newPath[MAX_TEXT_LENGTH];
     if (!NormaliseGamesPath(typed, newPath, sizeof(newPath)))
