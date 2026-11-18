@@ -214,7 +214,9 @@ A good check: download the same game in your computer's web browser. If that's s
 
 ## Check out X-Store too
 
-Omni360 began as a modified version of [X-Store](https://github.com/951261/X-Store) by 951261, and X-Store is still a great app in its own right, now with Internet Archive support of its own. It's well worth trying alongside Omni360.
+Omni360 started from [X-Store](https://github.com/951261/X-Store) by 951261, which at the time was a Vimm's Lair downloader. Its networking code gave Omni360 a head start, and that part is still in here (see [Credits](#credits)). The rest went a different way: the archive.org library, installer, DLC and title updates, and the whole interface were written for Omni360. X-Store later added Internet Archive support of its own, written separately.
+
+The two are separate apps now, and X-Store is a great one. It's well worth trying alongside Omni360.
 
 <br>
 
@@ -244,7 +246,12 @@ AGPL-3.0, inherited from the original X-Store project (see `LICENSE`). Vendored 
 
 ### Credits
 
-Omni360 is a modified version of [X-Store](https://github.com/951261/X-Store) by 951261, released under AGPL-3.0; this section is its notice that it has been modified (AGPL-3.0 section 5(a)). Most of the application has since been rewritten, but X-Store's code is still at its foundation: the TLS wrapper around BearSSL (`XboxTLS.cpp/.h`), the HTTPS client (`downloadFile.cpp`), DNS (`dns.cpp`), URL and text helpers (`parsing.cpp`), drive mounting (`driveMount.c`), the log console (`OutputConsole.cpp`) and the on-screen keyboard (`Keyboard.cpp`). Several of those files carry `PROGRAMMER : 951261` headers. Those headers are copyright notices, and AGPL-3.0 requires them to survive - rename the product as much as you like, but leave them, and this section, in place.
+Omni360 was forked from [X-Store](https://github.com/951261/X-Store) by 951261 (AGPL-3.0) on 2026-09-25 and has been modified since; this paragraph is the notice AGPL-3.0 section 5(a) asks for. The code that came from X-Store is the networking layer and a few small helpers:
+
+- **By 951261 (X-Store):** the HTTPS client (`downloadFile.cpp`), DNS (`dns.cpp`), URL helpers (`parsing.cpp`) and the on-screen keyboard (`Keyboard.cpp`).
+- **Brought in by X-Store from other projects:** the TLS wrapper around BearSSL (`XboxTLS.cpp/.h`) from [XboxTLS](https://github.com/JakobRangel/XboxTLS) by JakobRangel, and drive mounting (`driveMount.c`) and the log console (`OutputConsole.cpp`) from [Simple 360 NAND Flasher](https://github.com/Swizzy/XDK_Projects) by Swizzy.
+
+Everything else (the archive.org library, installer, DLC and title updates, the interface) was written for Omni360. Several of the files above carry `PROGRAMMER : 951261` headers. Those headers are copyright notices, and AGPL-3.0 requires them to stay - rename the product as much as you like, but leave them, and this section, in place.
 
 Game data comes from [Redump](http://redump.org) (title IDs, by disc serial), [xboxunity.net](https://xboxunity.net) (covers), [LaunchBox Games Database](https://gamesdb.launchbox-app.com) (covers and wallpapers for the games Xbox Live and xboxunity have none for, picked into `tools/data/launchbox-*.txt`), Xbox Live's own servers (art, details and icons), [MobCat's original Xbox game list](https://github.com/MobCat/MobCats-original-xbox-game-list) (Original Xbox cover art and icons) and [ConsoleMods](https://consolemods.org/wiki/Xbox_360:Original_Xbox_Games_Compatibility_List) (the Hacked Xefu Pack, and the community compatibility list that picks each unsupported game's emulator and its known issues); the games themselves from the archive.org collections named above.
 
