@@ -9334,3 +9334,152 @@ void RenderStorageFrame(StoragePageView &view, const UiHint *hints, int hintCoun
 
     EndFrame();
 }
+
+// The list: rows shorter than the Queue's cards - a name, a size and one line
+// of what it's made of - with the cover the row's height, and the checkbox
+// at its right end.
+static float StorageListRowH() { return S(92.0f); }
+static float StorageListGap()  { return S(10.0f); }
+
+void RenderStorageListFrame(StorageListView &view, const UiHint *hints, int hintCount)
+{
+    if (!g_Initialized)
+        return;
+
+    const int count = (view.rows != NULL && view.count > 0) ? view.count : 0;
+    const int gameCount = (view.games != NULL && view.gameCount > 0) ? view.gameCount : 0;
+
+    Icon *icons = NULL;
+    if (gameCount > 0)
+    {
+        EnsureIconsLoaded(view.games, gameCount);
+        icons = (g_iconCount == gameCount) ? g_icons : NULL;
+    }
+
+    const float rowH = StorageListRowH() + StorageListGap();
+    const float plateH = StorageListRowH();
+    const float listTop = g_M.listY;
+    const float listBottom = g_M.footerY - S(30.0f);
+    const float panelW = g_M.contentW * 0.27f;
+    const float listW = g_M.contentW - panelW - S(28.0f);
+    const float panelX = g_M.contentX + listW + S(28.0f);
+
+    int visibleRows = (int)((listBottom - listTop + StorageListGap()) / rowH);
+    if (visibleRows < 1) visibleRows = 1;
+    KeepSelectionVisible(count, visibleRows, view.selected, view.scroll);
+
+    const bool showScroll = count > visibleRows;
+    const float plateW = listW - (showScroll ? ScrollGutter() : 0.0f);
+    const float coverX = g_M.contentX;
+    const float textX = coverX + plateH + S(20.0f);
+    const float checkX = g_M.contentX + plateW - S(24.0f) - SettingsCheck();
+    const float textRight = checkX - S(20.0f);
+
+    BeginFrame();
+    const bool showToast = ToastVisibleThisFrame();
+
+    ButtonHint footer[MAX_FOOTER_HINTS];
+    const int footerCount = LayoutFooter(hints, hintCount, footer);
+
+    // The covers of what isn't in the library - DLC left behind, mostly.
+    g_storeFrame++;
+    {
+        unsigned long want[MAX_STORE_COVERS];
+        int wantCount = 0;
+        for (int row = 0; row < visibleRows && view.scroll + row < count; ++row)
+        {
+            const unsigned long tid = view.rows[view.scroll + row].titleId;
+            if (tid != 0 && tid != INDIE_TITLE_ID && StoreCoverFor(tid) == NULL && wantCount < MAX_STORE_COVERS)
+                want[wantCount++] = tid;
+        }
+        RequestMissingStoreCovers(want, wantCount);
+    }
+
+    // --- Pass 1: quads ---
+    DrawFrameBase(false);
+
+    for (int row = 0; row < visibleRows; ++row)
+    {
+        const int index = view.scroll + row;
+        if (index >= count)
+            break;
+        const StorageListRowView &r = view.rows[index];
+        const float y = listTop + row * rowH;
+        const bool on = index == view.selected;
+
+        FillRound(g_M.contentX, y, plateW, plateH, g_M.radius, on ? COL_SURFACE_HI : COL_SURFACE);
+        if (on)
+            FocusRing(g_M.contentX, y, plateW, plateH, g_M.radius);
+
+        const Icon *icon = (icons != NULL && r.libraryIndex >= 0 && r.libraryIndex < gameCount) ? &icons[r.libraryIndex] : NULL;
+        D3DTexture *boxArt = (r.titleId == INDIE_TITLE_ID) ? IndieTile() : StoreCoverFor(r.titleId);
+        DrawCoverFlushLeft(boxArt, icon, coverX, y, plateH, g_M.radius);
+
+        DrawCheckQuads(checkX, y + plateH * 0.5f, r.checked, false);
+    }
+
+    if (showScroll)
+        DrawScrollbar(listTop, visibleRows * rowH - StorageListGap(), count, visibleRows, view.scroll);
+
+    // The panel: what's ticked.
+    const float panelH = listBottom - listTop;
+    FillRound(panelX, listTop, panelW, panelH, g_M.radius, COL_SURFACE);
+
+    DrawButtonHintShapes(footer, footerCount, g_M.footerY);
+    DrawHeaderQuads(showToast);
+
+    // --- Pass 2: text ---
+    g_UiFont.Begin();
+
+    DrawHeaderText(view.title, view.subtitle, showToast);
+    DrawButtonHintText(footer, footerCount, g_M.footerY);
+
+    if (count == 0 && view.emptyLine != NULL)
+        TextFit(g_M.contentX, listTop + S(8.0f), 0.85f, COL_TEXT2, view.emptyLine, listW);
+
+    for (int row = 0; row < visibleRows; ++row)
+    {
+        const int index = view.scroll + row;
+        if (index >= count)
+            break;
+        const StorageListRowView &r = view.rows[index];
+        const float y = listTop + row * rowH;
+        const float nameH = LineHeight(0.95f) * 1.2f;
+        const float detailH = LineHeight(0.75f) * 1.2f;
+        const float nameY = y + (plateH - nameH - detailH - S(4.0f)) * 0.5f;
+
+        float nameRight = textRight;
+        if (r.size != NULL)
+        {
+            Text(textRight, nameY, 0.95f, COL_TEXT, r.size, ATGFONT_RIGHT, 0.0f, true);
+            nameRight -= TextWidth(r.size, 0.95f, true) + S(16.0f);
+        }
+        if (index == view.selected)
+            MarqueeTextMid(textX, nameY + nameH * 0.5f, 0.95f, COL_TEXT, r.name, nameRight - textX, true);
+        else
+            TextFit(textX, nameY, 0.95f, COL_TEXT, r.name, nameRight - textX, true);
+        TextFit(textX, nameY + nameH + S(4.0f), 0.75f, r.leftover ? COL_AMBER : COL_TEXT2, r.detail, textRight - textX);
+    }
+
+    const float px = panelX + S(22.0f);
+    const float pw = panelW - S(44.0f);
+    float py = listTop + S(20.0f);
+    if (view.pickedCount != NULL)
+    {
+        TextFit(px, py, 0.95f, COL_TEXT, view.pickedCount, pw, true);
+        py += LineHeight(0.95f) * 1.2f;
+    }
+    if (view.pickedSize != NULL)
+    {
+        TextFit(px, py, 1.4f, COL_TEXT, view.pickedSize, pw, true);
+        py += LineHeight(1.4f) * 1.2f + S(16.0f);
+    }
+    if (view.note != NULL)
+        TextWrapped(px, py, 0.72f, COL_DIM, view.note, pw, LineHeight(0.72f) * 1.25f, 8);
+
+    g_UiFont.SetBold(false);
+    g_UiFont.SetScaleFactors(1.0f, 1.0f);
+    g_UiFont.End();
+
+    EndFrame();
+}

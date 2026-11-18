@@ -868,6 +868,38 @@ struct StoragePageView
 
 void RenderStorageFrame(StoragePageView &view, const UiHint *hints, int hintCount);
 
+// Storage's list: what's on a drive - or every drive, or just the leftovers -
+// a row a game, biggest first, each with a checkbox; and down the right, how
+// much is ticked. A ticks, X removes what's ticked.
+struct StorageListRowView
+{
+    const char *name;
+    const char *size;   // right-aligned on the name's line
+    const char *detail; // "Hdd1 · Game 7.8 GB · 12 DLC · Update"
+    bool checked;
+    bool leftover;      // DLC or updates with no game - the detail reads amber
+    int libraryIndex;   // whose icon, into games; -1 for none
+    unsigned long titleId; // whose box art otherwise
+};
+
+struct StorageListView
+{
+    const InstalledGame *games; // the library, for the covers
+    int gameCount;
+    const char *title;
+    const char *subtitle;
+    const StorageListRowView *rows;
+    int count;
+    int selected;
+    int scroll;
+    const char *emptyLine;   // in the list's place while there are no rows
+    const char *pickedCount; // "3 selected"
+    const char *pickedSize;  // "12.4 GB"
+    const char *note;        // under them, wrapped
+};
+
+void RenderStorageListFrame(StorageListView &view, const UiHint *hints, int hintCount);
+
 // ---------------------------------------------------------------------------
 // Popup
 // ---------------------------------------------------------------------------

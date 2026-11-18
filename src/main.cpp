@@ -3336,6 +3336,14 @@ struct Shell
     bool storageFromRing;
     bool sidebarOnStorage;
 
+    // Storage's list in place of the overview: which list (StorageListMode),
+    // the drive for one drive's, and where it is.
+    bool storageList;
+    int storageListMode;
+    int storageListDrive;
+    int storageListSelected;
+    int storageListScroll;
+
     // The disc in the drive, as the library's first tile - see UpdateDisc.
     // librarySelected counts it: with a disc, 0 is the disc and game i is
     // item i + 1.
@@ -6560,7 +6568,7 @@ static unsigned long FocusSignature(const Shell &shell)
         shell.storeVersionsOpen, shell.storeVersionFocus,
         shell.storeFilterOpen, shell.storeFilterFocus, FilterSignature(),
         shell.storeInHomebrew, shell.homebrewRow, shell.homebrewPlace,
-        shell.storageColumn, shell.storageRow, shell.sidebarOnStorage,
+        shell.storageColumn, shell.storageRow, shell.sidebarOnStorage, shell.storageList, shell.storageListSelected,
         g_shelves[SHELF_APPS].selected, g_shelves[SHELF_HOMEBREW].selected, g_shelves[SHELF_EMULATORS].selected,
     };
     unsigned long hash = 2166136261UL; // FNV-1a
@@ -6868,6 +6876,7 @@ static void EnterStoragePage(Shell &shell, const Library &lib, const char *games
     shell.sidebarFocused = false;
     shell.storageColumn = 0;
     shell.storageRow = 0;
+    shell.storageList = false;
     BeginStorageScan(lib, gamesPath);
 }
 
@@ -6920,6 +6929,8 @@ static bool ClearPartialsFromStorage()
     return true;
 }
 
+static void OpenStorageList(Shell &shell, int mode, int drive); // with the list, below
+
 // The page's input. True if something took over the screen.
 static bool StoragePageInput(Shell &shell, const UiInput &input, const Library &lib, const char *gamesPath)
 {
@@ -6954,12 +6965,17 @@ static bool StoragePageInput(Shell &shell, const UiInput &input, const Library &
     {
         if (shell.storageColumn == 1)
         {
-            // A drive's contents: the next step.
-            ShowShellToast(Tr(STR_COMING_SOON), Tr(STR_STORAGE_NEXT), UI_TOAST_INFO);
+            OpenStorageList(shell, 0 /* STORAGE_LIST_DRIVE */, g_storageText.driveIndex[shell.storageRow]);
             return false;
         }
         switch (shell.storageRow)
         {
+        case STORAGE_ACTION_FREE_UP:
+            OpenStorageList(shell, 1 /* STORAGE_LIST_ALL */, -1);
+            return false;
+        case STORAGE_ACTION_LEFTOVERS:
+            OpenStorageList(shell, 2 /* STORAGE_LIST_LEFTOVERS */, -1);
+            return false;
         case STORAGE_ACTION_PARTIALS:
             if (ClearPartialsFromStorage())
                 BeginStorageScan(lib, gamesPath);
@@ -6968,7 +6984,6 @@ static bool StoragePageInput(Shell &shell, const UiInput &input, const Library &
             BeginStorageScan(lib, gamesPath);
             return false;
         default:
-            ShowShellToast(Tr(STR_COMING_SOON), Tr(STR_STORAGE_NEXT), UI_TOAST_INFO);
             return false;
         }
     }
@@ -8406,6 +8421,390 @@ static int AddHint(UiHint *hints, int count, UiButton button, const WCHAR *label
     hints[count].shortLabel = shortLabel;
     return count + 1;
 }
+
+// ---------------------------------------------------------------------------
+// Storage's list: what's on a drive, a game a row
+// ---------------------------------------------------------------------------
+//
+// Built from the snapshot when it changes - or the library, or which list it
+// is - not every frame, since every row looks up its name. What's ticked is
+// kept across rebuilds by title and drive.
+
+enum StorageListMode
+{
+    STORAGE_LIST_DRIVE,     // one drive, storageListDrive
+    STORAGE_LIST_ALL,       // Free up space: every drive
+    STORAGE_LIST_LEFTOVERS  // only DLC and updates with no game
+};
+
+struct StorageListRow
+{
+    unsigned long titleId;
+    int drive;
+    unsigned long long bytes; // what removing it frees
+    bool checked;
+    bool leftover;
+    int libraryIndex;
+    char name[128];
+    char size[32];
+    char detail[192];
+};
+
+static StorageListRow g_storageRows[STORAGE_MAX_TITLES];
+static StorageListRowView g_storageRowViews[STORAGE_MAX_TITLES];
+static int g_storageRowCount = 0;
+static int g_storageRowsBuiltFrom = -1; // the snapshot's generation; -1 builds again
+static int g_storageRowsLibrary = -1;   // g_libraryGeneration
+static int g_storageRowsMode = -1;      // mode * 16 + drive
+
+static int CompareStorageRows(const void *a, const void *b)
+{
+    const StorageListRow &x = *(const StorageListRow *)a;
+    const StorageListRow &y = *(const StorageListRow *)b;
+    if (x.bytes != y.bytes)
+        return x.bytes < y.bytes ? 1 : -1;
+    return _stricmp(x.name, y.name);
+}
+
+// A title's name: the library's (or its rename), the Store's, the bundled
+// list's - or its ID.
+static void StorageTitleNameFor(const Library &lib, unsigned long titleId, int *libraryIndex, char *out, size_t outSize)
+{
+    *libraryIndex = -1;
+    const char *name = NULL;
+    for (int i = 0; i < lib.count && name == NULL; ++i)
+    {
+        if (lib.games[i].titleId != titleId)
+            continue;
+        *libraryIndex = i;
+        name = (i < MAX_INSTALLED_GAMES && g_shownNames[i] != NULL) ? g_shownNames[i] : lib.games[i].displayName;
+    }
+    StoreGame store;
+    if (name == NULL && StoreGameByTitleId(titleId, &store) && store.name != NULL && store.name[0] != '\0')
+        name = store.name;
+    if (name == NULL)
+        name = LookupTitleName(titleId);
+    if (name != NULL)
+        _snprintf(out, outSize, "%s", name);
+    else
+    {
+        char hex[16];
+        _snprintf(hex, sizeof(hex), "%08lX", titleId);
+        TrFormat(out, outSize, STR_STORAGE_UNKNOWN_TITLE, hex);
+    }
+    out[outSize - 1] = '\0';
+}
+
+static void AppendPart(char *out, size_t outSize, const char *part)
+{
+    const size_t len = strlen(out);
+    _snprintf(out + len, outSize - len, "%s%s", len > 0 ? STORE_MIDDOT : "", part);
+    out[outSize - 1] = '\0';
+}
+
+static void BuildStorageRows(const Shell &shell, const Library &lib)
+{
+    const StorageSnapshot *snap = StorageSnapshotAcquire();
+    const int generation = snap != NULL ? snap->generation : 0;
+    const int mode = shell.storageListMode * 16 + shell.storageListDrive;
+    if (generation == g_storageRowsBuiltFrom && g_libraryGeneration == g_storageRowsLibrary && mode == g_storageRowsMode)
+    {
+        if (snap != NULL)
+            StorageSnapshotRelease();
+        return;
+    }
+
+    // What was ticked, to tick again.
+    static unsigned long checkedKeys[STORAGE_MAX_TITLES];
+    int checkedCount = 0;
+    if (mode == g_storageRowsMode)
+    {
+        for (int i = 0; i < g_storageRowCount; ++i)
+        {
+            if (g_storageRows[i].checked)
+                checkedKeys[checkedCount++] = (g_storageRows[i].titleId ^ (unsigned long)g_storageRows[i].drive * 0x9E3779B1UL);
+        }
+    }
+
+    g_storageRowsBuiltFrom = generation;
+    g_storageRowsLibrary = g_libraryGeneration;
+    g_storageRowsMode = mode;
+    g_storageRowCount = 0;
+    if (snap == NULL)
+        return;
+
+    for (int i = 0; i < snap->titleCount; ++i)
+    {
+        const StorageTitle &t = snap->titles[i];
+        if (t.system || StorageRemovableBytes(t) == 0)
+            continue;
+        if (shell.storageListMode == STORAGE_LIST_DRIVE && t.drive != shell.storageListDrive)
+            continue;
+        const bool leftover = StorageLeftover(t, shell);
+        if (shell.storageListMode == STORAGE_LIST_LEFTOVERS && !leftover)
+            continue;
+
+        StorageListRow &row = g_storageRows[g_storageRowCount++];
+        memset(&row, 0, sizeof(row));
+        row.titleId = t.titleId;
+        row.drive = t.drive;
+        row.bytes = StorageRemovableBytes(t);
+        row.leftover = leftover;
+        StorageTitleNameFor(lib, t.titleId, &row.libraryIndex, row.name, sizeof(row.name));
+        StorageBytes(row.bytes, row.size, sizeof(row.size));
+
+        const unsigned long key = t.titleId ^ (unsigned long)t.drive * 0x9E3779B1UL;
+        for (int k = 0; k < checkedCount && !row.checked; ++k)
+            row.checked = checkedKeys[k] == key;
+
+        // Where it is and what it's made of.
+        char part[64], size[32];
+        AppendPart(row.detail, sizeof(row.detail), snap->drives[t.drive].name);
+        if (leftover)
+            AppendPart(row.detail, sizeof(row.detail), Tr(STR_STORAGE_NO_GAME));
+        if (t.bytes[STORAGE_GAME] > 0)
+        {
+            StorageBytes(t.bytes[STORAGE_GAME], size, sizeof(size));
+            TrFormat(part, sizeof(part), STR_STORAGE_PART_GAME, size);
+            AppendPart(row.detail, sizeof(row.detail), part);
+        }
+        if (t.bytes[STORAGE_DISC_INSTALL] > 0)
+        {
+            StorageBytes(t.bytes[STORAGE_DISC_INSTALL], size, sizeof(size));
+            TrFormat(part, sizeof(part), STR_STORAGE_PART_DISC, size);
+            AppendPart(row.detail, sizeof(row.detail), part);
+        }
+        if (t.items[STORAGE_DLC] > 0)
+        {
+            TrCount(part, sizeof(part), STR_STORAGE_PART_DLC_ONE, STR_STORAGE_PART_DLC, t.items[STORAGE_DLC]);
+            AppendPart(row.detail, sizeof(row.detail), part);
+        }
+        if (t.items[STORAGE_UPDATE] > 0)
+        {
+            TrCount(part, sizeof(part), STR_STORAGE_PART_UPDATE_ONE, STR_STORAGE_PART_UPDATES, t.items[STORAGE_UPDATE]);
+            AppendPart(row.detail, sizeof(row.detail), part);
+        }
+    }
+    StorageSnapshotRelease();
+
+    if (g_storageRowCount > 1)
+        qsort(g_storageRows, g_storageRowCount, sizeof(StorageListRow), CompareStorageRows);
+}
+
+static StorageListView MakeStorageListView(Shell &shell, const Library &lib)
+{
+    BuildStorageRows(shell, lib);
+
+    static char title[64], subtitle[128], pickedCount[48], pickedSize[32];
+    int picked = 0;
+    unsigned long long pickedBytes = 0;
+    for (int i = 0; i < g_storageRowCount; ++i)
+    {
+        const StorageListRow &r = g_storageRows[i];
+        StorageListRowView &v = g_storageRowViews[i];
+        v.name = r.name;
+        v.size = r.size;
+        v.detail = r.detail;
+        v.checked = r.checked;
+        v.leftover = r.leftover;
+        v.libraryIndex = r.libraryIndex;
+        v.titleId = r.titleId;
+        if (r.checked)
+        {
+            picked++;
+            pickedBytes += r.bytes;
+        }
+    }
+
+    const bool measuring = StorageScanRunning();
+    if (shell.storageListMode == STORAGE_LIST_DRIVE)
+    {
+        // The overview's card names the drive; its free space, as of the scan.
+        int card = -1;
+        for (int i = 0; i < STORAGE_VIEW_DRIVES; ++i)
+        {
+            if (g_storageText.drives[i].name != NULL && g_storageText.driveIndex[i] == shell.storageListDrive)
+                card = i;
+        }
+        _snprintf(title, sizeof(title), "%s", card >= 0 ? g_storageText.name[card] : Tr(STR_STORAGE_TITLE));
+        if (measuring)
+            TrFormat(subtitle, sizeof(subtitle), STR_STORAGE_MEASURING);
+        else
+            _snprintf(subtitle, sizeof(subtitle), "%s", card >= 0 ? g_storageText.freeLine[card] : "");
+    }
+    else
+    {
+        TrFormat(title, sizeof(title), shell.storageListMode == STORAGE_LIST_ALL ? STR_STORAGE_FREE_UP : STR_STORAGE_LEFTOVERS);
+        TrFormat(subtitle, sizeof(subtitle), measuring ? STR_STORAGE_MEASURING
+                                             : shell.storageListMode == STORAGE_LIST_ALL ? STR_STORAGE_ALL_DRIVES
+                                                                                           : STR_STORAGE_LEFTOVERS_SUBTITLE);
+    }
+    title[sizeof(title) - 1] = '\0';
+    subtitle[sizeof(subtitle) - 1] = '\0';
+
+    TrCount(pickedCount, sizeof(pickedCount), STR_STORAGE_SELECTED_ONE, STR_STORAGE_SELECTED, picked);
+    StorageBytes(pickedBytes, pickedSize, sizeof(pickedSize));
+
+    StorageListView view;
+    memset(&view, 0, sizeof(view));
+    view.games = lib.games;
+    view.gameCount = lib.count;
+    view.title = title;
+    view.subtitle = subtitle;
+    view.rows = g_storageRowViews;
+    view.count = g_storageRowCount;
+    view.selected = shell.storageListSelected;
+    view.scroll = shell.storageListScroll;
+    view.emptyLine = g_storageRowsBuiltFrom == 0 ? Tr(STR_STORAGE_MEASURING)
+                     : shell.storageListMode == STORAGE_LIST_LEFTOVERS ? Tr(STR_STORAGE_LEFTOVERS_EMPTY)
+                                                                       : Tr(STR_STORAGE_LIST_EMPTY);
+    view.pickedCount = pickedCount;
+    view.pickedSize = pickedSize;
+    view.note = Tr(shell.storageListMode == STORAGE_LIST_LEFTOVERS ? STR_STORAGE_LEFTOVERS_NOTE : STR_STORAGE_LIST_NOTE);
+    return view;
+}
+
+static void OpenStorageList(Shell &shell, int mode, int drive)
+{
+    shell.storageList = true;
+    shell.storageListMode = mode;
+    shell.storageListDrive = drive;
+    shell.storageListSelected = 0;
+    shell.storageListScroll = 0;
+    // A different list: nothing carried over.
+    for (int i = 0; i < g_storageRowCount; ++i)
+        g_storageRows[i].checked = false;
+}
+
+// A ticked game still in the queue, or NULL. Its download writes where the
+// removal would delete.
+static const char *StorageRowInQueue()
+{
+    static QueueJobSnapshot jobs[MAX_QUEUE_ROWS];
+    int n = SnapshotDownloadQueue(jobs, MAX_QUEUE_ROWS);
+    n += SnapshotDiscJobs(jobs + n, MAX_QUEUE_ROWS - n);
+    n += SnapshotGameJobs(jobs + n, MAX_QUEUE_ROWS - n);
+    for (int r = 0; r < g_storageRowCount; ++r)
+    {
+        if (!g_storageRows[r].checked)
+            continue;
+        for (int j = 0; j < n; ++j)
+        {
+            if (jobs[j].state != QUEUE_FINISHED && jobs[j].titleId == g_storageRows[r].titleId)
+                return g_storageRows[r].name;
+        }
+    }
+    return NULL;
+}
+
+// X: everything ticked removed, once confirmed. True if the screen was taken over.
+static bool RemoveTickedStorage(Shell &shell, const Library &lib, const char *gamesPath)
+{
+    int picked = 0, first = -1;
+    unsigned long long bytes = 0;
+    for (int i = 0; i < g_storageRowCount; ++i)
+    {
+        if (!g_storageRows[i].checked)
+            continue;
+        if (first < 0)
+            first = i;
+        picked++;
+        bytes += g_storageRows[i].bytes;
+    }
+    if (picked == 0)
+        return false;
+
+    const char *busy = StorageRowInQueue();
+    if (busy != NULL)
+    {
+        char heading[192];
+        TrFormat(heading, sizeof(heading), STR_STORAGE_IN_QUEUE, busy);
+        ShowShellToast(heading, Tr(STR_STORAGE_IN_QUEUE_DETAIL), UI_TOAST_ERROR);
+        return false;
+    }
+
+    char size[32], message[256];
+    StorageBytes(bytes, size, sizeof(size));
+    TrCount(message, sizeof(message), STR_STORAGE_REMOVE_ONE, STR_STORAGE_REMOVE_MANY, picked, g_storageRows[first].name, size);
+    if (!ShowConfirmUI(Tr(STR_STORAGE_REMOVE_HEADING), message, Tr(STR_STORAGE_LIST_NOTE), Tr(STR_REMOVE)))
+        return true;
+
+    unsigned long long freed = 0;
+    bool ok = true;
+    for (int i = 0; i < g_storageRowCount; ++i)
+    {
+        StorageListRow &r = g_storageRows[i];
+        if (!r.checked)
+            continue;
+        RenderStatusFrame(Tr(STR_UNINSTALLING), r.name, NULL);
+        dprintf("[storage] removing %08lX from drive %d\n", r.titleId, r.drive);
+        ok = RemoveTitleContent(r.titleId, r.drive, STORAGE_REMOVABLE_KINDS, &freed) && ok;
+        r.checked = false;
+    }
+
+    char heading[192];
+    TrCount(heading, sizeof(heading), STR_STORAGE_REMOVED_ONE, STR_STORAGE_REMOVED_MANY, picked, g_storageRows[first].name);
+    StorageBytes(freed, size, sizeof(size));
+    TrFormat(message, sizeof(message), STR_STORAGE_FREED, size);
+    ShowShellToast(ok ? heading : Tr(STR_STORAGE_NOT_ALL_DELETED), message, ok ? UI_TOAST_SUCCESS : UI_TOAST_ERROR);
+
+    shell.rescanLibrary = true;
+    BeginStorageScan(lib, gamesPath);
+    return true;
+}
+
+// The list's input. True if something took over the screen.
+static bool StorageListInput(Shell &shell, const UiInput &input, const Library &lib, const char *gamesPath)
+{
+    const WORD pressed = input.pressed;
+    if (pressed & XINPUT_GAMEPAD_B)
+    {
+        shell.storageList = false;
+        return false;
+    }
+    StepSelection(input.nav, g_storageRowCount, shell.storageListSelected);
+
+    if ((pressed & XINPUT_GAMEPAD_A) && shell.storageListSelected < g_storageRowCount)
+    {
+        g_storageRows[shell.storageListSelected].checked = !g_storageRows[shell.storageListSelected].checked;
+        PlayUiSound(UI_SOUND_SELECT);
+    }
+    else if ((pressed & XINPUT_GAMEPAD_Y) && g_storageRowCount > 0)
+    {
+        // All, or none once they all are.
+        bool all = true;
+        for (int i = 0; i < g_storageRowCount && all; ++i)
+            all = g_storageRows[i].checked;
+        for (int i = 0; i < g_storageRowCount; ++i)
+            g_storageRows[i].checked = !all;
+        PlayUiSound(UI_SOUND_SELECT);
+    }
+    else if (pressed & XINPUT_GAMEPAD_X)
+        return RemoveTickedStorage(shell, lib, gamesPath);
+    return false;
+}
+
+// The hints the list shows for where it is.
+static int StorageListHints(const Shell &shell, UiHint *hints, int hintCount)
+{
+    int picked = 0;
+    bool all = g_storageRowCount > 0;
+    for (int i = 0; i < g_storageRowCount; ++i)
+    {
+        picked += g_storageRows[i].checked ? 1 : 0;
+        all = all && g_storageRows[i].checked;
+    }
+    if (g_storageRowCount > 0 && shell.storageListSelected < g_storageRowCount)
+        hintCount = AddHint(hints, hintCount, UI_BUTTON_A,
+                            g_storageRows[shell.storageListSelected].checked ? TrW(STR_STORAGE_DESELECT) : TrW(STR_SELECT));
+    if (picked > 0)
+        hintCount = AddHint(hints, hintCount, UI_BUTTON_X, TrW(STR_STORAGE_REMOVE_SELECTED), TrW(STR_REMOVE));
+    if (g_storageRowCount > 0)
+        hintCount = AddHint(hints, hintCount, UI_BUTTON_Y, all ? TrW(STR_STORAGE_CLEAR_SELECTION) : TrW(STR_STORAGE_SELECT_ALL));
+    hintCount = AddHint(hints, hintCount, UI_BUTTON_B, TrW(STR_BUTTON_BACK));
+    return hintCount;
+}
+
 
 // The DLC pack or title update picker, over whichever page opened it: a
 // search in progress or what it found.
@@ -9990,7 +10389,8 @@ int main()
         }
         else if (shell.page == SHELL_PAGE_STORAGE)
         {
-            acted = StoragePageInput(shell, input, lib, gamesPath);
+            acted = shell.storageList ? StorageListInput(shell, input, lib, gamesPath)
+                                      : StoragePageInput(shell, input, lib, gamesPath);
         }
         else if (shell.page == SHELL_PAGE_QUEUE)
         {
@@ -10632,6 +11032,15 @@ int main()
             break;
 
         case SHELL_PAGE_STORAGE:
+        if (shell.storageList)
+        {
+            StorageListView view = MakeStorageListView(shell, lib);
+            hintCount = StorageListHints(shell, hints, hintCount);
+            RenderStorageListFrame(view, hints, hintCount);
+            shell.storageListSelected = view.selected;
+            shell.storageListScroll = view.scroll;
+        }
+        else
         {
             StoragePageView view = MakeStorageView(shell);
             if (!(view.column == 0 && view.row == STORAGE_ACTION_RESCAN && StorageScanRunning()))

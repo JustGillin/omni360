@@ -32,7 +32,9 @@ static CRITICAL_SECTION g_lock;
 static bool g_lockReady = false;
 static volatile LONG g_running = 0;
 static int g_generation = 0;
-static StorageScanRequest g_request;
+static StorageScanRequest g_request;     // the running scan's, then the last one's
+static StorageScanRequest g_nextRequest; // asked for while one ran - g_lock
+static bool g_again = false;             // ...and so it runs again when done
 
 static void EnsureLock()
 {
@@ -263,31 +265,19 @@ static void SameRootKey(const char *in, char *out, size_t outSize)
         out[--n] = '\0';
 }
 
-static void Scan(StorageSnapshot &snap, const StorageScanRequest &req)
-{
-    const DWORD start = GetTickCount();
-    memset(&snap, 0, sizeof(snap));
-    snap.driveCount = STORAGE_MAX_DRIVES;
+#define STORAGE_ALL_ROOTS (STORAGE_MAX_DRIVES + STORAGE_MAX_ROOTS)
 
-    // Every drive's capacity, and its own content folder - then the extra
-    // roots, each only once.
-    char roots[STORAGE_MAX_DRIVES + STORAGE_MAX_ROOTS][512];
+// Every readable drive's own content folder, then the request's extra roots,
+// each once. present[d] says which drives answered.
+static int ContentRoots(const StorageScanRequest &req, char (*roots)[512], bool *present)
+{
     int rootCount = 0;
     for (int d = 0; d < STORAGE_MAX_DRIVES; ++d)
     {
-        StorageDrive &drive = snap.drives[d];
-        _snprintf(drive.name, sizeof(drive.name), "%s", kDrives[d]);
-        char root[16];
-        _snprintf(root, sizeof(root), "%s:\\", kDrives[d]);
-        ULARGE_INTEGER freeToCaller, total;
-        if (GetDiskFreeSpaceExA(root, &freeToCaller, &total, NULL) && total.QuadPart > 0)
-        {
-            drive.present = true;
-            drive.capacity = total.QuadPart;
-            drive.freeBytes = freeToCaller.QuadPart;
-            _snprintf(roots[rootCount], sizeof(roots[0]), "%s:" CONTENT_SUFFIX, kDrives[d]);
-            rootCount++;
-        }
+        if (!present[d])
+            continue;
+        _snprintf(roots[rootCount], 512, "%s:" CONTENT_SUFFIX, kDrives[d]);
+        rootCount++;
     }
     for (int r = 0; r < req.rootCount && r < STORAGE_MAX_ROOTS; ++r)
     {
@@ -302,6 +292,34 @@ static void Scan(StorageSnapshot &snap, const StorageScanRequest &req)
             rootCount++;
         }
     }
+    return rootCount;
+}
+
+static void Scan(StorageSnapshot &snap, const StorageScanRequest &req)
+{
+    const DWORD start = GetTickCount();
+    memset(&snap, 0, sizeof(snap));
+    snap.driveCount = STORAGE_MAX_DRIVES;
+
+    // Every drive's capacity, then the content folders on them.
+    char roots[STORAGE_ALL_ROOTS][512];
+    bool present[STORAGE_MAX_DRIVES];
+    for (int d = 0; d < STORAGE_MAX_DRIVES; ++d)
+    {
+        StorageDrive &drive = snap.drives[d];
+        _snprintf(drive.name, sizeof(drive.name), "%s", kDrives[d]);
+        char root[16];
+        _snprintf(root, sizeof(root), "%s:\\", kDrives[d]);
+        ULARGE_INTEGER freeToCaller, total;
+        if (GetDiskFreeSpaceExA(root, &freeToCaller, &total, NULL) && total.QuadPart > 0)
+        {
+            drive.present = true;
+            drive.capacity = total.QuadPart;
+            drive.freeBytes = freeToCaller.QuadPart;
+        }
+        present[d] = drive.present;
+    }
+    const int rootCount = ContentRoots(req, roots, present);
 
     for (int r = 0; r < rootCount; ++r)
     {
@@ -357,25 +375,47 @@ static void Scan(StorageSnapshot &snap, const StorageScanRequest &req)
 
 static DWORD WINAPI StorageScanEntry(LPVOID)
 {
-    Scan(*g_work, g_request);
+    for (;;)
+    {
+        Scan(*g_work, g_request);
 
-    EnterCriticalSection(&g_lock);
-    g_work->generation = ++g_generation;
-    StorageSnapshot *done = g_work;
-    g_work = g_published;
-    g_published = done;
-    LeaveCriticalSection(&g_lock);
+        EnterCriticalSection(&g_lock);
+        g_work->generation = ++g_generation;
+        StorageSnapshot *done = g_work;
+        g_work = g_published;
+        g_published = done;
+        dprintf("[storage] scan %d done: %d titles in %.0f ms\n", done->generation, done->titleCount, done->scanMs);
 
-    dprintf("[storage] scan %d done: %d titles in %.0f ms\n", done->generation, done->titleCount, done->scanMs);
-    InterlockedExchange(&g_running, 0);
-    return 0;
+        // Asked for again meanwhile - after a removal, say: once more, so
+        // what's shown isn't from before it.
+        const bool again = g_again;
+        if (again)
+        {
+            g_request = g_nextRequest;
+            g_again = false;
+        }
+        else
+            InterlockedExchange(&g_running, 0);
+        LeaveCriticalSection(&g_lock);
+        if (!again)
+            return 0;
+    }
 }
 
 bool StartStorageScan(const StorageScanRequest &request)
 {
     EnsureLock();
-    if (InterlockedCompareExchange(&g_running, 1, 0) != 0)
-        return false;
+    EnterCriticalSection(&g_lock);
+    if (g_running != 0)
+    {
+        // The running scan goes again with this once it's done.
+        g_nextRequest = request;
+        g_again = true;
+        LeaveCriticalSection(&g_lock);
+        return true;
+    }
+    g_running = 1;
+    LeaveCriticalSection(&g_lock);
 
     g_request = request;
     HANDLE thread = CreateThread(NULL, 256 * 1024, StorageScanEntry, NULL, 0, NULL);
@@ -453,6 +493,136 @@ static bool DeleteTree(const char *path, unsigned long long *freed, int depth)
     }
     if (!RemoveDirectoryA(path) && GetFileAttributesA(path) != INVALID_FILE_ATTRIBUTES)
         ok = false;
+    return ok;
+}
+
+bool RemoveTitleContent(unsigned long titleId, int drive, unsigned kindMask, unsigned long long *freed)
+{
+    if (drive < 0 || drive >= STORAGE_MAX_DRIVES || (titleId >> 16) == 0xFFFE || titleId == XNA_RUNTIME_TITLE)
+        return false;
+    kindMask &= STORAGE_REMOVABLE_KINDS; // never saves, never the rest
+
+    // The folders the last scan walked. Copied under the lock: a scan going
+    // again swaps its request there.
+    static StorageScanRequest req;
+    EnsureLock();
+    EnterCriticalSection(&g_lock);
+    req = g_request;
+    LeaveCriticalSection(&g_lock);
+
+    char roots[STORAGE_ALL_ROOTS][512];
+    bool present[STORAGE_MAX_DRIVES];
+    for (int d = 0; d < STORAGE_MAX_DRIVES; ++d)
+        present[d] = (d == drive);
+    const int rootCount = ContentRoots(req, roots, present);
+
+    bool ok = true;
+    char titleHex[16];
+    _snprintf(titleHex, sizeof(titleHex), "%08lX", titleId);
+    for (int r = 0; r < rootCount; ++r)
+    {
+        if (DriveOf(roots[r]) != drive)
+            continue;
+        char titleDir[600], pattern[620];
+        _snprintf(titleDir, sizeof(titleDir), "%s\\%s", roots[r], titleHex);
+        titleDir[sizeof(titleDir) - 1] = '\0';
+        _snprintf(pattern, sizeof(pattern), "%s\\*", titleDir);
+        pattern[sizeof(pattern) - 1] = '\0';
+
+        WIN32_FIND_DATAA found;
+        HANDLE h = FindFirstFileA(pattern, &found);
+        if (h == INVALID_HANDLE_VALUE)
+            continue;
+        do
+        {
+            unsigned long contentType = 0;
+            if (!(found.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY) || !ParseHex8(found.cFileName, &contentType))
+                continue;
+            if (!(kindMask & (1u << KindOf(titleId, contentType))))
+                continue;
+            char typeDir[600];
+            _snprintf(typeDir, sizeof(typeDir), "%s\\%s", titleDir, found.cFileName);
+            typeDir[sizeof(typeDir) - 1] = '\0';
+            const bool removed = DeleteTree(typeDir, freed, 0);
+            dprintf("[storage] removed %s%s\n", typeDir, removed ? "" : " - not all of it");
+            ok = removed && ok;
+        } while (FindNextFileA(h, &found));
+        FindClose(h);
+        RemoveDirectoryA(titleDir); // only goes if nothing's left - saves stay
+    }
+
+    // Its uppercase updates in the shared Cache.
+    if (kindMask & (1u << STORAGE_UPDATE))
+    {
+        char pattern[64];
+        _snprintf(pattern, sizeof(pattern), "%s:\\Cache\\TU_*", kDrives[drive]);
+        pattern[sizeof(pattern) - 1] = '\0';
+        WIN32_FIND_DATAA found;
+        HANDLE h = FindFirstFileA(pattern, &found);
+        if (h != INVALID_HANDLE_VALUE)
+        {
+            do
+            {
+                if (found.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY)
+                    continue;
+                char path[600];
+                _snprintf(path, sizeof(path), "%s:\\Cache\\%s", kDrives[drive], found.cFileName);
+                path[sizeof(path) - 1] = '\0';
+                StfsTitleInfo info;
+                memset(&info, 0, sizeof(info));
+                if (!StfsReadTitleInfo(path, &info))
+                    continue;
+                const bool ours = info.titleId == titleId;
+                StfsFreeTitleInfo(&info);
+                if (!ours)
+                    continue;
+                if (DeleteFileA(path))
+                {
+                    if (freed != NULL)
+                        *freed += ((unsigned long long)found.nFileSizeHigh << 32) | found.nFileSizeLow;
+                    dprintf("[storage] removed %s\n", path);
+                }
+                else
+                    ok = false;
+            } while (FindNextFileA(h, &found));
+            FindClose(h);
+        }
+    }
+
+    // Its folder game, as the library found it.
+    if (kindMask & (1u << STORAGE_GAME))
+    {
+        for (int f = 0; f < req.folderCount && f < STORAGE_MAX_FOLDERS; ++f)
+        {
+            const StorageFolderGame &folder = req.folders[f];
+            if (folder.titleId != titleId || DriveOf(folder.path) != drive)
+                continue;
+
+            // Never a drive's root or a library folder itself - a game's
+            // own folder is always somewhere under one.
+            char key[512];
+            SameRootKey(folder.path, key, sizeof(key));
+            const char *colon = strchr(key, ':');
+            bool unsafe = colon == NULL || strchr(colon, '\\') == NULL || colon[2] == '\0';
+            for (int r = 0; r < rootCount && !unsafe; ++r)
+                unsafe = _stricmp(roots[r], key) == 0;
+            for (int r = 0; r < req.rootCount && !unsafe; ++r)
+            {
+                char root[512];
+                SameRootKey(req.roots[r], root, sizeof(root));
+                unsafe = _stricmp(root, key) == 0;
+            }
+            if (unsafe)
+            {
+                dprintf("[storage] not removing %s - it's a drive or library folder\n", folder.path);
+                ok = false;
+                continue;
+            }
+            const bool removed = DeleteTree(folder.path, freed, 0);
+            dprintf("[storage] removed %s%s\n", folder.path, removed ? "" : " - not all of it");
+            ok = removed && ok;
+        }
+    }
     return ok;
 }
 

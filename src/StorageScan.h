@@ -96,8 +96,10 @@ struct StorageScanRequest
     StorageFolderGame folders[STORAGE_MAX_FOLDERS];
 };
 
-// Starts a scan on a thread of its own, copying the request. False if one is
-// already running (its result will still arrive) or the thread couldn't start.
+// Starts a scan on a thread of its own, copying the request. Asked for while
+// one is running, that one goes again with this request once it's done, so
+// the snapshot after it always reflects the drive as of the ask. False only
+// if the thread couldn't start.
 bool StartStorageScan(const StorageScanRequest &request);
 
 bool StorageScanRunning();
@@ -106,6 +108,31 @@ bool StorageScanRunning();
 // nothing to release) before the first scan has finished.
 const StorageSnapshot *StorageSnapshotAcquire();
 void StorageSnapshotRelease();
+
+// The kinds a removal can take: never saves, never "other".
+#define STORAGE_REMOVABLE_KINDS ((1u << STORAGE_GAME) | (1u << STORAGE_DISC_INSTALL) | (1u << STORAGE_DLC) | \
+                                 (1u << STORAGE_UPDATE))
+
+// What a title's content of these kinds is worth on a drive.
+inline unsigned long long StorageRemovableBytes(const StorageTitle &t, unsigned kindMask = STORAGE_REMOVABLE_KINDS)
+{
+    unsigned long long total = 0;
+    for (int k = 0; k < STORAGE_KIND_COUNT; ++k)
+    {
+        if (kindMask & STORAGE_REMOVABLE_KINDS & (1u << k))
+            total += t.bytes[k];
+    }
+    return total;
+}
+
+// Deletes a title's content of the given kinds (STORAGE_REMOVABLE_KINDS at
+// most) from one drive: its content-type folders in every content folder
+// the last scan walked there, its Cache\TU_ files, and its folder game. Its
+// saves stay, and so its title folder while they're in it. Refuses system
+// titles. On the UI thread, between scans' reads of the same request - a
+// scan running meanwhile only reads. Adds what was freed to *freed (if
+// given); false if anything couldn't be deleted.
+bool RemoveTitleContent(unsigned long titleId, int drive, unsigned kindMask, unsigned long long *freed);
 
 // Deletes Omni360Staging and Omni360-partial on every drive, whole - the
 // installer and the DLC downloader make them again when they need them. Only
