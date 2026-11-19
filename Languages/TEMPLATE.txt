@@ -875,6 +875,14 @@ CONTENT_INDIE_GAME = Indie game
 
 # ---- Title updates (the game page's Title updates button)
 TU_FIND_MORE_ONLINE = Find more online
+DLC_NONE_INSTALLED = No DLC for this game is installed.
+DLC_INSTALLED_ONE = 1 item installed, {2}. Manage on the game's page removes DLC.
+DLC_INSTALLED = {1} items installed, {2}. Manage on the game's page removes DLC.
+DLC_INSTALLED_HEADING = Installed
+DLC_FROM_ARCHIVE = DLC packs on archive.org. A pack can hold several items; any you already have are skipped.
+DLC_PACK_NOTE = {1}  ·  {2}% name match
+DLC_NOTHING_ONLINE = archive.org has no DLC packs for this game.
+DLC_ARCHIVE_DIDNT_ANSWER = archive.org didn't answer - check the console's connection and try again.
 TU_UNNAMED = Title update
 TU_INSTALLED_NOTE = Installed
 TU_NONE_INSTALLED = No title updates are installed for this game.

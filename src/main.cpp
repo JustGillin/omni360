@@ -1871,6 +1871,200 @@ static void ManageTitleUpdatesHeld(unsigned long titleId, const char *gameName, 
     }
 }
 
+// ---------------------------------------------------------------------------
+// DLC, in dialogs over the game page
+// ---------------------------------------------------------------------------
+//
+// Find DLC: what's installed for the game on every drive, each to delete, and
+// "Find more online" - archive.org's packs for it in the same dialog, one
+// picked downloading on the Queue with its progress followed right there.
+// Back to the installed list afterwards, with what came down in it.
+
+// Up with every removal or download from these dialogs and Storage's pages,
+// so a game page asks the drive again whether there's anything to manage.
+static int g_storageRemovals = 0;
+
+// archive.org's DLC packs for the game, with a progress dialog while it
+// looks; B stops waiting. How many, -1 if archive.org didn't answer, -2 if left.
+static int SearchArchiveDlc(const char *gameName, const char *edition, DlcRarMatch *out, int max)
+{
+    const int id = BeginSearch(SEARCH_DLC, gameName, edition);
+    if (id == 0)
+        return -1;
+    static SearchResult result;
+    int found = -2;
+    BeginProgressDialog();
+    for (;;)
+    {
+        if (TakeSearchResult(id, &result))
+        {
+            found = result.count;
+            for (int i = 0; i < found && i < max; ++i)
+                out[i] = result.packs[i];
+            if (found > max)
+                found = max;
+            break;
+        }
+        RenderProgressDialog(Tr(STR_TU_SEARCHING_ARCHIVE), gameName, NULL, -1.0f, UI_BUTTON_B, TrW(STR_BUTTON_BACK));
+        if (PollUiInput().pressed & XINPUT_GAMEPAD_B)
+            break;
+        Sleep(16);
+    }
+    EndProgressDialog();
+    return found;
+}
+
+// The download queue's newest job for this pack.
+static int FindDlcPackJob(const char *fileName)
+{
+    static QueueJobSnapshot jobs[MAX_QUEUE_JOBS];
+    const int count = SnapshotDownloadQueue(jobs, MAX_QUEUE_JOBS);
+    int id = 0;
+    for (int i = 0; i < count; ++i)
+    {
+        if (jobs[i].kind == QUEUE_JOB_DLC_PACK && strcmp(jobs[i].title, fileName) == 0 && jobs[i].id > id)
+            id = jobs[i].id;
+    }
+    return id;
+}
+
+// The packs on archive.org: one picked is queued and followed. True if
+// something was queued, so the installed list is read again.
+static bool ShowOnlineDlc(unsigned long titleId, const char *gameName, const char *edition, TitleUpdateAuth &auth)
+{
+    static DlcRarMatch packs[MAX_DLC_RAR_MATCHES];
+    const int count = SearchArchiveDlc(gameName, edition, packs, MAX_DLC_RAR_MATCHES);
+    if (count == -2)
+        return false;
+    if (count <= 0)
+    {
+        ShowAlertUI(gameName, Tr(count < 0 ? STR_DLC_ARCHIVE_DIDNT_ANSWER : STR_DLC_NOTHING_ONLINE), NULL, NULL, NULL);
+        return false;
+    }
+
+    static char notes[MAX_DLC_RAR_MATCHES][64];
+    const char *labels[MAX_DLC_RAR_MATCHES];
+    const char *rowNotes[MAX_DLC_RAR_MATCHES];
+    for (int i = 0; i < count; ++i)
+    {
+        char size[24] = "";
+        FormatBytes(packs[i].size, size, sizeof(size));
+        TrFormat(notes[i], sizeof(notes[i]), STR_DLC_PACK_NOTE, size, TrNum(packs[i].score));
+        notes[i][sizeof(notes[i]) - 1] = '\0';
+        labels[i] = packs[i].filename;
+        rowNotes[i] = notes[i];
+    }
+
+    const int picked =
+        ShowAlertListExUI(gameName, Tr(STR_DLC_FROM_ARCHIVE), labels, rowNotes, count, 0, NULL, NULL, true);
+    if (picked < 0)
+        return false;
+    if (!EnsureAuthHeader(*auth.haveAuth, auth.header, auth.headerSize))
+        return false;
+
+    const DlcRarMatch &pack = packs[picked];
+    const EnqueueResult queued = EnqueueDlcPack(pack, gameName, titleId, auth.header);
+    const int jobId = FindDlcPackJob(pack.filename);
+    if ((queued != ENQUEUE_ADDED && queued != ENQUEUE_ALREADY_QUEUED) || jobId == 0)
+    {
+        ShowShellToast(Tr(STR_FILES_QUEUE_FULL), Tr(STR_FILES_TRY_AGAIN_WHEN), UI_TOAST_ERROR);
+        return false;
+    }
+    char heading[200];
+    _snprintf(heading, sizeof(heading), "%s  \xC2\xB7  %s", gameName, Tr(STR_FIND_DLC));
+    heading[sizeof(heading) - 1] = '\0';
+    FollowJobInDialog(heading, jobId);
+    return true;
+}
+
+static void ManageDlcHeld(unsigned long titleId, const char *gameName, const char *edition, TitleUpdateAuth &auth)
+{
+    static StoragePart parts[STORAGE_MAX_PARTS];
+    static int partCount = 0;
+    static char notes[STORAGE_MAX_PARTS][64];
+    const char *labels[STORAGE_MAX_PARTS + 2];
+    const char *rowNotes[STORAGE_MAX_PARTS + 2];
+    int icons[STORAGE_MAX_PARTS + 2];
+    int kinds[STORAGE_MAX_PARTS + 2];
+
+    for (;;)
+    {
+        // Every drive's, only the DLC.
+        static StoragePart all[STORAGE_MAX_PARTS];
+        FreeTitleParts(parts, partCount);
+        partCount = 0;
+        unsigned long long total = 0;
+        for (int d = 0; d < STORAGE_MAX_DRIVES && titleId != 0; ++d)
+        {
+            const int n = ListTitleParts(titleId, d, all, STORAGE_MAX_PARTS);
+            for (int i = 0; i < n; ++i)
+            {
+                if (all[i].kind == STORAGE_DLC && partCount < STORAGE_MAX_PARTS)
+                {
+                    parts[partCount] = all[i];
+                    all[i].art = NULL; // moved
+                    total += parts[partCount].bytes;
+                    partCount++;
+                }
+            }
+            FreeTitleParts(all, n);
+        }
+
+        // Find more online - the one thing to pick - then what's installed,
+        // under its heading, to read. Removing it is Manage's.
+        int rows = 0;
+        labels[rows] = Tr(STR_TU_FIND_MORE_ONLINE);
+        rowNotes[rows] = NULL;
+        icons[rows] = UI_ICON_NONE;
+        kinds[rows++] = ALERT_ROW_PICK;
+        if (partCount > 0)
+        {
+            labels[rows] = Tr(STR_DLC_INSTALLED_HEADING);
+            rowNotes[rows] = NULL;
+            icons[rows] = UI_ICON_NONE;
+            kinds[rows++] = ALERT_ROW_HEADING;
+        }
+        for (int i = 0; i < partCount; ++i, ++rows)
+        {
+            char size[24] = "";
+            FormatBytes(parts[i].bytes, size, sizeof(size));
+            _snprintf(notes[i], sizeof(notes[i]), "%s  \xC2\xB7  %s", size, StorageDriveName(parts[i].drive));
+            notes[i][sizeof(notes[i]) - 1] = '\0';
+            labels[rows] = parts[i].name;
+            rowNotes[rows] = notes[i];
+            icons[rows] = UI_ICON_FILE;
+            kinds[rows] = ALERT_ROW_INFO;
+        }
+
+        char message[160], size[24] = "";
+        FormatBytes(total, size, sizeof(size));
+        if (partCount == 0)
+            TrFormat(message, sizeof(message), STR_DLC_NONE_INSTALLED);
+        else
+            TrCount(message, sizeof(message), STR_DLC_INSTALLED_ONE, STR_DLC_INSTALLED, partCount, size);
+
+        const int picked = ShowAlertListExUI(gameName, message, labels, rowNotes, rows, 0, icons, kinds, false);
+        if (picked != 0)
+            break; // B - the installed rows can't be picked
+        if (ShowOnlineDlc(titleId, gameName, edition, auth))
+            g_storageRemovals++; // the game page looks again
+    }
+    FreeTitleParts(parts, partCount);
+    partCount = 0;
+}
+
+static void ManageDlc(unsigned long titleId, const char *gameName, const char *edition, TitleUpdateAuth &auth)
+{
+    // Every dialog from here over the game page, not each other - as the
+    // title updates' are.
+    HoldDialogBackdrop();
+    if (titleId == 0)
+        ShowOnlineDlc(titleId, gameName, edition, auth); // nothing to look for installed by
+    else
+        ManageDlcHeld(titleId, gameName, edition, auth);
+    ReleaseDialogBackdrop();
+}
+
 // Opens the picker for a game and starts its search. editionName may be NULL:
 // the second name to look under, for a game whose Store entry is named after
 // another game sharing its title ID. See FindDlcRarFilenames.
@@ -6096,7 +6290,6 @@ static StoreInstallState StoreVersionState(const Library &lib, int version, floa
     return STORE_INSTALL_AVAILABLE;
 }
 
-static int g_storageRemovals = 0; // up with every removal from Storage's pages, below
 static const InstalledGame *LibraryGameByTitleId(const Library &lib, unsigned long titleId); // with the game pages
 
 // Whether the game page offers Manage: something of the game - the game,
@@ -11765,8 +11958,16 @@ int main()
                         ManageTitleUpdates(g_storeGame.titleId, g_storeGame.name, edition,
                                            InstalledMediaId(lib, g_storeGame.titleId), auth);
                     }
+                    else if (!updates)
+                    {
+                        // DLC: what's installed and what's online, in
+                        // dialogs over this page.
+                        acted = true;
+                        TitleUpdateAuth auth = { &haveAuth, authHeader, sizeof(authHeader) };
+                        ManageDlc(g_storeGame.titleId, g_storeGame.name, edition, auth);
+                    }
                     else
-                        OpenPicker(shell.picker, updates ? PICKER_TITLE_UPDATE : PICKER_DLC, g_storeGame.name,
+                        OpenPicker(shell.picker, PICKER_TITLE_UPDATE, g_storeGame.name,
                                    g_storeGame.titleId, shell.page, edition);
                 }
                 else if (f == STORE_GAME_FOCUS_BUTTONS + 3 && GamePageManages(lib))

@@ -1102,6 +1102,21 @@ int FilesVisibleRows();
 int ShowAlertListUI(const char *heading, const char *message, const char **labels, const char **notes, int count,
                     int focus, const int *icons = NULL);
 
+// The same, with a kind for each row: a pick (as above), a row that's only
+// there to read - it can be moved onto, to scroll, but A does nothing and
+// its prompt goes - or a heading over the rows after it, which the focus
+// skips. notesBelow puts each note on a line of its own under its label, for
+// labels too long to share a line (archive.org's file names).
+enum AlertRowKind
+{
+    ALERT_ROW_PICK,
+    ALERT_ROW_INFO,
+    ALERT_ROW_HEADING
+};
+
+int ShowAlertListExUI(const char *heading, const char *message, const char **labels, const char **notes, int count,
+                      int focus, const int *icons, const int *kinds, bool notesBelow);
+
 // A run of dialogs opened one from another - a list, then what to do with a
 // row, then its progress - each snapshots the screen behind it, which by
 // then is the dialog before, so they'd stack up dimmed. Holding the page

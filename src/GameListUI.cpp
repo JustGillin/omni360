@@ -4924,9 +4924,13 @@ static D3DTexture *TakeBackdrop(bool *owned)
 // Every alert: the card, its text, and either buttons or - with listCount -
 // a list of rows to pick from inside the card, as the emulator chooser has.
 // Returns the button or row pressed, or -1 for B (0 for a lone OK).
+// A list row's kind (AlertRowKind), and what that lets it do.
+static bool AlertRowPicks(const int *kinds, int i)     { return kinds == NULL || kinds[i] == ALERT_ROW_PICK; }
+static bool AlertRowFocuses(const int *kinds, int i)   { return kinds == NULL || kinds[i] != ALERT_ROW_HEADING; }
+
 static int RunAlert(const char *heading, const char *message, const char *detailLine, int maxMessageLines,
                     const char **labels, int count, const char **rowLabels, const char **rowNotes, int listCount,
-                    int listFocus, const int *rowIcons = NULL)
+                    int listFocus, const int *rowIcons = NULL, const int *rowKinds = NULL, bool notesBelow = false)
 {
     if (!g_Initialized)
         return -1;
@@ -4956,8 +4960,12 @@ static int RunAlert(const char *heading, const char *message, const char *detail
     const int messageLines = hasMessage ? TextWrappedLines(message, textW, 0.9f, maxMessageLines) : 0;
     const int detailLines = hasDetail ? TextWrappedLines(detailLine, textW, 0.76f, 4) : 0;
     const float buttonH = S(ALERT_BUTTON_H);
-    const float rowH = S(ALERT_LIST_ROW_H);
-    const int rowsShown = list ? (listCount < ALERT_LIST_ROWS ? listCount : ALERT_LIST_ROWS) : 0;
+    // Two-line rows are taller, and fewer fit in the same height.
+    const float rowH = notesBelow ? S(ALERT_LIST_ROW_H) * 1.5f : S(ALERT_LIST_ROW_H);
+    int rowsMax = notesBelow ? (int)(ALERT_LIST_ROWS / 1.5f) : ALERT_LIST_ROWS;
+    if (rowsMax < 1)
+        rowsMax = 1;
+    const int rowsShown = list ? (listCount < rowsMax ? listCount : rowsMax) : 0;
     const float footH = list ? rowsShown * rowH : buttonH;
     // Button prompts along the foot for a list dialog only: a dialog of
     // buttons already says what each does on the buttons themselves.
@@ -5004,6 +5012,8 @@ static int RunAlert(const char *heading, const char *message, const char *detail
     const float labelX = rowIcons != NULL ? S(22.0f) + iconSize + S(14.0f) : S(22.0f);
 
     int focus = list ? (listFocus >= 0 && listFocus < listCount ? listFocus : 0) : 0;
+    while (list && focus + 1 < listCount && !AlertRowFocuses(rowKinds, focus))
+        focus++;
     int scroll = 0;
     if (list && focus >= rowsShown)
         scroll = focus - rowsShown + 1;
@@ -5015,7 +5025,7 @@ static int RunAlert(const char *heading, const char *message, const char *detail
     for (;;)
     {
         const UiInput input = PollUiInput();
-        if (input.pressed & XINPUT_GAMEPAD_A)
+        if ((input.pressed & XINPUT_GAMEPAD_A) && (!list || AlertRowPicks(rowKinds, focus)))
         {
             PlayUiSound(list || focus == 0 ? UI_SOUND_SELECT : UI_SOUND_BACK);
             result = focus;
@@ -5030,10 +5040,16 @@ static int RunAlert(const char *heading, const char *message, const char *detail
         int to = focus;
         if (list)
         {
-            if (input.nav == XINPUT_GAMEPAD_DPAD_UP && focus > 0)
-                to = focus - 1;
-            else if (input.nav == XINPUT_GAMEPAD_DPAD_DOWN && focus + 1 < listCount)
-                to = focus + 1;
+            // The next row that takes the focus, past any heading.
+            const int step = input.nav == XINPUT_GAMEPAD_DPAD_UP ? -1 : input.nav == XINPUT_GAMEPAD_DPAD_DOWN ? 1 : 0;
+            for (int i = focus + step; step != 0 && i >= 0 && i < listCount; i += step)
+            {
+                if (AlertRowFocuses(rowKinds, i))
+                {
+                    to = i;
+                    break;
+                }
+            }
         }
         // Left is further from labels[0], right nearer.
         else if (input.nav == XINPUT_GAMEPAD_DPAD_LEFT && focus + 1 < count)
@@ -5048,6 +5064,16 @@ static int RunAlert(const char *heading, const char *message, const char *detail
                 scroll = focus;
             else if (focus >= scroll + rowsShown)
                 scroll = focus - rowsShown + 1;
+            // A heading just above stays in view with its first row.
+            if (focus > 0 && !AlertRowFocuses(rowKinds, focus - 1) && focus - 1 < scroll)
+                scroll = focus - 1;
+            // ...and so do headings and rows above the first that can be
+            // moved onto, which would otherwise never come back into view.
+            bool above = false;
+            for (int i = 0; i < focus && !above; ++i)
+                above = AlertRowFocuses(rowKinds, i);
+            if (!above)
+                scroll = 0;
         }
 
         // Opening: the page dims and the card rises a little into place.
@@ -5079,14 +5105,17 @@ static int RunAlert(const char *heading, const char *message, const char *detail
             {
                 const int i = scroll + r;
                 const float y = footY + r * rowH;
+                if (!AlertRowFocuses(rowKinds, i))
+                    continue; // a heading: its words alone
                 if (i == focus)
                 {
                     FillRound(innerX, y, textW, plateH, 0.0f, Faded(COL_ALERT_BTN_HI, a));
-                    if (t >= 1.0f)
+                    if (t >= 1.0f && AlertRowPicks(rowKinds, i))
                         FocusRing(innerX, y, textW, plateH, 0.0f);
                 }
                 else
-                    FillRound(innerX, y, textW, plateH, 0.0f, Faded(COL_ALERT_BTN, a));
+                    FillRound(innerX, y, textW, plateH, 0.0f,
+                              Faded(AlertRowPicks(rowKinds, i) ? COL_ALERT_BTN : COL_SURFACE_HI, a));
 
                 const int icon = rowIcons != NULL ? NavIconForListIcon(rowIcons[i]) : -1;
                 if (icon >= 0)
@@ -5108,7 +5137,9 @@ static int RunAlert(const char *heading, const char *message, const char *detail
             if (t >= 1.0f)
                 FocusRing(buttonX[focus], footY, buttonW[focus], buttonH, buttonH * 0.5f);
         }
-        for (int i = 0; i < hintCount; ++i)
+        // On a row only there to read, A does nothing - so no A prompt.
+        const int firstHint = (list && !AlertRowPicks(rowKinds, focus)) ? 1 : 0;
+        for (int i = firstHint; i < hintCount; ++i)
             DrawButtonSprite(hints[i].sprite, hints[i].badgeX, hintsY);
 
         TextBegin();
@@ -5128,12 +5159,34 @@ static int RunAlert(const char *heading, const char *message, const char *detail
             {
                 const int i = scroll + r;
                 const float cy = footY + r * rowH + plateH * 0.5f;
+                if (!AlertRowFocuses(rowKinds, i))
+                {
+                    // A heading, low in its row, close over what it heads.
+                    TextMid(innerX, footY + r * rowH + plateH - LineHeight(0.8f) * 0.6f, 0.8f, Faded(COL_TEXT2, a),
+                            rowLabels[i], ATGFONT_TRUNCATED, textW, true);
+                    continue;
+                }
+                const bool hasNote = rowNotes != NULL && rowNotes[i] != NULL;
+                if (notesBelow)
+                {
+                    // The label across the whole row, the note under it.
+                    const float labelH = LineHeight(0.85f) * 1.1f, noteH = LineHeight(0.76f) * 1.1f;
+                    const float top = cy - (labelH + (hasNote ? noteH : 0.0f)) * 0.5f;
+                    TextMid(innerX + labelX, top + labelH * 0.5f, 0.85f, Faded(COL_TEXT, a), rowLabels[i],
+                            ATGFONT_TRUNCATED, textW - labelX - S(22.0f), true);
+                    if (hasNote)
+                        TextMid(innerX + labelX, top + labelH + noteH * 0.5f, 0.76f,
+                                Faded(i == focus ? COL_TEXT : COL_TEXT2, a), rowNotes[i], ATGFONT_TRUNCATED,
+                                textW - labelX - S(22.0f));
+                    continue;
+                }
                 // The label stops short of its note rather than running into it.
                 float labelW = textW - labelX - S(22.0f);
-                if (rowNotes != NULL && rowNotes[i] != NULL)
+                if (hasNote)
                     labelW -= TextWidth(rowNotes[i], 0.76f) + S(20.0f);
-                TextMid(innerX + labelX, cy, 0.85f, Faded(COL_TEXT, a), rowLabels[i], ATGFONT_TRUNCATED, labelW, true);
-                if (rowNotes != NULL && rowNotes[i] != NULL)
+                TextMid(innerX + labelX, cy, 0.85f, Faded(COL_TEXT, a), rowLabels[i], ATGFONT_TRUNCATED, labelW,
+                        AlertRowPicks(rowKinds, i));
+                if (hasNote)
                     TextMid(innerX + textW - S(22.0f), cy, 0.76f, Faded(i == focus ? COL_TEXT : COL_TEXT2, a),
                             rowNotes[i], ATGFONT_RIGHT);
             }
@@ -5156,7 +5209,7 @@ static int RunAlert(const char *heading, const char *message, const char *detail
             const float scale = HINT_LABEL_SCALE * g_M.textScale;
             g_UiFont.SetBold(false);
             g_UiFont.SetScaleFactors(scale, scale);
-            for (int i = 0; i < hintCount; ++i)
+            for (int i = firstHint; i < hintCount; ++i)
                 g_UiFont.DrawText(hints[i].labelX, TextTopForCenter(hintsY, scale), Faded(COL_TEXT2, a),
                                   hints[i].label);
         }
@@ -5182,6 +5235,12 @@ int ShowAlertListUI(const char *heading, const char *message, const char **label
                     int focus, const int *icons)
 {
     return RunAlert(heading, message, NULL, 5, NULL, 0, labels, notes, count, focus, icons);
+}
+
+int ShowAlertListExUI(const char *heading, const char *message, const char **labels, const char **notes, int count,
+                      int focus, const int *icons, const int *kinds, bool notesBelow)
+{
+    return RunAlert(heading, message, NULL, 5, NULL, 0, labels, notes, count, focus, icons, kinds, notesBelow);
 }
 
 // The progress dialog's backdrop, from Begin to End - the held one when a
