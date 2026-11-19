@@ -880,7 +880,12 @@ struct StorageListRowView
     bool leftover;      // DLC or updates with no game - the detail reads amber
     int libraryIndex;   // whose icon, into games; -1 for none
     unsigned long titleId; // whose box art otherwise
+    int artIndex;       // its own picture from SetStoragePartArt, ahead of both; -1 for none
 };
+
+// Pictures for the rows of a game's parts, from each package's PNG: made into
+// textures now, replacing the last set. NULL or empty entries make none.
+void SetStoragePartArt(const unsigned char *const *pngs, const unsigned long *sizes, int count);
 
 struct StorageListView
 {

@@ -429,6 +429,15 @@ bool StartStorageScan(const StorageScanRequest &request)
     return true;
 }
 
+void SetStorageScanFolders(const StorageScanRequest &request)
+{
+    EnsureLock();
+    EnterCriticalSection(&g_lock);
+    if (g_running == 0)
+        g_request = request;
+    LeaveCriticalSection(&g_lock);
+}
+
 bool StorageScanRunning()
 {
     return g_running != 0;
@@ -494,6 +503,39 @@ static bool DeleteTree(const char *path, unsigned long long *freed, int depth)
     if (!RemoveDirectoryA(path) && GetFileAttributesA(path) != INVALID_FILE_ATTRIBUTES)
         ok = false;
     return ok;
+}
+
+// A folder game's path that is a drive's root or a library folder itself -
+// never deleted: a game's own folder is always somewhere under one.
+static bool UnsafeFolderGame(const char *path, const StorageScanRequest &req, char (*roots)[512], int rootCount)
+{
+    char key[512];
+    SameRootKey(path, key, sizeof(key));
+    const char *colon = strchr(key, ':');
+    bool unsafe = colon == NULL || strchr(colon, '\\') == NULL || colon[2] == '\0';
+    for (int r = 0; r < rootCount && !unsafe; ++r)
+        unsafe = _stricmp(roots[r], key) == 0;
+    for (int r = 0; r < req.rootCount && !unsafe; ++r)
+    {
+        char root[512];
+        SameRootKey(req.roots[r], root, sizeof(root));
+        unsafe = _stricmp(root, key) == 0;
+    }
+    return unsafe;
+}
+
+// The last scan's request, and the content folders on one drive from it.
+static int RootsOnDrive(int drive, StorageScanRequest &req, char (*roots)[512])
+{
+    EnsureLock();
+    EnterCriticalSection(&g_lock);
+    req = g_request;
+    LeaveCriticalSection(&g_lock);
+
+    bool present[STORAGE_MAX_DRIVES];
+    for (int d = 0; d < STORAGE_MAX_DRIVES; ++d)
+        present[d] = (d == drive);
+    return ContentRoots(req, roots, present);
 }
 
 bool RemoveTitleContent(unsigned long titleId, int drive, unsigned kindMask, unsigned long long *freed)
@@ -598,21 +640,7 @@ bool RemoveTitleContent(unsigned long titleId, int drive, unsigned kindMask, uns
             if (folder.titleId != titleId || DriveOf(folder.path) != drive)
                 continue;
 
-            // Never a drive's root or a library folder itself - a game's
-            // own folder is always somewhere under one.
-            char key[512];
-            SameRootKey(folder.path, key, sizeof(key));
-            const char *colon = strchr(key, ':');
-            bool unsafe = colon == NULL || strchr(colon, '\\') == NULL || colon[2] == '\0';
-            for (int r = 0; r < rootCount && !unsafe; ++r)
-                unsafe = _stricmp(roots[r], key) == 0;
-            for (int r = 0; r < req.rootCount && !unsafe; ++r)
-            {
-                char root[512];
-                SameRootKey(req.roots[r], root, sizeof(root));
-                unsafe = _stricmp(root, key) == 0;
-            }
-            if (unsafe)
+            if (UnsafeFolderGame(folder.path, req, roots, rootCount))
             {
                 dprintf("[storage] not removing %s - it's a drive or library folder\n", folder.path);
                 ok = false;
@@ -621,6 +649,322 @@ bool RemoveTitleContent(unsigned long titleId, int drive, unsigned kindMask, uns
             const bool removed = DeleteTree(folder.path, freed, 0);
             dprintf("[storage] removed %s%s\n", folder.path, removed ? "" : " - not all of it");
             ok = removed && ok;
+        }
+    }
+    return ok;
+}
+
+// ---------------------------------------------------------------------------
+// One title's parts
+// ---------------------------------------------------------------------------
+
+static void AddPart(StoragePart *out, int max, int &count, StoragePartSource source, StorageKind kind,
+                    unsigned long titleId, int drive, const char *path, const char *fallbackName,
+                    unsigned long long bytes, bool folder)
+{
+    if (count >= max)
+        return;
+    StoragePart &part = out[count++];
+    memset(&part, 0, sizeof(part));
+    part.source = source;
+    part.kind = kind;
+    part.titleId = titleId;
+    part.drive = drive;
+    part.bytes = bytes;
+    part.folder = folder;
+    _snprintf(part.path, sizeof(part.path), "%s", path);
+    part.path[sizeof(part.path) - 1] = '\0';
+
+    // A package names itself; a folder is its name.
+    StfsTitleInfo info;
+    memset(&info, 0, sizeof(info));
+    if (!folder && StfsReadTitleInfo(path, &info))
+    {
+        _snprintf(part.name, sizeof(part.name), "%s", info.displayName);
+        part.art = info.contentThumbnail; // kept: the rest goes
+        part.artSize = info.contentThumbnailSize;
+        info.contentThumbnail = NULL;
+        StfsFreeTitleInfo(&info);
+    }
+    if (part.name[0] == '\0')
+        _snprintf(part.name, sizeof(part.name), "%s", fallbackName);
+    part.name[sizeof(part.name) - 1] = '\0';
+}
+
+static int ComparePartsByKind(const void *a, const void *b)
+{
+    const StoragePart &x = *(const StoragePart *)a;
+    const StoragePart &y = *(const StoragePart *)b;
+    if (x.kind != y.kind)
+        return x.kind < y.kind ? -1 : 1;
+    return _stricmp(x.name, y.name);
+}
+
+const char *StorageDriveName(int drive)
+{
+    return (drive >= 0 && drive < STORAGE_MAX_DRIVES) ? kDrives[drive] : "";
+}
+
+bool StorageTitleHasContent(unsigned long titleId)
+{
+    if ((titleId >> 16) == 0xFFFE || titleId == XNA_RUNTIME_TITLE || titleId == 0)
+        return false;
+    static StorageScanRequest req;
+    char roots[STORAGE_ALL_ROOTS][512];
+    EnsureLock();
+    EnterCriticalSection(&g_lock);
+    req = g_request;
+    LeaveCriticalSection(&g_lock);
+    bool present[STORAGE_MAX_DRIVES];
+    for (int d = 0; d < STORAGE_MAX_DRIVES; ++d)
+        present[d] = true; // a drive that isn't there just finds nothing
+    const int rootCount = ContentRoots(req, roots, present);
+
+    for (int r = 0; r < rootCount; ++r)
+    {
+        char pattern[620];
+        _snprintf(pattern, sizeof(pattern), "%s\\%08lX\\*", roots[r], titleId);
+        pattern[sizeof(pattern) - 1] = '\0';
+        WIN32_FIND_DATAA found;
+        HANDLE h = FindFirstFileA(pattern, &found);
+        if (h == INVALID_HANDLE_VALUE)
+            continue;
+        bool any = false;
+        do
+        {
+            unsigned long contentType = 0;
+            if (!(found.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY) || !ParseHex8(found.cFileName, &contentType) ||
+                !(STORAGE_REMOVABLE_KINDS & (1u << KindOf(titleId, contentType))))
+                continue;
+            char typePattern[640];
+            _snprintf(typePattern, sizeof(typePattern), "%s\\%08lX\\%s\\*", roots[r], titleId, found.cFileName);
+            typePattern[sizeof(typePattern) - 1] = '\0';
+            WIN32_FIND_DATAA inner;
+            HANDLE ih = FindFirstFileA(typePattern, &inner);
+            if (ih == INVALID_HANDLE_VALUE)
+                continue;
+            do
+                any = !IsDots(inner.cFileName);
+            while (!any && FindNextFileA(ih, &inner));
+            FindClose(ih);
+        } while (!any && FindNextFileA(h, &found));
+        FindClose(h);
+        if (any)
+            return true;
+    }
+    for (int f = 0; f < req.folderCount && f < STORAGE_MAX_FOLDERS; ++f)
+    {
+        if (req.folders[f].titleId == titleId && GetFileAttributesA(req.folders[f].path) != INVALID_FILE_ATTRIBUTES)
+            return true;
+    }
+    return false;
+}
+
+void FreeTitleParts(StoragePart *parts, int count)
+{
+    for (int i = 0; parts != NULL && i < count; ++i)
+    {
+        free(parts[i].art);
+        parts[i].art = NULL;
+        parts[i].artSize = 0;
+    }
+}
+
+int ListTitleParts(unsigned long titleId, int drive, StoragePart *out, int max)
+{
+    if (drive < 0 || drive >= STORAGE_MAX_DRIVES || out == NULL || max <= 0)
+        return 0;
+    static StorageScanRequest req;
+    char roots[STORAGE_ALL_ROOTS][512];
+    const int rootCount = RootsOnDrive(drive, req, roots);
+
+    int count = 0;
+    for (int r = 0; r < rootCount; ++r)
+    {
+        if (DriveOf(roots[r]) != drive)
+            continue;
+        char titleDir[600], pattern[620];
+        _snprintf(titleDir, sizeof(titleDir), "%s\\%08lX", roots[r], titleId);
+        titleDir[sizeof(titleDir) - 1] = '\0';
+        _snprintf(pattern, sizeof(pattern), "%s\\*", titleDir);
+        pattern[sizeof(pattern) - 1] = '\0';
+
+        WIN32_FIND_DATAA typeFound;
+        HANDLE th = FindFirstFileA(pattern, &typeFound);
+        if (th == INVALID_HANDLE_VALUE)
+            continue;
+        do
+        {
+            unsigned long contentType = 0;
+            if (!(typeFound.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY) || !ParseHex8(typeFound.cFileName, &contentType))
+                continue;
+            const StorageKind kind = KindOf(titleId, contentType);
+            if (!(STORAGE_REMOVABLE_KINDS & (1u << kind)))
+                continue;
+
+            char typeDir[600];
+            _snprintf(typeDir, sizeof(typeDir), "%s\\%s", titleDir, typeFound.cFileName);
+            typeDir[sizeof(typeDir) - 1] = '\0';
+            _snprintf(pattern, sizeof(pattern), "%s\\*", typeDir);
+            pattern[sizeof(pattern) - 1] = '\0';
+
+            // Each package, with the ".data" folder of parts beside it that
+            // a Games on Demand one has.
+            WIN32_FIND_DATAA found;
+            HANDLE h = FindFirstFileA(pattern, &found);
+            if (h == INVALID_HANDLE_VALUE)
+                continue;
+            do
+            {
+                if (IsDots(found.cFileName))
+                    continue;
+                const bool dir = (found.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY) != 0;
+                const size_t len = strlen(found.cFileName);
+                if (dir && len > 5 && _stricmp(found.cFileName + len - 5, ".data") == 0)
+                    continue; // counted with its package
+                char path[600];
+                _snprintf(path, sizeof(path), "%s\\%s", typeDir, found.cFileName);
+                path[sizeof(path) - 1] = '\0';
+                unsigned long long bytes;
+                if (dir)
+                    bytes = FolderSize(path, NULL);
+                else
+                {
+                    bytes = ((unsigned long long)found.nFileSizeHigh << 32) | found.nFileSizeLow;
+                    char data[620];
+                    _snprintf(data, sizeof(data), "%s.data", path);
+                    data[sizeof(data) - 1] = '\0';
+                    bytes += FolderSize(data, NULL);
+                }
+                AddPart(out, max, count, STORAGE_PART_CONTENT, kind, titleId, drive, path, found.cFileName, bytes, dir);
+            } while (FindNextFileA(h, &found));
+            FindClose(h);
+        } while (FindNextFileA(th, &typeFound));
+        FindClose(th);
+    }
+
+    // Uppercase updates in the shared Cache.
+    char pattern[64];
+    _snprintf(pattern, sizeof(pattern), "%s:\\Cache\\TU_*", kDrives[drive]);
+    pattern[sizeof(pattern) - 1] = '\0';
+    WIN32_FIND_DATAA found;
+    HANDLE h = FindFirstFileA(pattern, &found);
+    if (h != INVALID_HANDLE_VALUE)
+    {
+        do
+        {
+            if (found.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY)
+                continue;
+            char path[600];
+            _snprintf(path, sizeof(path), "%s:\\Cache\\%s", kDrives[drive], found.cFileName);
+            path[sizeof(path) - 1] = '\0';
+            StfsTitleInfo info;
+            memset(&info, 0, sizeof(info));
+            if (!StfsReadTitleInfo(path, &info))
+                continue;
+            const bool ours = info.titleId == titleId;
+            StfsFreeTitleInfo(&info);
+            if (ours)
+                AddPart(out, max, count, STORAGE_PART_CACHE, STORAGE_UPDATE, titleId, drive, path, found.cFileName,
+                        ((unsigned long long)found.nFileSizeHigh << 32) | found.nFileSizeLow, false);
+        } while (FindNextFileA(h, &found));
+        FindClose(h);
+    }
+
+    // Its folder game.
+    for (int f = 0; f < req.folderCount && f < STORAGE_MAX_FOLDERS; ++f)
+    {
+        const StorageFolderGame &folder = req.folders[f];
+        if (folder.titleId != titleId || DriveOf(folder.path) != drive)
+            continue;
+        const char *slash = strrchr(folder.path, '\\');
+        AddPart(out, max, count, STORAGE_PART_FOLDER_GAME, STORAGE_GAME, titleId, drive, folder.path,
+                slash != NULL ? slash + 1 : folder.path, FolderSize(folder.path, NULL), true);
+    }
+
+    if (count > 1)
+        qsort(out, count, sizeof(StoragePart), ComparePartsByKind);
+    return count;
+}
+
+bool RemoveStoragePart(const StoragePart &part, unsigned long long *freed)
+{
+    if (part.drive < 0 || part.drive >= STORAGE_MAX_DRIVES || (part.titleId >> 16) == 0xFFFE ||
+        part.titleId == XNA_RUNTIME_TITLE || !(STORAGE_REMOVABLE_KINDS & (1u << part.kind)))
+        return false;
+
+    static StorageScanRequest req;
+    char roots[STORAGE_ALL_ROOTS][512];
+    const int rootCount = RootsOnDrive(part.drive, req, roots);
+
+    // Only where ListTitleParts would have found it: inside the title's
+    // folder in a content folder on that drive, the Cache's TU_ files, or
+    // the library's folder game for it.
+    bool where = false;
+    if (part.source == STORAGE_PART_CONTENT)
+    {
+        for (int r = 0; r < rootCount && !where; ++r)
+        {
+            char prefix[600];
+            _snprintf(prefix, sizeof(prefix), "%s\\%08lX\\", roots[r], part.titleId);
+            prefix[sizeof(prefix) - 1] = '\0';
+            const size_t n = strlen(prefix);
+            where = DriveOf(roots[r]) == part.drive && _strnicmp(part.path, prefix, n) == 0 &&
+                    strchr(part.path + n, '\\') != NULL && strstr(part.path, "..") == NULL;
+        }
+    }
+    else if (part.source == STORAGE_PART_CACHE)
+    {
+        char prefix[64];
+        _snprintf(prefix, sizeof(prefix), "%s:\\Cache\\TU_", kDrives[part.drive]);
+        prefix[sizeof(prefix) - 1] = '\0';
+        where = _strnicmp(part.path, prefix, strlen(prefix)) == 0 && strchr(part.path + strlen(prefix), '\\') == NULL;
+    }
+    else if (part.source == STORAGE_PART_FOLDER_GAME)
+    {
+        for (int f = 0; f < req.folderCount && f < STORAGE_MAX_FOLDERS && !where; ++f)
+            where = req.folders[f].titleId == part.titleId && _stricmp(req.folders[f].path, part.path) == 0;
+        if (where && UnsafeFolderGame(part.path, req, roots, rootCount))
+            where = false;
+    }
+    if (!where)
+    {
+        dprintf("[storage] not removing %s - not one of the title's parts\n", part.path);
+        return false;
+    }
+
+    bool ok;
+    if (part.folder)
+        ok = DeleteTree(part.path, freed, 0);
+    else
+    {
+        WIN32_FILE_ATTRIBUTE_DATA attrs;
+        const unsigned long long size = GetFileAttributesExA(part.path, GetFileExInfoStandard, &attrs)
+                                            ? ((unsigned long long)attrs.nFileSizeHigh << 32) | attrs.nFileSizeLow : 0;
+        ok = DeleteFileA(part.path) != FALSE;
+        if (ok && freed != NULL)
+            *freed += size;
+        char data[620];
+        _snprintf(data, sizeof(data), "%s.data", part.path);
+        data[sizeof(data) - 1] = '\0';
+        if (ok && GetFileAttributesA(data) != INVALID_FILE_ATTRIBUTES)
+            ok = DeleteTree(data, freed, 0);
+    }
+    dprintf("[storage] removed %s%s\n", part.path, ok ? "" : " - not all of it");
+
+    // Its content-type folder and title folder, if that left them empty.
+    if (part.source == STORAGE_PART_CONTENT)
+    {
+        char dir[600];
+        _snprintf(dir, sizeof(dir), "%s", part.path);
+        dir[sizeof(dir) - 1] = '\0';
+        for (int up = 0; up < 2; ++up)
+        {
+            char *slash = strrchr(dir, '\\');
+            if (slash == NULL)
+                break;
+            *slash = '\0';
+            RemoveDirectoryA(dir); // only goes if nothing's left
         }
     }
     return ok;

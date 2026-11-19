@@ -9540,6 +9540,34 @@ void RenderStorageFrame(StoragePageView &view, const UiHint *hints, int hintCoun
     EndFrame();
 }
 
+// The parts page's own pictures, a package each.
+#define STORAGE_PART_ART_MAX 96
+static Icon g_partArt[STORAGE_PART_ART_MAX];
+static int g_partArtCount = 0;
+
+void SetStoragePartArt(const unsigned char *const *pngs, const unsigned long *sizes, int count)
+{
+    for (int i = 0; i < g_partArtCount; ++i)
+    {
+        if (g_partArt[i].texture != NULL)
+            g_partArt[i].texture->Release();
+        if (g_partArt[i].average != NULL)
+            g_partArt[i].average->Release();
+    }
+    memset(g_partArt, 0, sizeof(g_partArt));
+    g_partArtCount = 0;
+    if (!g_Initialized || pngs == NULL || sizes == NULL)
+        return;
+
+    g_partArtCount = count < STORAGE_PART_ART_MAX ? count : STORAGE_PART_ART_MAX;
+    for (int i = 0; i < g_partArtCount; ++i)
+    {
+        g_partArt[i].aspect = 1.0f;
+        if (pngs[i] != NULL && sizes[i] > 0)
+            CreateIconTexture(pngs[i], sizes[i], &g_partArt[i], "content thumbnail", "storage part");
+    }
+}
+
 // The list: rows shorter than the Queue's cards - a name, a size and one line
 // of what it's made of - with the cover the row's height, and the checkbox
 // at its right end.
@@ -9616,8 +9644,12 @@ void RenderStorageListFrame(StorageListView &view, const UiHint *hints, int hint
         if (on)
             FocusRing(g_M.contentX, y, plateW, plateH, g_M.radius);
 
-        const Icon *icon = (icons != NULL && r.libraryIndex >= 0 && r.libraryIndex < gameCount) ? &icons[r.libraryIndex] : NULL;
-        D3DTexture *boxArt = (r.titleId == INDIE_TITLE_ID) ? IndieTile() : StoreCoverFor(r.titleId);
+        // Its own picture first - a DLC's, say - then the game's.
+        const Icon *own = (r.artIndex >= 0 && r.artIndex < g_partArtCount && g_partArt[r.artIndex].texture != NULL)
+                              ? &g_partArt[r.artIndex] : NULL;
+        const Icon *icon = own != NULL ? own
+                           : (icons != NULL && r.libraryIndex >= 0 && r.libraryIndex < gameCount) ? &icons[r.libraryIndex] : NULL;
+        D3DTexture *boxArt = own != NULL ? NULL : (r.titleId == INDIE_TITLE_ID) ? IndieTile() : StoreCoverFor(r.titleId);
         DrawCoverFlushLeft(boxArt, icon, coverX, y, plateH, g_M.radius);
 
         DrawCheckQuads(checkX, y + plateH * 0.5f, r.checked, false);

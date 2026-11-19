@@ -3223,9 +3223,8 @@ static void FormatKernelVersion(char *out, size_t outSize); // with the System p
 
 // The library's folders and folder games, handed to the scan. False if one
 // is already running.
-static bool BeginStorageScan(const Library &lib, const char *gamesPath)
+static void FillStorageRequest(const Library &lib, const char *gamesPath, StorageScanRequest &request)
 {
-    static StorageScanRequest request; // too big for the stack
     memset(&request, 0, sizeof(request));
     _snprintf(request.roots[request.rootCount++], sizeof(request.roots[0]), "%s", gamesPath);
     for (int p = 0; p < g_moreGamesPathCount && request.rootCount < STORAGE_MAX_ROOTS; ++p)
@@ -3239,7 +3238,26 @@ static bool BeginStorageScan(const Library &lib, const char *gamesPath)
         _snprintf(f.path, sizeof(f.path), "%s", lib.games[i].packagePath);
         f.path[sizeof(f.path) - 1] = '\0';
     }
+}
+
+static bool BeginStorageScan(const Library &lib, const char *gamesPath)
+{
+    static StorageScanRequest request; // too big for the stack
+    FillStorageRequest(lib, gamesPath, request);
     return StartStorageScan(request);
+}
+
+// The library's folders handed to StorageScan whenever the library changes,
+// so a game page can look for its game before Storage was ever opened.
+static void NoteStorageFolders(const Library &lib, const char *gamesPath)
+{
+    static int noted = -1;
+    if (noted == g_libraryGeneration)
+        return;
+    noted = g_libraryGeneration;
+    static StorageScanRequest request;
+    FillStorageRequest(lib, gamesPath, request);
+    SetStorageScanFolders(request);
 }
 
 // A title's name for the scan's log: the library's - which names Original
@@ -4004,6 +4022,15 @@ struct Shell
     int storageListDrive;
     int storageListSelected;
     int storageListScroll;
+
+    // One game's parts over the list (START on a row): whose, on which
+    // drive, and where it is.
+    bool storageParts;
+    unsigned long storagePartsTitle;
+    int storagePartsDrive;
+    int storagePartsSelected;
+    int storagePartsScroll;
+    bool storageFromGame; // opened by a game page's Manage: B goes back to it
 
     // The file manager, in Storage's place while it's open: two folders side
     // by side ("" is the list of drives), which side has focus, and where
@@ -5920,33 +5947,6 @@ static StoreInstallState ArcadeInstallState(const Library &lib, float *outFracti
     return STORE_INSTALL_AVAILABLE;
 }
 
-// Removes a game's own packages - those its RAR held for its title and
-// type. How many were removed.
-static int RemoveArcadePackages(const XblaGame &game)
-{
-    int removed = 0;
-    const char *p = game.files;
-    while (*p != '\0')
-    {
-        const char *space = strchr(p, ' ');
-        const size_t n = (space != NULL) ? (size_t)(space - p) : strlen(p);
-        char file[64], path[512];
-        if (n > 0 && n < sizeof(file))
-        {
-            memcpy(file, p, n);
-            file[n] = '\0';
-            _snprintf(path, sizeof(path), "%s\\%08lX\\%08lX\\%s", g_contentBase, game.titleId, game.contentType, file);
-            path[sizeof(path) - 1] = '\0';
-            if (DeleteFileA(path))
-                removed++;
-        }
-        p += n;
-        while (*p == ' ')
-            p++;
-    }
-    return removed;
-}
-
 // Where one disc of a version is: waiting or running in the game installer,
 // installed, or neither.
 enum StoreDiscProgress
@@ -6096,170 +6096,26 @@ static StoreInstallState StoreVersionState(const Library &lib, int version, floa
     return STORE_INSTALL_AVAILABLE;
 }
 
-// Whether the game page offers Uninstall: something of the chosen version is
-// installed, and none of it is on its way.
-static bool CanUninstallStoreVersion(const Library &lib, const Shell &shell)
+static int g_storageRemovals = 0; // up with every removal from Storage's pages, below
+static const InstalledGame *LibraryGameByTitleId(const Library &lib, unsigned long titleId); // with the game pages
+
+// Whether the game page offers Manage: something of the game - the game,
+// DLC, an update - is on a drive. Looked for on the drive, so DLC for a game
+// played from its disc counts; asked again only when the game, the library
+// or what Storage removed changes, not every frame.
+static bool GamePageManages(const Library &lib)
 {
-    float fraction = 0.0f;
-    bool partial = false;
-    const StoreInstallState state = StoreVersionState(lib, shell.storeVersionChosen, &fraction, &partial);
-    return state == STORE_INSTALL_INSTALLED || (state == STORE_INSTALL_AVAILABLE && partial);
-}
-
-// "<root>\TITLEID\00007000\MEDIAID" split up: the content root, and the
-// media ID - or an Original Xbox package's, "...\00005000\TITLEID", whose
-// name is its title ID. False for a path that is neither.
-static bool ParseGodPackagePath(const char *path, char *root, size_t rootSize, unsigned long *mediaId)
-{
-    const char *name = strrchr(path, '\\');
-    if (name == NULL || strlen(name + 1) != 8)
-        return false;
-    const char *type = name - 9; // "\00007000"
-    if (type < path || (_strnicmp(type, "\\00007000", 9) != 0 && _strnicmp(type, "\\00005000", 9) != 0))
-        return false;
-    const char *title = type - 9; // "\TITLEID"
-    if (title < path || title[0] != '\\')
-        return false;
-    char *end = NULL;
-    *mediaId = strtoul(name + 1, &end, 16);
-    if (end == NULL || *end != '\0')
-        return false;
-
-    size_t n = (size_t)(title - path);
-    if (n >= rootSize)
-        return false;
-    memcpy(root, path, n);
-    root[n] = '\0';
-    return true;
-}
-
-// Every package in a library game's own content-type folder - all the discs
-// of a Games on Demand game, or an arcade game's one package. Its DLC and
-// title updates are in other folders, and stay.
-static int RemoveLibraryGamePackages(const InstalledGame &game)
-{
-    if (game.folder)
-        return RemoveFolderGame(game) > 0 ? 1 : 0; // the folder, every disc in it
-
-    char root[512];
-    unsigned long mediaId = 0;
-    if (!ParseGodPackagePath(game.packagePath, root, sizeof(root), &mediaId))
+    static unsigned long title = 0;
+    static int libraryGeneration = -1, removals = -1;
+    static bool manages = false;
+    if (title != g_storeGame.titleId || libraryGeneration != g_libraryGeneration || removals != g_storageRemovals)
     {
-        // Not Games on Demand: one package file, nothing beside it.
-        return DeleteFileA(game.packagePath) ? 1 : 0;
+        title = g_storeGame.titleId;
+        libraryGeneration = g_libraryGeneration;
+        removals = g_storageRemovals;
+        manages = (title != 0 && (LibraryGameByTitleId(lib, title) != NULL || StorageTitleHasContent(title)));
     }
-
-    // Each disc's header in its folder, by media ID - 00007000, or an
-    // Original Xbox game's 00005000, as its own path says.
-    const char *typeDir = strstr(game.packagePath, "\\00005000\\") != NULL ? "00005000" : "00007000";
-    char folder[600], pattern[620];
-    _snprintf(folder, sizeof(folder), "%s\\%08lX\\%s", root, game.titleId, typeDir);
-    folder[sizeof(folder) - 1] = '\0';
-    _snprintf(pattern, sizeof(pattern), "%s\\*", folder);
-    pattern[sizeof(pattern) - 1] = '\0';
-
-    unsigned long mediaIds[16];
-    int count = 0;
-    WIN32_FIND_DATAA found;
-    HANDLE h = FindFirstFileA(pattern, &found);
-    if (h != INVALID_HANDLE_VALUE)
-    {
-        do
-        {
-            char *end = NULL;
-            unsigned long id = strtoul(found.cFileName, &end, 16);
-            if (!(found.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY) && strlen(found.cFileName) == 8 &&
-                end != NULL && *end == '\0' && count < 16)
-                mediaIds[count++] = id;
-        } while (FindNextFileA(h, &found));
-        FindClose(h);
-    }
-    for (int i = 0; i < count; ++i)
-        GodRemovePackage(root, game.titleId, mediaIds[i]);
-    return count;
-}
-
-// Uninstall on the game page, once confirmed: the chosen version's discs - by
-// the installer's note of each, or for a single disc the library's package -
-// or, for a game the Store hasn't got, everything of it in the library. True
-// if anything was removed.
-static bool UninstallStoreVersion(Shell &shell, const Library &lib, const char *gamesPath)
-{
-    char message[200];
-    TrFormat(message, sizeof(message), STR_REMOVE_FROM_HARD_DRIVE, g_storeGame.name);
-    message[sizeof(message) - 1] = '\0';
-    if (!ShowConfirmUI(Tr(STR_UNINSTALL), message, StoreGameIsIndie() ? Tr(STR_ONLY_ITS_OWN_PACKAGES_ARE)
-                                                                : Tr(STR_ITS_DLC_AND_TITLE_UPDATES), Tr(STR_UNINSTALL)))
-        return false;
-
-    RenderStatusFrame(Tr(STR_UNINSTALLING), g_storeGame.name, NULL);
-
-    int removed = 0;
-    const StoreRelease *release = StoreReleaseOf(&g_storeGame, shell.storeVersionChosen);
-    if (g_storeArcade != NULL)
-    {
-        // Its own packages; for an arcade game installed some other way -
-        // another version - the library's.
-        removed = RemoveArcadePackages(*g_storeArcade);
-        for (int i = 0; removed == 0 && !StoreGameIsIndie() && i < lib.count; ++i)
-        {
-            if (lib.games[i].titleId == g_storeArcade->titleId)
-                removed += RemoveLibraryGamePackages(lib.games[i]);
-        }
-    }
-    else if (release == NULL)
-    {
-        for (int i = 0; i < lib.count; ++i)
-        {
-            if (lib.games[i].titleId == g_storeGame.titleId)
-                removed += RemoveLibraryGamePackages(lib.games[i]);
-        }
-    }
-    else
-    {
-        for (int d = 0; d < release->discCount; ++d)
-        {
-            const StoreDisc *disc = StoreReleaseDisc(release, d);
-            if (disc == NULL)
-                continue;
-
-            unsigned long titleId = 0, mediaId = 0;
-            if (GameZipInstalledAs(disc->zip, &titleId, &mediaId))
-            {
-                GodRemovePackage(gamesPath, titleId, mediaId);
-                ForgetInstalledZip(disc->zip);
-                removed++;
-                continue;
-            }
-            // One the installer didn't note: the library's, for a single disc.
-            for (int i = 0; release->discCount == 1 && disc->titleId != 0 && i < lib.count; ++i)
-            {
-                char root[512];
-                if (lib.games[i].titleId == disc->titleId &&
-                    ParseGodPackagePath(lib.games[i].packagePath, root, sizeof(root), &mediaId))
-                {
-                    GodRemovePackage(root, disc->titleId, mediaId);
-                    removed++;
-                }
-            }
-        }
-
-        // Kept as an extracted folder rather than Games on Demand.
-        for (int i = 0; removed == 0 && i < lib.count; ++i)
-        {
-            if (lib.games[i].folder && lib.games[i].titleId == g_storeGame.titleId)
-                removed += RemoveLibraryGamePackages(lib.games[i]);
-        }
-    }
-
-    dprintf("[store] uninstalled %d package(s) of \"%s\"\n", removed, g_storeGame.name);
-    shell.rescanLibrary = true;
-    shell.stale = true;
-    if (removed > 0)
-        ShowShellToast(Tr(STR_UNINSTALLED), g_storeGame.name, UI_TOAST_SUCCESS);
-    else
-        ShowShellToast(Tr(STR_NOTHING_TO_UNINSTALL), Tr(STR_ITS_PACKAGE_WASNT_WHERE_THE), UI_TOAST_ERROR);
-    return removed > 0;
+    return manages;
 }
 
 // A game's page over the library, by its title ID: as the Store has it - on
@@ -6669,8 +6525,8 @@ static StoreGameView MakeStoreGameView(Shell &shell, const Library &lib)
         view.unavailable = true;
         view.buttonDisabled[1] = view.buttonDisabled[2] = true;
     }
-    if (view.install == STORE_INSTALL_INSTALLED || (view.install == STORE_INSTALL_AVAILABLE && partial))
-        view.buttons[3] = Tr(STR_UNINSTALL); // else not shown
+    if (GamePageManages(lib))
+        view.buttons[3] = Tr(STR_STORAGE_MANAGE_SHORT); // else not shown
 
     view.versions = g_storeVersions;
     view.versionCount = StoreVersionCount();
@@ -6703,7 +6559,7 @@ static bool GamePagePlays(const Shell &shell, const Library &lib)
 static void StepStoreGame(WORD nav, Shell &shell, const Library &lib)
 {
     int &f = shell.storeGameFocus;
-    const int buttons = CanUninstallStoreVersion(lib, shell) ? STORE_GAME_BUTTONS : STORE_GAME_BUTTONS - 1;
+    const int buttons = GamePageManages(lib) ? STORE_GAME_BUTTONS : STORE_GAME_BUTTONS - 1;
 
     if (f < STORE_GAME_FOCUS_SIMILAR)
     {
@@ -7240,6 +7096,7 @@ static unsigned long FocusSignature(const Shell &shell)
         shell.storeFilterOpen, shell.storeFilterFocus, FilterSignature(),
         shell.storeInHomebrew, shell.homebrewRow, shell.homebrewPlace,
         shell.storageColumn, shell.storageRow, shell.sidebarOnStorage, shell.storageList, shell.storageListSelected,
+        shell.storageParts, shell.storagePartsSelected,
         g_shelves[SHELF_APPS].selected, g_shelves[SHELF_HOMEBREW].selected, g_shelves[SHELF_EMULATORS].selected,
     };
     unsigned long hash = 2166136261UL; // FNV-1a
@@ -7553,6 +7410,7 @@ static void EnterStoragePage(Shell &shell, const Library &lib, const char *games
     shell.storageColumn = 0;
     shell.storageRow = 0;
     shell.storageList = false;
+    shell.storageParts = false;
     BeginStorageScan(lib, gamesPath);
 }
 
@@ -9332,6 +9190,7 @@ static StorageListView MakeStorageListView(Shell &shell, const Library &lib)
         v.leftover = r.leftover;
         v.libraryIndex = r.libraryIndex;
         v.titleId = r.titleId;
+        v.artIndex = -1;
         if (r.checked)
         {
             picked++;
@@ -9390,6 +9249,7 @@ static StorageListView MakeStorageListView(Shell &shell, const Library &lib)
 static void OpenStorageList(Shell &shell, int mode, int drive)
 {
     shell.storageList = true;
+    shell.storageParts = false;
     shell.storageListMode = mode;
     shell.storageListDrive = drive;
     shell.storageListSelected = 0;
@@ -9464,6 +9324,7 @@ static bool RemoveTickedStorage(Shell &shell, const Library &lib, const char *ga
         ok = RemoveTitleContent(r.titleId, r.drive, STORAGE_REMOVABLE_KINDS, &freed) && ok;
         r.checked = false;
     }
+    g_storageRemovals++;
 
     char heading[192];
     TrCount(heading, sizeof(heading), STR_STORAGE_REMOVED_ONE, STR_STORAGE_REMOVED_MANY, picked, g_storageRows[first].name);
@@ -10117,6 +9978,308 @@ static int FilesHints(const Shell &shell, UiHint *hints, int hintCount)
     return hintCount;
 }
 
+// ---------------------------------------------------------------------------
+// Storage: one game's parts
+// ---------------------------------------------------------------------------
+//
+// START on a row of the list, as the dashboard's Menu button manages a game:
+// each package of it on that drive - the game, each DLC, each update - to
+// remove one at a time. Read from the drive when it opens and after each
+// removal; not from the snapshot, which only has totals.
+
+static StoragePart g_storageParts[STORAGE_MAX_PARTS];
+static bool g_storagePartChecked[STORAGE_MAX_PARTS];
+static StorageListRowView g_storagePartViews[STORAGE_MAX_PARTS];
+static char g_storagePartDetail[STORAGE_MAX_PARTS][64];
+static char g_storagePartSize[STORAGE_MAX_PARTS][32];
+static int g_storagePartCount = 0;
+static char g_storagePartsName[128];   // the game's
+static int g_storagePartsLibrary = -1; // its library index, for the cover
+
+static void ReadStorageParts(const Shell &shell)
+{
+    RenderStatusFrame(g_storagePartsName, Tr(STR_LOADING), NULL);
+    FreeTitleParts(g_storageParts, g_storagePartCount);
+    // One drive's, or - from a game page - every drive's, a drive at a time.
+    g_storagePartCount = 0;
+    for (int d = 0; d < STORAGE_MAX_DRIVES; ++d)
+    {
+        if (shell.storagePartsDrive >= 0 && shell.storagePartsDrive != d)
+            continue;
+        g_storagePartCount += ListTitleParts(shell.storagePartsTitle, d, g_storageParts + g_storagePartCount,
+                                             STORAGE_MAX_PARTS - g_storagePartCount);
+    }
+
+    static const unsigned char *pngs[STORAGE_MAX_PARTS];
+    static unsigned long sizes[STORAGE_MAX_PARTS];
+    for (int i = 0; i < g_storagePartCount; ++i)
+    {
+        g_storagePartChecked[i] = false;
+        StorageBytes(g_storageParts[i].bytes, g_storagePartSize[i], sizeof(g_storagePartSize[i]));
+        pngs[i] = g_storageParts[i].art;
+        sizes[i] = g_storageParts[i].artSize;
+    }
+    SetStoragePartArt(pngs, sizes, g_storagePartCount);
+}
+
+static void OpenStorageParts(Shell &shell, const StorageListRow &row)
+{
+    shell.storageParts = true;
+    shell.storageFromGame = false;
+    shell.storagePartsTitle = row.titleId;
+    shell.storagePartsDrive = row.drive;
+    shell.storagePartsSelected = 0;
+    shell.storagePartsScroll = 0;
+    _snprintf(g_storagePartsName, sizeof(g_storagePartsName), "%s", row.name);
+    g_storagePartsName[sizeof(g_storagePartsName) - 1] = '\0';
+    g_storagePartsLibrary = row.libraryIndex;
+    ReadStorageParts(shell);
+}
+
+static StorageListView MakeStoragePartsView(const Shell &shell, const Library &lib)
+{
+    static const StringId kKindIds[STORAGE_KIND_COUNT] = { STR_STORAGE_KIND_GAME, STR_STORAGE_KIND_DISC,
+                                                           STR_STORAGE_KIND_DLC, STR_STORAGE_KIND_UPDATE,
+                                                           STR_STORAGE_KIND_GAME, STR_STORAGE_KIND_GAME };
+    static char subtitle[128], pickedCount[48], pickedSize[32];
+    int picked = 0;
+    unsigned long long pickedBytes = 0, total = 0;
+    for (int i = 0; i < g_storagePartCount; ++i)
+    {
+        const StoragePart &part = g_storageParts[i];
+        StorageListRowView &v = g_storagePartViews[i];
+        v.name = part.name;
+        v.size = g_storagePartSize[i];
+        // Which drive too, when they're all listed.
+        if (shell.storagePartsDrive < 0)
+            _snprintf(g_storagePartDetail[i], sizeof(g_storagePartDetail[i]), "%s" STORE_MIDDOT "%s",
+                      Tr(kKindIds[part.kind]), StorageDriveName(part.drive));
+        else
+            _snprintf(g_storagePartDetail[i], sizeof(g_storagePartDetail[i]), "%s", Tr(kKindIds[part.kind]));
+        g_storagePartDetail[i][sizeof(g_storagePartDetail[i]) - 1] = '\0';
+        v.detail = g_storagePartDetail[i];
+        v.checked = g_storagePartChecked[i];
+        v.leftover = false;
+        v.libraryIndex = (g_storagePartsLibrary < lib.count) ? g_storagePartsLibrary : -1;
+        v.titleId = part.titleId;
+        v.artIndex = part.art != NULL ? i : -1;
+        total += part.bytes;
+        if (v.checked)
+        {
+            picked++;
+            pickedBytes += part.bytes;
+        }
+    }
+
+    // "Hdd1 · 9.4 GB"
+    char totalText[32];
+    StorageBytes(total, totalText, sizeof(totalText));
+    // The drives it's on: one, or each that has a part.
+    char device[48] = "";
+    for (int d = 0; d < STORAGE_MAX_DRIVES; ++d)
+    {
+        bool on = (d == shell.storagePartsDrive);
+        for (int i = 0; i < g_storagePartCount && shell.storagePartsDrive < 0 && !on; ++i)
+            on = g_storageParts[i].drive == d;
+        if (!on)
+            continue;
+        const size_t len = strlen(device);
+        _snprintf(device + len, sizeof(device) - len, "%s%s", len > 0 ? ", " : "", StorageDriveName(d));
+    }
+    device[sizeof(device) - 1] = '\0';
+    _snprintf(subtitle, sizeof(subtitle), "%s" STORE_MIDDOT "%s", device, totalText);
+    subtitle[sizeof(subtitle) - 1] = '\0';
+
+    TrCount(pickedCount, sizeof(pickedCount), STR_STORAGE_SELECTED_ONE, STR_STORAGE_SELECTED, picked);
+    StorageBytes(pickedBytes, pickedSize, sizeof(pickedSize));
+
+    StorageListView view;
+    memset(&view, 0, sizeof(view));
+    view.games = lib.games;
+    view.gameCount = lib.count;
+    view.title = g_storagePartsName;
+    view.subtitle = subtitle;
+    view.rows = g_storagePartViews;
+    view.count = g_storagePartCount;
+    view.selected = shell.storagePartsSelected;
+    view.scroll = shell.storagePartsScroll;
+    view.emptyLine = Tr(STR_STORAGE_PARTS_EMPTY);
+    view.pickedCount = pickedCount;
+    view.pickedSize = pickedSize;
+    view.note = Tr(STR_STORAGE_PARTS_NOTE);
+    return view;
+}
+
+// Whether this title has a job still in the queue: its download writes
+// where a removal would delete.
+static bool StorageTitleInQueue(unsigned long titleId)
+{
+    static QueueJobSnapshot jobs[MAX_QUEUE_ROWS];
+    int n = SnapshotDownloadQueue(jobs, MAX_QUEUE_ROWS);
+    n += SnapshotDiscJobs(jobs + n, MAX_QUEUE_ROWS - n);
+    n += SnapshotGameJobs(jobs + n, MAX_QUEUE_ROWS - n);
+    for (int j = 0; j < n; ++j)
+    {
+        if (jobs[j].state != QUEUE_FINISHED && jobs[j].titleId == titleId)
+            return true;
+    }
+    return false;
+}
+
+// Manage on a game page: its parts on every drive, over the page - B comes
+// back to it.
+static void ManageGameStorage(Shell &shell, const Library &lib, const char *gamesPath)
+{
+    BeginStorageScan(lib, gamesPath); // the overview's numbers, for when Storage is next opened
+    shell.storageReturn = shell.page;
+    shell.storageFromGame = true;
+    shell.storageFromRing = false;
+    shell.page = SHELL_PAGE_STORAGE;
+    shell.sidebarFocused = false;
+    shell.storageList = false;
+    shell.storageParts = true;
+    shell.storagePartsTitle = g_storeGame.titleId;
+    shell.storagePartsDrive = -1;
+    shell.storagePartsSelected = 0;
+    shell.storagePartsScroll = 0;
+    const InstalledGame *game = LibraryGameByTitleId(lib, g_storeGame.titleId);
+    g_storagePartsLibrary = game != NULL ? (int)(game - lib.games) : -1;
+    _snprintf(g_storagePartsName, sizeof(g_storagePartsName), "%s", g_storeGame.name != NULL ? g_storeGame.name : "");
+    g_storagePartsName[sizeof(g_storagePartsName) - 1] = '\0';
+    ReadStorageParts(shell);
+}
+
+static void LeaveStorageParts(Shell &shell)
+{
+    shell.storageParts = false;
+    if (shell.storageFromGame)
+    {
+        // The game page it was opened from, still open under it.
+        shell.storageFromGame = false;
+        shell.page = shell.storageReturn;
+        if (g_storagePartCount == 0)
+        {
+            // Nothing left: Manage is gone, and a game the Store hasn't
+            // got has no page without it.
+            shell.storeGameFocus = STORE_GAME_FOCUS_BUTTONS;
+            if (shell.page == SHELL_PAGE_LIBRARY && StoreVersionCount() == 0)
+                shell.libraryInGame = false;
+        }
+    }
+}
+
+// X: the ticked parts removed, once confirmed. True if the screen was taken over.
+static bool RemoveTickedParts(Shell &shell, const Library &lib, const char *gamesPath)
+{
+    int picked = 0, first = -1;
+    unsigned long long bytes = 0;
+    bool game = false;
+    for (int i = 0; i < g_storagePartCount; ++i)
+    {
+        if (!g_storagePartChecked[i])
+            continue;
+        if (first < 0)
+            first = i;
+        picked++;
+        bytes += g_storageParts[i].bytes;
+        game = game || g_storageParts[i].kind == STORAGE_GAME || g_storageParts[i].kind == STORAGE_DISC_INSTALL;
+    }
+    if (picked == 0)
+        return false;
+
+    if (StorageTitleInQueue(shell.storagePartsTitle))
+    {
+        char heading[192];
+        TrFormat(heading, sizeof(heading), STR_STORAGE_IN_QUEUE, g_storagePartsName);
+        ShowShellToast(heading, Tr(STR_STORAGE_IN_QUEUE_DETAIL), UI_TOAST_ERROR);
+        return false;
+    }
+
+    char size[32], message[256];
+    StorageBytes(bytes, size, sizeof(size));
+    TrCount(message, sizeof(message), STR_STORAGE_REMOVE_ONE, STR_STORAGE_REMOVE_PARTS_MANY, picked,
+            g_storageParts[first].name, size);
+    if (!ShowConfirmUI(Tr(STR_STORAGE_REMOVE_HEADING), message, Tr(STR_STORAGE_PARTS_NOTE), Tr(STR_REMOVE)))
+        return true;
+
+    unsigned long long freed = 0;
+    bool ok = true;
+    for (int i = 0; i < g_storagePartCount; ++i)
+    {
+        if (!g_storagePartChecked[i])
+            continue;
+        RenderStatusFrame(Tr(STR_UNINSTALLING), g_storageParts[i].name, NULL);
+        ok = RemoveStoragePart(g_storageParts[i], &freed) && ok;
+    }
+    g_storageRemovals++;
+
+    char heading[192];
+    TrCount(heading, sizeof(heading), STR_STORAGE_REMOVED_ONE, STR_STORAGE_REMOVED_PARTS_MANY, picked,
+            g_storageParts[first].name);
+    StorageBytes(freed, size, sizeof(size));
+    TrFormat(message, sizeof(message), STR_STORAGE_FREED, size);
+    ShowShellToast(ok ? heading : Tr(STR_STORAGE_NOT_ALL_DELETED), message, ok ? UI_TOAST_SUCCESS : UI_TOAST_ERROR);
+
+    if (game)
+        shell.rescanLibrary = true;
+    BeginStorageScan(lib, gamesPath);
+
+    // What's left of it; nothing left, back to where it came from.
+    ReadStorageParts(shell);
+    if (g_storagePartCount == 0)
+        LeaveStorageParts(shell);
+    return true;
+}
+
+static bool StoragePartsInput(Shell &shell, const UiInput &input, const Library &lib, const char *gamesPath)
+{
+    const WORD pressed = input.pressed;
+    if (pressed & XINPUT_GAMEPAD_B)
+    {
+        LeaveStorageParts(shell);
+        return false;
+    }
+    StepSelection(input.nav, g_storagePartCount, shell.storagePartsSelected);
+
+    if ((pressed & XINPUT_GAMEPAD_A) && shell.storagePartsSelected < g_storagePartCount)
+    {
+        g_storagePartChecked[shell.storagePartsSelected] = !g_storagePartChecked[shell.storagePartsSelected];
+        PlayUiSound(UI_SOUND_SELECT);
+    }
+    else if ((pressed & XINPUT_GAMEPAD_Y) && g_storagePartCount > 0)
+    {
+        bool all = true;
+        for (int i = 0; i < g_storagePartCount && all; ++i)
+            all = g_storagePartChecked[i];
+        for (int i = 0; i < g_storagePartCount; ++i)
+            g_storagePartChecked[i] = !all;
+        PlayUiSound(UI_SOUND_SELECT);
+    }
+    else if (pressed & XINPUT_GAMEPAD_X)
+        return RemoveTickedParts(shell, lib, gamesPath);
+    return false;
+}
+
+static int StoragePartsHints(const Shell &shell, UiHint *hints, int hintCount)
+{
+    int picked = 0;
+    bool all = g_storagePartCount > 0;
+    for (int i = 0; i < g_storagePartCount; ++i)
+    {
+        picked += g_storagePartChecked[i] ? 1 : 0;
+        all = all && g_storagePartChecked[i];
+    }
+    if (g_storagePartCount > 0 && shell.storagePartsSelected < g_storagePartCount)
+        hintCount = AddHint(hints, hintCount, UI_BUTTON_A,
+                            g_storagePartChecked[shell.storagePartsSelected] ? TrW(STR_STORAGE_DESELECT) : TrW(STR_SELECT));
+    if (picked > 0)
+        hintCount = AddHint(hints, hintCount, UI_BUTTON_X, TrW(STR_STORAGE_REMOVE_SELECTED), TrW(STR_REMOVE));
+    if (g_storagePartCount > 0)
+        hintCount = AddHint(hints, hintCount, UI_BUTTON_Y, all ? TrW(STR_STORAGE_CLEAR_SELECTION) : TrW(STR_STORAGE_SELECT_ALL));
+    hintCount = AddHint(hints, hintCount, UI_BUTTON_B, TrW(STR_BUTTON_BACK));
+    return hintCount;
+}
+
 // The list's input. True if something took over the screen.
 static bool StorageListInput(Shell &shell, const UiInput &input, const Library &lib, const char *gamesPath)
 {
@@ -10127,6 +10290,13 @@ static bool StorageListInput(Shell &shell, const UiInput &input, const Library &
         return false;
     }
     StepSelection(input.nav, g_storageRowCount, shell.storageListSelected);
+
+    // START, the dashboard's Menu button: the row's game, a part at a time.
+    if ((pressed & XINPUT_GAMEPAD_START) && shell.storageListSelected < g_storageRowCount)
+    {
+        OpenStorageParts(shell, g_storageRows[shell.storageListSelected]);
+        return true;
+    }
 
     if ((pressed & XINPUT_GAMEPAD_A) && shell.storageListSelected < g_storageRowCount)
     {
@@ -10165,6 +10335,8 @@ static int StorageListHints(const Shell &shell, UiHint *hints, int hintCount)
         hintCount = AddHint(hints, hintCount, UI_BUTTON_X, TrW(STR_STORAGE_REMOVE_SELECTED), TrW(STR_REMOVE));
     if (g_storageRowCount > 0)
         hintCount = AddHint(hints, hintCount, UI_BUTTON_Y, all ? TrW(STR_STORAGE_CLEAR_SELECTION) : TrW(STR_STORAGE_SELECT_ALL));
+    if (g_storageRowCount > 0)
+        hintCount = AddHint(hints, hintCount, UI_BUTTON_START, TrW(STR_STORAGE_MANAGE_GAME), TrW(STR_STORAGE_MANAGE_SHORT));
     hintCount = AddHint(hints, hintCount, UI_BUTTON_B, TrW(STR_BUTTON_BACK));
     return hintCount;
 }
@@ -10193,7 +10365,7 @@ static void RenderGamePageFrame(Shell &shell, const Library &lib, UiHint *hints,
         else if (f == STORE_GAME_FOCUS_BUTTONS + 2 && !StoreGameIsIndie() && !StoreGameIsXbox())
             hintCount = AddHint(hints, hintCount, UI_BUTTON_A, TrW(STR_FIND_TITLE_UPDATES), TrW(STR_UPDATES));
         else if (f == STORE_GAME_FOCUS_BUTTONS + 3)
-            hintCount = AddHint(hints, hintCount, UI_BUTTON_A, TrW(STR_UNINSTALL));
+            hintCount = AddHint(hints, hintCount, UI_BUTTON_A, TrW(STR_STORAGE_MANAGE_GAME), TrW(STR_STORAGE_MANAGE_SHORT));
         if (!shell.storeVersionsOpen)
         {
             hintCount = AddHint(hints, hintCount, UI_BUTTON_B, TrW(STR_BUTTON_BACK));
@@ -11079,6 +11251,7 @@ int main()
         }
         PollLibraryRescan(shell, lib, gamesPath);
         PollStorageScan(lib);
+        NoteStorageFolders(lib, gamesPath);
         if (!shell.sidebarFocused)
             shell.sidebarOnStorage = false;
         if (shell.rescanShelves)
@@ -11596,16 +11769,11 @@ int main()
                         OpenPicker(shell.picker, updates ? PICKER_TITLE_UPDATE : PICKER_DLC, g_storeGame.name,
                                    g_storeGame.titleId, shell.page, edition);
                 }
-                else if (f == STORE_GAME_FOCUS_BUTTONS + 3 && CanUninstallStoreVersion(lib, shell))
+                else if (f == STORE_GAME_FOCUS_BUTTONS + 3 && GamePageManages(lib))
                 {
-                    // The confirmation takes over the screen, so resync after.
-                    const bool removed = UninstallStoreVersion(shell, lib, gamesPath);
+                    // Its parts on every drive, a page over this one.
+                    ManageGameStorage(shell, lib, gamesPath);
                     acted = true;
-                    shell.storeGameFocus = STORE_GAME_FOCUS_BUTTONS;
-
-                    // A game the Store hasn't got has no page once it's gone.
-                    if (removed && shell.page == SHELL_PAGE_LIBRARY && StoreVersionCount() == 0)
-                        shell.libraryInGame = false;
                 }
             }
             else if (input.nav != 0)
@@ -11773,6 +11941,7 @@ int main()
         {
             g_filesLibrary = &lib;
             acted = shell.filesOpen     ? FilesInput(shell, input)
+                    : shell.storageParts ? StoragePartsInput(shell, input, lib, gamesPath)
                     : shell.storageList ? StorageListInput(shell, input, lib, gamesPath)
                                         : StoragePageInput(shell, input, lib, gamesPath);
         }
@@ -12436,6 +12605,14 @@ int main()
                 shell.filesSelected[p] = view.panes[p].selected;
                 shell.filesScroll[p] = view.panes[p].scroll;
             }
+        }
+        else if (shell.storageParts)
+        {
+            StorageListView view = MakeStoragePartsView(shell, lib);
+            hintCount = StoragePartsHints(shell, hints, hintCount);
+            RenderStorageListFrame(view, hints, hintCount);
+            shell.storagePartsSelected = view.selected;
+            shell.storagePartsScroll = view.scroll;
         }
         else if (shell.storageList)
         {

@@ -104,6 +104,11 @@ bool StartStorageScan(const StorageScanRequest &request);
 
 bool StorageScanRunning();
 
+// The folders to look in, without a scan - so ListTitleParts and
+// StorageTitleHasContent know the library's folders before the first scan.
+// Left alone while a scan is running: it has them already.
+void SetStorageScanFolders(const StorageScanRequest &request);
+
 // The latest finished scan, held until StorageSnapshotRelease. NULL (and
 // nothing to release) before the first scan has finished.
 const StorageSnapshot *StorageSnapshotAcquire();
@@ -133,6 +138,58 @@ inline unsigned long long StorageRemovableBytes(const StorageTitle &t, unsigned 
 // scan running meanwhile only reads. Adds what was freed to *freed (if
 // given); false if anything couldn't be deleted.
 bool RemoveTitleContent(unsigned long titleId, int drive, unsigned kindMask, unsigned long long *freed);
+
+// One title's parts on one drive, each removable on its own: every package
+// (a Games on Demand disc, an arcade game, each DLC, each title update), an
+// installed disc, a Cache TU_ file, the folder game. Saves aren't listed.
+#define STORAGE_MAX_PARTS 96
+
+enum StoragePartSource
+{
+    STORAGE_PART_CONTENT,     // under a content folder's TITLEID\TYPE\ .
+    STORAGE_PART_CACHE,       // <drive>:\Cache\TU_...
+    STORAGE_PART_FOLDER_GAME  // the library's folder game
+};
+
+struct StoragePart
+{
+    StoragePartSource source;
+    StorageKind kind;
+    unsigned long titleId;
+    int drive;
+    char name[128];  // the package's own display name, else its file name
+    char path[512];
+    unsigned long long bytes; // a package's ".data" folder included
+    bool folder;     // path is a folder, deleted whole
+
+    // The package's own picture - its header's content thumbnail, the one
+    // the dashboard shows beside each DLC. malloc'd PNG, NULL for none;
+    // FreeTitleParts frees it.
+    unsigned char *art;
+    unsigned long artSize;
+};
+
+void FreeTitleParts(StoragePart *parts, int count);
+
+// "Hdd1", "Usb0"... for a drive index; "" for none.
+const char *StorageDriveName(int drive);
+
+// Whether the title has anything removable on any drive - a package of a
+// removable kind in one of its content folders, or its folder game - by
+// looking, not from the snapshot: a handful of directory reads, for the game
+// page to decide whether to offer Manage. Cache TU_ files aren't looked at.
+bool StorageTitleHasContent(unsigned long titleId);
+
+// Read from the drive now, on the caller's thread: it opens each package's
+// header for its name, so a game with dozens of DLC takes a moment. Uses the
+// folders the last scan walked. Sorted by kind, then name.
+int ListTitleParts(unsigned long titleId, int drive, StoragePart *out, int max);
+
+// Deletes one part from ListTitleParts - after checking it's still where
+// that would have found it, so nothing else can be passed in. A package's
+// ".data" folder goes with it, and its type and title folders if that left
+// them empty. Adds what was freed to *freed (if given).
+bool RemoveStoragePart(const StoragePart &part, unsigned long long *freed);
 
 // Deletes Omni360Staging and Omni360-partial on every drive, whole - the
 // installer and the DLC downloader make them again when they need them. Only
