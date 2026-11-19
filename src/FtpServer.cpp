@@ -36,7 +36,8 @@ struct FtpDrive
     const char *alias;
 };
 static const FtpDrive kFtpDrives[] = {
-    { "Hdd1", "Hdd1:" }, { "Usb0", "Usb0:" }, { "Usb1", "Usb1:" }, { "Usb2", "Usb2:" }, { "Game", "game:" },
+    { "Hdd1", "Hdd1:" }, { "HddX", "HddX:" }, { "Usb0", "Usb0:" }, { "Usb1", "Usb1:" }, { "Usb2", "Usb2:" }, { "Game", "game:" },
+    { "Dvd", "Dvd:" }, // the disc in the drive, while there is one - read-only, so writes fail as they should
 };
 #define FTP_DRIVE_COUNT ((int)(sizeof(kFtpDrives) / sizeof(kFtpDrives[0])))
 

@@ -4883,6 +4883,8 @@ static int NavIconForListIcon(int icon)
     case UI_ICON_FOLDER:   return NAV_ICON_FOLDER;
     case UI_ICON_CHECK:    return NAV_ICON_CHECK;
     case UI_ICON_KEYBOARD: return NAV_ICON_KEYBOARD;
+    case UI_ICON_FILE:     return NAV_ICON_FILE;
+    case UI_ICON_DISC:     return NAV_ICON_DISC;
     default:               return -1;
     }
 }
@@ -4924,8 +4926,10 @@ static int RunAlert(const char *heading, const char *message, const char *detail
     const float rowH = S(ALERT_LIST_ROW_H);
     const int rowsShown = list ? (listCount < ALERT_LIST_ROWS ? listCount : ALERT_LIST_ROWS) : 0;
     const float footH = list ? rowsShown * rowH : buttonH;
-    const float hintsH = S(ALERT_HINTS_H);
-    const float hintsGap = S(ALERT_HINTS_GAP);
+    // Button prompts along the foot for a list dialog only: a dialog of
+    // buttons already says what each does on the buttons themselves.
+    const float hintsH = list ? S(ALERT_HINTS_H) : 0.0f;
+    const float hintsGap = list ? S(ALERT_HINTS_GAP) : 0.0f;
     const float cardH = pad + titleH + S(12.0f) + messageLines * messageLineH +
                         (hasDetail ? S(8.0f) + detailLines * detailLineH : 0.0f) + S(24.0f) + footH + hintsGap +
                         hintsH + pad;
@@ -4946,18 +4950,17 @@ static int RunAlert(const char *heading, const char *message, const char *detail
         right = buttonX[i] - gap;
     }
 
-    // The buttons that work here, along the card's foot as every page has
-    // them: A and B for a list or a choice, A alone for a lone OK - B does
-    // the same there, so it isn't another choice to offer.
+    // A list dialog's buttons, along its foot as every page has them.
     ButtonHint hints[2];
     int hintCount = 0;
-    hints[hintCount].sprite = SpriteForButton(UI_BUTTON_A);
-    hints[hintCount++].label = TrW((list || count > 1) ? STR_SELECT : STR_BUTTON_OK);
-    if (list || count > 1)
+    if (list)
     {
+        hints[hintCount].sprite = SpriteForButton(UI_BUTTON_A);
+        hints[hintCount++].label = TrW(STR_SELECT);
         hints[hintCount].sprite = SpriteForButton(UI_BUTTON_B);
-        hints[hintCount++].label = TrW(list ? STR_BUTTON_BACK : STR_BUTTON_CANCEL);
+        hints[hintCount++].label = TrW(STR_BUTTON_BACK);
     }
+    if (hintCount > 0)
     {
         const float width = LayoutButtonHints(hints, hintCount, 0.0f);
         LayoutButtonHints(hints, hintCount, cardX + cardW - pad - width);
@@ -9190,12 +9193,20 @@ struct StorageLayout
     bool legend; // room for the legend under each card's bar
 };
 
-static StorageLayout LayOutStorage(int driveCount)
+static StorageLayout LayOutStorage(int driveCount, int actionCount)
 {
     StorageLayout l;
     l.top = g_M.listY;
     l.actionGap = S(12.0f);
     l.actionRowH = S(84.0f);
+    // Shorter rows rather than ones that run into the footer, as more
+    // actions join the column.
+    if (actionCount > 0)
+    {
+        const float fit = (g_M.footerY - S(30.0f) - l.top - l.actionGap * (actionCount - 1)) / actionCount;
+        if (fit < l.actionRowH)
+            l.actionRowH = fit;
+    }
     l.actionsX = g_M.contentX;
     l.actionsW = g_M.contentW * 0.36f;
     l.drivesX = l.actionsX + l.actionsW + S(28.0f);
@@ -9246,7 +9257,7 @@ void RenderStorageFrame(StoragePageView &view, const UiHint *hints, int hintCoun
     if (view.row > rows - 1) view.row = rows - 1;
     if (view.row < 0) view.row = 0;
 
-    const StorageLayout l = LayOutStorage(driveCount);
+    const StorageLayout l = LayOutStorage(driveCount, actionCount);
     const float r = StorageRingRadius(l);
     const float textX = StorageTextX(l);
     const float right = l.drivesX + l.drivesW - S(24.0f);
@@ -9537,6 +9548,150 @@ void RenderStorageListFrame(StorageListView &view, const UiHint *hints, int hint
     }
     if (view.note != NULL)
         TextWrapped(px, py, 0.72f, COL_DIM, view.note, pw, LineHeight(0.72f) * 1.25f, 8);
+
+    g_UiFont.SetBold(false);
+    g_UiFont.SetScaleFactors(1.0f, 1.0f);
+    g_UiFont.End();
+
+    EndFrame();
+}
+
+// ---------------------------------------------------------------------------
+// The file manager
+// ---------------------------------------------------------------------------
+
+static float FilesRowH() { return S(46.0f); }
+static float FilesRowGap() { return S(4.0f); }
+static float FilesPathH() { return S(44.0f); }
+
+int FilesVisibleRows()
+{
+    if (!g_Initialized)
+        return 8;
+    const float top = g_M.listY + FilesPathH() + S(10.0f);
+    const float bottom = g_M.footerY - S(30.0f);
+    const int rows = (int)((bottom - top + FilesRowGap()) / (FilesRowH() + FilesRowGap()));
+    return rows > 1 ? rows : 1;
+}
+
+void RenderFilesFrame(FilesPageView &view, const UiHint *hints, int hintCount)
+{
+    if (!g_Initialized)
+        return;
+
+    const float gap = S(24.0f);
+    const float paneW = (g_M.contentW - gap) * 0.5f;
+    const float pathY = g_M.listY;
+    const float listTop = pathY + FilesPathH() + S(10.0f);
+    const float rowH = FilesRowH();
+    const float pitch = rowH + FilesRowGap();
+    const int visibleRows = FilesVisibleRows();
+    const float iconSize = S(24.0f);
+
+    for (int p = 0; p < 2; ++p)
+    {
+        FilesPaneView &pane = view.panes[p];
+        if (pane.count < 0)
+            pane.count = 0;
+        KeepSelectionVisible(pane.count, visibleRows, pane.selected, pane.scroll);
+    }
+
+    BeginFrame();
+    const bool showToast = ToastVisibleThisFrame();
+    ButtonHint footer[MAX_FOOTER_HINTS];
+    const int footerCount = LayoutFooter(hints, hintCount, footer);
+
+    // --- Pass 1: quads ---
+    DrawFrameBase(false);
+    for (int p = 0; p < 2; ++p)
+    {
+        const FilesPaneView &pane = view.panes[p];
+        const bool focusedPane = (p == view.focusedPane);
+        const float x = g_M.contentX + p * (paneW + gap);
+        const bool showScroll = pane.count > visibleRows;
+        const float rowW = paneW - (showScroll ? ScrollGutter() : 0.0f);
+
+        // The path, on a band that's brighter on the pane with focus.
+        FillRound(x, pathY, paneW, FilesPathH(), 0.0f, focusedPane ? COL_SURFACE_HI : COL_SURFACE);
+        if (focusedPane)
+            FillRound(x, pathY + FilesPathH() - S(3.0f), paneW, S(3.0f), 0.0f, COL_GREEN);
+
+        for (int r = 0; r < visibleRows; ++r)
+        {
+            const int i = pane.scroll + r;
+            if (i >= pane.count)
+                break;
+            const float y = listTop + r * pitch;
+            const bool on = (i == pane.selected);
+            FillRound(x, y, rowW, rowH, 0.0f, on && focusedPane ? COL_SURFACE_HI : COL_SURFACE);
+            if (on && focusedPane)
+                FocusRing(x, y, rowW, rowH, 0.0f);
+            else if (on)
+                StrokeRound(x, y, rowW, rowH, 0.0f, S(2.0f), 0x59FFFFFF); // where the other side is
+
+            // A ticked row: a green edge, and the tick where its icon was.
+            const bool marked = pane.marked != NULL && pane.marked[i];
+            if (marked)
+                FillRound(x, y, S(4.0f), rowH, 0.0f, COL_GREEN);
+            const int icon = marked ? NAV_ICON_CHECK : pane.icons != NULL ? NavIconForListIcon(pane.icons[i]) : -1;
+            if (icon >= 0)
+                DrawNavIcon(icon, x + S(18.0f) + iconSize * 0.5f, y + rowH * 0.5f, iconSize,
+                            marked ? COL_GREEN : on && focusedPane ? COL_TEXT : COL_TEXT2);
+        }
+        if (showScroll)
+        {
+            // The scrollbar sits in the gutter at the pane's own right edge.
+            const float saveX = g_M.contentX, saveW = g_M.contentW;
+            g_M.contentX = x;
+            g_M.contentW = paneW;
+            DrawScrollbar(listTop, visibleRows * pitch - FilesRowGap(), pane.count, visibleRows, pane.scroll);
+            g_M.contentX = saveX;
+            g_M.contentW = saveW;
+        }
+    }
+    DrawButtonHintShapes(footer, footerCount, g_M.footerY);
+    DrawHeaderQuads(showToast);
+
+    // --- Pass 2: text ---
+    g_UiFont.Begin();
+    DrawHeaderText(view.title, view.subtitle, showToast);
+    DrawButtonHintText(footer, footerCount, g_M.footerY);
+
+    for (int p = 0; p < 2; ++p)
+    {
+        const FilesPaneView &pane = view.panes[p];
+        const bool focusedPane = (p == view.focusedPane);
+        const float x = g_M.contentX + p * (paneW + gap);
+        const bool showScroll = pane.count > visibleRows;
+        const float rowW = paneW - (showScroll ? ScrollGutter() : 0.0f);
+
+        TextMid(x + S(18.0f), pathY + FilesPathH() * 0.5f, 0.85f, focusedPane ? COL_TEXT : COL_TEXT2,
+                pane.path != NULL ? pane.path : "", ATGFONT_TRUNCATED, paneW - S(36.0f), true);
+
+        if (pane.count == 0 && pane.emptyLine != NULL)
+            TextFit(x + S(18.0f), listTop + S(12.0f), 0.8f, COL_DIM, pane.emptyLine, paneW - S(36.0f));
+
+        const float nameX = x + S(18.0f) + iconSize + S(14.0f);
+        for (int r = 0; r < visibleRows; ++r)
+        {
+            const int i = pane.scroll + r;
+            if (i >= pane.count)
+                break;
+            const float cy = listTop + r * pitch + rowH * 0.5f;
+            const bool on = (i == pane.selected) && focusedPane;
+            float nameRight = x + rowW - S(18.0f);
+            const char *size = pane.sizes != NULL ? pane.sizes[i] : NULL;
+            if (size != NULL && size[0] != '\0')
+            {
+                TextMid(nameRight, cy, 0.72f, on ? COL_TEXT : COL_DIM, size, ATGFONT_RIGHT);
+                nameRight -= TextWidth(size, 0.72f) + S(16.0f);
+            }
+            if (on)
+                MarqueeTextMid(nameX, cy, 0.85f, COL_TEXT, pane.names[i], nameRight - nameX, false);
+            else
+                TextMid(nameX, cy, 0.85f, COL_TEXT2, pane.names[i], ATGFONT_TRUNCATED, nameRight - nameX);
+        }
+    }
 
     g_UiFont.SetBold(false);
     g_UiFont.SetScaleFactors(1.0f, 1.0f);

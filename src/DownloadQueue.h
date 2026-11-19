@@ -31,7 +31,8 @@ enum QueueJobKind
     QUEUE_JOB_TITLE_UPDATE,
     QUEUE_JOB_DISC_INSTALL, // not this queue's: DiscWorker's, in the same terms so the Queue page lists both
     QUEUE_JOB_GAME_INSTALL, // likewise GameInstaller's
-    QUEUE_JOB_HOMEBREW      // an app, homebrew game or emulator from the ConsoleMods repo
+    QUEUE_JOB_HOMEBREW,     // an app, homebrew game or emulator from the ConsoleMods repo
+    QUEUE_JOB_FILE          // FileJobs.h's: a copy, move or delete from the file manager
 };
 
 enum QueueJobState

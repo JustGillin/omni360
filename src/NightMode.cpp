@@ -9,6 +9,7 @@ DESCRIPTION : Waiting for the queues to drain overnight and then switching the
 #include "DownloadQueue.h"
 #include "GameInstaller.h"
 #include "DiscWorker.h"
+#include "FileJobs.h"
 #include "OutputConsole.h"
 
 #include <xtl.h>
@@ -70,7 +71,7 @@ int RunningJobCount()
     // A disc install has no pause - there is nothing to keep and nothing to
     // carry on from - so every one of its pending jobs is one that will
     // finish.
-    return RunnableDownloadCount() + RunnableGameJobCount() + PendingDiscJobCount();
+    return RunnableDownloadCount() + RunnableGameJobCount() + PendingDiscJobCount() + PendingFileJobCount();
 }
 
 NightState GetNightState()

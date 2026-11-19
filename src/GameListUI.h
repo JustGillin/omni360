@@ -1050,8 +1050,45 @@ enum UiListIcon
     UI_ICON_USB,      // a USB drive
     UI_ICON_FOLDER,
     UI_ICON_CHECK,    // "this one" - Use this folder
-    UI_ICON_KEYBOARD  // typing instead - Type a path
+    UI_ICON_KEYBOARD, // typing instead - Type a path
+    UI_ICON_FILE,
+    UI_ICON_DISC      // the disc in the drive
 };
+
+// ---------------------------------------------------------------------------
+// The file manager: two folders side by side
+// ---------------------------------------------------------------------------
+//
+// Opened from Storage. Each pane is a folder - or, at the top, the drives -
+// as a list of rows: an icon, the name, a file's size on the right. One pane
+// has focus at a time; the other keeps its place, ringed faintly, as the
+// destination of a copy or move.
+
+struct FilesPaneView
+{
+    const char *path;          // over the list: "Hdd1:\Games", or "Drives" at the top
+    const char *const *names;  // per row
+    const char *const *sizes;  // per row, or NULL entries: a file's size, a drive's free space
+    const int *icons;          // per row, a UiListIcon
+    const bool *marked;        // per row, or NULL: ticked for Actions - a green tick in the icon's place
+    int count;
+    int selected;
+    int scroll;                // the first row shown; the Render call moves it
+    const char *emptyLine;     // in the rows' place when there are none
+};
+
+struct FilesPageView
+{
+    const char *title;
+    const char *subtitle;
+    FilesPaneView panes[2];
+    int focusedPane;
+};
+
+void RenderFilesFrame(FilesPageView &view, const UiHint *hints, int hintCount);
+
+// How many rows a pane shows at once - for LB/RB to page by.
+int FilesVisibleRows();
 
 // The same card holding a list to pick from: up and down move, the rest
 // scroll, A picks - returning the row - and B returns -1. Each row is a bold

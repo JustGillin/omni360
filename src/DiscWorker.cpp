@@ -76,6 +76,24 @@ static void ResetSpindleSpeed(const char *when, bool settle)
         Sleep(SPINDLE_SETTLE_MS);
 }
 
+// The file manager copying off the disc (FileJobs.cpp): the install's speed
+// for the copy, and the quiet one after - unless an install is still reading
+// the disc, which put it up itself and puts it back when it's done.
+void SpinDiscForCopy()
+{
+    const DWORD speed = (DWORD)g_spindleSpeed;
+    const DWORD result = XamSetDvdSpindleSpeed(speed);
+    dprintf("[disc] spindle to speed %lu for a file copy -> 0x%08lX\n", (unsigned long)speed, (unsigned long)result);
+    Sleep(SPINDLE_SETTLE_MS);
+}
+
+void QuietDiscAfterCopy()
+{
+    if (PendingDiscJobCount() > 0)
+        return;
+    ResetSpindleSpeed("after a file copy", false);
+}
+
 #define TRAY_POLL_MS        500
 #define SETTLE_MS           2500   // after the tray moves, before reading the disc
 // How long after the tray moves a disc that won't read yet keeps being tried.

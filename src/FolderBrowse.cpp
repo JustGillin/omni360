@@ -11,9 +11,21 @@ DESCRIPTION : Lists drives and folders for browsing - see FolderBrowse.h.
 #include <stdlib.h>
 #include <string.h>
 
-// The ones main.cpp mounts at start (MountDrives): the hard drive, then the
-// three USB ports by Aurora's names.
-static const char *const kDrives[] = { "Hdd1:", "Usb0:", "Usb1:", "Usb2:" };
+// The ones main.cpp mounts at start (MountDrives): the hard drive, the
+// three USB ports by Aurora's names, and the disc drive last.
+static const char *const kDrives[] = { "Hdd1:", "HddX:", "Usb0:", "Usb1:", "Usb2:", "Dvd:" };
+
+// HddX: the Original Xbox emulator's partition (XboxCompat.h mounts it) -
+// worth reaching to swap emulator files, nowhere to keep a library.
+static bool IsCompatPath(const char *path)
+{
+    return path != NULL && _strnicmp(path, "HddX:", 5) == 0;
+}
+
+bool IsDiscPath(const char *path)
+{
+    return path != NULL && _strnicmp(path, "Dvd:", 4) == 0;
+}
 
 const char *DriveKind(const char *drive)
 {
@@ -21,14 +33,20 @@ const char *DriveKind(const char *drive)
         return Tr(STR_HARD_DRIVE);
     if (_strnicmp(drive, "Usb", 3) == 0)
         return Tr(STR_USB_DRIVE);
+    if (IsDiscPath(drive))
+        return Tr(STR_DISC_DRIVE);
+    if (IsCompatPath(drive))
+        return Tr(STR_COMPAT_DRIVE);
     return NULL;
 }
 
-int ListDrives(FolderEntry *out, int max)
+int ListDrives(FolderEntry *out, int max, bool all)
 {
     int count = 0;
     for (int i = 0; i < (int)(sizeof(kDrives) / sizeof(kDrives[0])) && count < max; ++i)
     {
+        if (!all && (IsDiscPath(kDrives[i]) || IsCompatPath(kDrives[i])))
+            continue;
         // A port with nothing in it is mounted all the same, and reads as
         // missing here - which is what leaves it out.
         char root[16];

@@ -206,6 +206,28 @@ def icon_folder(d):
            fill=255, width=int(round(px(STROKE))), joint="curve")
 
 
+def icon_file(d):
+    """A file: a page with its top right corner folded over."""
+    x0, y0, x1, y1 = box()
+    w = (x1 - x0) * 0.70
+    left = (x0 + x1) * 0.5 - w * 0.5
+    right = left + w
+    fold = w * 0.34
+    d.line([(right - fold, y0), (left + px(3.0), y0), (left, y0 + px(3.0)), (left, y1 - px(3.0)),
+            (left + px(3.0), y1), (right - px(3.0), y1), (right, y1 - px(3.0)), (right, y0 + fold),
+            (right - fold, y0), (right - fold, y0 + fold), (right, y0 + fold)],
+           fill=255, width=int(round(px(STROKE))), joint="curve")
+
+
+def icon_disc(d):
+    """A disc: a ring with the hole in its middle."""
+    x0, y0, x1, y1 = box()
+    cx, cy = (x0 + x1) * 0.5, (y0 + y1) * 0.5
+    r = (x1 - x0) * 0.5
+    ring(d, cx, cy, r - px(STROKE * 0.5))
+    ring(d, cx, cy, r * 0.28)
+
+
 def icon_check(d):
     """A tick: this one."""
     x0, y0, x1, y1 = box()
@@ -241,6 +263,8 @@ ICONS = [
     ("FOLDER", icon_folder),
     ("CHECK", icon_check),
     ("KEYBOARD", icon_keyboard),
+    ("FILE", icon_file),
+    ("DISC", icon_disc),
 ]
 
 

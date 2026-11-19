@@ -23,8 +23,14 @@ struct FolderEntry
 };
 
 // The drives worth browsing that are there right now: the hard drive and
-// each USB port with a FAT32 drive in it. Returns how many.
-int ListDrives(FolderEntry *out, int max);
+// each USB port with a FAT32 drive in it - and, with all, the Original Xbox
+// emulator's partition (HddX:) and the disc in the drive (Dvd:), which can
+// be read but not written. The folder picker leaves those two out: neither
+// is somewhere to keep a library. Returns how many.
+int ListDrives(FolderEntry *out, int max, bool all = false);
+
+// Dvd: - the one drive nothing can be written to.
+bool IsDiscPath(const char *path);
 
 // What's in path, folders first and then (with files) files, each A to Z
 // ignoring case. Returns how many, or -1 if the folder couldn't be read.
@@ -36,7 +42,7 @@ int ListFolder(const char *path, bool files, FolderEntry *out, int max);
 bool FolderChild(const char *path, const char *name, char *out, size_t outSize);
 void FolderParent(const char *path, char *out, size_t outSize);
 
-// "Hard drive" or "USB drive", for a drive's alias - the words a list puts
+// "Hard drive", "USB drive" or "Disc", for a drive's alias - the words a list puts
 // under it. NULL for one it doesn't know.
 const char *DriveKind(const char *drive);
 

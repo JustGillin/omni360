@@ -50,6 +50,7 @@ end-to-end on real hardware against a real 27-game library.
 #include "GameMarks.h"   // favourites and renamed games
 #include "FolderBrowse.h" // drives and folders, for the folder picker
 #include "FtpServer.h"   // the drives over FTP, while the setting is on
+#include "FileJobs.h"    // the file manager's copies, moves and deletes
 #include "UpdateCheck.h"
 #include "ArchiveOrgDLC.h"
 #include "downloadFile.h" // DownloadProgressFn + FormatBytes, for the progress callback
@@ -161,12 +162,16 @@ bool CheckGameMounted()
     // a USB drive formatted FAT32. A port with nothing in it just reads as
     // empty. (A drive the dashboard formatted as Xbox storage keeps its
     // files inside a container these don't reach.)
+    //
+    // And the disc drive, for the file manager and FTP to read a disc's
+    // files - empty while there's no disc. Launching a disc mounts the same.
     static const char *const usbDrives[][2] = {
         { "Usb0:", "\\Device\\Mass0" },
         { "Usb1:", "\\Device\\Mass1" },
         { "Usb2:", "\\Device\\Mass2" },
+        { "Dvd:", "\\Device\\Cdrom0" },
     };
-    for (int i = 0; i < 3; ++i)
+    for (int i = 0; i < (int)(sizeof(usbDrives) / sizeof(usbDrives[0])); ++i)
         mount(usbDrives[i][0], (char *)usbDrives[i][1]);
 
     return true;
@@ -3460,7 +3465,7 @@ static void WaitForExit()
 // ---------------------------------------------------------------------------
 
 // Downloads and disc installs, on one Queue page.
-#define MAX_QUEUE_ROWS (MAX_QUEUE_JOBS + MAX_DISC_JOBS + MAX_GAME_JOBS)
+#define MAX_QUEUE_ROWS (MAX_QUEUE_JOBS + MAX_DISC_JOBS + MAX_GAME_JOBS + 64) // 64: FileJobs.cpp's MAX_FILE_JOBS
 
 // One tile of the Queue page's "Recently installed" row. The name is kept
 // rather than pointed at, because the job it came from is removed the
@@ -3547,6 +3552,16 @@ struct Shell
     int storageListDrive;
     int storageListSelected;
     int storageListScroll;
+
+    // The file manager, in Storage's place while it's open: two folders side
+    // by side ("" is the list of drives), which side has focus, and where
+    // each is. filesStale lists them again - after a copy or move finishes.
+    bool filesOpen;
+    bool filesStale;
+    int filesPane;
+    char filesPath[2][MAX_TEXT_LENGTH];
+    int filesSelected[2];
+    int filesScroll[2];
 
     // The disc in the drive, as the library's first tile - see UpdateDisc.
     // librarySelected counts it: with a disc, 0 is the disc and game i is
@@ -5853,7 +5868,7 @@ static const InstalledGame *LibraryGameByTitleId(const Library &lib, unsigned lo
 // still to do. True to go ahead.
 static bool ConfirmLeaving()
 {
-    int pending = PendingDownloadCount() + PendingDiscJobCount() + PendingGameJobCount();
+    int pending = PendingDownloadCount() + PendingDiscJobCount() + PendingGameJobCount() + PendingFileJobCount();
     if (pending == 0)
         return true;
 
@@ -6054,7 +6069,7 @@ static ExitAction g_exitAction = EXIT_NONE;
 
 static bool ExitMenu()
 {
-    const int pending = PendingDownloadCount() + PendingDiscJobCount() + PendingGameJobCount();
+    const int pending = PendingDownloadCount() + PendingDiscJobCount() + PendingGameJobCount() + PendingFileJobCount();
 
     char message[96];
     if (pending > 0)
@@ -6833,7 +6848,7 @@ static void PublishSidebar(const Shell &shell, const Library &lib)
     sidebar.emulatorsCount = g_shelvesRead ? g_shelves[SHELF_EMULATORS].count : 0;
     for (int p = 0; p < SHELL_PAGE_COUNT; ++p)
         sidebar.hidden[p] = PageHidden((ShellPage)p);
-    sidebar.queueCount = PendingDownloadCount() + PendingDiscJobCount() + PendingGameJobCount();
+    sidebar.queueCount = PendingDownloadCount() + PendingDiscJobCount() + PendingGameJobCount() + PendingFileJobCount();
     sidebar.storageUsed = shell.storage.used;
     strncpy(sidebar.storageLabel, shell.storage.label, sizeof(sidebar.storageLabel) - 1);
     sidebar.storageLabel[sizeof(sidebar.storageLabel) - 1] = '\0';
@@ -6881,6 +6896,7 @@ enum StorageAction
     STORAGE_ACTION_PARTIALS,
     STORAGE_ACTION_LEFTOVERS,
     STORAGE_ACTION_RESCAN,
+    STORAGE_ACTION_FILES,   // the file manager
     STORAGE_ACTION_COUNT
 };
 
@@ -7053,6 +7069,10 @@ static StoragePageView MakeStorageView(const Shell &shell)
     v.actions[a].quiet = measuring;
     TrFormat(v.actionDetail[a], sizeof(v.actionDetail[a]), measuring ? STR_STORAGE_MEASURING : STR_STORAGE_RESCAN_DETAIL);
 
+    a = STORAGE_ACTION_FILES;
+    v.actions[a].label = Tr(STR_FILES_BROWSE);
+    TrFormat(v.actionDetail[a], sizeof(v.actionDetail[a]), STR_FILES_BROWSE_DETAIL);
+
     for (int i = 0; i < STORAGE_ACTION_COUNT; ++i)
         v.actions[i].detail = v.actionDetail[i];
 
@@ -7086,6 +7106,7 @@ static void EnterStoragePage(Shell &shell, const Library &lib, const char *games
 
 static void LeaveStoragePage(Shell &shell)
 {
+    shell.filesOpen = false;
     if (!shell.storageFromRing)
     {
         shell.page = SHELL_PAGE_SETTINGS;
@@ -7108,7 +7129,7 @@ static bool ClearPartialsFromStorage()
         ShowShellToast(Tr(STR_STORAGE_PARTIALS), Tr(STR_STORAGE_NO_PARTIALS), UI_TOAST_INFO);
         return false;
     }
-    if (PendingDownloadCount() + PendingDiscJobCount() + PendingGameJobCount() > 0)
+    if (PendingDownloadCount() + PendingDiscJobCount() + PendingGameJobCount() + PendingFileJobCount() > 0)
     {
         ShowShellToast(Tr(STR_STORAGE_QUEUE_BUSY), Tr(STR_STORAGE_QUEUE_BUSY_DETAIL), UI_TOAST_ERROR);
         return false;
@@ -7186,6 +7207,10 @@ static bool StoragePageInput(Shell &shell, const UiInput &input, const Library &
             return true;
         case STORAGE_ACTION_RESCAN:
             BeginStorageScan(lib, gamesPath);
+            return false;
+        case STORAGE_ACTION_FILES:
+            shell.filesOpen = true;
+            shell.filesStale = true;
             return false;
         default:
             return false;
@@ -7508,7 +7533,7 @@ static HomePageView MakeHomeView(const Shell &shell, const Library &lib)
     // why that one reads "Games + Apps".
     static const ShellPage kHomeNavPages[] = { SHELL_PAGE_LIBRARY, SHELL_PAGE_STORE, SHELL_PAGE_QUEUE,
                                                SHELL_PAGE_SETTINGS };
-    const int queued = PendingDownloadCount() + PendingDiscJobCount() + PendingGameJobCount();
+    const int queued = PendingDownloadCount() + PendingDiscJobCount() + PendingGameJobCount() + PendingFileJobCount();
     for (int i = 0; i < (int)(sizeof(kHomeNavPages) / sizeof(kHomeNavPages[0])) && view.navCount < HOME_NAV_MAX;
          ++i)
     {
@@ -8291,9 +8316,11 @@ static void SnapshotQueue(Shell &shell, const Library &lib)
     static QueueJobSnapshot discJobs[MAX_DISC_JOBS];
     static QueueJobSnapshot gameJobs[MAX_GAME_JOBS];
     static QueueJobSnapshot dlJobs[MAX_QUEUE_JOBS];
+    static QueueJobSnapshot fileJobs[MAX_QUEUE_ROWS];
     const int discCount = SnapshotDiscJobs(discJobs, MAX_DISC_JOBS);
     const int gameCount = SnapshotGameJobs(gameJobs, MAX_GAME_JOBS);
     const int dlCount = SnapshotDownloadQueue(dlJobs, MAX_QUEUE_JOBS);
+    const int fileCount = SnapshotFileJobs(fileJobs, MAX_QUEUE_ROWS);
 
     int n = 0;
     for (int i = 0; i < discCount; ++i)
@@ -8311,6 +8338,13 @@ static void SnapshotQueue(Shell &shell, const Library &lib)
         if (!JobInstalled(dlJobs[i]))
             shell.queueJobs[n++] = dlJobs[i];
     }
+    // The file manager's copies and moves, still to do. Finished ones stay
+    // in the list rather than the row of installs: they aren't games.
+    for (int i = 0; i < fileCount && n < MAX_QUEUE_ROWS; ++i)
+    {
+        if (fileJobs[i].state != QUEUE_FINISHED)
+            shell.queueJobs[n++] = fileJobs[i];
+    }
     for (int i = 0; i < gameCount && n < MAX_QUEUE_ROWS; ++i)
     {
         if (gameJobs[i].state == QUEUE_FINISHED && !JobInstalled(gameJobs[i]))
@@ -8320,6 +8354,11 @@ static void SnapshotQueue(Shell &shell, const Library &lib)
     {
         if (discJobs[i].state == QUEUE_FINISHED && !JobInstalled(discJobs[i]))
             shell.queueJobs[n++] = discJobs[i];
+    }
+    for (int i = 0; i < fileCount && n < MAX_QUEUE_ROWS; ++i)
+    {
+        if (fileJobs[i].state == QUEUE_FINISHED)
+            shell.queueJobs[n++] = fileJobs[i];
     }
     shell.queueCount = n;
 
@@ -8535,6 +8574,24 @@ static void EnsureFolderGamesScanned()
 static void HandleFinishedDownloads(Shell &shell, bool &haveAuth)
 {
     QueueJobSnapshot job;
+
+    // A copy, move or delete: the file manager's folders are listed again,
+    // and the Storage page measures again when it's next shown.
+    while (TakeFinishedFileJob(&job))
+    {
+        shell.stale = true;
+        shell.filesStale = true;
+        if (!job.notify)
+            continue;
+        char message[192];
+        if (job.resultDetail[0] != '\0')
+            _snprintf(message, sizeof(message), "%s   -   %s", job.gameName, job.resultDetail);
+        else
+            _snprintf(message, sizeof(message), "%s", job.gameName);
+        message[sizeof(message) - 1] = '\0';
+        ShowShellToast(job.resultText, message,
+                       job.outcome == QUEUE_OUTCOME_INSTALLED ? UI_TOAST_SUCCESS : UI_TOAST_ERROR);
+    }
 
     // A disc or game install: the game is new in the library, or it isn't.
     while (TakeFinishedDiscJob(&job) || TakeFinishedGameJob(&job))
@@ -8965,6 +9022,647 @@ static bool RemoveTickedStorage(Shell &shell, const Library &lib, const char *ga
     shell.rescanLibrary = true;
     BeginStorageScan(lib, gamesPath);
     return true;
+}
+
+// ---------------------------------------------------------------------------
+// The file manager
+// ---------------------------------------------------------------------------
+//
+// Two panes, each a folder or the list of drives, listed by FolderBrowse.h.
+// A opens, B goes up (and out, from the drives), left and right pick a side.
+// X copies what's selected into the other side's folder; Y has the rest -
+// move, rename, delete, a new folder. Copies, moves and deletes are jobs on
+// the Queue (FileJobs.h), so the page stays free while they run; renames and
+// new folders are instant and done here.
+
+#define FILES_MAX_ROWS 512
+
+struct FilesListing
+{
+    FolderEntry entries[FILES_MAX_ROWS];
+    int count;
+    bool failed;                      // the folder couldn't be read
+    char listedPath[MAX_TEXT_LENGTH]; // what entries are of
+    bool listed;
+    const char *names[FILES_MAX_ROWS];
+    const char *sizes[FILES_MAX_ROWS];
+    char sizeText[FILES_MAX_ROWS][24];
+    char labels[FILES_MAX_ROWS][112]; // a Content folder's name with what it is: "415407D7 (Batman: Arkham City)"
+    int icons[FILES_MAX_ROWS];
+    bool marked[FILES_MAX_ROWS];      // ticked with X, for Actions to work on
+    int markedCount;
+};
+static FilesListing g_files[2];
+
+// The library, for naming title folders - set where the page is drawn and
+// driven, which is where main's library is to hand.
+static const Library *g_filesLibrary = NULL;
+
+// ---------------------------------------------------------------------------
+// What Content's numbered folders are
+// ---------------------------------------------------------------------------
+//
+// As Aurora shows them: under Content, a profile's folder (16 hex digits)
+// gets its gamertag; in one of those, a game's folder (8) gets the game's
+// name; and in that, each content-type folder (8 again) says what it holds.
+// Only shown - every path, copy and rename still uses the real name.
+
+static const struct
+{
+    unsigned long type;
+    StringId name;
+} kContentTypeNames[] = {
+    { 0x00000001, STR_CONTENT_SAVED_GAMES },  { 0x00000002, STR_CONTENT_DLC },
+    { 0x00004000, STR_CONTENT_INSTALLED_GAME }, { 0x00005000, STR_CONTENT_ORIGINAL_XBOX },
+    { 0x00007000, STR_CONTENT_GAMES_ON_DEMAND }, { 0x00009000, STR_CONTENT_AVATAR_ITEMS },
+    { 0x00010000, STR_CONTENT_PROFILE },      { 0x00020000, STR_CONTENT_GAMER_PICTURES },
+    { 0x00030000, STR_CONTENT_THEMES },       { 0x00040000, STR_CONTENT_CACHE },
+    { 0x00080000, STR_CONTENT_DEMO },         { 0x00090000, STR_CONTENT_VIDEOS },
+    { 0x000B0000, STR_CONTENT_TITLE_UPDATES }, { 0x000C0000, STR_CONTENT_TRAILERS },
+    { 0x000D0000, STR_CONTENT_ARCADE_GAME },  { 0x02000000, STR_CONTENT_INDIE_GAME },
+};
+
+// A name made of exactly digits hex digits, and its value.
+static bool HexFolderName(const char *name, size_t digits, unsigned long long *value)
+{
+    if (strlen(name) != digits || strspn(name, "0123456789abcdefABCDEF") != digits)
+        return false;
+    *value = _strtoui64(name, NULL, 16);
+    return true;
+}
+
+// The last part of a path, and the one before it.
+static void LastTwoParts(const char *path, char *last, char *before, size_t size)
+{
+    last[0] = before[0] = '\0';
+    const char *slash = strrchr(path, '\\');
+    if (slash == NULL)
+        return;
+    _snprintf(last, size, "%s", slash + 1);
+    last[size - 1] = '\0';
+    const char *prev = slash;
+    while (prev > path && prev[-1] != '\\')
+        prev--;
+    if (prev > path)
+        _snprintf(before, size, "%.*s", (int)(slash - prev), prev);
+    before[size - 1] = '\0';
+}
+
+// A game's name for its title ID - the library's (with its rename), the
+// Store's, the bundled list's - or NULL.
+static const char *FilesTitleName(unsigned long titleId)
+{
+    if (g_filesLibrary != NULL)
+    {
+        for (int i = 0; i < g_filesLibrary->count; ++i)
+        {
+            if (g_filesLibrary->games[i].titleId == titleId)
+                return ShownName(g_filesLibrary->games[i]);
+        }
+    }
+    static StoreGame store;
+    if (StoreGameByTitleId(titleId, &store) && store.name != NULL && store.name[0] != '\0')
+        return store.name;
+    return LookupTitleName(titleId);
+}
+
+// Labels for what's in path, where path is one of Content's levels; entries
+// elsewhere keep their own names.
+static void LabelContentFolders(FilesListing &L, const char *path)
+{
+    char last[64], before[64];
+    LastTwoParts(path, last, before, sizeof(last));
+    unsigned long long value = 0;
+    const bool inContent = _stricmp(last, "Content") == 0;
+    const bool inProfile = HexFolderName(last, 16, &value);
+    const bool inTitle = HexFolderName(last, 8, &value) && HexFolderName(before, 16, &value);
+    if (!inContent && !inProfile && !inTitle)
+        return;
+
+    ProfileEntry profiles[32];
+    const int profileCount = inContent ? ListProfiles(profiles, 32) : 0;
+
+    for (int i = 0; i < L.count; ++i)
+    {
+        const FolderEntry &e = L.entries[i];
+        if (!e.folder)
+            continue;
+        const char *what = NULL;
+        if (inContent && HexFolderName(e.name, 16, &value))
+        {
+            if (value == 0)
+                what = Tr(STR_CONTENT_EVERYONE);
+            for (int p = 0; p < profileCount && what == NULL; ++p)
+            {
+                if (profiles[p].xuid == value)
+                    what = profiles[p].gamertag;
+            }
+        }
+        else if (inProfile && HexFolderName(e.name, 8, &value))
+            what = FilesTitleName((unsigned long)value);
+        else if (inTitle && HexFolderName(e.name, 8, &value))
+        {
+            for (int t = 0; t < (int)(sizeof(kContentTypeNames) / sizeof(kContentTypeNames[0])) && what == NULL; ++t)
+            {
+                if (kContentTypeNames[t].type == value)
+                    what = Tr(kContentTypeNames[t].name);
+            }
+        }
+        if (what == NULL)
+            continue;
+        _snprintf(L.labels[i], sizeof(L.labels[i]), "%s (%s)", e.name, what);
+        L.labels[i][sizeof(L.labels[i]) - 1] = '\0';
+        L.names[i] = L.labels[i];
+    }
+}
+
+static void ListFilesPane(Shell &shell, int pane)
+{
+    FilesListing &L = g_files[pane];
+    const char *path = shell.filesPath[pane];
+
+    // Ticks survive the same folder being listed again - after a job
+    // finishes beside it - by name; another folder starts with none.
+    static char kept[FILES_MAX_ROWS][FOLDER_ENTRY_NAME_SIZE];
+    int keptCount = 0;
+    if (L.listed && strcmp(L.listedPath, path) == 0)
+    {
+        for (int i = 0; i < L.count && keptCount < FILES_MAX_ROWS; ++i)
+        {
+            if (L.marked[i])
+                strcpy(kept[keptCount++], L.entries[i].name);
+        }
+    }
+
+    L.failed = false;
+    if (path[0] == '\0')
+    {
+        L.count = ListDrives(L.entries, FILES_MAX_ROWS, true);
+        for (int i = 0; i < L.count; ++i)
+        {
+            const bool disc = IsDiscPath(L.entries[i].name);
+            L.icons[i] = disc ? UI_ICON_DISC : _strnicmp(L.entries[i].name, "Usb", 3) == 0 ? UI_ICON_USB : UI_ICON_DRIVE;
+            L.sizeText[i][0] = '\0';
+            if (disc)
+            {
+                _snprintf(L.sizeText[i], sizeof(L.sizeText[i]), "%s", Tr(STR_FILES_READ_ONLY));
+                continue; // a disc has no free space to speak of
+            }
+            // A drive's free space where a file's size would be.
+            char root[16], amount[16];
+            _snprintf(root, sizeof(root), "%s\\", L.entries[i].name);
+            root[sizeof(root) - 1] = '\0';
+            ULARGE_INTEGER freeToCaller;
+            if (GetDiskFreeSpaceExA(root, &freeToCaller, NULL, NULL) && FormatBytes(freeToCaller.QuadPart, amount, sizeof(amount)))
+                TrFormat(L.sizeText[i], sizeof(L.sizeText[i]), STR_FILES_FREE, amount);
+            L.sizeText[i][sizeof(L.sizeText[i]) - 1] = '\0';
+        }
+    }
+    else
+    {
+        L.count = ListFolder(path, true, L.entries, FILES_MAX_ROWS);
+        if (L.count < 0)
+        {
+            L.count = 0;
+            L.failed = true;
+        }
+        for (int i = 0; i < L.count; ++i)
+        {
+            L.icons[i] = L.entries[i].folder ? UI_ICON_FOLDER : UI_ICON_FILE;
+            L.sizeText[i][0] = '\0';
+            if (!L.entries[i].folder)
+                FormatBytes(L.entries[i].size, L.sizeText[i], sizeof(L.sizeText[i]));
+        }
+    }
+    L.markedCount = 0;
+    for (int i = 0; i < L.count; ++i)
+    {
+        L.names[i] = L.entries[i].name;
+        L.sizes[i] = L.sizeText[i];
+        L.marked[i] = false;
+        for (int k = 0; k < keptCount && !L.marked[i]; ++k)
+            L.marked[i] = (_stricmp(kept[k], L.entries[i].name) == 0);
+        if (L.marked[i])
+            L.markedCount++;
+    }
+    if (path[0] != '\0')
+        LabelContentFolders(L, path);
+    _snprintf(L.listedPath, sizeof(L.listedPath), "%s", path);
+    L.listedPath[sizeof(L.listedPath) - 1] = '\0';
+    L.listed = true;
+    if (shell.filesSelected[pane] > L.count - 1)
+        shell.filesSelected[pane] = L.count - 1;
+    if (shell.filesSelected[pane] < 0)
+        shell.filesSelected[pane] = 0;
+}
+
+// Each pane listed again if its folder changed or something finished.
+static void RefreshFiles(Shell &shell)
+{
+    for (int pane = 0; pane < 2; ++pane)
+    {
+        if (shell.filesStale || !g_files[pane].listed || strcmp(g_files[pane].listedPath, shell.filesPath[pane]) != 0)
+            ListFilesPane(shell, pane);
+    }
+    shell.filesStale = false;
+}
+
+// The highlight onto a name in a pane, once it's listed - after going up,
+// renaming or making a folder.
+static void SelectFilesName(Shell &shell, int pane, const char *name)
+{
+    ListFilesPane(shell, pane);
+    for (int i = 0; i < g_files[pane].count; ++i)
+    {
+        if (_stricmp(g_files[pane].entries[i].name, name) == 0)
+        {
+            shell.filesSelected[pane] = i;
+            return;
+        }
+    }
+}
+
+static void ClearFilesMarks(int pane)
+{
+    FilesListing &L = g_files[pane];
+    for (int i = 0; i < L.count; ++i)
+        L.marked[i] = false;
+    L.markedCount = 0;
+}
+
+// What an action works on: everything ticked, or - with nothing ticked -
+// the highlighted entry. Indexes into the pane's entries; none at the drives.
+static int FilesTargets(const Shell &shell, int pane, int *out)
+{
+    const FilesListing &L = g_files[pane];
+    if (shell.filesPath[pane][0] == '\0' || L.count == 0)
+        return 0;
+    int n = 0;
+    if (L.markedCount > 0)
+    {
+        for (int i = 0; i < L.count; ++i)
+        {
+            if (L.marked[i])
+                out[n++] = i;
+        }
+        return n;
+    }
+    if (shell.filesSelected[pane] >= 0 && shell.filesSelected[pane] < L.count)
+        out[n++] = shell.filesSelected[pane];
+    return n;
+}
+
+// What the confirm says the action is on: the one name, or how many.
+static void FilesTargetsName(int pane, const int *targets, int count, char *out, size_t outSize)
+{
+    if (count == 1)
+        _snprintf(out, outSize, "%s", g_files[pane].entries[targets[0]].name);
+    else
+        TrCount(out, outSize, STR_FILES_ITEMS_ONE, STR_FILES_ITEMS, count);
+    out[outSize - 1] = '\0';
+}
+
+// A name the drive will take: FATX allows 42 characters, and none of these.
+static bool GoodFileName(const char *name)
+{
+    const size_t length = strlen(name);
+    if (length == 0 || length > 42 || strcmp(name, ".") == 0 || strcmp(name, "..") == 0)
+        return false;
+    return strpbrk(name, "\\/:*?\"<>|") == NULL;
+}
+
+// The on-screen keyboard for a name; false if cancelled or not one the
+// drive takes (having said so).
+static bool TypeFileName(StringId title, const char *current, char *out, size_t outSize)
+{
+    WCHAR start[64];
+    Utf8ToWideText(current, start, 64);
+    std::string typed;
+    if (OpenKeyboardToString(XUSER_INDEX_ANY, &typed, TrW(title), TrW(STR_FILES_NAME_RULES), start) != ERROR_SUCCESS)
+        return false;
+    TrimInPlace(typed);
+    if (!GoodFileName(typed.c_str()))
+    {
+        ShowMessageUI(Tr(STR_FILES_NOT_A_NAME), Tr(STR_FILES_NAME_RULES), typed.c_str());
+        return false;
+    }
+    _snprintf(out, outSize, "%s", typed.c_str());
+    out[outSize - 1] = '\0';
+    return true;
+}
+
+// Each target queued as a job of its own; says how it went. The ticks go
+// once they're queued.
+static void QueueFilesJobs(Shell &shell, FileJobKind kind, const int *targets, int count, const char *destFolder)
+{
+    const int pane = shell.filesPane;
+    int added = 0;
+    for (int t = 0; t < count; ++t)
+    {
+        char source[MAX_TEXT_LENGTH];
+        if (FolderChild(shell.filesPath[pane], g_files[pane].entries[targets[t]].name, source, sizeof(source)) &&
+            EnqueueFileJob(kind, source, destFolder))
+            added++;
+    }
+    ClearFilesMarks(pane);
+    char what[96];
+    FilesTargetsName(pane, targets, added > 0 ? added : count, what, sizeof(what));
+    if (added == count)
+        ShowShellToast(Tr(STR_ADDED_TO_THE_QUEUE), what, UI_TOAST_SUCCESS);
+    else if (added > 0)
+    {
+        char message[96];
+        TrFormat(message, sizeof(message), STR_FILES_SOME_QUEUED, TrNum(added), TrNum(count));
+        message[sizeof(message) - 1] = '\0';
+        ShowShellToast(Tr(STR_FILES_QUEUE_FULL), message, UI_TOAST_ERROR);
+    }
+    else
+        ShowShellToast(Tr(STR_FILES_QUEUE_FULL), Tr(STR_FILES_TRY_AGAIN_WHEN), UI_TOAST_ERROR);
+}
+
+// Copy or Move: the targets into the other side's folder, once confirmed.
+static void QueueFilesCopy(Shell &shell, FileJobKind kind)
+{
+    const int pane = shell.filesPane;
+    const int other = 1 - pane;
+    int targets[FILES_MAX_ROWS];
+    const int count = FilesTargets(shell, pane, targets);
+    if (count == 0)
+        return;
+    if (shell.filesPath[other][0] == '\0')
+    {
+        ShowShellToast(Tr(STR_FILES_PICK_A_FOLDER), Tr(STR_FILES_OPEN_A_FOLDER_ON_THE_OTHER_SIDE), UI_TOAST_INFO);
+        return;
+    }
+    if (IsDiscPath(shell.filesPath[other]) || (kind == FILE_JOB_MOVE && IsDiscPath(shell.filesPath[pane])))
+    {
+        ShowShellToast(Tr(STR_FILES_DISC_IS_READ_ONLY), Tr(STR_FILES_DISC_COPY_FROM_IT), UI_TOAST_INFO);
+        return;
+    }
+    if (_stricmp(shell.filesPath[pane], shell.filesPath[other]) == 0)
+    {
+        ShowShellToast(Tr(STR_FILES_PICK_A_FOLDER), Tr(STR_FILES_BOTH_SIDES_ARE_THE_SAME), UI_TOAST_INFO);
+        return;
+    }
+    const bool move = (kind == FILE_JOB_MOVE);
+    char what[96], detail[MAX_TEXT_LENGTH + 32];
+    FilesTargetsName(pane, targets, count, what, sizeof(what));
+    TrFormat(detail, sizeof(detail), STR_FILES_INTO, shell.filesPath[other]);
+    detail[sizeof(detail) - 1] = '\0';
+    if (!ShowConfirmUI(Tr(move ? STR_FILES_MOVE_QUESTION : STR_FILES_COPY_QUESTION), what, detail,
+                       Tr(move ? STR_FILES_MOVE : STR_FILES_COPY)))
+        return;
+    QueueFilesJobs(shell, kind, targets, count, shell.filesPath[other]);
+}
+
+static void DeleteSelectedFiles(Shell &shell)
+{
+    const int pane = shell.filesPane;
+    int targets[FILES_MAX_ROWS];
+    const int count = FilesTargets(shell, pane, targets);
+    if (count == 0)
+        return;
+    bool anyFolder = false;
+    for (int t = 0; t < count; ++t)
+        anyFolder = anyFolder || g_files[pane].entries[targets[t]].folder;
+    char what[96];
+    FilesTargetsName(pane, targets, count, what, sizeof(what));
+    if (!ShowConfirmUI(Tr(STR_FILES_DELETE_QUESTION), what,
+                       Tr(anyFolder ? STR_FILES_DELETE_FOLDER_DETAIL : STR_FILES_DELETE_DETAIL), Tr(STR_FILES_DELETE)))
+        return;
+    QueueFilesJobs(shell, FILE_JOB_DELETE, targets, count, NULL);
+}
+
+static void RenameSelectedFile(Shell &shell)
+{
+    const int pane = shell.filesPane;
+    int targets[FILES_MAX_ROWS];
+    if (FilesTargets(shell, pane, targets) != 1)
+        return;
+    const char *oldName = g_files[pane].entries[targets[0]].name;
+    char source[MAX_TEXT_LENGTH], name[64], dest[MAX_TEXT_LENGTH];
+    if (!FolderChild(shell.filesPath[pane], oldName, source, sizeof(source)))
+        return;
+    if (!TypeFileName(STR_RENAME, oldName, name, sizeof(name)))
+        return;
+    if (!FolderChild(shell.filesPath[pane], name, dest, sizeof(dest)) || !MoveFileA(source, dest))
+    {
+        ShowMessageUI(Tr(STR_FILES_COULDNT_RENAME), Tr(STR_FILES_NAME_TAKEN_OR_IN_USE), name);
+        return;
+    }
+    ClearFilesMarks(pane);
+    shell.filesStale = true;
+    SelectFilesName(shell, pane, name);
+    if (_stricmp(shell.filesPath[0], shell.filesPath[1]) == 0)
+        ListFilesPane(shell, 1 - pane);
+}
+
+static void NewFilesFolder(Shell &shell)
+{
+    const int pane = shell.filesPane;
+    if (shell.filesPath[pane][0] == '\0')
+        return;
+    char name[64], dest[MAX_TEXT_LENGTH];
+    if (!TypeFileName(STR_FILES_NEW_FOLDER, Tr(STR_FILES_NEW_FOLDER_NAME), name, sizeof(name)))
+        return;
+    if (!FolderChild(shell.filesPath[pane], name, dest, sizeof(dest)) || !CreateDirectoryA(dest, NULL))
+    {
+        ShowMessageUI(Tr(STR_FILES_COULDNT_MAKE_FOLDER), Tr(STR_FILES_NAME_TAKEN_OR_IN_USE), name);
+        return;
+    }
+    shell.filesStale = true;
+    SelectFilesName(shell, pane, name);
+}
+
+// Y: what can be done to what's ticked - or the highlighted entry - as a list.
+static void FilesActions(Shell &shell)
+{
+    const int pane = shell.filesPane;
+    if (shell.filesPath[pane][0] == '\0')
+        return; // the drives: nothing to do to one
+    FilesListing &L = g_files[pane];
+    int targets[FILES_MAX_ROWS];
+    const int count = FilesTargets(shell, pane, targets);
+
+    enum { ACT_COPY, ACT_MOVE, ACT_RENAME, ACT_DELETE, ACT_NEW_FOLDER, ACT_SELECT_ALL, ACT_CLEAR };
+    const char *labels[8];
+    int icons[8], actions[8], n = 0;
+    // The disc can only be copied from.
+    const bool disc = IsDiscPath(shell.filesPath[pane]);
+    if (count > 0)
+    {
+        labels[n] = Tr(STR_FILES_COPY_TO_OTHER_SIDE); icons[n] = UI_ICON_FILE; actions[n++] = ACT_COPY;
+        if (!disc)
+        {
+            labels[n] = Tr(STR_FILES_MOVE_TO_OTHER_SIDE); icons[n] = UI_ICON_FOLDER; actions[n++] = ACT_MOVE;
+            if (count == 1)
+            {
+                labels[n] = Tr(STR_RENAME); icons[n] = UI_ICON_KEYBOARD; actions[n++] = ACT_RENAME;
+            }
+            labels[n] = Tr(STR_FILES_DELETE); icons[n] = UI_ICON_NONE; actions[n++] = ACT_DELETE;
+        }
+    }
+    if (!disc)
+    {
+        labels[n] = Tr(STR_FILES_NEW_FOLDER); icons[n] = UI_ICON_FOLDER; actions[n++] = ACT_NEW_FOLDER;
+    }
+    if (L.count > 0 && L.markedCount < L.count)
+    {
+        labels[n] = Tr(STR_FILES_SELECT_ALL); icons[n] = UI_ICON_CHECK; actions[n++] = ACT_SELECT_ALL;
+    }
+    if (L.markedCount > 0)
+    {
+        labels[n] = Tr(STR_FILES_CLEAR_SELECTION); icons[n] = UI_ICON_NONE; actions[n++] = ACT_CLEAR;
+    }
+    if (n == 0)
+        return;
+
+    char heading[96];
+    if (count > 0)
+        FilesTargetsName(pane, targets, count, heading, sizeof(heading));
+    else
+        _snprintf(heading, sizeof(heading), "%s", shell.filesPath[pane]);
+    heading[sizeof(heading) - 1] = '\0';
+
+    const int picked = ShowAlertListUI(heading, NULL, labels, NULL, n, 0, icons);
+    if (picked < 0)
+        return;
+    switch (actions[picked])
+    {
+    case ACT_COPY:       QueueFilesCopy(shell, FILE_JOB_COPY); break;
+    case ACT_MOVE:       QueueFilesCopy(shell, FILE_JOB_MOVE); break;
+    case ACT_RENAME:     RenameSelectedFile(shell); break;
+    case ACT_DELETE:     DeleteSelectedFiles(shell); break;
+    case ACT_NEW_FOLDER: NewFilesFolder(shell); break;
+    case ACT_SELECT_ALL:
+        for (int i = 0; i < L.count; ++i)
+            L.marked[i] = true;
+        L.markedCount = L.count;
+        break;
+    case ACT_CLEAR:      ClearFilesMarks(pane); break;
+    }
+}
+
+// The page's input. True if something took over the screen.
+static bool FilesInput(Shell &shell, const UiInput &input)
+{
+    RefreshFiles(shell);
+    const WORD pressed = input.pressed;
+    const int pane = shell.filesPane;
+    FilesListing &L = g_files[pane];
+    char *path = shell.filesPath[pane];
+
+    if (pressed & XINPUT_GAMEPAD_B)
+    {
+        if (path[0] == '\0')
+        {
+            shell.filesOpen = false; // out of the drives, back to Storage
+            return false;
+        }
+        // Up, with the highlight on the folder just left.
+        char left[MAX_TEXT_LENGTH];
+        const char *slash = strrchr(path, '\\');
+        _snprintf(left, sizeof(left), "%s", slash != NULL ? slash + 1 : path);
+        left[sizeof(left) - 1] = '\0';
+        FolderParent(path, path, MAX_TEXT_LENGTH);
+        shell.filesScroll[pane] = 0;
+        SelectFilesName(shell, pane, left);
+        return false;
+    }
+    if (input.nav == XINPUT_GAMEPAD_DPAD_LEFT || input.nav == XINPUT_GAMEPAD_DPAD_RIGHT)
+    {
+        shell.filesPane = (input.nav == XINPUT_GAMEPAD_DPAD_LEFT) ? 0 : 1;
+        return false;
+    }
+    StepSelection(input.nav, L.count, shell.filesSelected[pane]);
+    if (pressed & (XINPUT_GAMEPAD_LEFT_SHOULDER | XINPUT_GAMEPAD_RIGHT_SHOULDER))
+    {
+        const int page = FilesVisibleRows();
+        int &selected = shell.filesSelected[pane];
+        selected += (pressed & XINPUT_GAMEPAD_RIGHT_SHOULDER) ? page : -page;
+        if (selected > L.count - 1) selected = L.count - 1;
+        if (selected < 0) selected = 0;
+    }
+
+    if ((pressed & XINPUT_GAMEPAD_A) && L.count > 0 && L.entries[shell.filesSelected[pane]].folder)
+    {
+        char child[MAX_TEXT_LENGTH];
+        if (FolderChild(path, L.entries[shell.filesSelected[pane]].name, child, sizeof(child)))
+        {
+            _snprintf(path, MAX_TEXT_LENGTH, "%s", child);
+            shell.filesSelected[pane] = 0;
+            shell.filesScroll[pane] = 0;
+        }
+        return false;
+    }
+    if ((pressed & XINPUT_GAMEPAD_X) && L.count > 0 && path[0] != '\0')
+    {
+        // Tick or untick, and on to the next row, so a run of them is a
+        // run of presses.
+        const int i = shell.filesSelected[pane];
+        L.marked[i] = !L.marked[i];
+        L.markedCount += L.marked[i] ? 1 : -1;
+        if (i + 1 < L.count)
+            shell.filesSelected[pane] = i + 1;
+        PlayUiSound(UI_SOUND_SELECT);
+        return false;
+    }
+    if ((pressed & XINPUT_GAMEPAD_Y) && path[0] != '\0')
+    {
+        FilesActions(shell);
+        return true;
+    }
+    return false;
+}
+
+static FilesPageView MakeFilesView(Shell &shell)
+{
+    RefreshFiles(shell);
+    FilesPageView view;
+    memset(&view, 0, sizeof(view));
+    view.title = Tr(STR_FILES_TITLE);
+    // How many are ticked, while any are, in place of the how-to.
+    static char subtitle[64];
+    const int marked = g_files[shell.filesPane].markedCount;
+    if (marked > 0)
+        TrCount(subtitle, sizeof(subtitle), STR_FILES_SELECTED_ONE, STR_FILES_SELECTED, marked);
+    else
+        _snprintf(subtitle, sizeof(subtitle), "%s", Tr(STR_FILES_SUBTITLE));
+    subtitle[sizeof(subtitle) - 1] = '\0';
+    view.subtitle = subtitle;
+    view.focusedPane = shell.filesPane;
+    for (int p = 0; p < 2; ++p)
+    {
+        FilesPaneView &pane = view.panes[p];
+        const FilesListing &L = g_files[p];
+        pane.path = shell.filesPath[p][0] != '\0' ? shell.filesPath[p] : Tr(STR_FILES_DRIVES);
+        pane.names = L.names;
+        pane.sizes = L.sizes;
+        pane.icons = L.icons;
+        pane.marked = L.marked;
+        pane.count = L.count;
+        pane.selected = shell.filesSelected[p];
+        pane.scroll = shell.filesScroll[p];
+        pane.emptyLine = Tr(L.failed ? STR_COULDNT_OPEN_THIS_FOLDER : STR_FILES_EMPTY_FOLDER);
+    }
+    return view;
+}
+
+static int FilesHints(const Shell &shell, UiHint *hints, int hintCount)
+{
+    const int pane = shell.filesPane;
+    const FilesListing &L = g_files[pane];
+    const bool atDrives = shell.filesPath[pane][0] == '\0';
+    const int i = shell.filesSelected[pane];
+    const bool any = L.count > 0 && i >= 0 && i < L.count;
+    if (any && L.entries[i].folder)
+        hintCount = AddHint(hints, hintCount, UI_BUTTON_A, TrW(STR_OPEN));
+    if (any && !atDrives)
+        hintCount = AddHint(hints, hintCount, UI_BUTTON_X, TrW(L.marked[i] ? STR_FILES_UNSELECT : STR_SELECT));
+    if (!atDrives)
+        hintCount = AddHint(hints, hintCount, UI_BUTTON_Y, TrW(STR_FILES_ACTIONS));
+    hintCount = AddHint(hints, hintCount, UI_BUTTON_B, TrW(STR_BUTTON_BACK));
+    return hintCount;
 }
 
 // The list's input. True if something took over the screen.
@@ -9638,6 +10336,10 @@ int main()
     // Listens for the PC helper on the LAN, which Store downloads use once paired.
     ApplyPcHelperSettings();
     StartPcHelperListener();
+
+    // The file manager's copies, moves and deletes, one at a time.
+    if (!StartFileJobs())
+        dprintf("ERROR: the file jobs worker didn't start - the file manager can't copy\n");
 
     // Reads what's in the drive straight away, for the library's first tile.
     if (!StartDiscWorker(gamesPath))
@@ -10605,8 +11307,10 @@ int main()
         }
         else if (shell.page == SHELL_PAGE_STORAGE)
         {
-            acted = shell.storageList ? StorageListInput(shell, input, lib, gamesPath)
-                                      : StoragePageInput(shell, input, lib, gamesPath);
+            g_filesLibrary = &lib;
+            acted = shell.filesOpen     ? FilesInput(shell, input)
+                    : shell.storageList ? StorageListInput(shell, input, lib, gamesPath)
+                                        : StoragePageInput(shell, input, lib, gamesPath);
         }
         else if (shell.page == SHELL_PAGE_QUEUE)
         {
@@ -10687,7 +11391,7 @@ int main()
                 // way, and the row says which it is now.
                 const QueueJobSnapshot &job = shell.queueJobs[shell.queueSelected];
 
-                if (job.state == QUEUE_FINISHED || IsDiscJobId(job.id))
+                if (job.state == QUEUE_FINISHED || IsDiscJobId(job.id) || IsFileJobId(job.id))
                 {
                     // Nothing to pause.
                 }
@@ -10713,8 +11417,17 @@ int main()
                         RemoveGameJob(job.id);
                     else if (IsDiscJobId(job.id))
                         RemoveDiscJob(job.id);
+                    else if (IsFileJobId(job.id))
+                        RemoveFileJob(job.id);
                     else
                         RemoveQueueJob(job.id);
+                }
+                else if (IsFileJobId(job.id))
+                {
+                    // A stopped copy takes back what it had copied, so asked.
+                    if (ShowConfirmUI(Tr(STR_FILES_STOP), job.gameName, Tr(STR_FILES_STOP_DETAIL), Tr(STR_STOP)))
+                        CancelFileJob(job.id);
+                    acted = true;
                 }
                 else if (IsGameJobId(job.id))
                 {
@@ -11248,7 +11961,19 @@ int main()
             break;
 
         case SHELL_PAGE_STORAGE:
-        if (shell.storageList)
+        if (shell.filesOpen)
+        {
+            g_filesLibrary = &lib;
+            FilesPageView view = MakeFilesView(shell);
+            hintCount = FilesHints(shell, hints, hintCount);
+            RenderFilesFrame(view, hints, hintCount);
+            for (int p = 0; p < 2; ++p)
+            {
+                shell.filesSelected[p] = view.panes[p].selected;
+                shell.filesScroll[p] = view.panes[p].scroll;
+            }
+        }
+        else if (shell.storageList)
         {
             StorageListView view = MakeStorageListView(shell, lib);
             hintCount = StorageListHints(shell, hints, hintCount);
@@ -11334,7 +12059,7 @@ int main()
     if (g_exitAction == EXIT_RESTART || g_exitAction == EXIT_TURN_OFF)
         RenderStatusFrame(Tr(g_exitAction == EXIT_RESTART ? STR_RESTARTING : STR_TURNING_OFF),
                           Tr(STR_STOPPING_DOWNLOADS_AND_INSTALLS_FIRST), NULL);
-    else if (PendingDownloadCount() + PendingDiscJobCount() + PendingGameJobCount() > 0)
+    else if (PendingDownloadCount() + PendingDiscJobCount() + PendingGameJobCount() + PendingFileJobCount() > 0)
         RenderStatusFrame(Tr(STR_STOPPING), Tr(STR_STOPPING_DOWNLOADS_AND_INSTALLS), Tr(STR_FILES_THAT_ALREADY_FINISHED_STAY));
     StopDownloadQueue(15000);
 
@@ -11351,6 +12076,10 @@ int main()
 
     // An FTP transfer is cut off, as quitting Aurora would.
     StopFtpServer(3000);
+
+    // A copy in progress stops at its next megabyte and removes what it had
+    // copied; a move's original is only gone once its copy was all there.
+    StopFileJobs(10000);
 
     // Likewise a cover download: it's fetched again next time.
     StopCoverArt(3000);

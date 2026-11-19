@@ -70,6 +70,12 @@ void SetDiscWorkerGamesPath(const char *gamesPath);
 #define DISC_SPEED_FULL    4
 void SetDiscReadSpeed(int speed);
 
+// Around the file manager's copies off the disc: up to that same speed (and
+// a moment to get there), then back to the quiet one - left alone if a disc
+// install is still running.
+void SpinDiscForCopy();
+void QuietDiscAfterCopy();
+
 // Whether the tray opens once a disc has installed - set from Settings. Off
 // unless turned on. Only after one that finished; a stopped or failed
 // install leaves the disc in.
