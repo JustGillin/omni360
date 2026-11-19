@@ -49,6 +49,7 @@ end-to-end on real hardware against a real 27-game library.
 #include "Profiles.h"    // ListProfiles, SignInProfile - auto sign-in
 #include "GameMarks.h"   // favourites and renamed games
 #include "FolderBrowse.h" // drives and folders, for the folder picker
+#include "FtpServer.h"   // the drives over FTP, while the setting is on
 #include "UpdateCheck.h"
 #include "ArchiveOrgDLC.h"
 #include "downloadFile.h" // DownloadProgressFn + FormatBytes, for the progress callback
@@ -89,6 +90,9 @@ extern "C" NTSTATUS XexGetModuleHandle(PSZ moduleName, PHANDLE outHandle);
 #define LANGUAGE_KEY "language: "           // a code from Strings.h ("fr"); absent follows the console's language
 #define CLOCK_KEY "clock: "                 // "12" or "24"; absent follows the language (its @clock)
 #define CLOCK_SYNC_KEY "set-clock: "        // "yes" sets the clock from pool.ntp.org at start
+#define FTP_KEY "ftp: "                     // "yes" runs the FTP server while Omni360 is open
+#define FTP_USER_KEY "ftp-user: "           // its username; xboxftp, as Aurora's, unless set
+#define FTP_PASSWORD_KEY "ftp-password: "   // and password; xboxftp unless set
 #define SIGN_IN_KEY "sign-in-at-start: "    // a profile's offline XUID in hex, signed in at start when nobody is; "off" or absent for none
 #define HOMEBREW_MIRROR_KEY "homebrew-mirror: " // for testing: homebrew from "http://PC:8000", a folder of the repo's .7z files
 #define CREDENTIALS_FILE "game:\\ArchiveOrgKeys.txt"
@@ -409,6 +413,30 @@ static bool ClockSyncAtStart()
     char value[16];
     GetSettingsPath(CLOCK_SYNC_KEY, "off", value, sizeof(value));
     return _stricmp(value, "yes") == 0;
+}
+
+// Whether the FTP server runs. Off unless turned on: it opens the drives to
+// the network, which is something to ask for.
+static bool FtpSetting()
+{
+    char value[16];
+    GetSettingsPath(FTP_KEY, "off", value, sizeof(value));
+    return _stricmp(value, "yes") == 0;
+}
+
+// Its username and password, from settings.txt - Aurora's xboxftp for both
+// unless someone has changed them there.
+static void FtpCredentials(char *user, size_t userSize, char *password, size_t passwordSize)
+{
+    GetSettingsPath(FTP_USER_KEY, "xboxftp", user, userSize);
+    GetSettingsPath(FTP_PASSWORD_KEY, "xboxftp", password, passwordSize);
+}
+
+static bool StartFtpFromSettings()
+{
+    char user[64], password[64];
+    FtpCredentials(user, sizeof(user), password, sizeof(password));
+    return StartFtpServer(user, password);
 }
 
 // The profile signed in at start when nobody is signed in yet - its offline
@@ -1765,6 +1793,7 @@ enum SettingsRow
     SETTINGS_ROW_CLOCK_SYNC_NOW, // set the clock from the internet now
     SETTINGS_ROW_CLOCK_SYNC,   // ...and at start, on or off
     SETTINGS_ROW_SIGN_IN,      // the profile signed in at start: A picks it
+    SETTINGS_ROW_FTP,          // the FTP server, on or off
     SETTINGS_ROW_MANAGE_STORAGE // the Storage page
 };
 
@@ -2479,6 +2508,17 @@ static void ToggleUpdateChecks()
         ShowMessageUI(Tr(STR_NOT_SAVED), Tr(STR_SETTINGS_TXT_COULD_NOT_BE), NULL);
 }
 
+static void ToggleFtp()
+{
+    const bool on = !FtpSetting();
+    if (!SetSettingsValue(FTP_KEY, on ? "yes" : "off"))
+        ShowMessageUI(Tr(STR_NOT_SAVED), Tr(STR_SETTINGS_TXT_COULD_NOT_BE), NULL);
+    if (!on)
+        StopFtpServer(3000);
+    else if (!StartFtpFromSettings())
+        ShowMessageUI(Tr(STR_FTP_DIDNT_START), Tr(STR_PORT_21_MAY_BE_IN_USE), NULL);
+}
+
 static void ToggleClockSync()
 {
     const bool on = !ClockSyncAtStart();
@@ -2644,6 +2684,7 @@ struct SettingsPage
     char folderHelp[MAX_FOLDER_ROWS][128];
     char keysStatus[64];
     char helperStatus[96];
+    char ftpStatus[128];
     char updatesStatus[96];
     char updatesHelp[96];
 
@@ -3005,6 +3046,28 @@ static void BuildSettingsPage(SettingsPage &page, const Library &lib, const char
         AddSettingsControl(page, SETTINGS_CONTROL_CHECK, Tr(STR_AT_START), SETTINGS_ROW_CLOCK_SYNC,
                            Tr(STR_SETS_THE_CLOCK_EACH_TIME));
         page.rows[page.count - 1].controls[1].on = ClockSyncAtStart();
+
+        // FTP: where to point a PC, and what to sign in with, while it runs.
+        {
+            char user[64], password[64];
+            FtpCredentials(user, sizeof(user), password, sizeof(password));
+            char address[32] = "";
+            XNADDR xna;
+            memset(&xna, 0, sizeof(xna));
+            const DWORD flags = XNetGetTitleXnAddr(&xna);
+            if (flags != XNET_GET_XNADDR_PENDING && !(flags & XNET_GET_XNADDR_NONE) && xna.ina.s_addr != 0)
+                XNetInAddrToString(xna.ina, address, sizeof(address));
+            if (!FtpServerRunning())
+                TrFormat(page.ftpStatus, sizeof(page.ftpStatus), FtpSetting() ? STR_FTP_NOT_RUNNING : STR_FTP_OFF);
+            else if (address[0] == '\0')
+                TrFormat(page.ftpStatus, sizeof(page.ftpStatus), STR_SYSTEM_NOT_CONNECTED);
+            else
+                TrFormat(page.ftpStatus, sizeof(page.ftpStatus), STR_FTP_ADDRESS, address, user, password);
+            page.ftpStatus[sizeof(page.ftpStatus) - 1] = '\0';
+            AddSettingsRow(page, SETTINGS_VIEW_LINE, Tr(STR_FTP_SERVER)).status = page.ftpStatus;
+            AddSettingsControl(page, SETTINGS_CONTROL_CHECK, NULL, SETTINGS_ROW_FTP, Tr(STR_FTP_HELP));
+            page.rows[page.count - 1].controls[0].on = FtpSetting();
+        }
     }
 
     if (page.section == SETTINGS_SECTION_ASSETS)
@@ -3194,6 +3257,7 @@ static SettingsOutcome RunSettingsRow(SettingsRow row, int arg, Library &lib, ch
     case SETTINGS_ROW_CLOCK_SYNC_NOW: SetClockNow(); break;
     case SETTINGS_ROW_CLOCK_SYNC:   ToggleClockSync(); break;
     case SETTINGS_ROW_SIGN_IN:      PickSignInProfile(); break;
+    case SETTINGS_ROW_FTP:          ToggleFtp(); break;
     case SETTINGS_ROW_MANAGE_STORAGE: outcome.openStorage = true; break;
     case SETTINGS_ROW_HELPER_PAIR:  PairPcHelper(); break;
     case SETTINGS_ROW_HELPER_UNPAIR: UnpairPcHelper(); break;
@@ -7378,7 +7442,17 @@ static void ShowSystemPopup()
 
     view.rows[3].label = Tr(STR_APP_NAME);
     view.rows[3].value = CURRENT_VERSION;
-    view.rowCount = 4;
+
+    // Where to point an FTP client, while the server runs.
+    static char ftp[48];
+    if (FtpServerRunning() && strcmp(ip, Tr(STR_SYSTEM_NOT_CONNECTED)) != 0)
+        _snprintf(ftp, sizeof(ftp), "ftp://%s", ip);
+    else
+        _snprintf(ftp, sizeof(ftp), "%s", Tr(STR_FTP_OFF));
+    ftp[sizeof(ftp) - 1] = '\0';
+    view.rows[4].label = Tr(STR_FTP_SERVER);
+    view.rows[4].value = ftp;
+    view.rowCount = 5;
 
     view.barsHeading = Tr(STR_SYSTEM_TEMPERATURES);
     for (int i = 0; i < SYSTEM_TEMP_COUNT; ++i)
@@ -9484,6 +9558,8 @@ int main()
     LogNetworkStatus();
     if (ClockSyncAtStart())
         StartClockSync();
+    if (FtpSetting())
+        StartFtpFromSettings();
     StartupStep("network");
     // Before the library is read: renamed games are sorted by the new name.
     LoadGameMarks();
@@ -11272,6 +11348,9 @@ int main()
 
     // A search still out would only be thrown away - a short wait is plenty.
     StopSearchWorker(3000);
+
+    // An FTP transfer is cut off, as quitting Aurora would.
+    StopFtpServer(3000);
 
     // Likewise a cover download: it's fetched again next time.
     StopCoverArt(3000);

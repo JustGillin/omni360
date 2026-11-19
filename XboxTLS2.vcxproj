@@ -416,6 +416,7 @@
     <ClInclude Include="src\Profiles.h" />
     <ClInclude Include="src\GameMarks.h" />
     <ClInclude Include="src\FolderBrowse.h" />
+    <ClInclude Include="src\FtpServer.h" />
     <ClInclude Include="src\UiSound.h" />
     <ClInclude Include="src\Featured.h" />
     <ClInclude Include="src\ServiceCheck.h" />
@@ -513,6 +514,7 @@
     <ClCompile Include="src\Profiles.cpp" />
     <ClCompile Include="src\GameMarks.cpp" />
     <ClCompile Include="src\FolderBrowse.cpp" />
+    <ClCompile Include="src\FtpServer.cpp" />
     <ClCompile Include="src\UiSound.cpp" />
     <ClCompile Include="src\Featured.cpp" />
     <ClCompile Include="src\ServiceCheck.cpp" />
