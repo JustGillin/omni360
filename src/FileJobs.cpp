@@ -7,6 +7,9 @@ DESCRIPTION : The file manager's copies, moves and deletes - see FileJobs.h.
 #include "FileJobs.h"
 #include "DiscWorker.h"   // SpinDiscForCopy, for copies off the disc
 #include "FolderBrowse.h" // IsDiscPath
+#include "HttpPlain.h"    // HttpGetToFilePlain, for title updates from XboxUnity
+#include "TitleUpdates.h" // TurnOnTitleUpdateAt
+#include "inc\bearssl_hash.h"
 #include "Strings.h"
 #include "OutputConsole.h"
 #include "parsing.h" // LogEscapePercent
@@ -39,6 +42,12 @@ struct FileJob
     char resultDetail[160];
     bool cancel;
     bool handedOver;                // its popup has been taken
+
+    // A title update download's: where from, what it should hash to, whose.
+    char url[300];
+    char md5[48];
+    unsigned long titleId;
+    char label[128];
 };
 
 static CRITICAL_SECTION g_lock;
@@ -472,6 +481,160 @@ static void RunCopyOrMove(FileJob &job)
     Finish(job, QUEUE_OUTCOME_INSTALLED, move ? STR_FILES_MOVED : STR_FILES_COPIED, NULL);
 }
 
+// ---------------------------------------------------------------------------
+// Title updates from XboxUnity
+// ---------------------------------------------------------------------------
+
+// The download's progress callback has no room for the job, and only one
+// job runs at a time.
+static FileJob *g_downloading = NULL;
+
+// What earlier tries already brought in, so the bar runs on from it.
+static unsigned long long g_downloadBase = 0;
+
+static bool DownloadProgress(unsigned long long done, unsigned long long total, unsigned long long perSec,
+                             unsigned long long)
+{
+    FileJob &job = *g_downloading;
+    Lock();
+    job.done = g_downloadBase + done;
+    job.bytesPerSec = perSec;
+    Unlock();
+    return !Cancelled(job);
+}
+
+static unsigned long long FileSizeOf(const char *path)
+{
+    WIN32_FIND_DATAA found;
+    HANDLE h = FindFirstFileA(path, &found);
+    if (h == INVALID_HANDLE_VALUE)
+        return 0;
+    FindClose(h);
+    return ((unsigned long long)found.nFileSizeHigh << 32) | found.nFileSizeLow;
+}
+
+// The file's MD5 as hex, read through in chunks - what XboxUnity checks a
+// title update by (XboxUnity.h).
+static bool FileMd5(const char *path, char *hex, size_t hexSize)
+{
+    HANDLE h = CreateFileA(path, GENERIC_READ, FILE_SHARE_READ, NULL, OPEN_EXISTING, FILE_FLAG_SEQUENTIAL_SCAN, NULL);
+    if (h == INVALID_HANDLE_VALUE)
+        return false;
+    br_md5_context ctx;
+    br_md5_init(&ctx);
+    bool ok = true;
+    for (;;)
+    {
+        DWORD got = 0;
+        if (!ReadFile(h, g_buffer, FILE_COPY_CHUNK, &got, NULL))
+        {
+            ok = false;
+            break;
+        }
+        if (got == 0)
+            break;
+        br_md5_update(&ctx, g_buffer, got);
+    }
+    CloseHandle(h);
+    if (!ok || hexSize < 33)
+        return false;
+    unsigned char digest[16];
+    br_md5_out(&ctx, digest);
+    for (int i = 0; i < 16; ++i)
+        _snprintf(hex + i * 2, 3, "%02X", digest[i]);
+    hex[32] = '\0';
+    return true;
+}
+
+#define TU_DOWNLOAD_TRIES 5
+
+static void RunTitleUpdateDownload(FileJob &job)
+{
+    // Staged on the drive it's going to, so it lands with a rename.
+    char stagingFolder[FILE_PATH_SIZE], staging[FILE_PATH_SIZE], dest[FILE_PATH_SIZE];
+    const char *colon = strchr(job.destFolder, ':');
+    const int driveLength = colon != NULL ? (int)(colon - job.destFolder) : 0;
+    _snprintf(stagingFolder, sizeof(stagingFolder), "%.*s:\\Omni360Staging", driveLength, job.destFolder);
+    stagingFolder[sizeof(stagingFolder) - 1] = '\0';
+    CreateDirectoryA(stagingFolder, NULL);
+    if (!Join(stagingFolder, job.name, staging) || !Join(job.destFolder, job.name, dest))
+    {
+        Finish(job, QUEUE_OUTCOME_FAILED, STR_FILES_COULDNT_DOWNLOAD, Tr(STR_FILES_PATH_TOO_LONG));
+        return;
+    }
+    LogPath("downloading a title update to", dest);
+
+    // A range each time, so a transfer cut off partway keeps what came and
+    // the next try asks for the rest - the first one, to XboxUnity's
+    // Cloudflare, stopped 22KB short of a 952KB update. A server that
+    // ignores the range sends it all again, which is a fresh start.
+    const unsigned long long expected = job.total;
+    SetPhase(job, STR_FILES_DOWNLOADING, expected);
+    DeleteFileA(staging);
+    int status = 0;
+    unsigned long long have = 0;
+    for (int attempt = 0; attempt < TU_DOWNLOAD_TRIES; ++attempt)
+    {
+        have = FileSizeOf(staging);
+        if (expected > 0 && have >= expected)
+            break;
+        char range[64];
+        _snprintf(range, sizeof(range), "Range: bytes=%I64u-\r\n", have);
+        range[sizeof(range) - 1] = '\0';
+        g_downloading = &job;
+        g_downloadBase = have;
+        status = HttpGetToFilePlain(job.url, range, staging, expected > have ? expected - have : 0, 30000,
+                                    DownloadProgress, have > 0);
+        g_downloading = NULL;
+        if (status == HTTP_STATUS_CANCELLED || Cancelled(job))
+            break;
+        have = FileSizeOf(staging);
+        if ((status == 200 || status == 206) && (expected == 0 || have == expected))
+            break;
+        dprintf("[files] title update download, try %d: HTTP %d, %I64u of %I64u bytes\n", attempt + 1, status,
+                have, expected);
+    }
+    if (status == HTTP_STATUS_CANCELLED || Cancelled(job))
+    {
+        DeleteFileA(staging);
+        Finish(job, QUEUE_OUTCOME_CANCELLED, STR_FILES_CANCELLED, NULL);
+        return;
+    }
+    if ((status != 200 && status != 206) || (expected > 0 && have != expected))
+    {
+        DeleteFileA(staging);
+        Finish(job, QUEUE_OUTCOME_FAILED, STR_FILES_COULDNT_DOWNLOAD, Tr(STR_FILES_UNITY_DIDNT_SEND_IT));
+        return;
+    }
+
+    if (job.md5[0] != '\0')
+    {
+        SetPhase(job, STR_FILES_CHECKING, 0);
+        char got[48] = "";
+        if (!FileMd5(staging, got, sizeof(got)) || _stricmp(got, job.md5) != 0)
+        {
+            dprintf("[files] title update MD5 %s, expected %s - thrown away\n", got, job.md5);
+            DeleteFileA(staging);
+            Finish(job, QUEUE_OUTCOME_FAILED, STR_FILES_COULDNT_DOWNLOAD, Tr(STR_FILES_DIDNT_MATCH));
+            return;
+        }
+    }
+
+    // One of the same name is the same update, there already.
+    SetFileAttributesA(dest, FILE_ATTRIBUTE_NORMAL);
+    DeleteFileA(dest);
+    if (!MoveFileA(staging, dest))
+    {
+        DeleteFileA(staging);
+        Finish(job, QUEUE_OUTCOME_FAILED, STR_FILES_COULDNT_DOWNLOAD, Tr(STR_FILES_COULDNT_PUT_IT_IN_PLACE));
+        return;
+    }
+    if (!TurnOnTitleUpdateAt(job.titleId, dest))
+        Finish(job, QUEUE_OUTCOME_PARTIAL, STR_FILES_INSTALLED, Tr(STR_FILES_TURN_IT_ON_YOURSELF));
+    else
+        Finish(job, QUEUE_OUTCOME_INSTALLED, STR_FILES_INSTALLED, NULL);
+}
+
 static DWORD WINAPI WorkerThread(LPVOID)
 {
     for (;;)
@@ -497,6 +660,8 @@ static DWORD WINAPI WorkerThread(LPVOID)
                 break;
             if (job->kind == FILE_JOB_DELETE)
                 RunDelete(*job);
+            else if (job->kind == FILE_JOB_TITLE_UPDATE)
+                RunTitleUpdateDownload(*job);
             else
                 RunCopyOrMove(*job);
         }
@@ -585,6 +750,50 @@ bool EnqueueFileJob(FileJobKind kind, const char *source, const char *destFolder
     return true;
 }
 
+int EnqueueTitleUpdateDownload(const char *url, const char *destFolder, const char *fileName, const char *md5,
+                               unsigned long long size, unsigned long titleId, const char *label)
+{
+    if (g_thread == NULL || url == NULL || destFolder == NULL || fileName == NULL || strlen(url) >= 300 ||
+        strlen(destFolder) >= FILE_PATH_SIZE)
+        return 0;
+    Lock();
+    const int slot = FreeSlot();
+    if (slot < 0)
+    {
+        Unlock();
+        return 0;
+    }
+    FileJob &job = g_jobs[slot];
+    memset(&job, 0, sizeof(job));
+    job.used = true;
+    job.id = g_nextId++;
+    if (g_nextId >= 1000000)
+        g_nextId = FILE_JOB_ID_BASE;
+    job.kind = FILE_JOB_TITLE_UPDATE;
+    job.state = QUEUE_WAITING;
+    strcpy(job.url, url);
+    strcpy(job.destFolder, destFolder);
+    _snprintf(job.name, sizeof(job.name), "%s", fileName);
+    _snprintf(job.md5, sizeof(job.md5), "%s", md5 != NULL ? md5 : "");
+    _snprintf(job.label, sizeof(job.label), "%s", label != NULL ? label : fileName);
+    job.name[sizeof(job.name) - 1] = job.md5[sizeof(job.md5) - 1] = job.label[sizeof(job.label) - 1] = '\0';
+    job.total = size;
+    job.titleId = titleId;
+    const int id = job.id;
+    Unlock();
+    SetEvent(g_wake);
+    return id;
+}
+
+void MarkFileJobSeen(int id)
+{
+    Lock();
+    FileJob *job = FindJob(id);
+    if (job != NULL && job->state == QUEUE_FINISHED)
+        job->handedOver = true;
+    Unlock();
+}
+
 static void Snapshot(const FileJob &job, QueueJobSnapshot &out)
 {
     memset(&out, 0, sizeof(out));
@@ -592,8 +801,11 @@ static void Snapshot(const FileJob &job, QueueJobSnapshot &out)
     out.kind = QUEUE_JOB_FILE;
     out.state = job.state;
     out.outcome = job.outcome;
-    _snprintf(out.gameName, sizeof(out.gameName), "%s", job.name);
-    if (job.kind == FILE_JOB_DELETE)
+    _snprintf(out.gameName, sizeof(out.gameName), "%s", job.kind == FILE_JOB_TITLE_UPDATE ? job.label : job.name);
+    out.titleId = job.titleId; // a title update's game, for its cover on the Queue
+    if (job.kind == FILE_JOB_TITLE_UPDATE)
+        TrFormat(out.title, sizeof(out.title), STR_FILES_DOWNLOAD_INTO, job.destFolder);
+    else if (job.kind == FILE_JOB_DELETE)
         TrFormat(out.title, sizeof(out.title), STR_FILES_DELETE_FROM, job.source);
     else
         TrFormat(out.title, sizeof(out.title), job.kind == FILE_JOB_MOVE ? STR_FILES_MOVE_TO : STR_FILES_COPY_TO,

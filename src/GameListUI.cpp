@@ -4889,6 +4889,38 @@ static int NavIconForListIcon(int icon)
     }
 }
 
+// The page behind a run of dialogs, held for all of them - see
+// HoldDialogBackdrop. NULL while nothing holds it.
+static D3DTexture *g_heldBackdrop = NULL;
+static int g_heldBackdropDepth = 0;
+
+void HoldDialogBackdrop()
+{
+    if (!g_Initialized)
+        return;
+    if (g_heldBackdropDepth++ == 0)
+        g_heldBackdrop = SnapshotFrontBuffer();
+}
+
+void ReleaseDialogBackdrop()
+{
+    if (g_heldBackdropDepth == 0)
+        return;
+    if (--g_heldBackdropDepth == 0 && g_heldBackdrop != NULL)
+    {
+        g_heldBackdrop->Release();
+        g_heldBackdrop = NULL;
+    }
+}
+
+// A dialog's backdrop: the held one if there is one, else a snapshot of
+// what's on screen now, which the dialog owns and lets go of.
+static D3DTexture *TakeBackdrop(bool *owned)
+{
+    *owned = (g_heldBackdrop == NULL);
+    return g_heldBackdrop != NULL ? g_heldBackdrop : SnapshotFrontBuffer();
+}
+
 // Every alert: the card, its text, and either buttons or - with listCount -
 // a list of rows to pick from inside the card, as the emulator chooser has.
 // Returns the button or row pressed, or -1 for B (0 for a lone OK).
@@ -4909,7 +4941,8 @@ static int RunAlert(const char *heading, const char *message, const char *detail
     const bool hasMessage = (message != NULL && message[0] != '\0');
     const bool hasDetail = (detailLine != NULL && detailLine[0] != '\0');
 
-    D3DTexture *backdrop = SnapshotFrontBuffer();
+    bool ownBackdrop = true;
+    D3DTexture *backdrop = TakeBackdrop(&ownBackdrop);
 
     // The card's size, from how much its text needs. A long message - a
     // game's known issues - makes it wider before it makes it taller.
@@ -5095,8 +5128,11 @@ static int RunAlert(const char *heading, const char *message, const char *detail
             {
                 const int i = scroll + r;
                 const float cy = footY + r * rowH + plateH * 0.5f;
-                TextMid(innerX + labelX, cy, 0.85f, Faded(COL_TEXT, a), rowLabels[i], ATGFONT_TRUNCATED,
-                        textW - labelX - S(22.0f), true);
+                // The label stops short of its note rather than running into it.
+                float labelW = textW - labelX - S(22.0f);
+                if (rowNotes != NULL && rowNotes[i] != NULL)
+                    labelW -= TextWidth(rowNotes[i], 0.76f) + S(20.0f);
+                TextMid(innerX + labelX, cy, 0.85f, Faded(COL_TEXT, a), rowLabels[i], ATGFONT_TRUNCATED, labelW, true);
                 if (rowNotes != NULL && rowNotes[i] != NULL)
                     TextMid(innerX + textW - S(22.0f), cy, 0.76f, Faded(i == focus ? COL_TEXT : COL_TEXT2, a),
                             rowNotes[i], ATGFONT_RIGHT);
@@ -5130,7 +5166,7 @@ static int RunAlert(const char *heading, const char *message, const char *detail
         Sleep(16);
     }
 
-    if (backdrop != NULL)
+    if (backdrop != NULL && ownBackdrop)
         backdrop->Release();
     ResyncUiInput();
     return result;
@@ -5146,6 +5182,103 @@ int ShowAlertListUI(const char *heading, const char *message, const char **label
                     int focus, const int *icons)
 {
     return RunAlert(heading, message, NULL, 5, NULL, 0, labels, notes, count, focus, icons);
+}
+
+// The progress dialog's backdrop, from Begin to End - the held one when a
+// run of dialogs holds one.
+static D3DTexture *g_progressBackdrop = NULL;
+static bool g_progressOwnsBackdrop = false;
+
+void BeginProgressDialog()
+{
+    if (!g_Initialized)
+        return;
+    if (g_progressBackdrop != NULL && g_progressOwnsBackdrop)
+        g_progressBackdrop->Release();
+    g_progressBackdrop = TakeBackdrop(&g_progressOwnsBackdrop);
+    ResyncUiInput();
+}
+
+void EndProgressDialog()
+{
+    if (g_progressBackdrop != NULL && g_progressOwnsBackdrop)
+        g_progressBackdrop->Release();
+    g_progressBackdrop = NULL;
+    g_progressOwnsBackdrop = false;
+    ResyncUiInput();
+}
+
+void RenderProgressDialog(const char *heading, const char *line, const char *detail, float fraction,
+                          UiButton hintButton, const WCHAR *hintLabel)
+{
+    if (!g_Initialized)
+        return;
+    const float wide = S(ALERT_W);
+    const float cardW = (wide < g_M.screenW - S(80.0f)) ? wide : g_M.screenW - S(80.0f);
+    const float pad = S(ALERT_PAD);
+    const float textW = cardW - pad * 2.0f;
+    const float titleH = LineHeight(1.15f);
+    const float lineH = LineHeight(0.9f) * 1.15f;
+    const float detailH = LineHeight(0.76f) * 1.15f;
+    const float barH = S(10.0f);
+    const float hintsH = S(ALERT_HINTS_H);
+    const float cardH = pad + titleH + S(12.0f) + lineH + S(14.0f) + barH + S(10.0f) + detailH + S(ALERT_HINTS_GAP) +
+                        hintsH + pad;
+    const float cardX = (g_M.screenW - cardW) * 0.5f;
+    const float cardY = (g_M.screenH - cardH) * 0.5f;
+    const float innerX = cardX + pad;
+
+    ButtonHint hint;
+    hint.sprite = SpriteForButton(hintButton);
+    hint.label = hintLabel;
+    {
+        const float width = LayoutButtonHints(&hint, 1, 0.0f);
+        LayoutButtonHints(&hint, 1, cardX + cardW - pad - width);
+    }
+
+    BeginFrame();
+    if (g_progressBackdrop != NULL)
+        DrawQuad(g_progressBackdrop, 0.0f, 0.0f, g_M.screenW, g_M.screenH, 0xFFFFFFFF);
+    else
+        DrawBackground();
+    DrawRect(0.0f, 0.0f, g_M.screenW, g_M.screenH, COL_ALERT_DIM);
+    ShadowRound(cardX, cardY + S(6.0f), cardW, cardH, g_M.radius, S(28.0f), COL_SHADOW);
+    FillRound(cardX, cardY, cardW, cardH, g_M.radius, COL_SURFACE);
+
+    // The bar: filled to the fraction, or a sliver sweeping across while
+    // there's no telling how far it is.
+    const float barY = cardY + pad + titleH + S(12.0f) + lineH + S(14.0f);
+    FillRound(innerX, barY, textW, barH, barH * 0.5f, COL_TRACK);
+    if (fraction >= 0.0f)
+    {
+        const float f = fraction > 1.0f ? 1.0f : fraction;
+        if (f > 0.0f)
+            FillRound(innerX, barY, textW * f < barH ? barH : textW * f, barH, barH * 0.5f, COL_GREEN);
+    }
+    else
+    {
+        const float sliver = textW * 0.25f;
+        const float t = (float)(GetTickCount() % 1400) / 1400.0f;
+        FillRound(innerX + (textW - sliver) * t, barY, sliver, barH, barH * 0.5f, COL_GREEN);
+    }
+    const float hintsY = cardY + cardH - pad - hintsH * 0.5f;
+    DrawButtonSprite(hint.sprite, hint.badgeX, hintsY);
+
+    TextBegin();
+    float y = cardY + pad;
+    Text(innerX, y, 1.15f, COL_TEXT, heading != NULL ? heading : "", ATGFONT_TRUNCATED, textW, true);
+    y += titleH + S(12.0f);
+    Text(innerX, y, 0.9f, COL_TEXT, line != NULL ? line : "", ATGFONT_TRUNCATED, textW);
+    if (detail != NULL)
+        Text(innerX, barY + barH + S(10.0f), 0.76f, COL_DIM, detail, ATGFONT_TRUNCATED, textW);
+    {
+        const float scale = HINT_LABEL_SCALE * g_M.textScale;
+        g_UiFont.SetBold(false);
+        g_UiFont.SetScaleFactors(scale, scale);
+        g_UiFont.DrawText(hint.labelX, TextTopForCenter(hintsY, scale), COL_TEXT2, hint.label);
+    }
+    TextEnd();
+    EndFrame();
 }
 
 bool ShowAlertUI(const char *heading, const char *message, const char *detailLine, const char *confirmLabel,

@@ -1097,6 +1097,24 @@ int FilesVisibleRows();
 int ShowAlertListUI(const char *heading, const char *message, const char **labels, const char **notes, int count,
                     int focus, const int *icons = NULL);
 
+// A run of dialogs opened one from another - a list, then what to do with a
+// row, then its progress - each snapshots the screen behind it, which by
+// then is the dialog before, so they'd stack up dimmed. Holding the page
+// behind for the whole run draws every one over that instead. Nests; the
+// last Release lets it go.
+void HoldDialogBackdrop();
+void ReleaseDialogBackdrop();
+
+// A progress dialog: the same card, following something that runs on its own
+// - a download on the Queue, a search - a frame at a time. Begin snapshots
+// what's behind it; each Render draws one frame (fraction 0..1, or negative
+// for a bar with no end in sight); End lets the snapshot go. The caller
+// polls input between frames. hint is the one button shown, e.g. B Hide.
+void BeginProgressDialog();
+void RenderProgressDialog(const char *heading, const char *line, const char *detail, float fraction,
+                          UiButton hintButton, const WCHAR *hintLabel);
+void EndProgressDialog();
+
 // An alert asking to go ahead - confirmLabel names what that does, e.g.
 // "Remove" - or Cancel. For actions that take long or can't be undone.
 bool ShowConfirmUI(const char *heading, const char *message, const char *detailLine,

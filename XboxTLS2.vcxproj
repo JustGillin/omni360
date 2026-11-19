@@ -418,6 +418,8 @@
     <ClInclude Include="src\FolderBrowse.h" />
     <ClInclude Include="src\FtpServer.h" />
     <ClInclude Include="src\FileJobs.h" />
+    <ClInclude Include="src\TitleUpdates.h" />
+    <ClInclude Include="src\XboxUnity.h" />
     <ClInclude Include="src\UiSound.h" />
     <ClInclude Include="src\Featured.h" />
     <ClInclude Include="src\ServiceCheck.h" />
@@ -517,6 +519,8 @@
     <ClCompile Include="src\FolderBrowse.cpp" />
     <ClCompile Include="src\FtpServer.cpp" />
     <ClCompile Include="src\FileJobs.cpp" />
+    <ClCompile Include="src\TitleUpdates.cpp" />
+    <ClCompile Include="src\XboxUnity.cpp" />
     <ClCompile Include="src\UiSound.cpp" />
     <ClCompile Include="src\Featured.cpp" />
     <ClCompile Include="src\ServiceCheck.cpp" />

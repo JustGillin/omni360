@@ -27,7 +27,8 @@ enum FileJobKind
 {
     FILE_JOB_COPY,
     FILE_JOB_MOVE,
-    FILE_JOB_DELETE
+    FILE_JOB_DELETE,
+    FILE_JOB_TITLE_UPDATE // a title update from XboxUnity - see EnqueueTitleUpdateDownload
 };
 
 bool StartFileJobs();
@@ -39,6 +40,20 @@ void StopFileJobs(unsigned long timeoutMs);
 // it goes into ("Usb0:\Games") - unused for a delete. False if the queue is
 // full or the worker isn't running.
 bool EnqueueFileJob(FileJobKind kind, const char *source, const char *destFolder);
+
+// A title update from XboxUnity (XboxUnity.h): downloaded from url to a
+// staging file on destFolder's drive (resuming with a Range if it's cut off),
+// checked against md5 (hex; empty to skip) and size, which must be exact,
+// moved to destFolder\fileName - replacing one of that name - and
+// turned on, the title's others set aside (TitleUpdates.h). label names it on
+// the Queue.
+// Returns the job's id, or 0 if the queue is full or the worker isn't running.
+int EnqueueTitleUpdateDownload(const char *url, const char *destFolder, const char *fileName, const char *md5,
+                               unsigned long long size, unsigned long titleId, const char *label);
+
+// A finished job whose result was shown already - in the progress dialog
+// that followed it - so it doesn't pop up again as well.
+void MarkFileJobSeen(int id);
 
 // For the Queue page, as the other queues have them.
 int SnapshotFileJobs(QueueJobSnapshot *out, int maxJobs);

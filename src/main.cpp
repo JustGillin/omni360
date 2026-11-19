@@ -51,6 +51,8 @@ end-to-end on real hardware against a real 27-game library.
 #include "FolderBrowse.h" // drives and folders, for the folder picker
 #include "FtpServer.h"   // the drives over FTP, while the setting is on
 #include "FileJobs.h"    // the file manager's copies, moves and deletes
+#include "TitleUpdates.h" // a game's installed title updates, on or set aside
+#include "XboxUnity.h"    // title updates to download, from xboxunity.net
 #include "UpdateCheck.h"
 #include "ArchiveOrgDLC.h"
 #include "downloadFile.h" // DownloadProgressFn + FormatBytes, for the progress callback
@@ -1433,6 +1435,442 @@ static void ReleaseEdition(const StoreRelease *release, char *out, size_t outSiz
         out[0] = '\0';
 }
 
+// ---------------------------------------------------------------------------
+// The title update manager
+// ---------------------------------------------------------------------------
+//
+// The game page's Title updates button: the game's installed updates, on or
+// set aside (TitleUpdates.h), with the one in use ticked - A on one turns it
+// on or off, or deletes it - and "Find more online" at the foot. That's one
+// list too: XboxUnity's updates for this copy first, archive.org's once it's
+// been searched, all in the same dialog. Picking one downloads it, followed
+// in a progress dialog, and turns it on.
+
+static bool EnsureAuthHeader(bool &haveAuth, char *authHeader, unsigned long long authHeaderSize);
+static void FormatTransferNumbers(const QueueJobSnapshot &job, char *out, size_t outSize);
+
+// archive.org needs the keys, which main holds.
+struct TitleUpdateAuth
+{
+    bool *haveAuth;
+    char *header;
+    unsigned long long headerSize;
+};
+
+// A download on the Queue, followed in a progress dialog until it finishes -
+// its result shown, A to go on - or until B hides it, leaving it running.
+// True if it finished installed.
+// One frame of the progress dialog with no end in sight, before a lookup
+// that holds the thread for a moment - so the dialog says what's happening
+// rather than the screen sitting still.
+static void ShowWorkingDialog(const char *heading, const char *line)
+{
+    BeginProgressDialog();
+    RenderProgressDialog(heading, line, NULL, -1.0f, UI_BUTTON_B, TrW(STR_BUTTON_BACK));
+    EndProgressDialog();
+}
+
+static bool FollowJobInDialog(const char *heading, int jobId)
+{
+    static QueueJobSnapshot jobs[MAX_QUEUE_JOBS > 64 ? MAX_QUEUE_JOBS : 64];
+    const bool fileJob = IsFileJobId(jobId);
+    bool installed = false;
+    BeginProgressDialog();
+    for (;;)
+    {
+        const int count = fileJob ? SnapshotFileJobs(jobs, 64) : SnapshotDownloadQueue(jobs, MAX_QUEUE_JOBS);
+        const QueueJobSnapshot *job = NULL;
+        for (int i = 0; i < count && job == NULL; ++i)
+        {
+            if (jobs[i].id == jobId)
+                job = &jobs[i];
+        }
+        if (job == NULL)
+            break;
+
+        const bool finished = (job->state == QUEUE_FINISHED);
+        char detail[160] = "";
+        const char *line;
+        float fraction = -1.0f;
+        if (finished)
+        {
+            line = job->resultText;
+            _snprintf(detail, sizeof(detail), "%s", job->resultDetail);
+            installed = (job->outcome == QUEUE_OUTCOME_INSTALLED || job->outcome == QUEUE_OUTCOME_ALREADY_INSTALLED);
+            fraction = installed ? 1.0f : 0.0f;
+        }
+        else if (job->state == QUEUE_ACTIVE)
+        {
+            line = job->phase[0] != '\0' ? job->phase : Tr(STR_STARTING);
+            FormatTransferNumbers(*job, detail, sizeof(detail));
+            fraction = job->fraction;
+        }
+        else
+            line = Tr(STR_TU_WAITING_IN_THE_QUEUE);
+        detail[sizeof(detail) - 1] = '\0';
+
+        RenderProgressDialog(heading, line, detail[0] != '\0' ? detail : NULL, fraction,
+                             finished ? UI_BUTTON_A : UI_BUTTON_B,
+                             finished ? TrW(STR_BUTTON_OK) : TrW(STR_TU_HIDE));
+        const UiInput input = PollUiInput();
+        if (finished && (input.pressed & (XINPUT_GAMEPAD_A | XINPUT_GAMEPAD_B)))
+        {
+            PlayUiSound(UI_SOUND_SELECT);
+            if (fileJob)
+                MarkFileJobSeen(jobId); // its result was just shown - no popup as well
+            break;
+        }
+        if (!finished && (input.pressed & XINPUT_GAMEPAD_B))
+        {
+            PlayUiSound(UI_SOUND_BACK);
+            break; // hidden: it carries on in the Queue, and its popup says how it went
+        }
+        Sleep(16);
+    }
+    EndProgressDialog();
+    return installed;
+}
+
+// archive.org's search for the game's title updates, with a progress dialog
+// while it runs; B stops waiting. How many it found, -1 if archive.org didn't
+// answer, -2 if left.
+static int SearchArchiveTitleUpdates(const char *gameName, const char *edition, TitleUpdateMatch *out, int max)
+{
+    const int id = BeginSearch(SEARCH_TITLE_UPDATES, gameName, edition);
+    if (id == 0)
+        return -1;
+    static SearchResult result;
+    int found = -2;
+    BeginProgressDialog();
+    for (;;)
+    {
+        if (TakeSearchResult(id, &result))
+        {
+            found = result.count;
+            for (int i = 0; i < found && i < max; ++i)
+                out[i] = result.updates[i];
+            if (found > max)
+                found = max;
+            break;
+        }
+        RenderProgressDialog(Tr(STR_TU_SEARCHING_ARCHIVE), gameName, NULL, -1.0f, UI_BUTTON_B, TrW(STR_BUTTON_BACK));
+        if (PollUiInput().pressed & XINPUT_GAMEPAD_B)
+            break;
+        Sleep(16);
+    }
+    EndProgressDialog();
+    return found;
+}
+
+// The job archive.org's download queue made for this update, newest first.
+static int FindTitleUpdateJob(const char *fileName)
+{
+    static QueueJobSnapshot jobs[MAX_QUEUE_JOBS];
+    const int count = SnapshotDownloadQueue(jobs, MAX_QUEUE_JOBS);
+    int id = 0;
+    for (int i = 0; i < count; ++i)
+    {
+        if (jobs[i].kind == QUEUE_JOB_TITLE_UPDATE && strcmp(jobs[i].title, fileName) == 0 && jobs[i].id > id)
+            id = jobs[i].id;
+    }
+    return id;
+}
+
+static void ShowOnlineTitleUpdates(unsigned long titleId, const char *gameName, const char *edition,
+                                   unsigned long mediaId, TitleUpdateAuth &auth)
+{
+    ShowWorkingDialog(Tr(STR_TU_LOOKING_ONLINE), Tr(STR_TU_ASKING_XBOXUNITY));
+    static UnityTitleUpdate unity[MAX_UNITY_UPDATES];
+    static TitleUpdateMatch archive[MAX_TITLE_UPDATE_MATCHES];
+    int unityCount = 0;
+    const UnityResult unityResult = FindUnityTitleUpdates(titleId, mediaId, unity, MAX_UNITY_UPDATES, &unityCount);
+    if (unityResult != UNITY_OK)
+        unityCount = 0;
+
+    // Which of these are already here - and, for the installed list, the
+    // number each of those is, which their headers don't say.
+    static InstalledTitleUpdate installed[MAX_TITLE_UPDATES];
+    const int installedCount = ListTitleUpdates(titleId, installed, MAX_TITLE_UPDATES);
+    bool have[MAX_UNITY_UPDATES];
+    for (int i = 0; i < unityCount; ++i)
+    {
+        have[i] = false;
+        for (int j = 0; j < installedCount; ++j)
+        {
+            if (_stricmp(unity[i].contentId, installed[j].contentId) == 0)
+            {
+                have[i] = true;
+                if (installed[j].number != unity[i].version)
+                    RememberTitleUpdateNumber(unity[i].contentId, unity[i].version);
+            }
+        }
+    }
+    int archiveCount = 0;
+    bool archiveSearched = false, archiveFailed = false;
+
+    // Nothing from XboxUnity: archive.org straight away, rather than a list
+    // with nothing in it but the way there.
+    if (unityCount == 0)
+    {
+        archiveSearched = true;
+        archiveCount = SearchArchiveTitleUpdates(gameName, edition, archive, MAX_TITLE_UPDATE_MATCHES);
+        if (archiveCount == -2)
+            return;
+        archiveFailed = archiveCount < 0;
+        if (archiveCount < 0)
+            archiveCount = 0;
+    }
+
+    static char labels[MAX_UNITY_UPDATES + MAX_TITLE_UPDATE_MATCHES][64];
+    static char notes[MAX_UNITY_UPDATES + MAX_TITLE_UPDATE_MATCHES][64];
+    const char *rowLabels[MAX_UNITY_UPDATES + MAX_TITLE_UPDATE_MATCHES + 1];
+    const char *rowNotes[MAX_UNITY_UPDATES + MAX_TITLE_UPDATE_MATCHES + 1];
+    int focus = 0;
+    for (;;)
+    {
+        int rows = 0, forCopy = 0;
+        for (int i = 0; i < unityCount; ++i, ++rows)
+        {
+            TrFormat(labels[rows], sizeof(labels[rows]), STR_TU_NUMBERED, TrNum(unity[i].version));
+            char size[24] = "";
+            if (have[i])
+                _snprintf(size, sizeof(size), "%s", Tr(STR_TU_INSTALLED_NOTE));
+            else
+                FormatBytes(unity[i].size, size, sizeof(size));
+            // Another release's: which, so two of the same number can be told apart.
+            if (unity[i].forThisCopy)
+                _snprintf(notes[rows], sizeof(notes[rows]), "%s", size);
+            else
+                _snprintf(notes[rows], sizeof(notes[rows]), "%s  \xC2\xB7  %08lX", size, unity[i].mediaId);
+            if (unity[i].forThisCopy)
+                forCopy++;
+        }
+        for (int i = 0; i < archiveCount; ++i, ++rows)
+        {
+            if (archive[i].version > 0)
+                TrFormat(labels[rows], sizeof(labels[rows]), STR_TU_NUMBERED, TrNum(archive[i].version));
+            else
+                _snprintf(labels[rows], sizeof(labels[rows]), "%s", archive[i].filename);
+            char size[24] = "";
+            FormatBytes(archive[i].size, size, sizeof(size));
+            _snprintf(notes[rows], sizeof(notes[rows]), "%s%s%s  \xC2\xB7  archive.org", archive[i].region,
+                      archive[i].region[0] != '\0' ? "  \xC2\xB7  " : "", size);
+        }
+        for (int i = 0; i < rows; ++i)
+        {
+            labels[i][sizeof(labels[i]) - 1] = notes[i][sizeof(notes[i]) - 1] = '\0';
+            rowLabels[i] = labels[i];
+            rowNotes[i] = notes[i];
+        }
+        int total = rows;
+        if (!archiveSearched)
+        {
+            rowLabels[total] = Tr(STR_TU_SEARCH_ARCHIVE_TOO);
+            rowNotes[total++] = NULL;
+        }
+
+        const char *message;
+        if (rows == 0)
+            message = Tr(archiveFailed ? STR_TU_NOTHING_ANSWERED : STR_TU_NOTHING_ONLINE);
+        else if (unityCount == 0)
+            message = Tr(STR_TU_FROM_ARCHIVE);
+        else if (forCopy > 0)
+            message = Tr(STR_TU_FOR_YOUR_COPY);
+        else
+            message = Tr(mediaId == 0 ? STR_TU_COPY_NOT_KNOWN : STR_TU_NONE_FOR_YOUR_COPY);
+        if (total == 0)
+        {
+            ShowAlertUI(gameName, message, NULL, NULL, NULL);
+            return;
+        }
+
+        const int picked = ShowAlertListUI(gameName, message, rowLabels, rowNotes, total, focus, NULL);
+        if (picked < 0)
+            return;
+        focus = picked;
+
+        if (picked == rows)
+        {
+            // Search archive.org too: its results join this list.
+            archiveSearched = true;
+            archiveCount = SearchArchiveTitleUpdates(gameName, edition, archive, MAX_TITLE_UPDATE_MATCHES);
+            archiveFailed = archiveCount == -1;
+            if (archiveCount < 0)
+            {
+                if (archiveFailed)
+                    ShowShellToast(Tr(STR_TU_ARCHIVE_DIDNT_ANSWER), gameName, UI_TOAST_ERROR);
+                archiveSearched = !archiveFailed ? false : true;
+                archiveCount = 0;
+            }
+            focus = unityCount;
+            continue;
+        }
+
+        char heading[160];
+        _snprintf(heading, sizeof(heading), "%s  \xC2\xB7  %s", gameName, labels[picked]);
+        heading[sizeof(heading) - 1] = '\0';
+
+        if (picked < unityCount)
+        {
+            // XboxUnity's: its file name and URL, the MD5 and exact size it's
+            // checked by, then the download - checked, installed, turned on.
+            const UnityTitleUpdate &u = unity[picked];
+            ShowWorkingDialog(heading, Tr(STR_TU_ASKING_XBOXUNITY));
+            char fileName[128], url[300], md5[48], folder[MAX_TEXT_LENGTH];
+            unsigned long long size = 0;
+            if (!UnityTitleUpdateFile(titleId, u, fileName, sizeof(fileName), url, sizeof(url)) ||
+                !UnityTitleUpdateMd5(u, md5, sizeof(md5), &size))
+            {
+                ShowAlertUI(Tr(STR_TU_XBOXUNITY_DIDNT_ANSWER), Tr(STR_TU_TRY_AGAIN_LATER), NULL, NULL, NULL);
+                continue;
+            }
+            TitleUpdateFolderFor(titleId, fileName, g_contentBase, folder, sizeof(folder));
+            RememberTitleUpdateNumber(u.contentId, u.version);
+            const int jobId = EnqueueTitleUpdateDownload(url, folder, fileName, md5, size, titleId, heading);
+            if (jobId == 0)
+            {
+                ShowShellToast(Tr(STR_FILES_QUEUE_FULL), Tr(STR_FILES_TRY_AGAIN_WHEN), UI_TOAST_ERROR);
+                continue;
+            }
+            FollowJobInDialog(heading, jobId);
+            return;
+        }
+
+        // archive.org's: the download queue's job, as the picker page made
+        // it, followed here. It installs into 000B0000 as it always has;
+        // once it's in, it's turned on and anything else set aside - found
+        // as the one that wasn't there before.
+        const TitleUpdateMatch &a = archive[picked - unityCount];
+        if (!EnsureAuthHeader(*auth.haveAuth, auth.header, auth.headerSize))
+            continue;
+        static InstalledTitleUpdate before[MAX_TITLE_UPDATES];
+        const int beforeCount = ListTitleUpdates(titleId, before, MAX_TITLE_UPDATES);
+        const EnqueueResult queued = EnqueueTitleUpdate(a, gameName, titleId, auth.header);
+        const int jobId = FindTitleUpdateJob(a.filename);
+        if ((queued != ENQUEUE_ADDED && queued != ENQUEUE_ALREADY_QUEUED) || jobId == 0)
+        {
+            ShowShellToast(Tr(STR_FILES_QUEUE_FULL), Tr(STR_FILES_TRY_AGAIN_WHEN), UI_TOAST_ERROR);
+            continue;
+        }
+        if (FollowJobInDialog(heading, jobId))
+        {
+            static InstalledTitleUpdate after[MAX_TITLE_UPDATES];
+            const int afterCount = ListTitleUpdates(titleId, after, MAX_TITLE_UPDATES);
+            for (int i = 0; i < afterCount; ++i)
+            {
+                bool isNew = after[i].on;
+                for (int j = 0; j < beforeCount && isNew; ++j)
+                    isNew = _stricmp(before[j].path, after[i].path) != 0;
+                if (isNew)
+                {
+                    TurnOnTitleUpdate(titleId, after[i]);
+                    break;
+                }
+            }
+        }
+        return;
+    }
+}
+
+static void ManageTitleUpdatesHeld(unsigned long titleId, const char *gameName, const char *edition,
+                                   unsigned long mediaId, TitleUpdateAuth &auth);
+
+static void ManageTitleUpdates(unsigned long titleId, const char *gameName, const char *edition,
+                               unsigned long mediaId, TitleUpdateAuth &auth)
+{
+    // Every dialog from here - the list, what to do with one, looking
+    // online, a download's progress - over the game page, not each other.
+    HoldDialogBackdrop();
+    ManageTitleUpdatesHeld(titleId, gameName, edition, mediaId, auth);
+    ReleaseDialogBackdrop();
+}
+
+static void ManageTitleUpdatesHeld(unsigned long titleId, const char *gameName, const char *edition,
+                                   unsigned long mediaId, TitleUpdateAuth &auth)
+{
+    static InstalledTitleUpdate updates[MAX_TITLE_UPDATES];
+    static char notes[MAX_TITLE_UPDATES][48];
+    const char *labels[MAX_TITLE_UPDATES + 1];
+    const char *rowNotes[MAX_TITLE_UPDATES + 1];
+    int icons[MAX_TITLE_UPDATES + 1];
+    int focus = 0;
+
+    for (;;)
+    {
+        const int count = ListTitleUpdates(titleId, updates, MAX_TITLE_UPDATES);
+        int onCount = 0;
+        for (int i = 0; i < count; ++i)
+        {
+            // The heading already names the game, so a row from "Title
+            // Update" on - "Title Update #3" of "Halo 3 FINAL (English)
+            // Title Update #3" - when the header's name has those words.
+            const char *name = updates[i].name;
+            for (const char *p = name; *p != '\0'; ++p)
+            {
+                if (_strnicmp(p, "Title Update", 12) == 0)
+                {
+                    name = p;
+                    break;
+                }
+            }
+            if (updates[i].number > 0)
+            {
+                TrFormat(notes[i], sizeof(notes[i]), STR_TU_NUMBERED, TrNum((long)updates[i].number));
+                notes[i][sizeof(notes[i]) - 1] = '\0';
+                labels[i] = notes[i];
+            }
+            else
+                labels[i] = name[0] != '\0' ? name : Tr(STR_TU_UNNAMED);
+            rowNotes[i] = NULL;
+            icons[i] = updates[i].on ? UI_ICON_CHECK : UI_ICON_FILE;
+            if (updates[i].on)
+                onCount++;
+        }
+        labels[count] = Tr(STR_TU_FIND_MORE_ONLINE);
+        rowNotes[count] = NULL;
+        icons[count] = UI_ICON_NONE;
+
+        const char *message = count == 0      ? Tr(STR_TU_NONE_INSTALLED)
+                              : onCount > 1   ? Tr(STR_TU_MORE_THAN_ONE_ON)
+                              : onCount == 0  ? Tr(STR_TU_NONE_ON)
+                                              : Tr(STR_TU_THE_TICKED_ONE);
+        const int picked = ShowAlertListUI(gameName, message, labels, rowNotes, count + 1, focus, icons);
+        if (picked < 0)
+            return;
+        if (picked == count)
+        {
+            // Online, in this same dialog; back to this list afterwards,
+            // which then has what was downloaded.
+            ShowOnlineTitleUpdates(titleId, gameName, edition, mediaId, auth);
+            focus = 0;
+            continue;
+        }
+        focus = picked;
+
+        // What to do with that one.
+        const InstalledTitleUpdate u = updates[picked];
+        char size[24] = "", detail[128];
+        FormatBytes(u.size, size, sizeof(size));
+        TrFormat(detail, sizeof(detail), STR_TU_DETAIL, TrNum((long)u.version), size, u.drive);
+        detail[sizeof(detail) - 1] = '\0';
+        const char *actions[2] = { Tr(u.on ? STR_TU_TURN_OFF : STR_TU_TURN_ON), Tr(STR_FILES_DELETE) };
+        const int action = ShowAlertListUI(labels[picked], detail, actions, NULL, 2, 0, NULL);
+        if (action == 0)
+        {
+            const bool ok = u.on ? TurnOffTitleUpdate(titleId, u) : TurnOnTitleUpdate(titleId, u);
+            if (!ok)
+                ShowAlertUI(Tr(STR_TU_COULDNT_SWITCH), Tr(STR_TU_COULDNT_SWITCH_DETAIL), u.name, NULL, NULL);
+        }
+        else if (action == 1 && ShowConfirmUI(Tr(STR_FILES_DELETE_QUESTION), u.name, Tr(STR_TU_DELETE_DETAIL),
+                                              Tr(STR_FILES_DELETE)))
+        {
+            if (!DeleteTitleUpdate(u))
+                ShowAlertUI(Tr(STR_FILES_COULDNT_DELETE), Tr(STR_FILES_NAME_TAKEN_OR_IN_USE), u.name, NULL, NULL);
+            focus = 0;
+        }
+    }
+}
+
 // Opens the picker for a game and starts its search. editionName may be NULL:
 // the second name to look under, for a game whose Store entry is named after
 // another game sharing its title ID. See FindDlcRarFilenames.
@@ -1577,6 +2015,20 @@ static const char *g_shownNames[MAX_INSTALLED_GAMES]; // a rename, or NULL
 static int g_favouriteOrder[MAX_INSTALLED_GAMES];     // the favourites, as library indexes, in its order
 static int g_favouriteShown = 0;
 static int g_marksVersion = 0; // up with every favourite or rename made here
+
+// The media ID of the title's installed copy - which release it is, for
+// XboxUnity to match updates by. 0 when it isn't installed or can't be read.
+static unsigned long InstalledMediaId(const Library &lib, unsigned long titleId)
+{
+    for (int i = 0; i < lib.count; ++i)
+    {
+        unsigned long mediaId = 0;
+        if (lib.games[i].titleId == titleId &&
+            ReadGameMediaId(lib.games[i].packagePath, lib.games[i].folder, &mediaId))
+            return mediaId;
+    }
+    return 0;
+}
 
 static void RefreshGameMarks(const Library &lib)
 {
@@ -11129,8 +11581,20 @@ int main()
                     if (g_storeArcade == NULL)
                         ReleaseEdition(StoreReleaseOf(&g_storeGame, shell.storeVersionChosen), edition,
                                        sizeof(edition));
-                    OpenPicker(shell.picker, f == STORE_GAME_FOCUS_BUTTONS + 1 ? PICKER_DLC : PICKER_TITLE_UPDATE,
-                               g_storeGame.name, g_storeGame.titleId, shell.page, edition);
+                    // Title updates: what's installed first, with the search
+                    // a row away - straight to the search for an entry that
+                    // has no title ID to look for them by.
+                    const bool updates = (f == STORE_GAME_FOCUS_BUTTONS + 2);
+                    if (updates && g_storeGame.titleId != 0)
+                    {
+                        acted = true;
+                        TitleUpdateAuth auth = { &haveAuth, authHeader, sizeof(authHeader) };
+                        ManageTitleUpdates(g_storeGame.titleId, g_storeGame.name, edition,
+                                           InstalledMediaId(lib, g_storeGame.titleId), auth);
+                    }
+                    else
+                        OpenPicker(shell.picker, updates ? PICKER_TITLE_UPDATE : PICKER_DLC, g_storeGame.name,
+                                   g_storeGame.titleId, shell.page, edition);
                 }
                 else if (f == STORE_GAME_FOCUS_BUTTONS + 3 && CanUninstallStoreVersion(lib, shell))
                 {
