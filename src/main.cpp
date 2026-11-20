@@ -1323,77 +1323,6 @@ static bool GetArchiveOrgAuthHeader(char *authHeader, unsigned long long authHea
     return true;
 }
 
-// ---------------------------------------------------------------------------
-// The DLC pack and title update pickers
-// ---------------------------------------------------------------------------
-//
-// A game page's Find DLC and Title updates buttons - over the Store or the
-// library - and the installed disc's tile search for a game's DLC or title
-// updates; either way a picker opens over the page straight away, fills in
-// when the search comes back, and B steps back to the page at any point.
-//
-// ALWAYS a picker, even for a single perfectly-scored result. The DLC side
-// briefly auto-selected an unambiguous match and skipped straight to
-// downloading. That was removed after actually living with it: the picker is
-// not friction, it is the one place you can see the real filename and size
-// before committing to a download that may be gigabytes, and the one place to
-// back out of a game selected by mistake. For title updates it's also the
-// point: one game routinely has v1/v2/v3 across several regions, and "newest"
-// is not always what someone wants - a specific version is sometimes needed
-// for mods or for matchmaking compatibility.
-//
-// A in the picker adds the row to the download queue and leaves the picker
-// open, so a game with several separate packs - Call of Duty 2 has three -
-// can have them all queued in one visit.
-
-enum PickerKind
-{
-    PICKER_NONE,
-    PICKER_DLC,
-    PICKER_TITLE_UPDATE
-};
-
-// The picker opens the moment A or X is pressed, while the search runs on the
-// search worker, and fills in when the result arrives.
-enum PickerStatus
-{
-    PICKER_SEARCHING,
-    PICKER_READY,       // results to choose from
-    PICKER_NOTHING,     // the search worked, and matched nothing
-    PICKER_UNREACHABLE  // archive.org couldn't be reached - A tries again
-};
-
-#define MAX_PICKER_ROWS (MAX_DLC_RAR_MATCHES > MAX_TITLE_UPDATE_MATCHES ? MAX_DLC_RAR_MATCHES : MAX_TITLE_UPDATE_MATCHES)
-
-struct Picker
-{
-    PickerKind kind;
-    PickerStatus status;
-    int requestId; // the search it's waiting on, while PICKER_SEARCHING
-    ShellPage page; // the page it's open over: the library, or a game in the Store
-
-    // The game it's for - copied, since it may be the disc in the drive,
-    // which isn't in the library. editionName is the second name its search
-    // matches on, empty for none: see FindDlcRarFilenames.
-    char gameName[256];
-    char editionName[128];
-    unsigned long titleId;
-    int count;
-    int selected;
-    int scroll;
-
-    DlcRarMatch packs[MAX_DLC_RAR_MATCHES];
-    TitleUpdateMatch updates[MAX_TITLE_UPDATE_MATCHES];
-
-    // What the list page draws. labels point into packs/updates.
-    const char *labels[MAX_PICKER_ROWS];
-    const char *sublabels[MAX_PICKER_ROWS];
-    char subText[MAX_PICKER_ROWS][96];
-};
-
-// Where SearchResults land - static, as they're 8KB.
-static SearchResult g_searchResult;
-
 // The edition named on a version's line, if it has one: "Grand Theft Auto IV"
 // out of "Grand Theft Auto IV  ·  En, Fr, De, Es, It". Empty if it hasn't.
 //
@@ -1736,8 +1665,7 @@ static void ShowOnlineTitleUpdates(unsigned long titleId, const char *gameName, 
             return;
         }
 
-        // archive.org's: the download queue's job, as the picker page made
-        // it, followed here. It installs into 000B0000 as it always has;
+        // archive.org's: the download queue's job, followed here. It installs into 000B0000 as it always has;
         // once it's in, it's turned on and anything else set aside - found
         // as the one that wasn't there before.
         const TitleUpdateMatch &a = archive[picked - unityCount];
@@ -2063,117 +1991,6 @@ static void ManageDlc(unsigned long titleId, const char *gameName, const char *e
     else
         ManageDlcHeld(titleId, gameName, edition, auth);
     ReleaseDialogBackdrop();
-}
-
-// Opens the picker for a game and starts its search. editionName may be NULL:
-// the second name to look under, for a game whose Store entry is named after
-// another game sharing its title ID. See FindDlcRarFilenames.
-static void OpenPicker(Picker &picker, PickerKind kind, const char *gameName, unsigned long titleId,
-                       ShellPage page = SHELL_PAGE_LIBRARY, const char *editionName = NULL)
-{
-    picker.kind = kind;
-    picker.page = page;
-    strncpy(picker.gameName, gameName, sizeof(picker.gameName) - 1);
-    picker.gameName[sizeof(picker.gameName) - 1] = '\0';
-    strncpy(picker.editionName, editionName != NULL ? editionName : "", sizeof(picker.editionName) - 1);
-    picker.editionName[sizeof(picker.editionName) - 1] = '\0';
-    picker.titleId = titleId;
-    picker.count = 0;
-    picker.selected = 0;
-    picker.scroll = -1;
-    picker.requestId = BeginSearch(kind == PICKER_DLC ? SEARCH_DLC : SEARCH_TITLE_UPDATES, picker.gameName,
-                                   picker.editionName);
-
-    // 0 means the search worker never started; the log says why.
-    picker.status = (picker.requestId != 0) ? PICKER_SEARCHING : PICKER_UNREACHABLE;
-}
-
-// The rows for a DLC search. The filename is what actually identifies a pack,
-// and the size plus match confidence are what let someone judge between two
-// similar-looking entries.
-static void FillDlcRows(Picker &picker)
-{
-    for (int i = 0; i < picker.count; ++i)
-    {
-        picker.labels[i] = picker.packs[i].filename;
-
-        char sizeText[64] = "";
-        FormatBytes(picker.packs[i].size, sizeText, sizeof(sizeText));
-
-        _snprintf(picker.subText[i], sizeof(picker.subText[i]), "%s   %d%% name match",
-                  sizeText, picker.packs[i].score);
-        picker.subText[i][sizeof(picker.subText[i]) - 1] = '\0';
-        picker.sublabels[i] = picker.subText[i];
-    }
-}
-
-static void FillTitleUpdateRows(Picker &picker)
-{
-    for (int i = 0; i < picker.count; ++i)
-    {
-        const TitleUpdateMatch &update = picker.updates[i];
-
-        // "score N", not "N%" - a literal percent sign does not survive this
-        // logging path (see LogEscapePercent in parsing.h), which is why an
-        // earlier run of this printed "100v1" instead of "100%  v1".
-        dprintf("[TU]   score %d  v%d  region \"%s\"  %I64u bytes  %s\n",
-                update.score, update.version, update.region, update.size, update.filename);
-
-        picker.labels[i] = update.filename;
-
-        char sizeText[64] = "";
-        FormatBytes(update.size, sizeText, sizeof(sizeText));
-
-        _snprintf(picker.subText[i], sizeof(picker.subText[i]), "%s   v%d   %s   %d%% name match",
-                  sizeText, update.version,
-                  update.region[0] != '\0' ? update.region : "unknown region",
-                  update.score);
-        picker.subText[i][sizeof(picker.subText[i]) - 1] = '\0';
-        picker.sublabels[i] = picker.subText[i];
-    }
-}
-
-// Collects the picker's search result, if it has arrived. Called every frame
-// while the picker is searching.
-static void PollPickerSearch(Picker &picker)
-{
-    if (picker.kind == PICKER_NONE || picker.status != PICKER_SEARCHING)
-        return;
-
-    if (!TakeSearchResult(picker.requestId, &g_searchResult))
-        return;
-
-    const SearchResult &result = g_searchResult;
-
-    if (result.count < 0)
-    {
-        picker.status = PICKER_UNREACHABLE;
-        return;
-    }
-
-    if (result.count == 0)
-    {
-        picker.status = PICKER_NOTHING;
-        return;
-    }
-
-    picker.count = result.count;
-
-    if (picker.kind == PICKER_DLC)
-    {
-        memcpy(picker.packs, result.packs, sizeof(picker.packs));
-        FillDlcRows(picker);
-    }
-    else
-    {
-        // Sorted score-first then version-descending, so the first row is the
-        // newest update for the best-matching name - the right default to
-        // land on, but still shown rather than assumed.
-        memcpy(picker.updates, result.updates, sizeof(picker.updates));
-        FillTitleUpdateRows(picker);
-    }
-
-    picker.status = PICKER_READY;
 }
 
 // ---------------------------------------------------------------------------
@@ -4172,7 +3989,6 @@ struct Shell
     int libraryScroll; // -1 until placed - see LibraryPageView
 
     SettingsPage settings;
-    Picker picker; // open over the library while picker.kind != PICKER_NONE
 
     // The queue as of this frame, copied out of DownloadQueue at the top of
     // each pass, and the row text built from it. The selection is held as a
@@ -4358,8 +4174,7 @@ static char g_storeMeta[256];
 // version row is the RAR - the game, and anything packed with it.
 static const XblaGame *g_storeArcade = NULL;
 
-// Static rather than on main's stack: the picker's match arrays and the
-// queue's snapshot are tens of KB between them.
+// Static rather than on main's stack: the queue's snapshot alone is tens of KB.
 static Shell g_shell;
 
 // An empty Queue has nothing to choose - on it, the sidebar keeps focus.
@@ -7283,7 +7098,7 @@ static unsigned long FocusSignature(const Shell &shell)
         shell.homeFocus, shell.homeNavFocus, shell.homeSelected,
         shell.settings.section, shell.settings.focusRow, shell.settings.focusCol, DiscSpeedSetting(),
         InstallAsFolderSetting() ? 1 : 0,
-        shell.picker.kind, shell.picker.selected, shell.queueSelected,
+        shell.queueSelected,
         shell.storeFocus, shell.storeInSection, shell.storeSection, shell.sectionFocus[shell.storeSection],
         shell.storeInLetter, shell.storeSelected, shell.storeInGame, shell.storeGameFocus, shell.storeVersionChosen,
         shell.storeVersionsOpen, shell.storeVersionFocus,
@@ -10577,66 +10392,6 @@ static void RenderGamePageFrame(Shell &shell, const Library &lib, UiHint *hints,
     shell.storeGameScroll = view.scroll;
 }
 
-static void RenderPickerFrame(Shell &shell, UiHint *hints, int hintCount)
-{
-    if (shell.picker.kind != PICKER_NONE && shell.picker.status != PICKER_READY)
-    {
-        const Picker &picker = shell.picker;
-        const char *heading = (picker.kind == PICKER_DLC) ? Tr(STR_CHOOSE_DLC_PACK) : Tr(STR_CHOOSE_TITLE_UPDATE);
-        const char *gameName = picker.gameName;
-
-        if (picker.status == PICKER_UNREACHABLE)
-            hintCount = AddHint(hints, hintCount, UI_BUTTON_A, TrW(STR_TRY_AGAIN));
-        hintCount = AddHint(hints, hintCount, UI_BUTTON_B, TrW(STR_BUTTON_BACK));
-
-        if (picker.status == PICKER_SEARCHING)
-        {
-            // The dots step about three times a second - something
-            // has to move, or a slow answer reads as a hang.
-            static const char *const kDots[] = { "", ".", "..", "..." };
-            char message[96];
-            _snprintf(message, sizeof(message), "%s%s", Tr(STR_SEARCHING_ARCHIVE_ORG), kDots[(GetTickCount() / 333) % 4]);
-            message[sizeof(message) - 1] = '\0';
-            RenderPlaceholderFrame(heading, message, gameName, hints, hintCount);
-        }
-        else if (picker.status == PICKER_NOTHING)
-        {
-            RenderPlaceholderFrame(heading,
-                                   picker.kind == PICKER_DLC ? Tr(STR_NO_DLC_IN_THE_COLLECTION)
-                                                             : Tr(STR_NO_TITLE_UPDATE_MATCHED_THIS),
-                                   gameName, hints, hintCount);
-        }
-        else
-        {
-            RenderPlaceholderFrame(heading, Tr(STR_COULD_NOT_REACH_ARCHIVE_ORG),
-                                   Tr(STR_CHECK_THE_CONSOLES_NETWORK_CONNECTION),
-                                   hints, hintCount);
-        }
-    }
-    else
-    {
-        hintCount = AddHint(hints, hintCount, UI_BUTTON_A, TrW(STR_ADD_TO_QUEUE), TrW(STR_NAV_QUEUE));
-        hintCount = AddHint(hints, hintCount, UI_BUTTON_B, TrW(STR_BUTTON_BACK));
-
-        ListPageView view;
-        view.heading = (shell.picker.kind == PICKER_DLC) ? Tr(STR_CHOOSE_DLC_PACK) : Tr(STR_CHOOSE_TITLE_UPDATE);
-        view.subheading = shell.picker.gameName;
-        view.labels = shell.picker.labels;
-        view.sublabels = shell.picker.sublabels;
-        view.sections = NULL;
-        view.count = shell.picker.count;
-        view.selected = shell.picker.selected;
-        view.scroll = shell.picker.scroll;
-        view.focused = true;
-        view.showCounter = true;
-
-        RenderListFrame(view, hints, hintCount);
-
-        shell.picker.selected = view.selected;
-        shell.picker.scroll = view.scroll;
-    }
-}
-
 // The header from keys already saved, asking for nothing. Restoring the queue
 // at launch must not stop to prompt: a console whose keys have gone simply
 // has nothing to restore from archive.org, and says so when the jobs fail.
@@ -11392,7 +11147,6 @@ int main()
     shell.settings.focusRow = 0;
     shell.settings.focusCol = 0;
     shell.settings.scroll = 0.0f;
-    shell.picker.kind = PICKER_NONE;
     shell.queueCount = 0;
     shell.queueSelected = 0;
     shell.queueSelectedId = 0;
@@ -11543,7 +11297,6 @@ int main()
         const double partPumps = ImageTimerMs();
 
         SnapshotQueue(shell, lib);
-        PollPickerSearch(shell.picker);
         PumpCoverArt();
         PumpStoreArt();
         const double partRest = ImageTimerMs();
@@ -11709,55 +11462,6 @@ int main()
                 shell.sidebarFocused = false;
             else if (pressed & XINPUT_GAMEPAD_B)
                 EnterPage(shell, SHELL_PAGE_HOME, false); // the root, as B is everywhere but Home
-        }
-        else if (shell.picker.kind != PICKER_NONE && shell.page == shell.picker.page)
-        {
-            Picker &picker = shell.picker;
-
-            if (picker.status == PICKER_READY)
-                StepSelection(input.nav, picker.count, picker.selected);
-
-            if (pressed & XINPUT_GAMEPAD_B)
-            {
-                // Backing out of a search that's still running just leaves its
-                // result uncollected.
-                picker.kind = PICKER_NONE;
-            }
-            else if ((pressed & XINPUT_GAMEPAD_A) && picker.status == PICKER_UNREACHABLE)
-            {
-                // Try again, under the same names.
-                char edition[128];
-                strncpy(edition, picker.editionName, sizeof(edition) - 1);
-                edition[sizeof(edition) - 1] = '\0';
-                OpenPicker(picker, picker.kind, picker.gameName, picker.titleId, picker.page, edition);
-            }
-            else if ((pressed & XINPUT_GAMEPAD_A) && picker.status == PICKER_READY)
-            {
-                // The keys, the first time something is queued. Usually
-                // they're saved and this costs nothing; if they're not, it's
-                // the keyboard, which takes over the screen.
-                // If that took over the screen, resync once it's done.
-                const bool hadAuth = haveAuth;
-                const bool signedIn = EnsureAuthHeader(haveAuth, authHeader, sizeof(authHeader));
-                if (!hadAuth)
-                    acted = true;
-
-                // Queued, not downloaded: this returns at once and the picker
-                // stays open, so the next pack can be queued straight after.
-                // How it goes turns up on the Queue page and as a popup.
-                if (signedIn && picker.kind == PICKER_DLC)
-                {
-                    const DlcRarMatch &pack = picker.packs[picker.selected];
-                    ReportEnqueue(EnqueueDlcPack(pack, picker.gameName, picker.titleId, authHeader),
-                                  pack.filename);
-                }
-                else if (signedIn)
-                {
-                    const TitleUpdateMatch &update = picker.updates[picker.selected];
-                    ReportEnqueue(EnqueueTitleUpdate(update, picker.gameName, picker.titleId, authHeader),
-                                  update.filename);
-                }
-            }
         }
         else if (shell.page == SHELL_PAGE_LIBRARY && !shell.libraryInGame)
         {
@@ -11949,17 +11653,16 @@ int main()
                         ReleaseEdition(StoreReleaseOf(&g_storeGame, shell.storeVersionChosen), edition,
                                        sizeof(edition));
                     // Title updates: what's installed first, with the search
-                    // a row away - straight to the search for an entry that
-                    // has no title ID to look for them by.
+                    // a row away.
                     const bool updates = (f == STORE_GAME_FOCUS_BUTTONS + 2);
-                    if (updates && g_storeGame.titleId != 0)
+                    if (updates)
                     {
                         acted = true;
                         TitleUpdateAuth auth = { &haveAuth, authHeader, sizeof(authHeader) };
                         ManageTitleUpdates(g_storeGame.titleId, g_storeGame.name, edition,
                                            InstalledMediaId(lib, g_storeGame.titleId), auth);
                     }
-                    else if (!updates)
+                    else
                     {
                         // DLC: what's installed and what's online, in
                         // dialogs over this page.
@@ -11967,9 +11670,6 @@ int main()
                         TitleUpdateAuth auth = { &haveAuth, authHeader, sizeof(authHeader) };
                         ManageDlc(g_storeGame.titleId, g_storeGame.name, edition, auth);
                     }
-                    else
-                        OpenPicker(shell.picker, PICKER_TITLE_UPDATE, g_storeGame.name,
-                                   g_storeGame.titleId, shell.page, edition);
                 }
                 else if (f == STORE_GAME_FOCUS_BUTTONS + 3 && GamePageManages(lib))
                 {
@@ -12523,11 +12223,7 @@ int main()
         }
 
         case SHELL_PAGE_LIBRARY:
-            if (shell.picker.kind != PICKER_NONE && shell.picker.page == SHELL_PAGE_LIBRARY)
-            {
-                RenderPickerFrame(shell, hints, hintCount);
-            }
-            else if (shell.libraryInGame)
+            if (shell.libraryInGame)
             {
                 RenderGamePageFrame(shell, lib, hints, hintCount);
             }
@@ -12611,11 +12307,7 @@ int main()
         }
 
         case SHELL_PAGE_STORE:
-            if (shell.picker.kind != PICKER_NONE && shell.picker.page == SHELL_PAGE_STORE)
-            {
-                RenderPickerFrame(shell, hints, hintCount);
-            }
-            else if (shell.storeInGame)
+            if (shell.storeInGame)
             {
                 RenderGamePageFrame(shell, lib, hints, hintCount);
             }
