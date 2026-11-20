@@ -26,6 +26,8 @@
 //	                                    bytes not downloaded yet
 //	GET  /status?item=I&file=F          "<size> <bytes done>"
 //	POST /forget?item=I&file=F          drop the cached copy
+//	GET  /speed?bytes=N                 N bytes from memory, for the
+//	                                    console's speed test
 package main
 
 import (

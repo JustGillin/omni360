@@ -18,12 +18,13 @@ TLS handshakes) and times the bytes after, over MEASURE_MS.
 
 #include "SpeedTest.h"
 #include "Strings.h" // Tr() - every string the UI shows
-#include "GameListUI.h"   // RenderStatusFrame, ShowNotesUI, PollUiInput
+#include "GameListUI.h"   // the progress and list dialogs, PollUiInput
 #include "UiSound.h"
 #include "downloadFile.h" // httpRequestHTTPS
 #include "dns.h"
 #include "OutputConsole.h"
 #include "XboxTLS.h"       // XboxTLS_SetThreadSuites
+#include "PcHelper.h"      // PcHelperSetThreadBypass
 #include "inc\bearssl.h"
 
 #define WARMUP_MAX_MS   5000  // waiting for every connection's first byte, at most
@@ -78,7 +79,19 @@ struct SpeedResults
     double chacha, gcm;     // MB/s on one core; negative: not run
     double archive[RUN_COUNT];       // MB/s; negative: not run or failed
     unsigned short suite[RUN_COUNT]; // what the first connection settled on
+    double helper;          // MB/s from the PC helper's /speed; negative: not run or failed
+    bool helperTooOld;      // it answered, but has no /speed - an older helper
 };
+
+// The paired PC helper, when it's running and in use - its own run, over the
+// local network, from data it holds in memory: never the archive.org file,
+// which it would set about downloading.
+#define HELPER_CONNECTIONS 2
+#define HELPER_SPEED_BYTES "1073741824" // a request's worth; asked for again until the test stops
+static char g_helperHost[64];
+static unsigned short g_helperPort;
+static char g_helperToken[64];
+static bool g_helperOn;
 
 static SpeedResults g_results;
 static CRITICAL_SECTION g_lock;
@@ -174,7 +187,9 @@ static double Measure(int slots)
 static SOCKET ConnectPlain(const char *host, unsigned short port, bool logDetails)
 {
     char ip[64] = "";
-    if (!ResolveDNS(host, ip, sizeof(ip)) && searchDnsCache(host, ip, sizeof(ip)) != 0)
+    if (inet_addr(host) != INADDR_NONE)
+        _snprintf(ip, sizeof(ip), "%s", host); // an address already - the PC helper's
+    else if (!ResolveDNS(host, ip, sizeof(ip)) && searchDnsCache(host, ip, sizeof(ip)) != 0)
         return INVALID_SOCKET;
 
     SOCKET s = socket(AF_INET, SOCK_STREAM, IPPROTO_TCP);
@@ -312,6 +327,93 @@ static double TestPlain(int host)
 }
 
 // ---------------------------------------------------------------------------
+// The PC helper, over the local network
+// ---------------------------------------------------------------------------
+
+static volatile long g_helperOld; // a connection was answered 404: no /speed
+
+static DWORD WINAPI HelperEntry(LPVOID param)
+{
+    const int slot = (int)(INT_PTR)param;
+    char *buffer = (char *)malloc(RECV_CHUNK);
+    int failures = 0;
+    while (buffer != NULL && !InterlockedCompareExchange(&g_stopTransfers, 0, 0) && failures < 3 &&
+           !InterlockedCompareExchange(&g_helperOld, 0, 0))
+    {
+        SOCKET s = ConnectPlain(g_helperHost, g_helperPort, slot == 0 && failures == 0);
+        if (s == INVALID_SOCKET)
+        {
+            failures++;
+            Sleep(300);
+            continue;
+        }
+        char request[256];
+        const int len = _snprintf(request, sizeof(request),
+                                  "GET /speed?bytes=" HELPER_SPEED_BYTES "&t=%s HTTP/1.1\r\nHost: %s\r\n"
+                                  "Connection: close\r\n\r\n",
+                                  g_helperToken, g_helperHost);
+        bool any = false, first = true;
+        if (len > 0 && send(s, request, len, 0) == len)
+        {
+            int got;
+            while (!InterlockedCompareExchange(&g_stopTransfers, 0, 0) && (got = recv(s, buffer, RECV_CHUNK, 0)) > 0)
+            {
+                if (first)
+                {
+                    // An older helper has no /speed: it says so in its first line.
+                    first = false;
+                    if (got >= 12 && strncmp(buffer, "HTTP/1.", 7) == 0 && strncmp(buffer + 9, "200", 3) != 0)
+                    {
+                        if (strncmp(buffer + 9, "404", 3) == 0)
+                            InterlockedExchange(&g_helperOld, 1);
+                        dprintf("[speedtest] the PC helper answered %.12s\n", buffer);
+                        break;
+                    }
+                }
+                g_slotBytes[slot] += (unsigned long long)got;
+                any = true;
+            }
+        }
+        closesocket(s);
+        if (!any)
+            failures++;
+    }
+    free(buffer);
+    return 0;
+}
+
+static double TestHelper()
+{
+    if (!NetUp())
+        return -1.0;
+    InterlockedExchange(&g_stopTransfers, 0);
+    InterlockedExchange(&g_helperOld, 0);
+    static const DWORD kCores[HELPER_CONNECTIONS] = { 1, 4 }; // a download's two connections'
+    HANDLE threads[HELPER_CONNECTIONS];
+    int started = 0;
+    for (int i = 0; i < HELPER_CONNECTIONS; ++i)
+    {
+        g_slotBytes[i] = 0;
+        threads[started] = CreateThread(NULL, 64 * 1024, HelperEntry, (LPVOID)(INT_PTR)i, CREATE_SUSPENDED, NULL);
+        if (threads[started] == NULL)
+            continue;
+        XSetThreadProcessor(threads[started], kCores[i]);
+        ResumeThread(threads[started]);
+        started++;
+    }
+    const double rate = started > 0 ? Measure(HELPER_CONNECTIONS) : -1.0;
+    InterlockedExchange(&g_stopTransfers, 1);
+    for (int i = 0; i < started; ++i)
+    {
+        WaitForSingleObject(threads[i], INFINITE);
+        CloseHandle(threads[i]);
+    }
+    NetDown();
+    g_results.helperTooOld = InterlockedCompareExchange(&g_helperOld, 0, 0) != 0;
+    return g_results.helperTooOld ? -1.0 : rate;
+}
+
+// ---------------------------------------------------------------------------
 // 2. Decrypting, on one core
 // ---------------------------------------------------------------------------
 
@@ -397,6 +499,7 @@ static void ScratchPath(int slot, char *out, size_t outSize)
 static DWORD WINAPI ArchiveEntry(LPVOID param)
 {
     const int slot = (int)(INT_PTR)param;
+    PcHelperSetThreadBypass(true); // its own thread: the bypass is per thread
     XboxTLS_SetThreadSuites(g_archiveSuites);
     char headers[256];
     const unsigned long long from = slot * ARCHIVE_SLOT_SPAN;
@@ -533,6 +636,9 @@ static double TestArchive(int connections, int suites, unsigned short *outSuite)
 
 static DWORD WINAPI SpeedTestEntry(LPVOID)
 {
+    // archive.org, measured - never the PC helper, which would answer a
+    // request for the test file by downloading all of it on the PC.
+    PcHelperSetThreadBypass(true);
     SetPhase(Tr(STR_CHECKING_YOUR_INTERNET_CONNECTION));
     g_results.plain = TestPlain(PLAIN_NEAR);
     dprintf("[speedtest] network, no encryption, nearby (%s): %.2f MB/s\n", kPlainHosts[PLAIN_NEAR], g_results.plain);
@@ -551,6 +657,14 @@ static DWORD WINAPI SpeedTestEntry(LPVOID)
         TestDecrypt(&g_results.chacha, &g_results.gcm);
         dprintf("[speedtest] decrypting on one core: ChaCha20-Poly1305 %.2f MB/s, AES-128-GCM %.2f MB/s\n",
                 g_results.chacha, g_results.gcm);
+    }
+
+    if (g_helperOn && !Cancelled())
+    {
+        SetPhase(Tr(STR_CHECKING_THE_PC_HELPER));
+        g_results.helper = TestHelper();
+        dprintf("[speedtest] the PC helper, %d connections, local network: %.2f MB/s%s\n", HELPER_CONNECTIONS,
+                g_results.helper, g_results.helperTooOld ? " (an older helper, without /speed)" : "");
     }
 
     if (g_auth != NULL && !Cancelled() && ResolveArchiveUrl())
@@ -595,20 +709,19 @@ static DWORD WINAPI SpeedTestEntry(LPVOID)
     return 0;
 }
 
-static void AppendRate(std::string &out, const char *label, double rate)
+// A result's figure, for its row: "9.8 MB/s", or that it couldn't be checked.
+static void RateNote(double rate, char *out, size_t outSize)
 {
-    char line[128];
     if (rate >= 0.0)
     {
         char mbs[16];
         _snprintf(mbs, sizeof(mbs), "%.1f", rate);
         mbs[sizeof(mbs) - 1] = '\0';
-        TrFormat(line, sizeof(line), STR_SPEED_RATE, label, mbs);
+        TrFormat(out, outSize, STR_SPEED_MBS, mbs);
     }
     else
-        TrFormat(line, sizeof(line), STR_SPEED_UNCHECKED, label);
-    out += line;
-    out += "\n";
+        TrFormat(out, outSize, STR_SPEED_COULDNT_CHECK);
+    out[outSize - 1] = '\0';
 }
 
 // The fastest archive.org run, or -1 if none worked.
@@ -649,7 +762,18 @@ static std::string Verdict(const SpeedResults &r)
     return Tr(STR_SPEED_CONSOLE_LIMIT);
 }
 
+static void RunSpeedTestHeld(const char *authHeader, const char *scratchPath);
+
 void RunSpeedTestUI(const char *authHeader, const char *scratchPath)
+{
+    // Its progress and its results in dialogs over Settings, on the one
+    // backdrop - not a page of its own.
+    HoldDialogBackdrop();
+    RunSpeedTestHeld(authHeader, scratchPath);
+    ReleaseDialogBackdrop();
+}
+
+static void RunSpeedTestHeld(const char *authHeader, const char *scratchPath)
 {
     static bool initialized = false;
     if (!initialized)
@@ -659,13 +783,33 @@ void RunSpeedTestUI(const char *authHeader, const char *scratchPath)
     }
 
     memset(&g_results, 0, sizeof(g_results));
-    g_results.plain = g_results.plainFar = g_results.chacha = g_results.gcm = -1.0;
+    g_results.plain = g_results.plainFar = g_results.chacha = g_results.gcm = g_results.helper = -1.0;
+    g_results.helperTooOld = false;
+
+    // The helper's address, from "http://192.168.1.20:36061".
+    char helperUrl[64], helperName[64];
+    g_helperOn = PcHelperUrl(helperUrl, sizeof(helperUrl), g_helperToken, sizeof(g_helperToken), helperName,
+                             sizeof(helperName));
+    if (g_helperOn)
+    {
+        const char *host = strstr(helperUrl, "://");
+        host = host != NULL ? host + 3 : helperUrl;
+        const char *colon = strchr(host, ':');
+        const size_t n = colon != NULL ? (size_t)(colon - host) : strlen(host);
+        g_helperOn = n > 0 && n < sizeof(g_helperHost);
+        if (g_helperOn)
+        {
+            memcpy(g_helperHost, host, n);
+            g_helperHost[n] = '\0';
+            g_helperPort = (unsigned short)(colon != NULL ? atoi(colon + 1) : 80);
+        }
+    }
     for (int i = 0; i < RUN_COUNT; ++i)
         g_results.archive[i] = -1.0;
     g_auth = authHeader;
     g_phase[0] = '\0';
     g_step = 0;
-    g_steps = (authHeader != NULL) ? 3 + RUN_COUNT : 3;
+    g_steps = ((authHeader != NULL) ? 3 + RUN_COUNT : 3) + (g_helperOn ? 1 : 0);
     g_live = 0.0;
     g_cancel = 0;
     g_finished = 0;
@@ -692,13 +836,13 @@ void RunSpeedTestUI(const char *authHeader, const char *scratchPath)
     HANDLE worker = CreateThread(NULL, 256 * 1024, SpeedTestEntry, NULL, CREATE_SUSPENDED, NULL);
     if (worker == NULL)
     {
-        ShowNotesUI(Tr(STR_SPEED_TEST), Tr(STR_COULDNT_START), Tr(STR_THE_TEST_COULDNT_BE_STARTED), NULL, NULL);
+        ShowAlertUI(Tr(STR_COULDNT_START), Tr(STR_THE_TEST_COULDNT_BE_STARTED), NULL, NULL, NULL);
         return;
     }
     XSetThreadProcessor(worker, 4); // a download connection's core, for the decryption test
     ResumeThread(worker);
 
-    ResyncUiInput();
+    BeginProgressDialog();
     while (!InterlockedCompareExchange(&g_finished, 0, 0))
     {
         const UiInput input = PollUiInput();
@@ -709,7 +853,10 @@ void RunSpeedTestUI(const char *authHeader, const char *scratchPath)
         }
 
         char phase[96], detail[96];
+        float fraction = -1.0f;
         EnterCriticalSection(&g_lock);
+        if (g_steps > 0 && g_step > 0)
+            fraction = (float)(g_step - 1) / (float)g_steps; // the steps done; the bar fills as each ends
         _snprintf(phase, sizeof(phase), "%s", g_phase[0] != '\0' ? g_phase : Tr(STR_STARTING));
         if (Cancelled())
             TrFormat(detail, sizeof(detail), STR_STOPPING_ELLIPSIS);
@@ -728,12 +875,12 @@ void RunSpeedTestUI(const char *authHeader, const char *scratchPath)
         phase[sizeof(phase) - 1] = '\0';
         detail[sizeof(detail) - 1] = '\0';
 
-        RenderStatusFrame(Tr(STR_SPEED_TEST), phase, detail);
+        RenderProgressDialog(Tr(STR_SPEED_TEST), phase, detail, fraction, UI_BUTTON_B, TrW(STR_STOP));
         Sleep(16);
     }
     WaitForSingleObject(worker, INFINITE);
     CloseHandle(worker);
-    ResyncUiInput();
+    EndProgressDialog();
 
     if (Cancelled())
     {
@@ -741,18 +888,43 @@ void RunSpeedTestUI(const char *authHeader, const char *scratchPath)
         return;
     }
 
-    // Three numbers anyone can read; the log has every run, and the ciphers.
-    std::string body;
-    // The far-away server's speed is for the verdict and the log, not here:
-    // a second internet number only puzzles.
-    AppendRate(body, Tr(STR_YOUR_INTERNET_CONNECTION), g_results.plain);
-    AppendRate(body, Tr(STR_WHAT_YOUR_CONSOLE_CAN_KEEP), g_results.chacha);
-    if (authHeader != NULL)
-        AppendRate(body, Tr(STR_ARCHIVE_ORG), BestArchive(g_results));
+    // Three numbers anyone can read, a row each, under what they say; the
+    // log has every run, and the ciphers. The far-away server's speed is for
+    // the verdict and the log, not here: a second internet number only puzzles.
     const std::string verdict = Verdict(g_results);
-    body += "\n";
-    body += verdict;
     dprintf("[speedtest] %s\n", verdict.c_str());
 
-    ShowNotesUI(Tr(STR_SPEED_TEST), Tr(STR_RESULTS), body.c_str(), Tr(STR_THE_DETAILS_ARE_IN_DEBUGINFO), NULL);
+    static char notes[4][48];
+    const char *labels[4], *rowNotes[4];
+    int kinds[4];
+    int rows = 0;
+    labels[rows] = Tr(STR_YOUR_INTERNET_CONNECTION);
+    RateNote(g_results.plain, notes[rows], sizeof(notes[rows]));
+    rows++;
+    labels[rows] = Tr(STR_WHAT_YOUR_CONSOLE_CAN_KEEP);
+    RateNote(g_results.chacha, notes[rows], sizeof(notes[rows]));
+    rows++;
+    if (authHeader != NULL)
+    {
+        labels[rows] = Tr(STR_ARCHIVE_ORG);
+        RateNote(BestArchive(g_results), notes[rows], sizeof(notes[rows]));
+        rows++;
+    }
+    if (g_helperOn)
+    {
+        // An older helper can't be tested: it has to be updated first.
+        labels[rows] = Tr(STR_THROUGH_THE_PC_HELPER);
+        if (g_results.helperTooOld)
+            TrFormat(notes[rows], sizeof(notes[rows]), STR_SPEED_UPDATE_THE_HELPER);
+        else
+            RateNote(g_results.helper, notes[rows], sizeof(notes[rows]));
+        rows++;
+    }
+    for (int i = 0; i < rows; ++i)
+    {
+        rowNotes[i] = notes[i];
+        kinds[i] = ALERT_ROW_INFO; // to read: B closes it
+    }
+    ShowAlertListExUI(Tr(STR_SPEED_TEST), verdict.c_str(), labels, rowNotes, rows, 0, NULL, kinds, false,
+                      Tr(STR_THE_DETAILS_ARE_IN_DEBUGINFO));
 }

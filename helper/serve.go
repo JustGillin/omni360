@@ -1,11 +1,13 @@
 package main
 
 import (
+	"crypto/rand"
 	"fmt"
 	"io"
 	"log"
 	"net/http"
 	"os"
+	"strconv"
 	"strings"
 )
 
@@ -59,6 +61,28 @@ func registerHandlers(mux *http.ServeMux, s *store, p *pairing) {
 		log.Printf("dropped %s/%s - the console cancelled it", item, file)
 	}))
 
+	// /speed?bytes=N: N bytes from memory, for the console's speed test - how
+	// fast the helper can hand a download over the local network, with
+	// archive.org and the disk left out of it.
+	mux.HandleFunc("/speed", p.requireToken(func(w http.ResponseWriter, r *http.Request) {
+		n, err := strconv.ParseInt(r.URL.Query().Get("bytes"), 10, 64)
+		if err != nil || n <= 0 || n > 4<<30 {
+			n = 1 << 30
+		}
+		w.Header().Set("Content-Type", "application/octet-stream")
+		w.Header().Set("Content-Length", strconv.FormatInt(n, 10))
+		for n > 0 {
+			k := int64(len(speedData))
+			if k > n {
+				k = n
+			}
+			if _, err := w.Write(speedData[:k]); err != nil {
+				return // the console stopped reading: its test is over
+			}
+			n -= k
+		}
+	}))
+
 	// /file/<item>/<file>: what the console reads in place of archive.org.
 	mux.HandleFunc("/file/", p.requireToken(func(w http.ResponseWriter, r *http.Request) {
 		rest := strings.TrimPrefix(r.URL.Path, "/file/")
@@ -75,6 +99,14 @@ func registerHandlers(mux *http.ServeMux, s *store, p *pairing) {
 		serveRange(w, r, s, d)
 	}))
 }
+
+// speedData is what /speed sends, over and over: random, so nothing on the
+// way can shrink it.
+var speedData = func() []byte {
+	b := make([]byte, 1<<20)
+	rand.Read(b)
+	return b
+}()
 
 // smallRead is the most a read can be to skip the chunk queue.
 const smallRead = 1 << 20

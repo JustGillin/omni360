@@ -5251,9 +5251,9 @@ int ShowAlertListUI(const char *heading, const char *message, const char **label
 }
 
 int ShowAlertListExUI(const char *heading, const char *message, const char **labels, const char **notes, int count,
-                      int focus, const int *icons, const int *kinds, bool notesBelow)
+                      int focus, const int *icons, const int *kinds, bool notesBelow, const char *detailLine)
 {
-    return RunAlert(heading, message, NULL, 5, NULL, 0, labels, notes, count, focus, icons, kinds, notesBelow);
+    return RunAlert(heading, message, detailLine, 5, NULL, 0, labels, notes, count, focus, icons, kinds, notesBelow);
 }
 
 // The progress dialog's backdrop, from Begin to End - the held one when a

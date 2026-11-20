@@ -1117,7 +1117,7 @@ enum AlertRowKind
 };
 
 int ShowAlertListExUI(const char *heading, const char *message, const char **labels, const char **notes, int count,
-                      int focus, const int *icons, const int *kinds, bool notesBelow);
+                      int focus, const int *icons, const int *kinds, bool notesBelow, const char *detailLine = NULL);
 
 // A run of dialogs opened one from another - a list, then what to do with a
 // row, then its progress - each snapshots the screen behind it, which by
