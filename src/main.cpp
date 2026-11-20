@@ -6579,10 +6579,11 @@ static bool ExitMenu()
         TrFormat(message, sizeof(message), STR_EXIT_WHERE_TO);
     message[sizeof(message) - 1] = '\0';
 
-    const char *buttons[3] = { Tr(STR_EXIT), Tr(STR_EXIT_RESTART), Tr(STR_EXIT_TURN_OFF) };
+    // Opens on Cancel, leftmost: two of the others power the console off.
+    const char *buttons[4] = { Tr(STR_EXIT), Tr(STR_EXIT_RESTART), Tr(STR_EXIT_TURN_OFF), Tr(STR_BUTTON_CANCEL) };
     const int answer = ShowAlertButtonsUI(Tr(STR_EXIT_OMNI360), message,
                                           pending > 0 ? Tr(STR_LEAVING_STOPS_THEM_FILES_THAT) : NULL,
-                                          buttons, 3);
+                                          buttons, 4, 5, 3);
     switch (answer)
     {
     case 0: g_exitAction = EXIT_TO_DASHBOARD; break;

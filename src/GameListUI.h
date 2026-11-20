@@ -1040,12 +1040,14 @@ bool ShowNotesUI(const char *heading, const char *title, const char *body, const
 bool ShowAlertUI(const char *heading, const char *message, const char *detailLine, const char *confirmLabel,
                  const char *cancelLabel);
 
-// ShowAlertUI with up to three buttons: labels[0] - the one that goes
+// ShowAlertUI with up to four buttons: labels[0] - the one that goes
 // ahead - on the right, the rest leftward in order. Returns the index of
 // the one pressed, or -1 for B (0 when there's only the one). Past five
 // lines of message - a game's known issues - the card widens to fit more.
+// focus is the button it opens on; give a Cancel's index wherever going
+// ahead can't be undone.
 int ShowAlertButtonsUI(const char *heading, const char *message, const char *detailLine, const char **labels,
-                       int count, int maxMessageLines = 5);
+                       int count, int maxMessageLines = 5, int focus = 0);
 
 // Icons for a list card's rows, so what a row is reads at a glance.
 enum UiListIcon

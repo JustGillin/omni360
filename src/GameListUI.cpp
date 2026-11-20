@@ -4865,7 +4865,7 @@ static D3DCOLOR Faded(D3DCOLOR color, float a)
     return (color & 0x00FFFFFF) | (alpha << 24);
 }
 
-#define ALERT_MAX_BUTTONS 3
+#define ALERT_MAX_BUTTONS 4
 #define ALERT_LIST_ROW_H  52.0f
 #define ALERT_LIST_ROWS   6     // shown at once; the rest scroll
 #define ALERT_HINTS_H     34.0f // the button hints along the card's foot
@@ -4930,7 +4930,8 @@ static bool AlertRowFocuses(const int *kinds, int i)   { return kinds == NULL ||
 
 static int RunAlert(const char *heading, const char *message, const char *detailLine, int maxMessageLines,
                     const char **labels, int count, const char **rowLabels, const char **rowNotes, int listCount,
-                    int listFocus, const int *rowIcons = NULL, const int *rowKinds = NULL, bool notesBelow = false)
+                    int listFocus, const int *rowIcons = NULL, const int *rowKinds = NULL, bool notesBelow = false,
+                    int buttonFocus = 0)
 {
     if (!g_Initialized)
         return -1;
@@ -4950,9 +4951,22 @@ static int RunAlert(const char *heading, const char *message, const char *detail
 
     // The card's size, from how much its text needs. A long message - a
     // game's known issues - makes it wider before it makes it taller.
-    const float wide = (maxMessageLines > 5) ? S(840.0f) : S(ALERT_W);
-    const float cardW = (wide < g_M.screenW - S(80.0f)) ? wide : g_M.screenW - S(80.0f);
+    // Wider again when its buttons wouldn't fit side by side.
     const float pad = S(ALERT_PAD);
+    const float gap = S(14.0f);
+    float buttonX[ALERT_MAX_BUTTONS], buttonW[ALERT_MAX_BUTTONS];
+    float buttonsW = 0.0f;
+    for (int i = 0; i < count; ++i)
+    {
+        buttonW[i] = TextWidth(labels[i], 0.85f, true) + S(48.0f);
+        if (buttonW[i] < S(ALERT_BUTTON_W))
+            buttonW[i] = S(ALERT_BUTTON_W);
+        buttonsW += buttonW[i] + (i > 0 ? gap : 0.0f);
+    }
+    float wide = (maxMessageLines > 5) ? S(840.0f) : S(ALERT_W);
+    if (wide < buttonsW + pad * 2.0f)
+        wide = buttonsW + pad * 2.0f;
+    const float cardW = (wide < g_M.screenW - S(80.0f)) ? wide : g_M.screenW - S(80.0f);
     const float textW = cardW - pad * 2.0f;
     const float titleH = LineHeight(1.15f);
     const float messageLineH = LineHeight(0.9f) * 1.15f;
@@ -4979,14 +4993,9 @@ static int RunAlert(const char *heading, const char *message, const char *detail
 
     // The buttons, at the card's foot on the right, labels[0] - the one that
     // goes ahead - rightmost, as the 360's own dialogs and the web's put it.
-    const float gap = S(14.0f);
-    float buttonX[ALERT_MAX_BUTTONS], buttonW[ALERT_MAX_BUTTONS];
     float right = cardX + cardW - pad;
     for (int i = 0; i < count; ++i)
     {
-        buttonW[i] = TextWidth(labels[i], 0.85f, true) + S(48.0f);
-        if (buttonW[i] < S(ALERT_BUTTON_W))
-            buttonW[i] = S(ALERT_BUTTON_W);
         buttonX[i] = right - buttonW[i];
         right = buttonX[i] - gap;
     }
@@ -5011,7 +5020,10 @@ static int RunAlert(const char *heading, const char *message, const char *detail
     const float iconSize = S(26.0f);
     const float labelX = rowIcons != NULL ? S(22.0f) + iconSize + S(14.0f) : S(22.0f);
 
-    int focus = list ? (listFocus >= 0 && listFocus < listCount ? listFocus : 0) : 0;
+    // A button dialog opens where its caller says - a confirmation on Cancel,
+    // so a second press of A can't delete or power off anything.
+    int focus = list ? (listFocus >= 0 && listFocus < listCount ? listFocus : 0)
+                     : (buttonFocus >= 0 && buttonFocus < count ? buttonFocus : 0);
     while (list && focus + 1 < listCount && !AlertRowFocuses(rowKinds, focus))
         focus++;
     int scroll = 0;
@@ -5226,9 +5238,10 @@ static int RunAlert(const char *heading, const char *message, const char *detail
 }
 
 int ShowAlertButtonsUI(const char *heading, const char *message, const char *detailLine, const char **labels,
-                       int count, int maxMessageLines)
+                       int count, int maxMessageLines, int focus)
 {
-    return RunAlert(heading, message, detailLine, maxMessageLines, labels, count, NULL, NULL, 0, 0);
+    return RunAlert(heading, message, detailLine, maxMessageLines, labels, count, NULL, NULL, 0, 0, NULL, NULL,
+                    false, focus);
 }
 
 int ShowAlertListUI(const char *heading, const char *message, const char **labels, const char **notes, int count,
@@ -5346,7 +5359,9 @@ bool ShowAlertUI(const char *heading, const char *message, const char *detailLin
     const char *labels[2];
     labels[0] = (confirmLabel != NULL) ? confirmLabel : Tr(STR_BUTTON_OK);
     labels[1] = cancelLabel;
-    return ShowAlertButtonsUI(heading, message, detailLine, labels, cancelLabel != NULL ? 2 : 1) == 0;
+    // With a Cancel, start on it: the safe choice is the one a stray A picks.
+    return ShowAlertButtonsUI(heading, message, detailLine, labels, cancelLabel != NULL ? 2 : 1, 5,
+                              cancelLabel != NULL ? 1 : 0) == 0;
 }
 
 bool ShowConfirmUI(const char *heading, const char *message, const char *detailLine,
