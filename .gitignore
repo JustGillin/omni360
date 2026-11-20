@@ -1,5 +1,7 @@
 # Build output folders
 **/Release/
+InputBridgePlugin/Release Retail/
+InputBridgePlugin/*.log
 
 # Local reminder folder
 REMEMBER TO OPEN THE .sln FILE!!!/

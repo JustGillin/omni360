@@ -1,0 +1,10 @@
+# Set this to the PC's LAN IPv4 address (the PC running omni360_input_bridge.py).
+ip=192.0.2.1
+port=36062
+
+# Boot debugging. stage: 2 = wait only, 3 = + XAM lookups, 4-7 = + each hook
+# in turn, 8 = everything (default). delay: milliseconds to wait after boot
+# before touching XAM (default 15000). The log is written beside the XEX as
+# Omni360InputBridge.log.
+#stage=8
+#delay=15000
