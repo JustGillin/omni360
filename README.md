@@ -218,6 +218,8 @@ Omni360 started from [X-Store](https://github.com/951261/X-Store) by 951261, whi
 
 The two are separate apps now, and X-Store is a great one. It's well worth trying alongside Omni360.
 
+For how Omni360 compares with X-Store, GodStix, ConsoleCrate and ReLive — where each gets its games, what it covers, how fast it downloads, and whether it's open source — see [How Omni360 compares](docs/comparison.md).
+
 <br>
 
 ## Building it yourself
