@@ -658,14 +658,12 @@ void RenderStoreLetterFrame(StoreLetterView &view, const UiHint *hints, int hint
 
 // A game's page: its wallpaper across the top, the box, the catalog's
 // details, its buttons, the synopsis and screenshots - and under them, More
-// like this, a row of games that scrolls sideways. Its versions are on a
-// panel down the right, open over the page while versionsOpen; Install
-// installs the chosen one, which is the best one unless someone chose.
+// like this, a row of games that scrolls sideways. Its versions are a
+// dialog main.cpp opens over the page (Y).
 //
 // focus: STORE_GAME_FOCUS_BUTTONS + 0..3 is a button, STORE_GAME_FOCUS_SIMILAR
 // + i a game in the row. similarScroll is the row's first game shown, and
-// scroll how far the page has moved up to show it; on the panel,
-// versionFocus is the focused version and versionScroll the first shown.
+// scroll how far the page has moved up to show it.
 // The Render call keeps what's focused on screen. The buttons are Install,
 // Find DLC, Title updates and Uninstall; a NULL one isn't shown, and only
 // the last may be - Uninstall, while there's nothing installed to remove.
@@ -721,13 +719,6 @@ struct StoreGameView
     bool buttonDisabled[STORE_GAME_BUTTONS];
     StoreInstallState install; // how the first button, Install, is drawn
     float installFraction;     // while installing: 0..1, negative when unknown
-
-    const StoreVersionView *versions;
-    int versionCount;
-    int versionChosen;      // the one Install installs
-    bool versionsOpen;      // the panel
-    int versionFocus;
-    int versionScroll;
 
     const StoreTileView *similar; // More like this; none hides the row
     int similarCount;

@@ -4147,10 +4147,7 @@ struct Shell
     // sidebar. librarySelected counts its tiles then, not the library's.
     bool libraryFavourites;
     int storeGameFocus;     // STORE_GAME_FOCUS_*
-    int storeVersionChosen;
-    int storeVersionScroll;
-    bool storeVersionsOpen; // the Versions panel, over the page - Y
-    int storeVersionFocus;
+    int storeVersionChosen; // the one Install installs - Y picks another (ChooseStoreVersion)
     bool storeShotsAsked;   // its screenshots, once its details came
     int storeSimilarScroll; // More like this's first game shown
     float storeGameScroll;  // how far the page has moved up, to show it
@@ -5834,8 +5831,6 @@ static void OpenStoreGame(Shell &shell, const StoreGame &game)
         shell.storeInGame = true;
     shell.storeGameFocus = STORE_GAME_FOCUS_BUTTONS;
     shell.storeVersionChosen = BestVersionForFilter(g_storeGame);
-    shell.storeVersionScroll = 0;
-    shell.storeVersionsOpen = false;
     shell.storeShotsAsked = false;
     shell.storeSimilarScroll = 0;
     shell.storeGameScroll = 0.0f;
@@ -5913,6 +5908,34 @@ static void OpenArcadeGame(Shell &shell, const XblaGame &game)
 static int StoreVersionCount()
 {
     return g_storeArcade != NULL ? 1 : g_storeGame.versionCount;
+}
+
+// Y on a game page: its versions, in the same dialog as its DLC and title
+// updates - the game's name, a tick on the one Install installs, and under
+// each its languages and notes with its size. A picks the one to install.
+static void ChooseStoreVersion(Shell &shell)
+{
+    const int count = StoreVersionCount();
+    if (count < 2 || count > STORE_MAX_VERSIONS)
+        return;
+    static char notes[STORE_MAX_VERSIONS][200];
+    const char *labels[STORE_MAX_VERSIONS], *rowNotes[STORE_MAX_VERSIONS];
+    int icons[STORE_MAX_VERSIONS];
+    for (int v = 0; v < count; ++v)
+    {
+        const StoreVersionView &ver = g_storeVersions[v];
+        const bool detail = ver.detail != NULL && ver.detail[0] != '\0';
+        _snprintf(notes[v], sizeof(notes[v]), "%s%s%s", detail ? ver.detail : "",
+                  detail && ver.size[0] != '\0' ? "  \xC2\xB7  " : "", ver.size);
+        notes[v][sizeof(notes[v]) - 1] = '\0';
+        labels[v] = ver.label;
+        rowNotes[v] = notes[v][0] != '\0' ? notes[v] : NULL;
+        icons[v] = v == shell.storeVersionChosen ? UI_ICON_CHECK : UI_ICON_DISC;
+    }
+    const int picked = ShowAlertListExUI(g_storeGame.name, Tr(STR_STORE_VERSIONS_TICKED), labels, rowNotes, count,
+                                         shell.storeVersionChosen, icons, NULL, true);
+    if (picked >= 0)
+        shell.storeVersionChosen = picked;
 }
 
 // Whether a game from either list is on the drive: its biggest package, in
@@ -6553,12 +6576,6 @@ static StoreGameView MakeStoreGameView(Shell &shell, const Library &lib)
     if (GamePageManages(lib))
         view.buttons[3] = Tr(STR_STORAGE_MANAGE_SHORT); // else not shown
 
-    view.versions = g_storeVersions;
-    view.versionCount = StoreVersionCount();
-    view.versionChosen = shell.storeVersionChosen;
-    view.versionsOpen = shell.storeVersionsOpen;
-    view.versionFocus = shell.storeVersionFocus;
-    view.versionScroll = shell.storeVersionScroll;
     view.similar = g_similarTiles;
     view.similarCount = g_similarCount;
     view.similarScroll = shell.storeSimilarScroll;
@@ -7117,7 +7134,6 @@ static unsigned long FocusSignature(const Shell &shell)
         shell.queueSelected,
         shell.storeFocus, shell.storeInSection, shell.storeSection, shell.sectionFocus[shell.storeSection],
         shell.storeInLetter, shell.storeSelected, shell.storeInGame, shell.storeGameFocus, shell.storeVersionChosen,
-        shell.storeVersionsOpen, shell.storeVersionFocus,
         shell.storeFilterOpen, shell.storeFilterFocus, FilterSignature(),
         shell.storeInHomebrew, shell.homebrewRow, shell.homebrewPlace,
         shell.storageColumn, shell.storageRow, shell.sidebarOnStorage, shell.storageList, shell.storageListSelected,
@@ -10376,12 +10392,7 @@ static void RenderGamePageFrame(Shell &shell, const Library &lib, UiHint *hints,
     if (!shell.sidebarFocused)
     {
         const int f = shell.storeGameFocus;
-        if (shell.storeVersionsOpen)
-        {
-            hintCount = AddHint(hints, hintCount, UI_BUTTON_A, TrW(STR_CHOOSE));
-            hintCount = AddHint(hints, hintCount, UI_BUTTON_B, TrW(STR_DONE));
-        }
-        else if (f >= STORE_GAME_FOCUS_SIMILAR)
+        if (f >= STORE_GAME_FOCUS_SIMILAR)
             hintCount = AddHint(hints, hintCount, UI_BUTTON_A, TrW(STR_VIEW_GAME), TrW(STR_VIEW));
         else if (f == STORE_GAME_FOCUS_BUTTONS && StoreVersionCount() > 0)
             hintCount = AddHint(hints, hintCount, UI_BUTTON_A, GamePagePlays(shell, lib) ? TrW(STR_PLAY) : TrW(STR_INSTALL));
@@ -10391,19 +10402,14 @@ static void RenderGamePageFrame(Shell &shell, const Library &lib, UiHint *hints,
             hintCount = AddHint(hints, hintCount, UI_BUTTON_A, TrW(STR_FIND_TITLE_UPDATES), TrW(STR_UPDATES));
         else if (f == STORE_GAME_FOCUS_BUTTONS + 3)
             hintCount = AddHint(hints, hintCount, UI_BUTTON_A, TrW(STR_STORAGE_MANAGE_GAME), TrW(STR_STORAGE_MANAGE_SHORT));
-        if (!shell.storeVersionsOpen)
-        {
-            hintCount = AddHint(hints, hintCount, UI_BUTTON_B, TrW(STR_BUTTON_BACK));
-            if (StoreVersionCount() > 1)
-                hintCount = AddHint(hints, hintCount, UI_BUTTON_Y, TrW(STR_STORE_VERSIONS));
-        }
+        hintCount = AddHint(hints, hintCount, UI_BUTTON_B, TrW(STR_BUTTON_BACK));
+        if (StoreVersionCount() > 1)
+            hintCount = AddHint(hints, hintCount, UI_BUTTON_Y, TrW(STR_STORE_VERSIONS));
     }
 
     StoreGameView view = MakeStoreGameView(shell, lib);
     RenderStoreGameFrame(view, hints, hintCount);
     shell.storeGameFocus = view.focus;
-    shell.storeVersionScroll = view.versionScroll;
-    shell.storeVersionFocus = view.versionFocus;
     shell.storeSimilarScroll = view.similarScroll;
     shell.storeGameScroll = view.scroll;
 }
@@ -11570,35 +11576,13 @@ int main()
                 acted = true;
             }
         }
-        else if (GamePageOpen(shell) && shell.storeVersionsOpen)
-        {
-            // The Versions panel: A chooses one, for Install; B or Y closes it.
-            if (pressed & (XINPUT_GAMEPAD_B | XINPUT_GAMEPAD_Y))
-            {
-                shell.storeVersionsOpen = false;
-            }
-            else if (pressed & XINPUT_GAMEPAD_A)
-            {
-                shell.storeVersionChosen = shell.storeVersionFocus;
-                shell.storeVersionsOpen = false;
-            }
-            else if (input.nav == XINPUT_GAMEPAD_DPAD_UP && shell.storeVersionFocus > 0)
-            {
-                shell.storeVersionFocus--;
-            }
-            else if (input.nav == XINPUT_GAMEPAD_DPAD_DOWN && shell.storeVersionFocus + 1 < StoreVersionCount())
-            {
-                shell.storeVersionFocus++;
-            }
-        }
         else if (GamePageOpen(shell))
         {
             const int f = shell.storeGameFocus;
             if ((pressed & XINPUT_GAMEPAD_Y) && StoreVersionCount() > 1)
             {
-                // The Versions panel, on the one Install installs.
-                shell.storeVersionsOpen = true;
-                shell.storeVersionFocus = shell.storeVersionChosen;
+                ChooseStoreVersion(shell);
+                acted = true;
             }
             else if ((pressed & XINPUT_GAMEPAD_B) && shell.page == SHELL_PAGE_LIBRARY)
             {

@@ -90,6 +90,7 @@ STORE_NO_MATCH = No games match: {1}
 STORE_NO_MATCH_HINT = Press X to reset the filters, or Y to change them.
 STORE_VERSIONS = Versions
 STORE_VERSIONS_COUNT = Versions  ·  {1}
+STORE_VERSIONS_TICKED = Install gets the ticked one.
 STORE_INSTALLING_PCT = Installing {1}%
 STORE_LOADING_DETAILS = Loading details from Xbox Live...
 STORE_NO_DETAILS = No details found for this game

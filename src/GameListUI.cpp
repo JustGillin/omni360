@@ -3621,8 +3621,6 @@ static PopupLayout LayOutPopup(const UiPopupView &p)
         L.barsY = body;
     }
     body += S(16.0f);
-    const float hintsCY = body + S(26.0f);
-    body += S(52.0f);
 
     L.h = L.headH + body;
     L.x = (g_M.screenW - L.w) * 0.5f;
@@ -3633,7 +3631,7 @@ static PopupLayout LayOutPopup(const UiPopupView &p)
     L.rowsY += top;
     if (L.barsHeadY >= 0.0f) L.barsHeadY += top;
     L.barsY += top;
-    L.hintsCY = top + hintsCY;
+    L.hintsCY = g_M.footerY; // in the screen's footer, as every dialog's
     return L;
 }
 
@@ -3654,6 +3652,8 @@ static void PopupBarColumns(const UiPopupView &p, const PopupLayout &L, float *t
         *trackW = S(40.0f);
 }
 
+static void DrawDialogFooterBand(float a); // with the alerts
+
 static void DrawShellPopup()
 {
     const UiPopupView &p = g_popup;
@@ -3665,13 +3665,13 @@ static void DrawShellPopup()
         hints[i].sprite = SpriteForButton(p.hints[i].button);
         hints[i].label = p.hints[i].label;
     }
-    // Inside the card, from its left.
-    LayoutButtonHints(hints, p.hintCount, L.x + L.pad);
+    LayoutButtonHintsRight(hints, p.hintCount);
 
     // --- Quads ---
     ClearClip();
     g_pd3dDevice->SetRenderState(D3DRS_SCISSORTESTENABLE, FALSE);
     FillRound(0.0f, 0.0f, g_M.screenW, g_M.screenH, 0.0f, 0xB3000000);
+    DrawDialogFooterBand(1.0f); // over the page's own footer
     ShadowRound(L.x, L.y + S(10.0f), L.w, L.h, g_M.radius, S(30.0f), COL_SHADOW);
     FillRound(L.x, L.y, L.w, L.h, g_M.radius, COL_SURFACE);
     FillRound(L.x, L.y, L.w, L.headH, g_M.radius, COL_SURFACE_HI);
@@ -4868,8 +4868,6 @@ static D3DCOLOR Faded(D3DCOLOR color, float a)
 #define ALERT_MAX_BUTTONS 4
 #define ALERT_LIST_ROW_H  52.0f
 #define ALERT_LIST_ROWS   6     // shown at once; the rest scroll
-#define ALERT_HINTS_H     34.0f // the button hints along the card's foot
-#define ALERT_HINTS_GAP   18.0f
 
 static void DrawNavIcon(int icon, float cx, float cy, float size, D3DCOLOR tint); // with Home's nav row
 
@@ -4887,6 +4885,34 @@ static int NavIconForListIcon(int icon)
     case UI_ICON_DISC:     return NAV_ICON_DISC;
     default:               return -1;
     }
+}
+
+// Every dialog's controller hints go where every page has them, at the foot
+// of the screen - not inside the card. The page's own footer, still in the
+// dimmed backdrop, is faded out under them first so there is only one.
+static void DrawDialogFooterBand(float a)
+{
+    const float solidTop = g_M.footerY - S(30.0f);
+    const float fadeTop = solidTop - S(40.0f);
+    DrawGradientRect(0.0f, fadeTop, g_M.screenW, solidTop - fadeTop, 0x00000000, Faded(0xE8000000, a), true);
+    DrawRect(0.0f, solidTop, g_M.screenW, g_M.screenH - solidTop, Faded(0xE8000000, a));
+}
+
+static void DrawDialogHints(const ButtonHint *hints, int count, float a)
+{
+    for (int i = 0; i < count; ++i)
+        DrawButtonSprite(hints[i].sprite, hints[i].badgeX, g_M.footerY);
+}
+
+// Inside the frame's text Begin/End.
+static void DrawDialogHintText(const ButtonHint *hints, int count, float a)
+{
+    const float scale = HINT_LABEL_SCALE * g_M.textScale;
+    g_UiFont.SetBold(false);
+    g_UiFont.SetScaleFactors(scale, scale);
+    for (int i = 0; i < count; ++i)
+        g_UiFont.DrawText(hints[i].labelX, TextTopForCenter(g_M.footerY, scale), Faded(COL_TEXT2, a),
+                          hints[i].label);
 }
 
 // The page behind a run of dialogs, held for all of them - see
@@ -4981,13 +5007,9 @@ static int RunAlert(const char *heading, const char *message, const char *detail
         rowsMax = 1;
     const int rowsShown = list ? (listCount < rowsMax ? listCount : rowsMax) : 0;
     const float footH = list ? rowsShown * rowH : buttonH;
-    // Button prompts along the foot for a list dialog only: a dialog of
-    // buttons already says what each does on the buttons themselves.
-    const float hintsH = list ? S(ALERT_HINTS_H) : 0.0f;
-    const float hintsGap = list ? S(ALERT_HINTS_GAP) : 0.0f;
+    // The button prompts are at the foot of the screen, not in the card.
     const float cardH = pad + titleH + S(12.0f) + messageLines * messageLineH +
-                        (hasDetail ? S(8.0f) + detailLines * detailLineH : 0.0f) + S(24.0f) + footH + hintsGap +
-                        hintsH + pad;
+                        (hasDetail ? S(8.0f) + detailLines * detailLineH : 0.0f) + S(24.0f) + footH + pad;
     const float cardX = (g_M.screenW - cardW) * 0.5f;
     const float restY = (g_M.screenH - cardH) * 0.5f;
 
@@ -5000,21 +5022,25 @@ static int RunAlert(const char *heading, const char *message, const char *detail
         right = buttonX[i] - gap;
     }
 
-    // A list dialog's buttons, along its foot as every page has them.
+    // Its buttons, in the screen's footer as every page has them: a list's
+    // A Select and B Back; a lone button's own word on A; otherwise A Select
+    // and B Cancel.
     ButtonHint hints[2];
     int hintCount = 0;
-    if (list)
+    static WCHAR loneLabel[64];
+    hints[hintCount].sprite = SpriteForButton(UI_BUTTON_A);
+    if (!list && count == 1)
     {
-        hints[hintCount].sprite = SpriteForButton(UI_BUTTON_A);
+        Utf8ToWide(labels[0], loneLabel, 64);
+        hints[hintCount++].label = loneLabel;
+    }
+    else
+    {
         hints[hintCount++].label = TrW(STR_SELECT);
         hints[hintCount].sprite = SpriteForButton(UI_BUTTON_B);
-        hints[hintCount++].label = TrW(STR_BUTTON_BACK);
+        hints[hintCount++].label = list ? TrW(STR_BUTTON_BACK) : TrW(STR_BUTTON_CANCEL);
     }
-    if (hintCount > 0)
-    {
-        const float width = LayoutButtonHints(hints, hintCount, 0.0f);
-        LayoutButtonHints(hints, hintCount, cardX + cardW - pad - width);
-    }
+    LayoutButtonHintsRight(hints, hintCount);
 
     // A row's icon, when the list has them, sits before its label.
     const float iconSize = S(26.0f);
@@ -5101,12 +5127,12 @@ static int RunAlert(const char *heading, const char *message, const char *detail
         else
             DrawBackground();
         DrawRect(0.0f, 0.0f, g_M.screenW, g_M.screenH, Faded(COL_ALERT_DIM, a));
+        DrawDialogFooterBand(a);
 
         ShadowRound(cardX, cardY + S(6.0f), cardW, cardH, g_M.radius, S(28.0f), Faded(COL_SHADOW, a));
         FillRound(cardX, cardY, cardW, cardH, g_M.radius, Faded(COL_SURFACE, a));
 
-        const float hintsY = cardY + cardH - pad - hintsH * 0.5f;
-        const float footY = cardY + cardH - pad - hintsH - hintsGap - footH;
+        const float footY = cardY + cardH - pad - footH;
         const float innerX = cardX + pad;
         if (list)
         {
@@ -5151,8 +5177,7 @@ static int RunAlert(const char *heading, const char *message, const char *detail
         }
         // On a row only there to read, A does nothing - so no A prompt.
         const int firstHint = (list && !AlertRowPicks(rowKinds, focus)) ? 1 : 0;
-        for (int i = firstHint; i < hintCount; ++i)
-            DrawButtonSprite(hints[i].sprite, hints[i].badgeX, hintsY);
+        DrawDialogHints(hints + firstHint, hintCount - firstHint, a);
 
         TextBegin();
         float y = cardY + pad;
@@ -5217,14 +5242,7 @@ static int RunAlert(const char *heading, const char *message, const char *detail
                         Faded(i == 0 || i == focus ? COL_TEXT : COL_TEXT2, a), labels[i], ATGFONT_CENTER_X, 0.0f,
                         true);
         }
-        {
-            const float scale = HINT_LABEL_SCALE * g_M.textScale;
-            g_UiFont.SetBold(false);
-            g_UiFont.SetScaleFactors(scale, scale);
-            for (int i = firstHint; i < hintCount; ++i)
-                g_UiFont.DrawText(hints[i].labelX, TextTopForCenter(hintsY, scale), Faded(COL_TEXT2, a),
-                                  hints[i].label);
-        }
+        DrawDialogHintText(hints + firstHint, hintCount - firstHint, a);
         TextEnd();
 
         EndFrame();
@@ -5293,9 +5311,7 @@ void RenderProgressDialog(const char *heading, const char *line, const char *det
     const float lineH = LineHeight(0.9f) * 1.15f;
     const float detailH = LineHeight(0.76f) * 1.15f;
     const float barH = S(10.0f);
-    const float hintsH = S(ALERT_HINTS_H);
-    const float cardH = pad + titleH + S(12.0f) + lineH + S(14.0f) + barH + S(10.0f) + detailH + S(ALERT_HINTS_GAP) +
-                        hintsH + pad;
+    const float cardH = pad + titleH + S(12.0f) + lineH + S(14.0f) + barH + S(10.0f) + detailH + pad;
     const float cardX = (g_M.screenW - cardW) * 0.5f;
     const float cardY = (g_M.screenH - cardH) * 0.5f;
     const float innerX = cardX + pad;
@@ -5303,10 +5319,7 @@ void RenderProgressDialog(const char *heading, const char *line, const char *det
     ButtonHint hint;
     hint.sprite = SpriteForButton(hintButton);
     hint.label = hintLabel;
-    {
-        const float width = LayoutButtonHints(&hint, 1, 0.0f);
-        LayoutButtonHints(&hint, 1, cardX + cardW - pad - width);
-    }
+    LayoutButtonHintsRight(&hint, 1); // in the screen's footer, as RunAlert's
 
     BeginFrame();
     if (g_progressBackdrop != NULL)
@@ -5314,6 +5327,7 @@ void RenderProgressDialog(const char *heading, const char *line, const char *det
     else
         DrawBackground();
     DrawRect(0.0f, 0.0f, g_M.screenW, g_M.screenH, COL_ALERT_DIM);
+    DrawDialogFooterBand(1.0f);
     ShadowRound(cardX, cardY + S(6.0f), cardW, cardH, g_M.radius, S(28.0f), COL_SHADOW);
     FillRound(cardX, cardY, cardW, cardH, g_M.radius, COL_SURFACE);
 
@@ -5333,8 +5347,7 @@ void RenderProgressDialog(const char *heading, const char *line, const char *det
         const float t = (float)(GetTickCount() % 1400) / 1400.0f;
         FillRound(innerX + (textW - sliver) * t, barY, sliver, barH, barH * 0.5f, COL_GREEN);
     }
-    const float hintsY = cardY + cardH - pad - hintsH * 0.5f;
-    DrawButtonSprite(hint.sprite, hint.badgeX, hintsY);
+    DrawDialogHints(&hint, 1, 1.0f);
 
     TextBegin();
     float y = cardY + pad;
@@ -5343,12 +5356,7 @@ void RenderProgressDialog(const char *heading, const char *line, const char *det
     Text(innerX, y, 0.9f, COL_TEXT, line != NULL ? line : "", ATGFONT_TRUNCATED, textW);
     if (detail != NULL)
         Text(innerX, barY + barH + S(10.0f), 0.76f, COL_DIM, detail, ATGFONT_TRUNCATED, textW);
-    {
-        const float scale = HINT_LABEL_SCALE * g_M.textScale;
-        g_UiFont.SetBold(false);
-        g_UiFont.SetScaleFactors(scale, scale);
-        g_UiFont.DrawText(hint.labelX, TextTopForCenter(hintsY, scale), COL_TEXT2, hint.label);
-    }
+    DrawDialogHintText(&hint, 1, 1.0f);
     TextEnd();
     EndFrame();
 }
@@ -8480,89 +8488,6 @@ static StoreGameLayout LayOutStoreGame(bool hasShots)
     return L;
 }
 
-// The Versions panel: down the right over a scrim, as the Filter and sort
-// panel is - a row each, with its label, languages and size, and a tick on
-// the one Install installs.
-struct VersionsPanelLayout
-{
-    float x;          // the panel's left edge; it runs to the screen's right
-    float rowX, rowW, rowH, rowGap;
-    float titleY;     // the middle of its title
-    float top;        // the first row's
-    int rows;         // shown at once
-};
-
-static VersionsPanelLayout LayOutVersionsPanel(int count)
-{
-    VersionsPanelLayout L;
-    L.rowW = S(FILTER_PANEL_W);
-    L.rowX = g_M.screenW - g_M.safeX - L.rowW;
-    L.x = L.rowX - S(28.0f);
-    L.rowH = S(58.0f);
-    L.rowGap = S(8.0f);
-    L.titleY = g_M.headerY + S(22.0f);
-    L.top = g_M.headerY + S(58.0f);
-    L.rows = (int)((g_M.footerY - S(20.0f) - L.top + L.rowGap) / (L.rowH + L.rowGap));
-    if (L.rows > count)
-        L.rows = count;
-    if (L.rows < 1)
-        L.rows = 1;
-    // The rows stop short of the scrollbar when there are more than fit;
-    // rowX stays, so they start in the same place either way.
-    if (count > L.rows)
-        L.rowW -= ScrollGutter();
-    return L;
-}
-
-static void DrawVersionsPanelQuads(const StoreGameView &view, const VersionsPanelLayout &L)
-{
-    DrawRect(0.0f, 0.0f, L.x, g_M.screenH, COL_SHADOW);
-    DrawRect(L.x, 0.0f, g_M.screenW - L.x, g_M.screenH, COL_RAIL);
-    for (int row = 0; row < L.rows; ++row)
-    {
-        const int v = view.versionScroll + row;
-        if (v >= view.versionCount)
-            break;
-        const float y = L.top + row * (L.rowH + L.rowGap);
-        const bool focused = view.focused && v == view.versionFocus;
-        FillRound(L.rowX, y, L.rowW, L.rowH, g_M.radius, focused ? COL_SURFACE_HI : COL_SURFACE);
-        if (focused)
-            FocusRing(L.rowX, y, L.rowW, L.rowH, g_M.radius);
-        DrawCheckQuads(L.rowX + L.rowW - S(16.0f) - SettingsCheck(), y + L.rowH * 0.5f, v == view.versionChosen, false);
-    }
-
-    if (view.versionCount > L.rows)
-        DrawScrollbar(L.top, g_M.footerY - S(20.0f) - L.top, view.versionCount, L.rows, view.versionScroll);
-}
-
-static void DrawVersionsPanelText(const StoreGameView &view, const VersionsPanelLayout &L)
-{
-    char title[48];
-    char versions[16];
-    _snprintf(versions, sizeof(versions), "%d", view.versionCount);
-    versions[sizeof(versions) - 1] = '\0';
-    TrFormat(title, sizeof(title), view.versionCount > L.rows ? STR_STORE_VERSIONS_COUNT : STR_STORE_VERSIONS,
-             versions);
-    TextMid(L.rowX, L.titleY, 1.1f, COL_TEXT, title, 0, 0.0f, true);
-
-    for (int row = 0; row < L.rows; ++row)
-    {
-        const int v = view.versionScroll + row;
-        if (v >= view.versionCount)
-            break;
-        const StoreVersionView &ver = view.versions[v];
-        const bool focused = view.focused && v == view.versionFocus;
-        const float y = L.top + row * (L.rowH + L.rowGap);
-        const float sizeRight = L.rowX + L.rowW - S(16.0f) - SettingsCheck() - S(14.0f);
-        const float sizeW = TextWidth(ver.size, 0.78f);
-        const float textX = L.rowX + S(16.0f), textW = sizeRight - sizeW - S(16.0f) - textX;
-        TextFit(textX, y + S(8.0f), 0.82f, focused ? COL_TEXT : COL_TEXT2, ver.label, textW, true);
-        if (ver.detail != NULL && ver.detail[0] != '\0')
-            TextFit(textX, y + S(10.0f) + LineHeight(0.82f) * 1.2f, 0.66f, COL_DIM, ver.detail, textW);
-        TextMid(sizeRight, y + L.rowH * 0.5f, 0.78f, COL_TEXT2, ver.size, ATGFONT_RIGHT);
-    }
-}
-
 // The page moved up by `scroll`: everything on it but the header and footer.
 static void ScrollStoreGameLayout(StoreGameLayout &L, float scroll)
 {
@@ -8631,7 +8556,6 @@ void RenderStoreGameFrame(StoreGameView &view, const UiHint *hints, int hintCoun
     // same way.)
     g_pageArtAskedCount = -1;
 
-    const int versionCount = (view.versions != NULL && view.versionCount > 0) ? view.versionCount : 0;
     const int similarCount = (view.similar != NULL && view.similarCount > 0)
                                  ? (view.similarCount < STORE_SIMILAR_MAX ? view.similarCount : STORE_SIMILAR_MAX)
                                  : 0;
@@ -8654,21 +8578,11 @@ void RenderStoreGameFrame(StoreGameView &view, const UiHint *hints, int hintCoun
     StoreGameLayout L = LayOutStoreGame(view.loading || view.screenshotCount > 0);
     const float r = g_M.radius;
 
-    // The Versions panel, its focused version among the rows it shows. While
-    // it's open the page under it has no focus, and its text - which can't
-    // be cut, or covered by the scrim - stops short of it, dimmed as the
-    // scrim dims the page's quads.
-    const bool panelOpen = view.versionsOpen && versionCount > 0;
-    const VersionsPanelLayout P = LayOutVersionsPanel(versionCount);
-    if (panelOpen)
-    {
-        if (view.versionFocus > versionCount - 1) view.versionFocus = versionCount - 1;
-        if (view.versionFocus < 0) view.versionFocus = 0;
-        KeepSelectionVisible(versionCount, P.rows, view.versionFocus, view.versionScroll);
-    }
-    const bool pageFocused = view.focused && !panelOpen;
-    const float textRight = panelOpen ? P.x - S(24.0f) : g_M.screenW;
-    const float see = panelOpen ? FILTER_SCRIM_SEE : 1.0f;
+    // Versions are a dialog over the page now (main.cpp), so the page is
+    // always drawn whole.
+    const bool pageFocused = view.focused;
+    const float textRight = g_M.screenW;
+    const float see = 1.0f;
 
     // The page between the top and the footer, which it scrolls inside: up
     // just far enough to show More like this while a game in it has focus,
@@ -8865,15 +8779,10 @@ void RenderStoreGameFrame(StoreGameView &view, const UiHint *hints, int hintCoun
     }
     ClearClip();
 
-    // Not while the versions panel is over the page: it has its own list.
-    if (!panelOpen)
     {
         const float trackY = g_M.listYTitleOnly;
         DrawScrollbarRange(trackY, clipBottom - trackY, clipBottom - trackY, scrollMost, view.scroll);
     }
-
-    if (panelOpen)
-        DrawVersionsPanelQuads(view, P);
 
     DrawButtonHintShapes(footer, footerCount, g_M.footerY);
     DrawHeaderQuads(showToast);
@@ -8982,9 +8891,6 @@ void RenderStoreGameFrame(StoreGameView &view, const UiHint *hints, int hintCoun
         }
     }
     ClearClip();
-
-    if (panelOpen)
-        DrawVersionsPanelText(view, P);
 
     g_UiFont.SetBold(false);
     g_UiFont.SetScaleFactors(1.0f, 1.0f);
