@@ -42,7 +42,7 @@ def deploy(host, user, password, local, remote):
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--host", default="192.168.68.71")
+    parser.add_argument("--host", default="192.168.68.74")
     parser.add_argument("--user", default="xboxftp")
     parser.add_argument("--password", default="xboxftp")
     parser.add_argument("--local", default="Release/Omni360.xex")

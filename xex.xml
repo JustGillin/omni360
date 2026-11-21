@@ -14,7 +14,14 @@
      comparing headers (imagexex /DUMP) with XeXMenu, which stays open when
      the tray is opened on the same console. The documented Multidisc Swap
      and Multidisc Insecure Media privileges (15, 16) were tried first and
-     made no difference on hardware. -->
+     made no difference on hardware.
+
+     Privilege 6 (insecure sockets): lets the app's plain TCP connections
+     (XNET_STARTUP_BYPASS_SECURITY + SO 0x5801) skip Xbox's secure layer.
+     Without it, some exploit setups (Peer Pressure, ABadAvatar with
+     XeUnshackle) time out every connection unless DashLaunch's sockpatch is
+     on - issues #2 and #16. sockpatch gives every title this privilege. -->
 <xex>
   <privilege id="0"/>
+  <privilege id="6"/>
 </xex>
