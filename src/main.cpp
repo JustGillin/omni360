@@ -3152,6 +3152,8 @@ struct SettingsPage
     char folderHelp[MAX_FOLDER_ROWS][128];
     char keysStatus[64];
     char helperStatus[96];
+    int helperShown;     // the PcHelperStatus helperStatus was made from, and
+    char helperName[64]; // the PC's name then - see SettingsHelperChanged
     char ftpStatus[128];
     char updatesStatus[96];
     char updatesHelp[96];
@@ -3444,6 +3446,9 @@ static void BuildSettingsPage(SettingsPage &page, const Library &lib, const char
         {
             char pcName[64];
             const PcHelperStatus helper = GetPcHelperStatus(pcName, sizeof(pcName));
+            page.helperShown = helper;
+            strncpy(page.helperName, pcName, sizeof(page.helperName) - 1);
+            page.helperName[sizeof(page.helperName) - 1] = '\0';
             switch (helper)
             {
             case PC_HELPER_PAIRED_ONLINE:
@@ -3694,6 +3699,17 @@ static void StepSettingsRow(SettingsPage &page, int direction)
             return;
         }
     }
+}
+
+// Whether the PC helper has started, stopped or changed since General's
+// rows were made - its row and buttons follow it while the page is open.
+static bool SettingsHelperChanged(const SettingsPage &page)
+{
+    if (page.section != SETTINGS_SECTION_GENERAL)
+        return false;
+    char pcName[64];
+    const PcHelperStatus helper = GetPcHelperStatus(pcName, sizeof(pcName));
+    return helper != page.helperShown || strcmp(pcName, page.helperName) != 0;
 }
 
 // LB and RB, or up and down its sidebar: the next section, built now so the
@@ -11287,6 +11303,8 @@ int main()
         UpdateDisc(shell, lib, gamesPath);
 
         const double partRefresh = ImageTimerMs();
+        if (shell.page == SHELL_PAGE_SETTINGS && SettingsHelperChanged(shell.settings))
+            shell.settingsStale = true;
         if (shell.stale)
             RefreshShell(shell, lib, g_contentBase, gamesPath);
         else if (shell.settingsStale)
