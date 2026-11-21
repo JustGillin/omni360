@@ -279,13 +279,29 @@ Three different hint patterns: confirmations show none, menus and pickers show t
 
 Ordered by risk, then reach:
 
-1. **Confirmations open on Cancel**, including Exit (add Cancel). One change in `RunAlert`/`ShowAlertUI` covers every delete, remove, stop and power action.
+1. **Confirmations open on Cancel**, including Exit (add Cancel). One change in `RunAlert`/`ShowAlertUI` covers every delete, remove, stop and power action. **Done in 0e985de**, checked on the console.
 2. **Fix the shared truncation** (word boundary + ellipsis, or wrap): settings help lines, toasts, tile names, store rows, the squeezed Versions page. Dozens of instances; some mislead ("Left 4 Dead.").
 3. **One dialog component and one footer rule**: centered dialog, page footer hidden, the dialog's own actions in a single screen-bottom footer. Make Versions, DLC and Title updates the same dialog (see the comparison under Store).
 4. **Footer labels that match what the button does**: "B Store" that goes back, "A Find title updates", carousels with no ◀▶ hint, "A Turn off" on the active language, Queue "X Remove", Queue "Y" Night mode.
 5. **Plain names, used the same everywhere**: drives ("Hard drive", "USB drive 1" instead of Hdd1/HDD1/Usb0/HddX), store categories (no XBLA/XBLIG), folders not paths, "Kernel", "Re-sync", "Assets", raw file names and match percentages.
 6. **Trim subtitles and help lines** that repeat the label or the footer (Storage's left buttons, Queue "3 installed", Homebrew and category subtitles, DLC subtitle).
 7. **Return focus to where the user came from** (nav icons, Home after View game, the storage ring not switching pages).
+
+### Found while checking the speed test and PC helper (2026-11-20, Claude)
+
+| Priority | Screen/state | Observed | Expected / suggestion |
+| --- | --- | --- | --- |
+| Fixed | Settings › PC helper › Scan | "Scan found no helper" although the helper answered `/hello`. Cause: each batch waited 700 ms, and a PC on Wi-Fi that had dozed off answered later than that (the same helper answered in 7 ms on another scan). **Fixed:** 2.5 s per batch; found 3 of 3 times on the console, against 0 of 3 before. | Done. |
+| P2 | PC helper after the PC's address changes | The saved `helper-url` only updates once the helper is heard or found, so a new DHCP address leaves it "not running" until Scan is pressed. Broadcasts from an old helper build (11-16) didn't reach the console; the current build's do. | Scan now recovers it. Optionally scan once automatically when a paired helper hasn't been heard for a while. |
+| P2 | Settings › PC helper row | The row keeps its old state (e.g. "Paired · DESKTOP-…" with no Scan) after the helper stops, even after reopening Settings, until another sidebar section is visited; the clock icon updates correctly. "No helper found" was also shown while the clock icon said connected. | Rebuild the helper row when the helper's state changes. |
+| P2 | Speed test verdict | With "Through the PC helper 11.3 MB/s" beside "archive.org 2.6 MB/s", the verdict still says "…so this is as fast as it gets." | When the helper is faster, say downloads go faster through it. |
+| P2 | Speed test progress | "Step 6 of 7 - B stops it" repeats the "B Stop" hint below it. | Drop "B stops it" from the line. |
+| P2 | "No helper found" | Message clipped: "running on a PC on the same netwo."; footer "B Continue". | Truncation fix; "B Back" or "A OK". |
+| P2 | Pairing wait ("Allow it on your PC") | No footer at all, so no visible way out. The helper's PC prompt expires after 2 minutes and counts as No; the console then says "Pairing wasn't allowed on your PC", which reads as if the user refused. | Show "B Cancel"; say "Nobody answered on the PC in time" when it timed out. |
+| P2 | Unpair | Unpairs at once, no confirmation. | Fine, since pairing again is easy; noting it. |
+| P2 | Title updates dialog, long game name | "Hasbro Family Game Night 4: The Game ." (truncation bug). | Truncation fix. |
+
+Checked and working: the speed test's PC helper row (11.3 MB/s with a current helper; "Update the helper to check" with one built before `/speed`); Title updates on a Store entry with no title ID (opens the dialog; "Find more online" reports nothing found, no crash).
 
 **Capture correction (2026-11-20, Claude):** the first window captures were cropped on the right and bottom by a DPI-scaling bug in the capture script (fixed in `tools/capture_window.ps1`). With the full frame, the Storage file browser footer shows **A Open, B Back** (not only A Open), and the Storage overview shows A Select, B Back. Earlier footer omissions recorded from cropped frames need rechecking. The file browser's top helper line is genuinely clipped: "Y acts on what's selecte".
 

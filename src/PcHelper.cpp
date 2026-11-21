@@ -229,14 +229,19 @@ static DWORD WINAPI CheckInEntry(LPVOID)
 //
 // For when its announcements don't arrive. Every address on the console's
 // /24 is tried on the helper's HTTP port, a batch at a time with non-blocking
-// connects - on a LAN a live address answers in a millisecond or two, so a
-// short wait per batch is plenty - and whatever accepts is asked /hello.
-// A PC that pairing could work with at all has that port open, so this finds
-// every helper pairing could use.
+// connects, and whatever accepts is asked /hello. A PC that pairing could work
+// with at all has that port open, so this finds every helper pairing could use.
+//
+// The wait per batch is long for a LAN on purpose. A PC on Wi-Fi that has
+// dozed off to save power can take well over half a second to answer - the
+// same helper answered in 7 ms on one scan and not within 700 ms on three
+// others - so a short wait missed it. A batch is no bigger because XNet allows
+// 32 TCP sockets in all, and downloads and the FTP server hold some of them.
+// The scan stops at the first helper, so a PC low on the subnet is quick.
 
 #define HELPER_HTTP_PORT   36061 // the helper's default, as its announcements say
 #define SCAN_BATCH         24
-#define SCAN_WAIT_MS       700
+#define SCAN_WAIT_MS       2500
 
 // The addresses in one batch that accepted a connection, into open[].
 static int ScanBatch(const unsigned long *addrs, int count, unsigned long *open)
