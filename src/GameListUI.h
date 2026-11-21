@@ -141,7 +141,8 @@ enum UiButton
     UI_BUTTON_Y,
     UI_BUTTON_LBRB,
     UI_BUTTON_START,
-    UI_BUTTON_LTRT
+    UI_BUTTON_LTRT,
+    UI_BUTTON_DPAD_LR // left and right on the D-pad: a value that they change
 };
 
 // One button hint in the footer. shortLabel, when non-NULL, is used for every

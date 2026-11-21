@@ -2228,6 +2228,7 @@ static int SpriteForButton(UiButton button)
     case UI_BUTTON_LBRB:  return BUTTON_SPRITE_LBRB;
     case UI_BUTTON_START: return BUTTON_SPRITE_START;
     case UI_BUTTON_LTRT:  return BUTTON_SPRITE_LTRT;
+    case UI_BUTTON_DPAD_LR: return BUTTON_SPRITE_DPAD_LR;
     }
     return BUTTON_SPRITE_A;
 }
@@ -4725,8 +4726,8 @@ void ShowMessageUI(const char *heading, const char *message, const char *detailL
             break;
 
         ButtonHint hints[1];
-        hints[0].sprite = BUTTON_SPRITE_B;
-        hints[0].label = TrW(STR_BUTTON_CONTINUE);
+        hints[0].sprite = BUTTON_SPRITE_A;
+        hints[0].label = TrW(STR_BUTTON_OK);
 
         RenderStatusFrameInternal(heading, message, detailLine, hints, 1);
         Sleep(16);
@@ -9175,8 +9176,10 @@ void RenderQueueFrame(QueuePageView &view, const UiHint *hints, int hintCount)
     }
     if (waiting > 0 && recentCount > 0)
         _snprintf(subtitle, sizeof(subtitle), "%s" MIDDOT "%s", toDo, installed);
-    else if (waiting > 0 || recentCount > 0)
-        _snprintf(subtitle, sizeof(subtitle), "%s", waiting > 0 ? toDo : installed);
+    else if (waiting > 0)
+        _snprintf(subtitle, sizeof(subtitle), "%s", toDo);
+    else if (recentCount > 0)
+        subtitle[0] = '\0'; // the "Recently installed" row says it already
     else
     {
         _snprintf(n, sizeof(n), "%d", count);
@@ -9455,10 +9458,12 @@ void RenderStorageFrame(StoragePageView &view, const UiHint *hints, int hintCoun
         const float tx = l.actionsX + S(22.0f);
         const float tw = l.actionsW - S(44.0f);
         const float labelH = LineHeight(0.95f) * 1.2f;
-        const float detailH = LineHeight(0.75f) * 1.2f;
+        // A label alone sits in the middle of its button.
+        const bool hasDetail = a.detail != NULL && a.detail[0] != '\0';
+        const float detailH = hasDetail ? LineHeight(0.75f) * 1.2f : 0.0f;
         const float blockY = y + (l.actionRowH - labelH - detailH) * 0.5f;
         TextFit(tx, blockY, 0.95f, a.quiet ? COL_TEXT2 : COL_TEXT, a.label, tw, true);
-        if (a.detail != NULL)
+        if (hasDetail)
             TextFit(tx, blockY + labelH, 0.75f, COL_DIM, a.detail, tw);
     }
 

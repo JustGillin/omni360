@@ -282,10 +282,47 @@ Ordered by risk, then reach:
 1. **Confirmations open on Cancel**, including Exit (add Cancel). One change in `RunAlert`/`ShowAlertUI` covers every delete, remove, stop and power action. **Done in 0e985de**, checked on the console.
 2. **Fix the shared truncation** (word boundary + ellipsis, or wrap): settings help lines, toasts, tile names, store rows, the squeezed Versions page. Dozens of instances; some mislead ("Left 4 Dead."). **Done:** XUI's ellipsis style cut mid-word and drew "…" as a single full stop in Selawik. `UiFont::DrawText` now shortens the text itself, ending at a word with "..." (checked on the console: "…to see what slows..."). Places that are simply too narrow (the Versions page) still need layout work under item 3.
 3. **One dialog component and one footer rule**: centered dialog, page footer hidden, the dialog's own actions in a single screen-bottom footer. Make Versions, DLC and Title updates the same dialog (see the comparison under Store). **Done (b11, checked on the console):** every dialog drawn by `RunAlert` (confirmations, choices, DLC, Title updates, pickers, Files actions), the progress dialog and the System panel now put their hints in the screen's footer, over a dark band that hides the page's own footer. Button dialogs gained hints: "A Select, B Cancel", or "A <label>" for a lone button. Versions is no longer a side panel: Y opens the same list dialog as DLC (game name, "Install gets the ticked one.", tick on the chosen version, languages and size under each). Still open from the comparison: titling the three by what they are ("Versions", "DLC", "Updates") rather than the game name, and the DLC subtitle wording - both need copy decisions (item 5).
-4. **Footer labels that match what the button does**: "B Store" that goes back, "A Find title updates", carousels with no ◀▶ hint, "A Turn off" on the active language, Queue "X Remove", Queue "Y" Night mode.
+4. **Footer labels that match what the button does**: "B Store" that goes back, "A Find title updates", carousels with no ◀▶ hint, "A Turn off" on the active language, Queue "X Remove", Queue "Y" Night mode. **Done (b16, checked on the console):** Store sub-pages say "B Back"; the game page says "A Title updates", hides "Y Versions" on More like this, and puts B last; Settings value rows show a new D-pad ◀▶ "Change" icon and A no longer acts on them (Install disc games as used to toggle); Settings buttons name their action in the footer ("A Change", "A Unpair", "A Run test"...) instead of "A Select"; the language in use has no A hint, the others "A Use"; Settings footer adds "LB RB Section"; Queue X reads "Clear from list"; the sidebar storage ring says "A Storage". Queue "Y Night mode" already shows while something downloads. New from this pass: on a Settings › Storage folder row, Left changes the folder type, so the sidebar can only be reached from a row without a value (P2, focus trap).
 5. **Plain names, used the same everywhere**: drives ("Hard drive", "USB drive 1" instead of Hdd1/HDD1/Usb0/HddX), store categories (no XBLA/XBLIG), folders not paths, "Kernel", "Re-sync", "Assets", raw file names and match percentages.
 6. **Trim subtitles and help lines** that repeat the label or the footer (Storage's left buttons, Queue "3 installed", Homebrew and category subtitles, DLC subtitle).
 7. **Return focus to where the user came from** (nav icons, Home after View game, the storage ring not switching pages).
+
+### Batch 1 for review (b17, 2026-11-21)
+
+Fix-first items 5-7 plus open P2s, in one build. Naming choices are the user's (2026-11-21); drives keep their real names (Hdd1:, Usb0:) and only get consistent casing. **Checked on the console by Claude:** Settings › Storage rows, folder-row Left, Storage buttons, return to the Settings icon, View game from Home then B. The rest is in the code and built, for the user to look at first.
+
+| Where | What changed |
+| --- | --- |
+| Everywhere | "HDD1:" and "hdd1:" now show as "Hdd1:" (also "Usb0:", "HddX:"); the sidebar ring says "Hdd1" |
+| Store | Tiles and page titles "Arcade" and "Indie games"; category subtitle "743 games"; Homebrew page subtitle gone |
+| Game page | Button "DLC" beside "Title updates"; "SEGA · Sega" shows once |
+| DLC / Title updates / Versions dialogs | Titled "DLC · Game", "Title updates · Game", "Versions · Game"; DLC subtitle "7 installed · 2.21 MB"; online search "Find DLC · Game"; help lines no longer say what A does |
+| Title updates, nothing found | "No updates found for this game." |
+| Settings › General | "Archive.org keys" (status just "Saved"); PC helper "Find PC"; disc speed help without "left and right change it"; Sign in at start ticks the current choice |
+| Settings › Library (was Assets) | "Refresh game list", button "Refresh", "drives" not "disk" |
+| Settings › Storage | "Manage storage" is a row with an "Open" button (no "Drives" heading); "Folders", "Add folder"; homebrew row says "1 app"; help lines drop "A picks…"; Left on a folder row's first type goes to the sidebar |
+| Settings › Language | "Time format" (was Clock); "Reload" (was Refresh) |
+| Settings › About | "Console software 2.0.17559" replaces Version info (the version is on Updates) |
+| Folder pickers | Inside a folder, focus starts on the first subfolder, not "Use this folder"; "Download location" title |
+| Storage | Left buttons have no subtitles except counts; "Rescan drives"; partials with 0 B say "1 item" |
+| Leftover DLC and updates › Remove | "This removes the DLC and updates for <game> and frees 157 MB."; no "Saves are kept" note |
+| Exit (B on Home) | Title "Leave Omni360", "Go back to the Xbox dashboard, restart the console or turn it off." |
+| System panel (BACK) | "Console software"; X "Show °F" / "Show °C" |
+| Queue | No "3 installed" subtitle when only recents; empty state "Games, DLC and updates you download wait here."; Night mode toast reworded |
+| Favorites › Y | Opens on Rename when the game is a favourite |
+| Messages | One-button messages show "A OK" instead of "B Continue" |
+| Speed test | Progress "Step 6 of 7" (no "B stops it"); when the helper is 30%+ faster than archive.org the verdict says to download through it |
+| Return focus | B from a page opened from the top nav lands on that icon; a game opened with X on Home goes back to Home |
+| Translations | en-ca regenerated; the machine-translated languages keep their old wording for changed lines until retranslated |
+
+Not done in this batch: Cancel while pairing waits (needs the wait to stop mid-request), telling a PC-side timeout from a No, Manage game's loading screen (it blocks), the folder picker's leftover layer and one-press close, Files menu icons, Home BACK hint, Y Search on category pages, Language radio marks.
+
+#### Found during batch 1 review (user, 2026-11-21)
+
+| Priority | Screen/state | Observed | Expected / suggestion |
+| --- | --- | --- | --- |
+| P1 | Settings › PC helper › Find PC | Takes over the whole screen: "Looking for your PC" progress (`ScanProgress` → `RenderStatusFrame`), then the result as a full-screen message (`ShowMessageUI`), in `ScanForPcHelper` (`src/main.cpp`). | Run it in a centered dialog over Settings, as other dialogs are: progress, then the result, in the same dialog with its hints in the screen footer. Pairing ("Allow it on your PC", `PairPcHelper`) uses the same full-screen frames and should move with it. |
+| P1 | Find PC › nothing found | Text on the "No helper found" result is cut off. The message ("Make sure Omni360 Helper is running on a PC on the same network as this Xbox.") and the detail line ("If it is, allow it through…") are drawn on single lines by the status frame, so the ends are cut. | Wrap the message and detail. Moving it into a dialog (above) should fix it; check both lines fit at 640x480. |
 
 ### Found while checking the speed test and PC helper (2026-11-20, Claude)
 

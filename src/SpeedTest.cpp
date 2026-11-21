@@ -749,6 +749,11 @@ static std::string Verdict(const SpeedResults &r)
     if (archive < 0.0)
         return Tr(g_auth == NULL ? STR_SPEED_ADD_KEYS : STR_SPEED_ARCHIVE_UNREACHABLE);
 
+    // The helper beats archive.org by a clear margin: that's the news, more
+    // than which part of the direct route is slowest.
+    if (r.helper > 0.0 && r.helper > archive * 1.3)
+        return Tr(STR_SPEED_HELPER_FASTER);
+
     const double internet = r.plain, console = r.chacha;
     double others = -1.0; // the slower of your internet and console that were measured
     if (internet > 0.0)

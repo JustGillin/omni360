@@ -252,6 +252,24 @@ def main():
         print("rendered", text)
     sprites.append(("LTRT", 0, 2 * CELL, sprite_w, CELL, bm, bm, cap_w + gap + cap_w, BUMPER_H))
 
+    # The D-pad's left and right: a graphite capsule, the shoulders' height,
+    # with an arrow at each end - for a value that left and right change.
+    dpad_w = 58
+    def dpad_arrows(draw, cx, cy, R):
+        h = R * 0.84
+        w = h * 0.74
+        off = (dpad_w - BUMPER_H) / 2.0 * SS + R * 0.18
+        draw.polygon([(cx - off - w / 2, cy), (cx - off + w / 2, cy - h / 2), (cx - off + w / 2, cy + h / 2)], fill=255)
+        draw.polygon([(cx + off + w / 2, cy), (cx + off - w / 2, cy - h / 2), (cx + off - w / 2, cy + h / 2)], fill=255)
+
+    dpad_x = 176
+    dpad_cell = dpad_w + 2 * bm
+    assert dpad_x >= sprite_w and dpad_x + dpad_cell <= ATLAS_W
+    img = render_button(dpad_cell, CELL, r, (dpad_w - BUMPER_H) / 2.0, BUMPER_BASE, dpad_arrows, BUMPER_TEXT, False)
+    atlas.alpha_composite(img, (dpad_x, 2 * CELL))
+    sprites.append(("DPAD_LR", dpad_x, 2 * CELL, dpad_cell, CELL, bm, bm, dpad_w, BUMPER_H))
+    print("rendered DPAD_LR")
+
     atlas.save(OUT_PNG, optimize=True)
     png = open(OUT_PNG, "rb").read()
 
