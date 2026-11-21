@@ -2452,8 +2452,8 @@ static void GoUpFolder(char *path, size_t pathSize, char *cameFrom, size_t cameF
 // start, when it's a folder that's there, is where it opens - B still goes
 // up from it to the drives. typeHint is the keyboard's line under its title
 // for Type a path, which starts filled in with start (or "Usb0:\").
-static FolderPickResult PickFolder(const char *heading, const char *start, StringId typeHint, char *out,
-                                   size_t outSize)
+static FolderPickResult PickFolderSteps(const char *heading, const char *start, StringId typeHint, char *out,
+                                        size_t outSize)
 {
     static FolderEntry entries[FOLDER_PICKER_MAX];
     static const char *labels[FOLDER_PICKER_MAX + 1];
@@ -2553,6 +2553,17 @@ static FolderPickResult PickFolder(const char *heading, const char *start, Strin
         path[sizeof(path) - 1] = '\0';
         cameFrom[0] = '\0';
     }
+}
+
+// Every level of the picker is drawn over the page it was opened from, so
+// going back up a level leaves no dimmed copy of the one before behind it.
+static FolderPickResult PickFolder(const char *heading, const char *start, StringId typeHint, char *out,
+                                   size_t outSize)
+{
+    HoldDialogBackdrop();
+    const FolderPickResult result = PickFolderSteps(heading, start, typeHint, out, outSize);
+    ReleaseDialogBackdrop();
+    return result;
 }
 
 static void AddLibraryFolder(Library &lib, const char *gamesPath, SettingsOutcome &outcome)
@@ -2897,13 +2908,28 @@ static void ToggleInstallType()
 
 // Asks the helper to pair, and waits while the user allows it on the PC - the
 // same code on both screens shows it's this console asking.
-static void PairPcHelper()
+// Finding and pairing the helper happen in a dialog over Settings, not on a
+// screen of their own: progress in the card, then the outcome as an OK. Each
+// wait blocks while the helper answers, so there's no button to show.
+static void HelperProgress(const char *heading, const char *line, const char *detail, float fraction)
 {
-    RenderStatusFrame(Tr(STR_PAIRING), Tr(STR_TALKING_TO_YOUR_PC), NULL);
+    RenderProgressDialog(heading, line, detail, fraction, UI_BUTTON_A, NULL);
+}
+
+static void HelperOutcome(const char *heading, const char *message, const char *detail)
+{
+    EndProgressDialog();
+    ShowAlertUI(heading, message, detail, NULL, NULL);
+}
+
+static void PairPcHelperInDialog()
+{
+    BeginProgressDialog();
+    HelperProgress(Tr(STR_PAIRING), Tr(STR_TALKING_TO_YOUR_PC), NULL, -1.0f);
     char requestId[40], code[8], token[64], id[32], message[128];
     if (!PcHelperRequestPair(requestId, sizeof(requestId), code, sizeof(code), message, sizeof(message)))
     {
-        ShowMessageUI(Tr(STR_NOT_PAIRED), message, NULL);
+        HelperOutcome(Tr(STR_NOT_PAIRED), message, NULL);
         return;
     }
 
@@ -2911,24 +2937,34 @@ static void PairPcHelper()
     TrFormat(detail, sizeof(detail), STR_PAIR_CODE, code);
     detail[sizeof(detail) - 1] = '\0';
     PcHelperPairResult result = PAIR_WAITING;
-    for (int tries = 0; tries < 7 && result == PAIR_WAITING; ++tries) // the helper gives up after 2 minutes
+    const int maxTries = 7; // the helper gives up after 2 minutes
+    for (int tries = 0; tries < maxTries && result == PAIR_WAITING; ++tries)
     {
-        RenderStatusFrame(Tr(STR_ALLOW_IT_ON_YOUR_PC), Tr(STR_CHECK_YOUR_PC_SHOWS_THE), detail);
+        // The bar is the time the PC has left to answer.
+        HelperProgress(Tr(STR_ALLOW_IT_ON_YOUR_PC), Tr(STR_CHECK_YOUR_PC_SHOWS_THE), detail,
+                       (float)tries / (float)maxTries);
         result = PcHelperWaitPair(requestId, token, sizeof(token), id, sizeof(id), message, sizeof(message));
     }
     if (result != PAIR_ALLOWED)
     {
-        ShowMessageUI(Tr(STR_NOT_PAIRED), result == PAIR_WAITING ? Tr(STR_NOBODY_ANSWERED_ON_YOUR_PC) : message, NULL);
+        HelperOutcome(Tr(STR_NOT_PAIRED), result == PAIR_WAITING ? Tr(STR_NOBODY_ANSWERED_ON_YOUR_PC) : message, NULL);
         return;
     }
     if (!SetSettingsValue(HELPER_ID_KEY, id) || !SetSettingsValue(HELPER_TOKEN_KEY, token))
     {
-        ShowMessageUI(Tr(STR_NOT_SAVED), Tr(STR_SETTINGS_TXT_COULD_NOT_BE), NULL);
+        HelperOutcome(Tr(STR_NOT_SAVED), Tr(STR_SETTINGS_TXT_COULD_NOT_BE), NULL);
         return;
     }
     ApplyPcHelperSettings();
     SavePcHelperUrl();
-    ShowMessageUI(Tr(STR_PAIRED), Tr(STR_STORE_DOWNLOADS_GO_THROUGH_YOUR), NULL);
+    HelperOutcome(Tr(STR_PAIRED), Tr(STR_STORE_DOWNLOADS_GO_THROUGH_YOUR), NULL);
+}
+
+static void PairPcHelper()
+{
+    HoldDialogBackdrop(); // Settings stays behind every card of it
+    PairPcHelperInDialog();
+    ReleaseDialogBackdrop();
 }
 
 static void UnpairPcHelper()
@@ -2944,28 +2980,31 @@ static void ScanProgress(int done, int total)
     char detail[64];
     TrFormat(detail, sizeof(detail), STR_CHECKED_ADDRESSES, TrNum(done), TrNum(total));
     detail[sizeof(detail) - 1] = '\0';
-    RenderStatusFrame(Tr(STR_LOOKING_FOR_YOUR_PC), Tr(STR_LOOKING_FOR_OMNI360_HELPER_ON), detail);
+    HelperProgress(Tr(STR_LOOKING_FOR_YOUR_PC), Tr(STR_LOOKING_FOR_OMNI360_HELPER_ON), detail,
+                   total > 0 ? (float)done / (float)total : -1.0f);
 }
 
 // Scan, in Settings: looks for the helper rather than waiting to hear it, and
 // goes straight on to pairing with what it finds - unless it is the PC this
 // console is already paired with, which just reconnects.
-static void ScanForPcHelper()
+static void ScanForPcHelperInDialog()
 {
+    BeginProgressDialog();
     ScanProgress(0, 253);
     char id[32], name[64];
     const PcHelperScanResult result = PcHelperScan(id, sizeof(id), name, sizeof(name), ScanProgress);
     if (result == SCAN_NO_NETWORK)
     {
-        ShowMessageUI(Tr(STR_NO_HELPER_FOUND), Tr(STR_CHECK_THE_CONSOLES_NETWORK_CONNECTION), NULL);
+        HelperOutcome(Tr(STR_NO_HELPER_FOUND), Tr(STR_CHECK_THE_CONSOLES_NETWORK_CONNECTION), NULL);
         return;
     }
     if (result == SCAN_NOT_FOUND)
     {
-        ShowMessageUI(Tr(STR_NO_HELPER_FOUND), Tr(STR_MAKE_SURE_OMNI360_HELPER_IS_RUNNING),
+        HelperOutcome(Tr(STR_NO_HELPER_FOUND), Tr(STR_MAKE_SURE_OMNI360_HELPER_IS_RUNNING),
                       Tr(STR_IF_IT_IS_ALLOW_IT_THROUGH));
         return;
     }
+    EndProgressDialog();
 
     char pairedId[32];
     GetSettingsPath(HELPER_ID_KEY, "", pairedId, sizeof(pairedId));
@@ -2975,10 +3014,17 @@ static void ScanForPcHelper()
         char message[128];
         TrFormat(message, sizeof(message), STR_CONNECTED_TO_AGAIN, name);
         message[sizeof(message) - 1] = '\0';
-        ShowMessageUI(Tr(STR_FOUND_YOUR_PC), message, NULL);
+        ShowAlertUI(Tr(STR_FOUND_YOUR_PC), message, NULL, NULL, NULL);
         return;
     }
-    PairPcHelper();
+    PairPcHelperInDialog();
+}
+
+static void ScanForPcHelper()
+{
+    HoldDialogBackdrop(); // Settings stays behind every card of it
+    ScanForPcHelperInDialog();
+    ReleaseDialogBackdrop();
 }
 
 static void TogglePcHelperUse()
@@ -11882,6 +11928,10 @@ int main()
                 shell.storeInSection = false; // back to the front page, on its button
                 RequestFeaturedArt();
             }
+            else if (pressed & XINPUT_GAMEPAD_Y)
+            {
+                acted = OpenStoreSearch(shell); // as on the front page; B from the results comes back here
+            }
             else if (pressed & XINPUT_GAMEPAD_A)
             {
                 const int l = shell.sectionFocus[set];
@@ -12447,6 +12497,7 @@ int main()
                         hintCount = AddHint(hints, hintCount, UI_BUTTON_A, browse, TrW(STR_BROWSE));
                     }
                     hintCount = AddHint(hints, hintCount, UI_BUTTON_B, TrW(STR_BUTTON_BACK));
+                    hintCount = AddHint(hints, hintCount, UI_BUTTON_Y, TrW(STR_SEARCH));
                 }
 
                 StoreSectionView view = MakeSectionView(shell);

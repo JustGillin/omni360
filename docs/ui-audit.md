@@ -321,8 +321,24 @@ Not done in this batch: Cancel while pairing waits (needs the wait to stop mid-r
 
 | Priority | Screen/state | Observed | Expected / suggestion |
 | --- | --- | --- | --- |
-| P1 | Settings › PC helper › Find PC | Takes over the whole screen: "Looking for your PC" progress (`ScanProgress` → `RenderStatusFrame`), then the result as a full-screen message (`ShowMessageUI`), in `ScanForPcHelper` (`src/main.cpp`). | Run it in a centered dialog over Settings, as other dialogs are: progress, then the result, in the same dialog with its hints in the screen footer. Pairing ("Allow it on your PC", `PairPcHelper`) uses the same full-screen frames and should move with it. |
-| P1 | Find PC › nothing found | Text on the "No helper found" result is cut off. The message ("Make sure Omni360 Helper is running on a PC on the same network as this Xbox.") and the detail line ("If it is, allow it through…") are drawn on single lines by the status frame, so the ends are cut. | Wrap the message and detail. Moving it into a dialog (above) should fix it; check both lines fit at 640x480. |
+| Fixed (b18) | Settings › PC helper › Find PC | Takes over the whole screen: "Looking for your PC" progress (`ScanProgress` → `RenderStatusFrame`), then the result as a full-screen message (`ShowMessageUI`), in `ScanForPcHelper` (`src/main.cpp`). | Run it in a centered dialog over Settings, as other dialogs are: progress, then the result, in the same dialog with its hints in the screen footer. Pairing ("Allow it on your PC", `PairPcHelper`) uses the same full-screen frames and should move with it. |
+| Fixed (b18) | Find PC › nothing found | Text on the "No helper found" result is cut off. The message ("Make sure Omni360 Helper is running on a PC on the same network as this Xbox.") and the detail line ("If it is, allow it through…") are drawn on single lines by the status frame, so the ends are cut. | Wrap the message and detail. Moving it into a dialog (above) should fix it; check both lines fit at 640x480. |
+
+### Batch 2 for review (b18, 2026-11-21)
+
+**Checked on the console by Claude:** Find PC (search progress and "No helper found" as dialogs over Settings, full text wrapped, focus back on Find PC), and the folder picker (going into Hdd1: and back leaves no leftover layer; focus starts on the first subfolder).
+
+| Where | What changed |
+| --- | --- |
+| Settings › PC helper › Find PC | Runs in a dialog over Settings: a progress bar with "Checked 24 of 253 addresses", then the outcome as an OK dialog. No button hint while it searches, since nothing can be pressed |
+| Pairing (after Find PC finds a new PC, or Pair) | "Talking to your PC" and "Allow it on your PC" in the same dialog; the bar shows the time the PC has left to answer; Paired / Not paired as an OK dialog |
+| Full-screen messages everywhere | The message wraps to up to three lines and the detail to two, and the card grows to fit, instead of cutting the end off with "..." |
+| Folder pickers (Add folder, Download location) | Every level draws over the page it was opened from, so going back up leaves no dimmed copy behind |
+| Store category pages (Arcade, Indie games, Original Xbox) | Y Search, as on the Store's front page; B from the results comes back to the category |
+| List dialogs (DLC, Title updates) | Installed rows that can't be picked now get the white focus outline too |
+| Grids, Home shelf, Files | The remembered position (while the sidebar, top nav or other Files pane has focus) is a much fainter outline, so there's one clear focus on screen |
+
+Not changed: the Homebrew item card already carries the item's name (the header shows its kind); "Find more online" is indented to line up with the labels of rows that have icons.
 
 ### Found while checking the speed test and PC helper (2026-11-20, Claude)
 

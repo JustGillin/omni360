@@ -901,6 +901,7 @@ static void Utf8ToWide(const char *in, WCHAR *out, int outSize)
 #define COL_ERROR          0xFFFF6B61
 #define COL_AMBER          0xFFF0BE12 // the Y button's colour, for the keys notice
 #define COL_FOCUS          0xFFFFFFFF
+#define COL_REMEMBERED     0x2EFFFFFF // where focus will land, while something else has it: much fainter than COL_FOCUS
 #define COL_PILL           0xB8000000 // the disc's labels over artwork
 #define COL_SHADOW         0x99000000
 #define COL_PEEK_TOP       0x590E0E0E // the cut-off row, fading into the background
@@ -4226,7 +4227,7 @@ void RenderLibraryFrame(LibraryPageView &view, const UiHint *hints, int hintCoun
                 // so you can see where you'll land.
                 if (item == selected)
                     StrokeRound(x - S(4.0f), y - S(4.0f), L.tile + S(8.0f), L.tile + S(8.0f),
-                                r > 0.0f ? r + S(4.0f) : 0.0f, S(2.0f), 0x59FFFFFF);
+                                r > 0.0f ? r + S(4.0f) : 0.0f, S(2.0f), COL_REMEMBERED);
 
                 DrawPillQuads(PillsFor(items, item, x, y, L.tile));
                 DrawDiscProgress(items, item, x, y, L.tile, ItemNamedUnfocused(items, item) ? bandH : 0.0f);
@@ -4616,11 +4617,20 @@ static void RenderStatusFrameInternal(const char *heading, const char *message,
     const bool sidebarFocused = asPage && g_sidebar.focused;
     const bool hasDetail = (detailLine != NULL && detailLine[0] != '\0');
 
-    const float cardH = hasDetail ? S(150.0f) : S(116.0f);
-    const float cardY = CardTop(asPage, cardH);
     const float padX = S(36.0f);
     const float innerX = g_M.contentX + padX;
     const float innerW = g_M.contentW - padX * 2.0f;
+
+    // The message and detail wrap rather than lose their ends; the card
+    // grows to hold them, starting from the size one line of each needs.
+    const float messageLineH = LineHeight(1.2f) * 1.15f;
+    const float detailLineH = LineHeight(0.85f) * 1.2f;
+    const int messageLines = TextWrappedLines(message, innerW, 1.2f, 3, true);
+    const int detailLines = hasDetail ? TextWrappedLines(detailLine, innerW, 0.85f, 2) : 0;
+    const float extra = (messageLines > 1 ? (messageLines - 1) * messageLineH : 0.0f) +
+                        (detailLines > 1 ? (detailLines - 1) * detailLineH : 0.0f);
+    const float cardH = (hasDetail ? S(150.0f) : S(116.0f)) + extra;
+    const float cardY = CardTop(asPage, cardH);
 
     BeginFrame();
 
@@ -4643,10 +4653,12 @@ static void RenderStatusFrameInternal(const char *heading, const char *message,
     DrawSidebarText(sidebarFocused);
     DrawHeaderText(heading, NULL, showToast);
 
-    const float messageY = cardY + (hasDetail ? S(34.0f) : (cardH - LineHeight(1.2f)) * 0.5f - S(4.0f));
-    TextFit(innerX, messageY, 1.2f, COL_TEXT, message, innerW, true);
+    const float messageY =
+        cardY + (hasDetail ? S(34.0f) : (cardH - LineHeight(1.2f) - extra) * 0.5f - S(4.0f));
+    TextWrapped(innerX, messageY, 1.2f, COL_TEXT, message, innerW, messageLineH, 3, true);
     if (hasDetail)
-        TextFit(innerX, messageY + LineHeight(1.2f) * 1.25f + S(10.0f), 0.85f, COL_TEXT2, detailLine, innerW);
+        TextWrapped(innerX, messageY + (messageLines > 1 ? messageLines - 1 : 0) * messageLineH + LineHeight(1.2f) * 1.25f + S(10.0f),
+                    0.85f, COL_TEXT2, detailLine, innerW, detailLineH, 2);
 
     if (hints != NULL && hintCount > 0)
         DrawButtonHintText(hints, hintCount, g_M.footerY);
@@ -5148,8 +5160,10 @@ static int RunAlert(const char *heading, const char *message, const char *detail
                     continue; // a heading: its words alone
                 if (i == focus)
                 {
+                    // Every focused row gets the outline - one only to read
+                    // (an installed DLC) as well, or focus is hard to see.
                     FillRound(innerX, y, textW, plateH, 0.0f, Faded(COL_ALERT_BTN_HI, a));
-                    if (t >= 1.0f && AlertRowPicks(rowKinds, i))
+                    if (t >= 1.0f)
                         FocusRing(innerX, y, textW, plateH, 0.0f);
                 }
                 else
@@ -5317,10 +5331,12 @@ void RenderProgressDialog(const char *heading, const char *line, const char *det
     const float cardY = (g_M.screenH - cardH) * 0.5f;
     const float innerX = cardX + pad;
 
+    // No label: nothing can be pressed while it runs, so no hint.
     ButtonHint hint;
     hint.sprite = SpriteForButton(hintButton);
     hint.label = hintLabel;
-    LayoutButtonHintsRight(&hint, 1); // in the screen's footer, as RunAlert's
+    const int hintCount = hintLabel != NULL ? 1 : 0;
+    LayoutButtonHintsRight(&hint, hintCount); // in the screen's footer, as RunAlert's
 
     BeginFrame();
     if (g_progressBackdrop != NULL)
@@ -5348,7 +5364,7 @@ void RenderProgressDialog(const char *heading, const char *line, const char *det
         const float t = (float)(GetTickCount() % 1400) / 1400.0f;
         FillRound(innerX + (textW - sliver) * t, barY, sliver, barH, barH * 0.5f, COL_GREEN);
     }
-    DrawDialogHints(&hint, 1, 1.0f);
+    DrawDialogHints(&hint, hintCount, 1.0f);
 
     TextBegin();
     float y = cardY + pad;
@@ -5357,7 +5373,7 @@ void RenderProgressDialog(const char *heading, const char *line, const char *det
     Text(innerX, y, 0.9f, COL_TEXT, line != NULL ? line : "", ATGFONT_TRUNCATED, textW);
     if (detail != NULL)
         Text(innerX, barY + barH + S(10.0f), 0.76f, COL_DIM, detail, ATGFONT_TRUNCATED, textW);
-    DrawDialogHintText(&hint, 1, 1.0f);
+    DrawDialogHintText(&hint, hintCount, 1.0f);
     TextEnd();
     EndFrame();
 }
@@ -6848,7 +6864,7 @@ void RenderHomeFrame(HomePageView &view, const UiHint *hints, int hintCount)
         // Where focus lands when the nav row gives it back.
         if (item == focusTile)
             StrokeRound(x - S(4.0f), L.rowY - S(4.0f), L.tile + S(8.0f), L.tile + S(8.0f),
-                        g_M.radius > 0.0f ? g_M.radius + S(4.0f) : 0.0f, S(2.0f), 0x59FFFFFF);
+                        g_M.radius > 0.0f ? g_M.radius + S(4.0f) : 0.0f, S(2.0f), COL_REMEMBERED);
     }
 
     if (growTile)
@@ -8245,7 +8261,7 @@ void RenderStoreLetterFrame(StoreLetterView &view, const UiHint *hints, int hint
             {
                 if (item == selected)
                     StrokeRound(x - S(4.0f), y - S(4.0f), L.tile + S(8.0f), L.tile + S(8.0f),
-                                r > 0.0f ? r + S(4.0f) : 0.0f, S(2.0f), 0x59FFFFFF);
+                                r > 0.0f ? r + S(4.0f) : 0.0f, S(2.0f), COL_REMEMBERED);
 
                 if (tileTextCount < MAX_VISIBLE_TILES)
                 {
@@ -9777,7 +9793,7 @@ void RenderFilesFrame(FilesPageView &view, const UiHint *hints, int hintCount)
             if (on && focusedPane)
                 FocusRing(x, y, rowW, rowH, 0.0f);
             else if (on)
-                StrokeRound(x, y, rowW, rowH, 0.0f, S(2.0f), 0x59FFFFFF); // where the other side is
+                StrokeRound(x, y, rowW, rowH, 0.0f, S(2.0f), COL_REMEMBERED); // where the other side is
 
             // A ticked row: a green edge, and the tick where its icon was.
             const bool marked = pane.marked != NULL && pane.marked[i];
