@@ -32,6 +32,11 @@ TLS handshakes) and times the bytes after, over MEASURE_MS.
 #define DECRYPT_MS      2000  // per cipher
 #define MAX_SLOTS       3
 #define PAUSE_MS        3000  // between archive.org runs, so one's connections are gone before the next's
+// An archive.org connection's longest wait for data. The HTTPS client only
+// hears Stop when data arrives, so with its usual 2 minutes one stalled
+// connection held the test that long; nothing slower than this counts anyway.
+#define ARCHIVE_IO_TIMEOUT_MS 6000
+#define STOP_WAIT_MS    1500  // after B, how long the dialog waits before the rest stops out of sight
 #define RECV_CHUNK      (64 * 1024)
 #define RECV_BUFFER     (4 * 1024 * 1024) // as XboxTLS asks for, so the two compare
 #define XBOX_SO_BYPASS_SECURITY 0x5801
@@ -107,6 +112,7 @@ static unsigned short g_slotSuite[MAX_SLOTS];  // and the cipher suite it used
 static int g_archiveSuites;                    // XBOXTLS_SUITES_* for the run
 static const char *g_auth;
 static char g_scratchDrive[16];
+static HANDLE g_stoppingWorker;    // a stopped test still closing its connections, or NULL
 
 static const double MB = 1024.0 * 1024.0;
 
@@ -501,6 +507,7 @@ static DWORD WINAPI ArchiveEntry(LPVOID param)
     const int slot = (int)(INT_PTR)param;
     PcHelperSetThreadBypass(true); // its own thread: the bypass is per thread
     XboxTLS_SetThreadSuites(g_archiveSuites);
+    XboxTLS_SetThreadIoTimeout(ARCHIVE_IO_TIMEOUT_MS);
     char headers[256];
     const unsigned long long from = slot * ARCHIVE_SLOT_SPAN;
     _snprintf(headers, sizeof(headers), "%sRange: bytes=%I64u-%I64u\r\n", g_auth, from, from + ARCHIVE_SLOT_SPAN - 1);
@@ -782,6 +789,31 @@ static void RunSpeedTestHeld(const char *authHeader, const char *scratchPath)
         initialized = true;
     }
 
+    // A test stopped moments ago may still be closing its connections, and
+    // shares everything below: wait for it first (seconds at most), or B
+    // leaves without starting.
+    if (g_stoppingWorker != NULL)
+    {
+        bool back = false;
+        BeginProgressDialog();
+        while (WaitForSingleObject(g_stoppingWorker, 16) == WAIT_TIMEOUT)
+        {
+            if (PollUiInput().pressed & XINPUT_GAMEPAD_B)
+            {
+                PlayUiSound(UI_SOUND_BACK);
+                back = true;
+                break;
+            }
+            RenderProgressDialog(Tr(STR_SPEED_TEST), Tr(STR_STARTING), Tr(STR_STOPPING_ELLIPSIS), -1.0f,
+                                 UI_BUTTON_B, TrW(STR_BUTTON_BACK));
+        }
+        EndProgressDialog();
+        if (back)
+            return;
+        CloseHandle(g_stoppingWorker);
+        g_stoppingWorker = NULL;
+    }
+
     memset(&g_results, 0, sizeof(g_results));
     g_results.plain = g_results.plainFar = g_results.chacha = g_results.gcm = g_results.helper = -1.0;
     g_results.helperTooOld = false;
@@ -806,7 +838,14 @@ static void RunSpeedTestHeld(const char *authHeader, const char *scratchPath)
     }
     for (int i = 0; i < RUN_COUNT; ++i)
         g_results.archive[i] = -1.0;
-    g_auth = authHeader;
+    // A copy: a stopped test can outlive the caller's buffer (g_stoppingWorker).
+    static char authCopy[256];
+    g_auth = NULL;
+    if (authHeader != NULL && strlen(authHeader) < sizeof(authCopy))
+    {
+        strcpy(authCopy, authHeader);
+        g_auth = authCopy;
+    }
     g_phase[0] = '\0';
     g_step = 0;
     g_steps = ((authHeader != NULL) ? 3 + RUN_COUNT : 3) + (g_helperOn ? 1 : 0);
@@ -842,14 +881,19 @@ static void RunSpeedTestHeld(const char *authHeader, const char *scratchPath)
     XSetThreadProcessor(worker, 4); // a download connection's core, for the decryption test
     ResumeThread(worker);
 
+    // After B, a moment for the test to wind down here; past that it finishes
+    // stopping out of sight (see g_stoppingWorker) rather than hold the screen.
+    DWORD stoppedAt = 0;
     BeginProgressDialog();
-    while (!InterlockedCompareExchange(&g_finished, 0, 0))
+    while (!InterlockedCompareExchange(&g_finished, 0, 0) &&
+           !(stoppedAt != 0 && GetTickCount() - stoppedAt >= STOP_WAIT_MS))
     {
         const UiInput input = PollUiInput();
         if ((input.pressed & XINPUT_GAMEPAD_B) && !Cancelled())
         {
             PlayUiSound(UI_SOUND_BACK);
             InterlockedExchange(&g_cancel, 1);
+            stoppedAt = GetTickCount() | 1; // never 0, which means not stopped
         }
 
         char phase[96], detail[96];
@@ -878,9 +922,17 @@ static void RunSpeedTestHeld(const char *authHeader, const char *scratchPath)
         RenderProgressDialog(Tr(STR_SPEED_TEST), phase, detail, fraction, UI_BUTTON_B, TrW(STR_STOP));
         Sleep(16);
     }
-    WaitForSingleObject(worker, INFINITE);
-    CloseHandle(worker);
     EndProgressDialog();
+    if (InterlockedCompareExchange(&g_finished, 0, 0))
+    {
+        WaitForSingleObject(worker, INFINITE);
+        CloseHandle(worker);
+    }
+    else
+    {
+        dprintf("[speedtest] still stopping - finishing in the background\n");
+        g_stoppingWorker = worker;
+    }
 
     if (Cancelled())
     {
