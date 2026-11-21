@@ -77,7 +77,7 @@ public:
     void SetBold(bool bold);
 
     // dwFlags takes UITEXT_* (identical to ATGFONT_*). fMaxPixelWidth bounds
-    // the text and, with UITEXT_TRUNCATED, gives it an ellipsis.
+    // the text and, with UITEXT_TRUNCATED, shortens it to a word and "...".
     void DrawText(float sx, float sy, DWORD dwColor, const WCHAR *strText,
                   DWORD dwFlags = 0L, float fMaxPixelWidth = 0.0f);
 
@@ -96,6 +96,7 @@ public:
     bool IsReady() const;
 
 private:
+    void ShortenToWidth(const WCHAR *text, float maxWidth, WCHAR *out, int outChars);
     float SizeForScale(float scale) const;
     void *FontForPixelSize(float pixels, bool bold); // HXUIFONT, opaque here to keep XUI headers out of this file
 

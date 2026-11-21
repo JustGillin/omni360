@@ -421,6 +421,49 @@ float UiFont::GetTextWidth(const WCHAR *strText)
     return rect.right - rect.left;
 }
 
+// The longest start of text that fits maxWidth with "..." after it, ended at
+// a word when that doesn't throw away much (a single long word is cut
+// anywhere), without the space or punctuation before the dots.
+void UiFont::ShortenToWidth(const WCHAR *text, float maxWidth, WCHAR *out, int outChars)
+{
+    static const WCHAR kDots[] = L"...";
+    int length = (int)wcslen(text);
+    if (length > outChars - 4)
+        length = outChars - 4;
+
+    // Binary search on the number of characters kept.
+    int lo = 0, hi = length;
+    while (lo < hi)
+    {
+        const int mid = (lo + hi + 1) / 2;
+        wcsncpy(out, text, mid);
+        out[mid] = L'\0';
+        wcscat(out, kDots);
+        if (GetTextWidth(out) <= maxWidth)
+            lo = mid;
+        else
+            hi = mid - 1;
+    }
+    int keep = lo;
+
+    // Back to the end of a word, unless the cut already falls between words
+    // or the last word started more than a third of the way back.
+    if (keep < length && keep > 0 && text[keep] != L' ' && text[keep - 1] != L' ')
+    {
+        int space = keep - 1;
+        while (space > 0 && text[space] != L' ')
+            space--;
+        if (space > 0 && space >= keep * 2 / 3)
+            keep = space;
+    }
+    while (keep > 0 && wcschr(L" ,;:-.\x00B7\x2013\x2014", text[keep - 1]) != NULL)
+        keep--;
+
+    wcsncpy(out, text, keep);
+    out[keep] = L'\0';
+    wcscat(out, kDots);
+}
+
 void UiFont::DrawText(float sx, float sy, DWORD dwColor, const WCHAR *strText,
                       DWORD dwFlags, float fMaxPixelWidth)
 {
@@ -435,12 +478,19 @@ void UiFont::DrawText(float sx, float sy, DWORD dwColor, const WCHAR *strText,
     // row, and letting XUI wrap would silently push text outside its row.
     DWORD style = XUI_FONT_STYLE_SINGLE_LINE | XUI_FONT_STYLE_NO_WORDWRAP;
 
-    if (dwFlags & UITEXT_TRUNCATED)
-        style |= XUI_FONT_STYLE_ELLIPSIS;
-
     float width = (fMaxPixelWidth > 0.0f) ? fMaxPixelWidth : (g_backBufferW - sx);
     if (width < 1.0f)
         width = 1.0f;
+
+    // Too long: shortened here rather than by XUI's ellipsis style, which cut
+    // mid-word and drew a "…" that Selawik shows as one full stop - so
+    // "Left 4 Dead 2" read as "Left 4 Dead." Ours ends at a word, with "...".
+    WCHAR shortened[256];
+    if ((dwFlags & UITEXT_TRUNCATED) && fMaxPixelWidth > 0.0f && GetTextWidth(strText) > fMaxPixelWidth)
+    {
+        ShortenToWidth(strText, fMaxPixelWidth, shortened, sizeof(shortened) / sizeof(shortened[0]));
+        strText = shortened;
+    }
 
     // Alignment is resolved by moving the draw origin rather than by handing
     // XUI an alignment flag. ATG::Font treats sx as the RIGHT edge for
@@ -459,7 +509,8 @@ void UiFont::DrawText(float sx, float sy, DWORD dwColor, const WCHAR *strText,
         else
             originX = sx - textW * 0.5f;
 
-        width = (textW > 1.0f) ? textW : 1.0f;
+        // A pixel spare: the measured width, exactly, can lose the last glyph.
+        width = (textW > 1.0f) ? textW + 1.0f : 1.0f;
     }
 
     XUIRect rect;
