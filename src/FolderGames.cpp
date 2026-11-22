@@ -266,24 +266,38 @@ static void VisitApps(FolderScan &scan, const char *dir, int depth)
     HANDLE h = FindFirstFileA(pattern, &found);
     if (h == INVALID_HANDLE_VALUE)
         return;
+    // Several, but one named after the folder - Valkyrie\valkyrie.xex beside
+    // its own FtpDll.xex - and that one is the app.
+    const char *folderName = strrchr(dir, '\\');
+    folderName = folderName != NULL ? folderName + 1 : dir;
+    const size_t folderLen = strlen(folderName);
     int xexCount = 0;
     char lone[MAX_PATH];
-    lone[0] = '\0';
+    char named[MAX_PATH];
+    lone[0] = named[0] = '\0';
     do
     {
         const size_t len = strlen(found.cFileName);
         if (!(found.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY) && len > 4 &&
-            _stricmp(found.cFileName + len - 4, ".xex") == 0 && xexCount++ == 0)
+            _stricmp(found.cFileName + len - 4, ".xex") == 0)
         {
-            _snprintf(lone, sizeof(lone), "%s", found.cFileName);
-            lone[sizeof(lone) - 1] = '\0';
+            if (xexCount++ == 0)
+            {
+                _snprintf(lone, sizeof(lone), "%s", found.cFileName);
+                lone[sizeof(lone) - 1] = '\0';
+            }
+            if (folderLen == len - 4 && _strnicmp(found.cFileName, folderName, folderLen) == 0)
+            {
+                _snprintf(named, sizeof(named), "%s", found.cFileName);
+                named[sizeof(named) - 1] = '\0';
+            }
         }
     } while (FindNextFileA(h, &found));
     FindClose(h);
 
-    if (xexCount == 1 && depth > 0)
+    if (depth > 0 && (xexCount == 1 || named[0] != '\0'))
     {
-        _snprintf(exe, sizeof(exe), "%s\\%s", dir, lone);
+        _snprintf(exe, sizeof(exe), "%s\\%s", dir, xexCount == 1 ? lone : named);
         exe[sizeof(exe) - 1] = '\0';
         AddApp(scan, dir, exe);
         return;

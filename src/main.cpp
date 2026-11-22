@@ -6057,8 +6057,19 @@ static void FriendlyVersionDetail(const char *detail, char *out, size_t outSize)
     }
 }
 
+// The Store's game pages walked through More like this, so B goes back
+// through them before leaving - Search → Sonic → Sonic Generations, then B
+// is Sonic again. Opening a page any other way starts it afresh.
+#define STORE_GAME_BACK_MAX 8
+static StoreGame g_storeGameBack[STORE_GAME_BACK_MAX];
+static int g_storeGameBackFocus[STORE_GAME_BACK_MAX][2]; // the focus and More like this's scroll it was left with
+static int g_storeGameBackCount = 0;
+static bool g_openingFromSimilar = false;
+
 static void OpenStoreGame(Shell &shell, const StoreGame &game)
 {
+    if (!g_openingFromSimilar)
+        g_storeGameBackCount = 0;
     g_storeGame = game;
     g_storeArcade = NULL; // OpenArcadeGame sets it after
     for (int v = 0; v < g_storeGame.versionCount; ++v)
@@ -6106,6 +6117,20 @@ static void OpenStoreGame(Shell &shell, const StoreGame &game)
 
     // More like this. Its covers are asked for as they come into view.
     g_similarCount = StoreSimilarGames(g_storeGame.titleId, g_similarGames, STORE_SIMILAR_MAX);
+    // One tile per name, as the front page's rows: regional copies (Bully's)
+    // otherwise sit side by side with the same cover.
+    {
+        int kept = 0;
+        for (int i = 0; i < g_similarCount; ++i)
+        {
+            bool seen = false;
+            for (int j = 0; j < kept && !seen; ++j)
+                seen = _stricmp(g_similarGames[j].name, g_similarGames[i].name) == 0;
+            if (!seen)
+                g_similarGames[kept++] = g_similarGames[i];
+        }
+        g_similarCount = kept;
+    }
     for (int i = 0; i < g_similarCount; ++i)
     {
         g_similarTiles[i].titleId = StoreCoverKey(g_similarGames[i].titleId, g_similarGames[i].name);
@@ -8651,6 +8676,61 @@ static void UpdateDisc(Shell &shell, const Library &lib, const char *gamesPath)
 // room for it, and the name the dashboard will show. Returns true if one of
 // those took over the screen, so input is resynced after.
 //
+// How many discs the Store's catalog has for a title, in its biggest version:
+// 0 if it isn't listed. A disc's own header can undercount - Halo 4's first
+// disc says it's the only one, as its second is installed rather than
+// swapped in - so the larger of the two is shown.
+static unsigned int CatalogDiscCount(unsigned long titleId)
+{
+    StoreGame game;
+    if (!StoreGameByTitleId(titleId, &game))
+        return 0;
+    unsigned int most = 0;
+    for (int v = 0; v < game.versionCount; ++v)
+    {
+        const StoreRelease *release = StoreReleaseOf(&game, v);
+        if (release != NULL && release->discCount > most)
+            most = release->discCount;
+    }
+    return most;
+}
+
+// The install, laid out before it starts: which disc of how many, its size
+// and format, where it goes and what's left after. A installs, B backs out.
+static bool ConfirmDiscPreview(const DiscInfo &disc, const char *name, const char *sizeText, const char *gamesPath,
+                               unsigned long long freeSpace)
+{
+    unsigned int count = disc.discCount;
+    const unsigned int listed = disc.original ? 0 : CatalogDiscCount(disc.titleId);
+    if (listed > count)
+        count = listed;
+    const char *format = disc.original || !InstallAsFolderSetting() ? Tr(STR_GAMES_ON_DEMAND)
+                                                                     : Tr(STR_FOLDER_DEFAULT_XEX);
+
+    char facts[160];
+    if (count > 1 && disc.discNumber >= 1)
+    {
+        char n1[8], n2[8];
+        _snprintf(n1, sizeof(n1), "%u", disc.discNumber);
+        _snprintf(n2, sizeof(n2), "%u", count);
+        TrFormat(facts, sizeof(facts), STR_DISC_PREVIEW_FACTS, n1, n2, sizeText, format);
+    }
+    else
+        TrFormat(facts, sizeof(facts), STR_DISC_PREVIEW_FACTS_ONE, sizeText, format);
+
+    char drive[16];
+    DriveLabel(gamesPath, drive, sizeof(drive), gamesPath);
+    char left[32] = "";
+    FormatBytes(freeSpace > disc.outputSize ? freeSpace - disc.outputSize : 0, left, sizeof(left));
+    char where[200];
+    TrFormat(where, sizeof(where), STR_DISC_PREVIEW_WHERE, drive, left);
+
+    char message[400];
+    _snprintf(message, sizeof(message), "%s\n%s", facts, where);
+    message[sizeof(message) - 1] = '\0';
+    return ShowAlertUI(name, message, NULL, Tr(STR_INSTALL), Tr(STR_BUTTON_CANCEL));
+}
+
 // START on the disc's tile starts this, and so does Install from disc on the
 // game's own page - the two are the same install.
 static bool StartDiscInstall(Shell &shell, const char *gamesPath)
@@ -8689,6 +8769,15 @@ static bool StartDiscInstall(Shell &shell, const char *gamesPath)
 
     char sizeText[64] = "";
     FormatBytes(disc.outputSize, sizeText, sizeof(sizeText));
+
+    // What's about to happen, before it starts - unless a reinstall or a
+    // compilation's own question has just asked already.
+    if (!shell.discInstalled && !compilation)
+    {
+        tookScreen = true;
+        if (!ConfirmDiscPreview(disc, name.c_str(), sizeText, gamesPath, freeSpace))
+            return true;
+    }
 
     char detail[160];
     switch (QueueDiscInstall(disc.titleId, disc.mediaId, name.c_str()))
@@ -9764,6 +9853,13 @@ struct FilesListing
 };
 static FilesListing g_files[2];
 
+// A file A starts: a 360 program (.xex) or an Original Xbox one (.xbe).
+static bool FilesEntryStarts(const FolderEntry &e)
+{
+    const size_t len = strlen(e.name);
+    return !e.folder && len > 4 && (_stricmp(e.name + len - 4, ".xex") == 0 || _stricmp(e.name + len - 4, ".xbe") == 0);
+}
+
 // The library, for naming title folders - set where the page is drawn and
 // driven, which is where main's library is to hand.
 static const Library *g_filesLibrary = NULL;
@@ -10305,6 +10401,21 @@ static bool FilesInput(Shell &shell, const UiInput &input)
         }
         return false;
     }
+    if ((pressed & XINPUT_GAMEPAD_A) && L.count > 0 && FilesEntryStarts(L.entries[shell.filesSelected[pane]]))
+    {
+        // A program: start it, as Aurora's file manager can - handy for
+        // trying a build without adding its folder anywhere.
+        const char *name = L.entries[shell.filesSelected[pane]].name;
+        char file[MAX_TEXT_LENGTH];
+        if (FolderChild(path, name, file, sizeof(file)) && ConfirmLeaving())
+        {
+            dprintf("Starting from Files: %s\n", file);
+            RenderLaunchFrame(Tr(STR_STARTING), name, 0);
+            LaunchApp(file);
+            ShowMessageUI(Tr(STR_COULDNT_START_IT), name, Tr(STR_THE_CONSOLES_LOADER_REFUSED_IT));
+        }
+        return true;
+    }
     if ((pressed & XINPUT_GAMEPAD_X) && L.count > 0 && path[0] != '\0')
     {
         // Tick or untick, and on to the next row, so a run of them is a
@@ -10367,6 +10478,8 @@ static int FilesHints(const Shell &shell, UiHint *hints, int hintCount)
     const bool any = L.count > 0 && i >= 0 && i < L.count;
     if (any && L.entries[i].folder)
         hintCount = AddHint(hints, hintCount, UI_BUTTON_A, TrW(STR_OPEN));
+    else if (any && FilesEntryStarts(L.entries[i]))
+        hintCount = AddHint(hints, hintCount, UI_BUTTON_A, TrW(STR_START));
     if (any && !atDrives)
         hintCount = AddHint(hints, hintCount, UI_BUTTON_X, TrW(L.marked[i] ? STR_FILES_UNSELECT : STR_SELECT));
     if (!atDrives)
@@ -11967,6 +12080,19 @@ int main()
                 if (shell.gameFromHome)
                     EnterPage(shell, SHELL_PAGE_HOME, false); // or to Home, where it was opened
             }
+            else if ((pressed & XINPUT_GAMEPAD_B) && shell.page == SHELL_PAGE_STORE && g_storeGameBackCount > 0)
+            {
+                // Back to the game whose More like this opened this one.
+                const StoreGame previous = g_storeGameBack[--g_storeGameBackCount];
+                g_openingFromSimilar = true;
+                OpenStoreGame(shell, previous);
+                g_openingFromSimilar = false;
+                // On the tile it was left by.
+                shell.storeGameFocus = g_storeGameBackFocus[g_storeGameBackCount][0];
+                shell.storeSimilarScroll = g_storeGameBackFocus[g_storeGameBackCount][1];
+                if (shell.storeGameFocus - STORE_GAME_FOCUS_SIMILAR >= g_similarCount)
+                    shell.storeGameFocus = STORE_GAME_FOCUS_SIMILAR;
+            }
             else if (pressed & XINPUT_GAMEPAD_B)
             {
                 // Back to the letter it was opened from, or the front page.
@@ -11986,7 +12112,23 @@ int main()
                     if (f - STORE_GAME_FOCUS_SIMILAR < g_similarCount)
                     {
                         const StoreGame next = g_similarGames[f - STORE_GAME_FOCUS_SIMILAR];
+                        // The page being left, for B - on the Store only:
+                        // a library page may be a game the Store hasn't got.
+                        if (shell.page == SHELL_PAGE_STORE && g_storeArcade == NULL)
+                        {
+                            if (g_storeGameBackCount == STORE_GAME_BACK_MAX)
+                            {
+                                memmove(g_storeGameBack, g_storeGameBack + 1, sizeof(StoreGame) * (STORE_GAME_BACK_MAX - 1));
+                                memmove(g_storeGameBackFocus, g_storeGameBackFocus + 1, sizeof(int) * 2 * (STORE_GAME_BACK_MAX - 1));
+                                g_storeGameBackCount--;
+                            }
+                            g_storeGameBackFocus[g_storeGameBackCount][0] = f;
+                            g_storeGameBackFocus[g_storeGameBackCount][1] = shell.storeSimilarScroll;
+                            g_storeGameBack[g_storeGameBackCount++] = g_storeGame;
+                        }
+                        g_openingFromSimilar = true;
                         OpenStoreGame(shell, next);
+                        g_openingFromSimilar = false;
                     }
                 }
                 else if (f == STORE_GAME_FOCUS_BUTTONS && installState == STORE_INSTALL_AVAILABLE &&

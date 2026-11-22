@@ -6979,8 +6979,12 @@ void RenderHomeFrame(HomePageView &view, const UiHint *hints, int hintCount)
     // learn which is which. Only while the row has focus, so it doesn't sit
     // over the wallpaper the rest of the time.
     if (navFocused && navCount > 0)
+    {
+        TextMid(g_M.screenW * 0.5f + S(2.0f), L.navY + L.navH + S(18.0f), 0.72f, 0xCC000000,
+                view.nav[navFocus].label, ATGFONT_CENTER_X, 0.0f, true);
         TextMid(g_M.screenW * 0.5f, L.navY + L.navH + S(16.0f), 0.72f, COL_TEXT, view.nav[navFocus].label,
                 ATGFONT_CENTER_X, 0.0f, true);
+    }
 
     // The focused game, over the wallpaper - or, on the favourites tile,
     // FAVORITES and how many.
@@ -6992,7 +6996,13 @@ void RenderHomeFrame(HomePageView &view, const UiHint *hints, int hintCount)
         const StringId caption = game.favourites ? STR_HOME_FAVOURITES
                                  : game.disc     ? STR_HOME_IN_THE_DRIVE
                                                  : STR_HOME_CONTINUE_PLAYING;
+        // A dark copy just below and right of each, so the small green
+        // caption and the name still read over a light wallpaper (Sonic's
+        // sky) - shading the whole band enough would hide the art.
+        const float sh = S(2.0f);
+        Text(g_M.safeX + sh, L.nameY + sh, 0.62f, 0xCC000000, Tr(caption), 0, 0.0f, true);
         Text(g_M.safeX, L.nameY, 0.62f, COL_GREEN_TEXT, Tr(caption), 0, 0.0f, true);
+        TextFit(g_M.safeX + sh, L.nameY + S(26.0f) + sh, 2.0f, 0x99000000, game.name, nameW, true);
         TextFit(g_M.safeX, L.nameY + S(26.0f), 2.0f, COL_TEXT, game.name, nameW, true);
     }
 
