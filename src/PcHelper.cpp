@@ -526,8 +526,10 @@ PcHelperPairResult PcHelperWaitPair(const char *requestId, char *token, unsigned
     if (status == 408)
         return PAIR_WAITING;
     dprintf("[helper] pairing ended: HTTP %d\n", status);
-    CopyOut(message, messageSize, status == 403 ? Tr(STR_PAIRING_WASNT_ALLOWED_ON_YOUR)
-                                                : Tr(STR_LOST_TOUCH_WITH_THE_HELPER));
+    // 410: the PC's prompt ran out with nobody answering - not a No.
+    CopyOut(message, messageSize, status == 403   ? Tr(STR_PAIRING_WASNT_ALLOWED_ON_YOUR)
+                                  : status == 410 ? Tr(STR_NOBODY_ANSWERED_ON_YOUR_PC)
+                                                  : Tr(STR_LOST_TOUCH_WITH_THE_HELPER));
     return PAIR_FAILED;
 }
 

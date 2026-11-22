@@ -4897,6 +4897,9 @@ static int NavIconForListIcon(int icon)
     case UI_ICON_KEYBOARD: return NAV_ICON_KEYBOARD;
     case UI_ICON_FILE:     return NAV_ICON_FILE;
     case UI_ICON_DISC:     return NAV_ICON_DISC;
+    case UI_ICON_COPY:     return NAV_ICON_COPY;
+    case UI_ICON_MOVE:     return NAV_ICON_MOVE;
+    case UI_ICON_DELETE:   return NAV_ICON_TRASH;
     default:               return -1;
     }
 }
@@ -5171,10 +5174,13 @@ static int RunAlert(const char *heading, const char *message, const char *detail
                     FillRound(innerX, y, textW, plateH, 0.0f,
                               Faded(AlertRowPicks(rowKinds, i) ? COL_ALERT_BTN : COL_SURFACE_HI, a));
 
+                // Delete's bin is red, whatever has focus: a row that can't
+                // be undone should look it.
                 const int icon = rowIcons != NULL ? NavIconForListIcon(rowIcons[i]) : -1;
                 if (icon >= 0)
                     DrawNavIcon(icon, innerX + S(22.0f) + iconSize * 0.5f, y + plateH * 0.5f, iconSize,
-                                Faded(i == focus ? COL_TEXT : COL_TEXT2, a));
+                                Faded(rowIcons[i] == UI_ICON_DELETE ? COL_ERROR : i == focus ? COL_TEXT : COL_TEXT2,
+                                      a));
             }
         }
         else

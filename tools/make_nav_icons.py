@@ -30,8 +30,8 @@ OUT_HEADER = os.path.join(ROOT, "src", "NavIcons.h")
 
 SS = 8                        # supersampling factor
 CELL = 64                     # atlas cell, in final pixels
-COLS, ROWS = 4, 4             # 12 icons and room for four more
-ATLAS_W, ATLAS_H = CELL * COLS, CELL * ROWS   # 256x256, both powers of two
+COLS, ROWS = 4, 8             # 17 icons and room for more
+ATLAS_W, ATLAS_H = CELL * COLS, CELL * ROWS   # 256x512, both powers of two (512 is the console's PNG limit)
 
 STROKE = 4.0                  # line width in final pixels
 INSET = 11.0                  # margin inside the cell, so the art is ~42px
@@ -250,6 +250,53 @@ def icon_keyboard(d):
     line(d, (x0 + (x1 - x0) * 0.30, cy + h * 0.48), (x0 + (x1 - x0) * 0.70, cy + h * 0.48), STROKE * 0.8)
 
 
+def icon_copy(d):
+    """Copy: two pages, one over the other."""
+    x0, y0, x1, y1 = box()
+    w = (x1 - x0) * 0.62
+    h = (y1 - y0) * 0.72
+    off = (x1 - x0) * 0.20
+    rrect(d, x0 + off, y0, x0 + off + w, y0 + h, px(4.0))
+    # The front page, its own outline over a filled-out gap so the back one
+    # reads as behind it.
+    fx0, fy0 = x0 + off * 0.0 + px(1.0), y0 + off + px(2.0)
+    d.rounded_rectangle([fx0 - px(STROKE), fy0 - px(STROKE), fx0 + w + px(STROKE), fy0 + h + px(STROKE)],
+                        radius=px(5.0), fill=0)
+    rrect(d, fx0, fy0, fx0 + w, fy0 + h, px(4.0))
+
+
+def icon_move(d):
+    """Move: an arrow out of a page, to the right."""
+    x0, y0, x1, y1 = box()
+    w = x1 - x0
+    # The page's left side, open on the right where the arrow leaves.
+    d.line([(x0 + w * 0.45, y0 + w * 0.12), (x0 + px(3.0), y0 + w * 0.12), (x0, y0 + w * 0.12 + px(3.0)),
+            (x0, y1 - w * 0.12 - px(3.0)), (x0 + px(3.0), y1 - w * 0.12), (x0 + w * 0.45, y1 - w * 0.12)],
+           fill=255, width=int(round(px(STROKE))), joint="curve")
+    cy = (y0 + y1) * 0.5
+    line(d, (x0 + w * 0.26, cy), (x1 - px(2.0), cy))
+    head = w * 0.20
+    d.line([(x1 - head - px(2.0), cy - head), (x1 - px(2.0), cy), (x1 - head - px(2.0), cy + head)],
+           fill=255, width=int(round(px(STROKE))), joint="curve")
+
+
+def icon_trash(d):
+    """Delete: a bin with its lid."""
+    x0, y0, x1, y1 = box()
+    w = x1 - x0
+    lidY = y0 + w * 0.18
+    line(d, (x0 + w * 0.08, lidY), (x1 - w * 0.08, lidY))
+    # The handle on the lid.
+    d.line([(x0 + w * 0.38, lidY), (x0 + w * 0.38, y0 + w * 0.04), (x0 + w * 0.62, y0 + w * 0.04),
+            (x0 + w * 0.62, lidY)], fill=255, width=int(round(px(STROKE * 0.85))), joint="curve")
+    # The body, a little narrower at the foot, with two ribs.
+    d.line([(x0 + w * 0.18, lidY + px(5.0)), (x0 + w * 0.25, y1 - px(3.0)), (x0 + w * 0.29, y1),
+            (x1 - w * 0.29, y1), (x1 - w * 0.25, y1 - px(3.0)), (x1 - w * 0.18, lidY + px(5.0))],
+           fill=255, width=int(round(px(STROKE))), joint="curve")
+    for t in (0.42, 0.58):
+        line(d, (x0 + w * t, lidY + w * 0.18), (x0 + w * t, y1 - w * 0.14), STROKE * 0.8)
+
+
 ICONS = [
     ("LIBRARY", icon_library),
     ("APPS", icon_apps),
@@ -265,6 +312,9 @@ ICONS = [
     ("KEYBOARD", icon_keyboard),
     ("FILE", icon_file),
     ("DISC", icon_disc),
+    ("COPY", icon_copy),
+    ("MOVE", icon_move),
+    ("TRASH", icon_trash),
 ]
 
 

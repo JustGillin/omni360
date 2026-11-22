@@ -55,6 +55,7 @@ type pairRequest struct {
 	approved bool
 	token    string
 	done     bool
+	expired  bool // nobody answered on the PC before it gave up
 }
 
 func loadPairing(dir string) *pairing {
@@ -143,14 +144,19 @@ func (p *pairing) handleRequest(w http.ResponseWriter, r *http.Request) {
 	}()
 	go func() {
 		time.Sleep(2 * time.Minute)
+		p.mu.Lock()
+		if !req.done {
+			req.expired = true
+		}
+		p.mu.Unlock()
 		p.decide(req, false)
 	}()
 	fmt.Fprintf(w, "%s %s", req.id, req.code)
 }
 
 // handleWait answers /pair/wait?r=ID: "<token> <helper id>" once allowed, 403
-// if refused, 408 if nobody has answered in 20 seconds (the console asks
-// again).
+// if refused, 410 if nobody answered on the PC before the request expired,
+// 408 if nobody has answered in 20 seconds (the console asks again).
 func (p *pairing) handleWait(w http.ResponseWriter, r *http.Request) {
 	p.mu.Lock()
 	req := p.pending
@@ -163,6 +169,10 @@ func (p *pairing) handleWait(w http.ResponseWriter, r *http.Request) {
 	case <-req.decided:
 	case <-time.After(20 * time.Second):
 		http.Error(w, "still waiting", http.StatusRequestTimeout)
+		return
+	}
+	if req.expired {
+		http.Error(w, "nobody answered", http.StatusGone)
 		return
 	}
 	if !req.approved || req.token == "" {

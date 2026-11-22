@@ -2922,8 +2922,41 @@ static void HelperOutcome(const char *heading, const char *message, const char *
     ShowAlertUI(heading, message, detail, NULL, NULL);
 }
 
+// One /pair/wait at a time, on a thread of its own so B can cancel while the
+// helper holds the request open (up to 20 s). A wait left behind by a cancel
+// finishes into these buffers on its own; the next pairing waits for it.
+struct PairWait
+{
+    char requestId[40];
+    char token[64], id[32], message[128];
+    PcHelperPairResult result;
+    volatile LONG done;
+    HANDLE thread;
+};
+static PairWait g_pairWait;
+
+static DWORD WINAPI PairWaitEntry(LPVOID)
+{
+    PairWait &w = g_pairWait;
+    w.result = PcHelperWaitPair(w.requestId, w.token, sizeof(w.token), w.id, sizeof(w.id), w.message,
+                                sizeof(w.message));
+    InterlockedExchange(&w.done, 1);
+    return 0;
+}
+
+static void FinishPairWait()
+{
+    if (g_pairWait.thread != NULL)
+    {
+        WaitForSingleObject(g_pairWait.thread, INFINITE);
+        CloseHandle(g_pairWait.thread);
+        g_pairWait.thread = NULL;
+    }
+}
+
 static void PairPcHelperInDialog()
 {
+    FinishPairWait(); // one cancelled earlier, still out
     BeginProgressDialog();
     HelperProgress(Tr(STR_PAIRING), Tr(STR_TALKING_TO_YOUR_PC), NULL, -1.0f);
     char requestId[40], code[8], token[64], id[32], message[128];
@@ -2937,13 +2970,55 @@ static void PairPcHelperInDialog()
     TrFormat(detail, sizeof(detail), STR_PAIR_CODE, code);
     detail[sizeof(detail) - 1] = '\0';
     PcHelperPairResult result = PAIR_WAITING;
-    const int maxTries = 7; // the helper gives up after 2 minutes
-    for (int tries = 0; tries < maxTries && result == PAIR_WAITING; ++tries)
+    const DWORD started = GetTickCount();
+    const DWORD giveUpMs = 130 * 1000; // the helper gives up after 2 minutes
+    ResyncUiInput();
+    while (result == PAIR_WAITING && GetTickCount() - started < giveUpMs)
     {
-        // The bar is the time the PC has left to answer.
-        HelperProgress(Tr(STR_ALLOW_IT_ON_YOUR_PC), Tr(STR_CHECK_YOUR_PC_SHOWS_THE), detail,
-                       (float)tries / (float)maxTries);
-        result = PcHelperWaitPair(requestId, token, sizeof(token), id, sizeof(id), message, sizeof(message));
+        _snprintf(g_pairWait.requestId, sizeof(g_pairWait.requestId), "%s", requestId);
+        g_pairWait.requestId[sizeof(g_pairWait.requestId) - 1] = '\0';
+        g_pairWait.done = 0;
+        g_pairWait.thread = CreateThread(NULL, 256 * 1024, PairWaitEntry, NULL, 0, NULL);
+        if (g_pairWait.thread == NULL)
+        {
+            result = PcHelperWaitPair(requestId, token, sizeof(token), id, sizeof(id), message, sizeof(message));
+            break;
+        }
+
+        bool cancelled = false;
+        while (!g_pairWait.done)
+        {
+            // The bar is the time the PC has left to answer.
+            const float f = (float)(GetTickCount() - started) / (float)giveUpMs;
+            RenderProgressDialog(Tr(STR_ALLOW_IT_ON_YOUR_PC), Tr(STR_CHECK_YOUR_PC_SHOWS_THE), detail,
+                                 f > 1.0f ? 1.0f : f, UI_BUTTON_B, TrW(STR_BUTTON_CANCEL));
+            if (PollUiInput().pressed & XINPUT_GAMEPAD_B)
+            {
+                cancelled = true;
+                break;
+            }
+            Sleep(16);
+        }
+        if (cancelled)
+        {
+            // The PC's prompt runs out on its own; nothing to say here.
+            EndProgressDialog();
+            ResyncUiInput();
+            return;
+        }
+        FinishPairWait();
+        result = g_pairWait.result;
+        if (result == PAIR_ALLOWED)
+        {
+            _snprintf(token, sizeof(token), "%s", g_pairWait.token);
+            _snprintf(id, sizeof(id), "%s", g_pairWait.id);
+            token[sizeof(token) - 1] = id[sizeof(id) - 1] = '\0';
+        }
+        else if (result == PAIR_FAILED)
+        {
+            _snprintf(message, sizeof(message), "%s", g_pairWait.message);
+            message[sizeof(message) - 1] = '\0';
+        }
     }
     if (result != PAIR_ALLOWED)
     {
@@ -4274,6 +4349,7 @@ static StoreGame g_storeGame;
 static StoreVersionView g_storeVersions[STORE_MAX_VERSIONS];
 static char g_storeVersionSize[STORE_MAX_VERSIONS][24];
 static char g_storeVersionDetail[STORE_MAX_VERSIONS][160]; // a detail with the slow-install note added
+static char g_storeVersionFriendly[STORE_MAX_VERSIONS][160]; // the generator's detail with languages as words
 
 // Its More like this row, and the row's tiles.
 static StoreGame g_similarGames[STORE_SIMILAR_MAX];
@@ -5906,6 +5982,81 @@ static bool ReleaseUnpacks(const StoreRelease *release)
 }
 
 // Opens a game's page over the current page - the Store's, or the library's.
+// Redump's language codes ("En, Ja, Fr") as words. Up to three are named;
+// past that, the first two and how many more - six two-letter codes in dim
+// small text said very little.
+static const char *LanguageWord(const char *code)
+{
+    static const char *const kCodes[][2] = {
+        { "En", "English" }, { "Ja", "Japanese" }, { "Fr", "French" },   { "De", "German" },
+        { "Es", "Spanish" }, { "It", "Italian" },  { "Nl", "Dutch" },    { "Pt", "Portuguese" },
+        { "Sv", "Swedish" }, { "No", "Norwegian" }, { "Da", "Danish" },  { "Fi", "Finnish" },
+        { "Pl", "Polish" },  { "Ru", "Russian" },  { "Ko", "Korean" },   { "Zh", "Chinese" },
+        { "Cs", "Czech" },   { "Hu", "Hungarian" }, { "El", "Greek" },   { "Tr", "Turkish" },
+        { "Ar", "Arabic" },
+    };
+    for (int i = 0; i < (int)(sizeof(kCodes) / sizeof(kCodes[0])); ++i)
+        if (strcmp(code, kCodes[i][0]) == 0)
+            return kCodes[i][1];
+    return code;
+}
+
+// One part of a version's detail: languages turned into words, anything else
+// as it was.
+static void AppendVersionDetailPart(char *out, size_t outSize, const char *part, size_t len)
+{
+    // "En" or "En, Fr, De": two letters, a capital then a small one, by ", ".
+    bool languages = len >= 2;
+    int codes = 0;
+    for (size_t i = 0; languages && i < len; i += 4)
+    {
+        languages = i + 2 <= len && isupper((unsigned char)part[i]) && islower((unsigned char)part[i + 1]) &&
+                    (i + 2 == len || (i + 4 <= len && part[i + 2] == ',' && part[i + 3] == ' '));
+        codes++;
+    }
+    char piece[160];
+    if (!languages)
+    {
+        _snprintf(piece, sizeof(piece), "%.*s", (int)len, part);
+    }
+    else
+    {
+        char code[3] = "";
+        piece[0] = '\0';
+        const int named = codes <= 3 ? codes : 2;
+        for (int c = 0; c < named; ++c)
+        {
+            code[0] = part[c * 4];
+            code[1] = part[c * 4 + 1];
+            code[2] = '\0';
+            const size_t at = strlen(piece);
+            _snprintf(piece + at, sizeof(piece) - at, "%s%s",
+                      c == 0 ? "" : (c == codes - 1 ? " and " : ", "), LanguageWord(code));
+        }
+        if (codes > 3)
+        {
+            const size_t at = strlen(piece);
+            _snprintf(piece + at, sizeof(piece) - at, " and %d more", codes - 2);
+        }
+    }
+    piece[sizeof(piece) - 1] = '\0';
+    AppendText(out, outSize, STORE_MIDDOT, piece);
+}
+
+static void FriendlyVersionDetail(const char *detail, char *out, size_t outSize)
+{
+    out[0] = '\0';
+    const char *at = detail;
+    const size_t sepLen = strlen(STORE_MIDDOT);
+    while (at != NULL && *at != '\0')
+    {
+        const char *sep = strstr(at, STORE_MIDDOT);
+        const size_t len = sep != NULL ? (size_t)(sep - at) : strlen(at);
+        AppendVersionDetailPart(out, outSize, at, len);
+        at = sep != NULL ? sep + sepLen : NULL;
+    }
+}
+
 static void OpenStoreGame(Shell &shell, const StoreGame &game)
 {
     g_storeGame = game;
@@ -5919,7 +6070,9 @@ static void OpenStoreGame(Shell &shell, const StoreGame &game)
         if (release != NULL)
             FormatBytes(release->size, g_storeVersionSize[v], sizeof(g_storeVersionSize[v]));
         g_storeVersions[v].label = release != NULL ? release->label : "";
-        g_storeVersions[v].detail = release != NULL ? release->detail : "";
+        FriendlyVersionDetail(release != NULL ? release->detail : "", g_storeVersionFriendly[v],
+                              sizeof(g_storeVersionFriendly[v]));
+        g_storeVersions[v].detail = g_storeVersionFriendly[v];
         g_storeVersions[v].size = g_storeVersionSize[v];
 
         if (ReleaseUnpacks(release))
@@ -8331,7 +8484,7 @@ static void ShelfItemOptions(Shelf &shelf)
         WCHAR current[128];
         Utf8ToWideText(shown, current, 128);
         std::string typed;
-        if (OpenKeyboardToString(XUSER_INDEX_ANY, &typed, TrW(STR_RENAME), TrW(STR_ONLY_OMNI360_SHOWS_THIS_NAME),
+        if (OpenKeyboardToString(XUSER_INDEX_ANY, &typed, TrW(STR_RENAME), TrW(STR_ONLY_OMNI360_SHOWS_THIS_NAME_APP),
                                  current) != ERROR_SUCCESS)
             return; // cancelled
         saved = SetRename(titleId, name, typed.c_str());
@@ -10048,15 +10201,15 @@ static void FilesActions(Shell &shell)
     const bool disc = IsDiscPath(shell.filesPath[pane]);
     if (count > 0)
     {
-        labels[n] = Tr(STR_FILES_COPY_TO_OTHER_SIDE); icons[n] = UI_ICON_FILE; actions[n++] = ACT_COPY;
+        labels[n] = Tr(STR_FILES_COPY_TO_OTHER_SIDE); icons[n] = UI_ICON_COPY; actions[n++] = ACT_COPY;
         if (!disc)
         {
-            labels[n] = Tr(STR_FILES_MOVE_TO_OTHER_SIDE); icons[n] = UI_ICON_FOLDER; actions[n++] = ACT_MOVE;
+            labels[n] = Tr(STR_FILES_MOVE_TO_OTHER_SIDE); icons[n] = UI_ICON_MOVE; actions[n++] = ACT_MOVE;
             if (count == 1)
             {
                 labels[n] = Tr(STR_RENAME); icons[n] = UI_ICON_KEYBOARD; actions[n++] = ACT_RENAME;
             }
-            labels[n] = Tr(STR_FILES_DELETE); icons[n] = UI_ICON_NONE; actions[n++] = ACT_DELETE;
+            labels[n] = Tr(STR_FILES_DELETE); icons[n] = UI_ICON_DELETE; actions[n++] = ACT_DELETE;
         }
     }
     if (!disc)

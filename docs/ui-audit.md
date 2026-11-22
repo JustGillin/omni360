@@ -375,6 +375,22 @@ New from this check (P2): the rename keyboard's help says "the game's files keep
 
 Still open: Cancel while pairing waits and telling a timeout from a No; Files menu icons and a caution style for Delete; Versions' language codes (generator); description layout differences between game pages.
 
+### Batch 5 for review (b21, 2026-11-21)
+
+**Checked on the console by Claude:** Versions on Sonic the Hedgehog reads "English, Japanese and 4 more · 6.74 GB" (and the info line shows "SEGA" once); Files' Y menu shows the new Copy and Move icons and a red bin on Delete. Pairing could not be tried: it needs a PC helper that isn't paired yet.
+
+| Where | What changed |
+| --- | --- |
+| Pairing ("Allow it on your PC") | B Cancel works while it waits: each wait runs on its own thread and the dialog shows "B Cancel"; cancelling goes back to Settings quietly (the PC's prompt runs out on its own) |
+| Pairing, nobody answers on the PC | The helper now answers 410 when its prompt runs out with no answer, and the console says "Nobody answered on your PC." rather than "Pairing wasn't allowed" - **needs the helper rebuilt** (helper/pairing.go); an older helper still reads as a No |
+| Files › Y menu | New icons: Copy (two pages), Move (arrow out of a page), Delete (a bin, always red) |
+| Versions dialog | Redump's language codes as words: up to three named, then "and N more" |
+| Rename keyboard on an app | "Only Omni360 shows this name - its files keep theirs." (games keep "the game's files") |
+
+Looked at, no change: Copy/Move while the other side shows only drives already explains when chosen ("Open the folder it should go into on the other side."); a game page's description is narrow beside screenshots and full width without them, which is intended.
+
+New from this check (P2): over a light wallpaper (Sonic the Hedgehog's sky), the small green "CONTINUE PLAYING" is still hard to read even with batch 3's stronger shade - it needs a text shadow or a darker plate, not more gradient.
+
 ### Found while checking the speed test and PC helper (2026-11-20, Claude)
 
 | Priority | Screen/state | Observed | Expected / suggestion |

@@ -1053,7 +1053,10 @@ enum UiListIcon
     UI_ICON_CHECK,    // "this one" - Use this folder
     UI_ICON_KEYBOARD, // typing instead - Type a path
     UI_ICON_FILE,
-    UI_ICON_DISC      // the disc in the drive
+    UI_ICON_DISC,     // the disc in the drive
+    UI_ICON_COPY,     // two pages: copy
+    UI_ICON_MOVE,     // an arrow out of a page: move
+    UI_ICON_DELETE    // a bin, drawn red: delete
 };
 
 // ---------------------------------------------------------------------------

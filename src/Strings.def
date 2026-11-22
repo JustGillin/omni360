@@ -85,6 +85,7 @@ STR(RENAME,                 "Rename")
 STR(USE_THE_ORIGINAL_NAME,  "Use the original name")
 STR(ORIGINALLY,             "Originally {1}")
 STR(ONLY_OMNI360_SHOWS_THIS_NAME, "Only Omni360 shows this name - the game's files keep theirs. Clear it to go back to the original.")
+STR(ONLY_OMNI360_SHOWS_THIS_NAME_APP, "Only Omni360 shows this name - its files keep theirs. Clear it to go back to the original.")
 STR(GAMEMARKS_TXT_COULD_NOT_BE, "GameMarks.txt couldn't be written beside Omni360.")
 
 // ---- Store ------------------------------------------------------------------

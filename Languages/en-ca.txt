@@ -73,6 +73,7 @@ RENAME = Rename
 USE_THE_ORIGINAL_NAME = Use the original name
 ORIGINALLY = Originally {1}
 ONLY_OMNI360_SHOWS_THIS_NAME = Only Omni360 shows this name - the game's files keep theirs. Clear it to go back to the original.
+ONLY_OMNI360_SHOWS_THIS_NAME_APP = Only Omni360 shows this name - its files keep theirs. Clear it to go back to the original.
 GAMEMARKS_TXT_COULD_NOT_BE = GameMarks.txt couldn't be written beside Omni360, buddy.
 
 # ---- Store
