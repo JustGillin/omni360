@@ -1,31 +1,31 @@
 # How Omni360 compares
 
-There are several ways to add games and manage content on a modded Xbox 360. This page compares **Omni360**, **X-Store**, **GodStix**, **ConsoleCrate** and **ReLive**. They overlap, but they are not all trying to do the same thing: some focus on downloading games, some are broader dashboards, and ReLive is a different kind of service altogether.
+There are several ways to add games and manage content on a modded Xbox 360. This page compares **Omni360**, **X-Store**, **GodStix**, **Valkyrie**, **ConsoleCrate** and **ReLive**. They overlap, but they are not all trying to do the same thing: some focus on downloading games, some are broader dashboards, and ReLive is a different kind of service altogether.
 
-This comparison combines Omni360 project details, hands-on testing of X-Store and GodStix, and publicly available documentation. GodStix was tested on **version 0.9.2**. Features that were not found or could not be verified are labelled that way rather than treated as definitely absent. Download speeds are individual observations, not controlled benchmarks. Last reviewed: **November 20, 2026**.
+This comparison combines Omni360 project details, hands-on testing of X-Store, GodStix and Valkyrie, and publicly available documentation. GodStix was tested on **version 0.9.2**; Valkyrie on a build dated **6 November 2026** (the 6.x series). Features that were not found or could not be verified are labelled that way rather than treated as definitely absent. Download speeds are individual observations, not controlled benchmarks. Last reviewed: **November 21, 2026**.
 
 If something here is wrong or out of date, [open an issue](https://github.com/JustGillin/omni360/issues) and we'll update it.
 
 ## At a glance
 
-| | **Omni360** | **X-Store** | **GodStix 0.9.2** | **ConsoleCrate** | **ReLive** |
-|---|---|---|---|---|---|
-| **What it is** | Store, library and content-management app | Focused game/content downloader | Dashboard with store, library and social features | Dashboard/store project | Stealth service for connecting a modded console to Xbox Live |
-| **Interface** | Controller-friendly native app | Simple, text-driven menu | Graphical dashboard with sidebar and multiple sections | Separate dashboard experience | Not a dashboard/store equivalent |
-| **Game source** | Internet Archive | Internet Archive | Private service; underlying file source not confirmed | Its own service; original source not confirmed | Not applicable / not confirmed |
-| **Account needed** | Free Internet Archive account to download | Free Internet Archive account to download | Guest access is available with a daily download allowance; account needed for social features and higher-tier access | Not confirmed | Service account / connection requirements depend on setup |
-| **Xbox 360 games** | Yes | Yes | Yes | Store listed; details not fully retested | No confirmed game catalogue |
-| **Xbox Live Arcade** | Yes | Yes | Yes | Mentioned in prior research | No confirmed game catalogue |
-| **Indie games** | Yes | No, according to its current setup guide | Not found in hands-on search; availability unconfirmed | Not confirmed | No |
-| **Original Xbox games** | Yes; emulator setup and compatibility guidance included | Yes | Not found in store or library during testing | Not confirmed | No |
-| **DLC / title updates** | Download, manage and switch title-update versions | Downloads DLC and title updates | Game details show installed DLC/TUs and allow deletion; a separate manager or version-switching workflow was not found | DLC compatibility checking mentioned in prior research; details not retested | Not confirmed |
-| **Disc ripping** | Yes; Xbox 360 and Original Xbox | No built-in disc-ripping workflow identified | No disc workflow surfaced in testing | Disc tools were described in prior research | Not applicable |
-| **Download queue** | Yes | Yes | Yes | Uses a separate installer, according to prior research | Not applicable |
-| **Downloads survive closing the app?** | Yes; pause and resume on next launch | No; app must remain open | No; downloads did not survive closing the app in testing | Not confirmed | Not applicable |
-| **Pause / resume** | Yes | Very basic pause (up to 30 seconds, according to release notes); no automatic recovery after closing | Cancel available; no pause option found | Not confirmed | Not applicable |
-| **Download limits** | No app-imposed daily limit | No app-imposed daily limit | Guest screen showed 8 downloads per day; starting and cancelling a download still consumes one | Not stated | Not applicable |
-| **File manager / FTP** | Yes / Yes | Not a main feature | Yes / Yes | File manager listed in prior research | Not applicable |
-| **Open source** | Yes, AGPL-3.0 | Yes, AGPL-3.0 | No public source found | No public source found in prior research | No public source found in prior research |
+| | **Omni360** | **X-Store** | **GodStix 0.9.2** | **Valkyrie** | **ConsoleCrate** | **ReLive** |
+|---|---|---|---|---|---|---|
+| **What it is** | Store, library and content-management app | Focused game/content downloader | Dashboard with store, library and social features | Dashboard for RGH/JTAG consoles: library, themes and content management, with a PC companion (Valhalla) | Dashboard/store project | Stealth service for connecting a modded console to Xbox Live |
+| **Interface** | Controller-friendly native app | Simple, text-driven menu | Graphical dashboard with sidebar and multiple sections | Graphical dashboard with eight swappable themes; Series X is the default | Separate dashboard experience | Not a dashboard/store equivalent |
+| **Game source** | Internet Archive | Internet Archive | Private service; underlying file source not confirmed | None built in: no store. Games come from your own discs and files, or are sent from a PC by Valhalla | Its own service; original source not confirmed | Not applicable / not confirmed |
+| **Account needed** | Free Internet Archive account to download | Free Internet Archive account to download | Guest access is available with a daily download allowance; account needed for social features and higher-tier access | No | Not confirmed | Service account / connection requirements depend on setup |
+| **Xbox 360 games** | Yes | Yes | Yes | In the library; no download catalogue | Store listed; details not fully retested | No confirmed game catalogue |
+| **Xbox Live Arcade** | Yes | Yes | Yes | Its own library section; no downloads | Mentioned in prior research | No confirmed game catalogue |
+| **Indie games** | Yes | No, according to its current setup guide | Not found in hands-on search; availability unconfirmed | Not confirmed | Not confirmed | No |
+| **Original Xbox games** | Yes; emulator setup and compatibility guidance included | Yes | Not found in store or library during testing | Its own library section; no downloads | Not confirmed | No |
+| **DLC / title updates** | Download, manage and switch title-update versions | Downloads DLC and title updates | Game details show installed DLC/TUs and allow deletion; a separate manager or version-switching workflow was not found | Lists a game's DLC; choose which title update runs; can fetch the newest from XboxUnity | DLC compatibility checking mentioned in prior research; details not retested | Not confirmed |
+| **Disc ripping** | Yes; Xbox 360 and Original Xbox | No built-in disc-ripping workflow identified | No disc workflow surfaced in testing | Yes; disc to Games on Demand ("Apotheosis") | Disc tools were described in prior research | Not applicable |
+| **Download queue** | Yes | Yes | Yes | No downloads; Valhalla has a transfer queue on the PC | Uses a separate installer, according to prior research | Not applicable |
+| **Downloads survive closing the app?** | Yes; pause and resume on next launch | No; app must remain open | No; downloads did not survive closing the app in testing | Not applicable | Not confirmed | Not applicable |
+| **Pause / resume** | Yes | Very basic pause (up to 30 seconds, according to release notes); no automatic recovery after closing | Cancel available; no pause option found | Not applicable | Not confirmed | Not applicable |
+| **Download limits** | No app-imposed daily limit | No app-imposed daily limit | Guest screen showed 8 downloads per day; starting and cancelling a download still consumes one | Not applicable | Not stated | Not applicable |
+| **File manager / FTP** | Yes / Yes | Not a main feature | Yes / Yes | Yes / Yes, plus a web page on the console and console-to-console copy | File manager listed in prior research | Not applicable |
+| **Open source** | Yes, AGPL-3.0 | Yes, AGPL-3.0 | No public source found | No public source found; free | No public source found in prior research | No public source found in prior research |
 
 ## Download speed observations
 
@@ -144,6 +144,35 @@ GodStix is a broader dashboard experience. In the tested version, its left sideb
 
 GodStix's clearest strengths are its dashboard presentation, social/community features, theme support, broad homebrew/ports/plugin sections and the fastest direct-console download speed observed in these tests. Its tested download workflow is less resilient than Omni360's: no pause was found, closing the app ended the download, and cancelled downloads still use the guest's daily allowance.
 
+### [Valkyrie](https://github.com/SafeLightDev/valkyrie)
+
+Valkyrie is a free dashboard for RGH and JTAG consoles from SafeLight.Dev, first released publicly in late October 2026 and updated often since (6.1 on 11 November). It needs DashLaunch and a hard drive; softmodded (exploit) consoles aren't supported. It has no store: it organises and plays what's already on the console, and its PC companion **Valhalla** (Windows and Mac) sends games, DLC and title updates over the network. No source code or licence is published. It was looked at hands-on on a build dated 6 November 2026, in the Series X theme.
+
+**Look and feel**
+
+- Eight themes that change the whole dashboard, not just colours: Series X (default), OG Xbox, Blades, NXE, Metro, Bifrost, Darkroom and Den. The Series X theme has an accent colour (12 swatches), dark mode, header text colour, theme music, your own music from USB, interface sounds and an idle mode.
+- Home has a cover flow in the middle, with the focused game's background art fading in behind it, and large tiles for the library, homebrew, disc installs and emulators. Settings › Spotlight swaps the cover flow for other layouts, such as a Bookshelf of game spines.
+- Motion is a large part of why it feels polished: the focus outline glides from one item to the next in about 150 ms (including between the sidebar and the grid), the background art cross-fades as focus moves, and pages fade in. Rows themselves don't scroll smoothly.
+- There's no footer: button hints sit inside a panel on the right that explains the focused item.
+- A boot video picker (several Xbox start-up videos) and a Discord webhook that can post game starts, play sessions, installs and disc rips.
+
+**Library**
+
+- Sections in the sidebar: Games (Xbox 360 retail), Arcade, Original Xbox, Catalogue, Trainers, Recently played, Search, Franchises and Groups, with counts, and a storage bar underneath.
+- Inside a section: sorting, region filters (NTSC-J, PAL, Korea, Asia), switches such as "Has Trainer" and "Stackable Achievements", and saved views you cycle with LT and RT.
+- Box art uses the real case designs (green Xbox 360, orange Arcade, OG Xbox); a game without art gets a coloured tile with its first letter.
+- A Manage view lists games with bars sized by how much space each takes, sorted A-Z or by size; uninstalling asks first, starting on Cancel.
+
+**Content and system**
+
+- Picks which title update a game runs, lists DLC, and can fetch the newest title update from XboxUnity when a game starts.
+- Disc to Games on Demand ("Apotheosis"), a file manager on every drive, FTP, a web page on the console, installing from a network share, and copying between two consoles running Valkyrie.
+- An Overview page with temperature cards and console details; Restart and Turn off ask for a second A press rather than a dialog.
+- Signed updates that roll back if a new build doesn't start, optional modules (like plugins) that are switched off if they crash, and named start-up dashboards chosen with a button at power-on (set up through Valhalla).
+- Valhalla also handles trainers (about 100), profiles and saves, disc-image checks and conversion, homebrew installs with undo, and installing Valkyrie itself.
+
+Valkyrie's strengths are presentation and polish: themes, motion, a well-organised library and thoughtful details. It isn't a store, so it doesn't compete with Omni360 on getting games; its library, content management and file tools overlap with Omni360's.
+
 ### [ConsoleCrate](https://dashboard.consolecratelive.online/)
 
 ConsoleCrate is a dashboard/store project that has been described as growing into ConsoleCrate Live OS. Earlier research found references to disc tools (copy, convert to Games on Demand and rip), trainers, achievements, a file manager and a Windows media server. Its downloads were described as coming from its own service, but the original file source was not identified. It is free with optional donations. These details have not been retested as part of the current hands-on comparison, so check the project's current release notes before relying on them.
@@ -161,6 +190,7 @@ The products have different priorities:
 - **Omni360** focuses on the complete game-management workflow: disc ripping, a unified library, downloads, DLC/title updates, Original Xbox compatibility and resumable downloads.
 - **X-Store** focuses on searching for and downloading games and related content directly on the console. It is simple and open source, but it is not a full dashboard and requires the app to stay open during downloads.
 - **GodStix** aims to be a dashboard and community hub as well as a store. It has a richer home screen, social features and customization, and it was the fastest direct downloader in these tests. Its tested guest download limits and lack of download recovery are meaningful trade-offs.
+- **Valkyrie** is a dashboard without a store. It stands out for its themes, motion and library organisation (sections, filters, saved views), and leaves getting games onto the console to its PC companion, Valhalla.
 - **ConsoleCrate** and **ReLive** serve different purposes and have not been retested in this round.
 
 No single feature list tells the whole story. The best fit depends on whether someone values a dashboard/social experience, a straightforward downloader, or a tool that handles the full process of installing and maintaining a game library.
@@ -170,6 +200,7 @@ No single feature list tells the whole story. The best fit depends on whether so
 - **Omni360:** [GitHub repository](https://github.com/JustGillin/omni360/). Project behaviour and features described above are based on the project and hands-on knowledge from its developer.
 - **X-Store:** [GitHub repository and README](https://github.com/951261/X-Store), [setup guide](https://github.com/951261/X-Store/blob/main/docs/Setup%20Guide.md), and [release notes](https://github.com/951261/X-Store/releases). The README documents Internet Archive authentication, the app-open requirement and the absence of automatic resume. The setup guide documents extracted XEX output and search behaviour; release notes document the limited pause feature.
 - **GodStix:** [Speedy Games Downloads' GodStix page](https://speedygamesdownloads.com/godstix/). The detailed GodStix 0.9.2 section is primarily based on hands-on testing, with unverified behaviour clearly labelled.
+- **Valkyrie and Valhalla:** [Valkyrie on GitHub](https://github.com/SafeLightDev/valkyrie) and its [releases](https://github.com/SafeLightDev/valkyrie/releases), [Valhalla on GitHub](https://github.com/SafeLightDev/valhalla) and its [releases](https://github.com/SafeLightDev/valhalla/releases), and [SafeLight.Dev's Xbox 360 help page](https://safelight.dev/x360help). The Valkyrie section is mostly from hands-on use of a build dated 6 November 2026 in the Series X theme; Valhalla's features come from its documentation and weren't tested.
 - **ConsoleCrate:** [ConsoleCrate dashboard site](https://dashboard.consolecratelive.online/). Details are retained from earlier research and were not retested in this update.
 - **ReLive:** [ConsoleMods' Xbox Live information](https://consolemods.org/wiki/Xbox_360:Xbox_Live). Details are retained from earlier research and were not retested in this update.
 
