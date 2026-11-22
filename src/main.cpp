@@ -4559,7 +4559,22 @@ static void BuildStoreRows()
     const int rows = StoreRowCount() < STORE_ROWS_MAX ? StoreRowCount() : STORE_ROWS_MAX;
     for (int r = 0; r < rows; ++r)
     {
-        const int n = StoreRowGames(r, g_rowGames[g_rowCount], STORE_ROW_TILES_MAX);
+        int n = StoreRowGames(r, g_rowGames[g_rowCount], STORE_ROW_TILES_MAX);
+        // One tile per name: regional copies (Scene It's) share an English
+        // name and would show twice, the same cover side by side.
+        {
+            StoreGame *games = g_rowGames[g_rowCount];
+            int kept = 0;
+            for (int i = 0; i < n; ++i)
+            {
+                bool seen = false;
+                for (int j = 0; j < kept && !seen; ++j)
+                    seen = _stricmp(games[j].name, games[i].name) == 0;
+                if (!seen)
+                    games[kept++] = games[i];
+            }
+            n = kept;
+        }
         if (n == 0)
             continue;
         for (int i = 0; i < n; ++i)
@@ -8264,6 +8279,12 @@ static LibraryPageView MakeShelfView(const Shell &shell, ShelfKind kind)
     view.coverKeys = shelf.coverKeys;
     view.gamesPath = shelf.pathCount > 0 ? shelf.pathList : NULL;
 
+    // Renames, as the library shows them: an app is renamed the same way.
+    static const char *shown[SHELF_COUNT][MAX_SHELF_ITEMS];
+    for (int i = 0; i < shelf.count && i < MAX_SHELF_ITEMS; ++i)
+        shown[kind][i] = RenamedTo(shelf.items[i].titleId, shelf.items[i].displayName);
+    view.names = shown[kind];
+
     // Without folders the page isn't in the sidebar, so it's never empty for
     // want of them.
     if (!g_shelvesRead)
@@ -8277,6 +8298,59 @@ static LibraryPageView MakeShelfView(const Shell &shell, ShelfKind kind)
         view.emptyHint = "Each one is a folder with default.xex, default.xbe or one other .xex in it.";
     }
     return view;
+}
+
+// Y on an app, homebrew or emulator: rename it, as a game can be. There's
+// no favourite here - Favorites is a page of games.
+static void ShelfItemOptions(Shelf &shelf)
+{
+    if (shelf.selected < 0 || shelf.selected >= shelf.count)
+        return;
+    const InstalledGame &item = shelf.items[shelf.selected];
+    const unsigned long titleId = item.titleId;
+    char name[256];
+    _snprintf(name, sizeof(name), "%s", item.displayName);
+    name[sizeof(name) - 1] = '\0';
+    char shown[256];
+    _snprintf(shown, sizeof(shown), "%s", ShownName(item));
+    shown[sizeof(shown) - 1] = '\0';
+    const bool renamed = RenamedTo(titleId, name) != NULL;
+
+    const char *labels[2] = { Tr(STR_RENAME), Tr(STR_USE_THE_ORIGINAL_NAME) };
+    char message[320] = "";
+    if (renamed)
+        TrFormat(message, sizeof(message), STR_ORIGINALLY, name);
+    message[sizeof(message) - 1] = '\0';
+    const int picked = ShowAlertListUI(shown, message, labels, NULL, renamed ? 2 : 1, 0);
+    if (picked < 0)
+        return;
+
+    bool saved = true;
+    if (picked == 0)
+    {
+        WCHAR current[128];
+        Utf8ToWideText(shown, current, 128);
+        std::string typed;
+        if (OpenKeyboardToString(XUSER_INDEX_ANY, &typed, TrW(STR_RENAME), TrW(STR_ONLY_OMNI360_SHOWS_THIS_NAME),
+                                 current) != ERROR_SUCCESS)
+            return; // cancelled
+        saved = SetRename(titleId, name, typed.c_str());
+    }
+    else
+        saved = SetRename(titleId, name, NULL);
+    if (!saved)
+        ShowShellToast(Tr(STR_NOT_SAVED), Tr(STR_GAMEMARKS_TXT_COULD_NOT_BE), UI_TOAST_ERROR);
+
+    // Back in name order, the covers' keys with them, and the focus on it.
+    g_marksVersion++;
+    if (shelf.count > 1)
+        qsort(shelf.items, shelf.count, sizeof(InstalledGame), CompareGamesByName);
+    for (int i = 0; i < shelf.count; ++i)
+    {
+        shelf.coverKeys[i] = HomebrewCoverKey(shelf.items[i].displayName);
+        if (shelf.items[i].titleId == titleId && strcmp(shelf.items[i].displayName, name) == 0)
+            shelf.selected = i;
+    }
 }
 
 // A on an app. Returns only if it didn't start, having said so.
@@ -10168,7 +10242,12 @@ static int g_storagePartsLibrary = -1; // its library index, for the cover
 
 static void ReadStorageParts(const Shell &shell)
 {
-    RenderStatusFrame(g_storagePartsName, Tr(STR_LOADING), NULL);
+    // A small dialog over the page it was opened from, not a screen with the
+    // sidebar that then jumps to the list's own layout. It stays up until
+    // the list draws; nothing can be pressed while the drive is read.
+    BeginProgressDialog();
+    RenderProgressDialog(g_storagePartsName, Tr(STR_LOADING), NULL, -1.0f, UI_BUTTON_A, NULL);
+    EndProgressDialog();
     FreeTitleParts(g_storageParts, g_storagePartCount);
     // One drive's, or - from a game page - every drive's, a drive at a time.
     g_storagePartCount = 0;
@@ -11715,6 +11794,11 @@ int main()
                 PlayApp(shelf.items[shelf.selected]);
                 acted = true;
             }
+            else if ((pressed & XINPUT_GAMEPAD_Y) && count > 0)
+            {
+                ShelfItemOptions(shelf);
+                acted = true;
+            }
         }
         else if (GamePageOpen(shell))
         {
@@ -12449,6 +12533,8 @@ int main()
             {
                 if (view.count > 0)
                     hintCount = AddHint(hints, hintCount, UI_BUTTON_A, TrW(STR_START));
+                if (view.count > 0)
+                    hintCount = AddHint(hints, hintCount, UI_BUTTON_Y, TrW(STR_OPTIONS));
                 hintCount = AddHint(hints, hintCount, UI_BUTTON_B, TrW(STR_NAV_HOME));
                 if (view.count > LibraryPageVisibleRows(view) * LibraryGridColumns())
                     hintCount = AddHint(hints, hintCount, UI_BUTTON_LBRB, TrW(STR_PAGE));

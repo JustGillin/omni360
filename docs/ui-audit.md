@@ -359,6 +359,22 @@ Already covered, no change: Night mode has its own screen when armed (the indica
 
 Still open after batch 3: Cancel while pairing waits and telling a timeout from a No (need the wait to stop mid-request); Manage game's blocking loading screen; Files menu icons and a caution style for Delete (no icons for them yet); Y Options (Rename) on Apps and Homebrew; walking the sidebar to the storage ring switches pages; Versions rows' language codes; Store data duplicates (Scene It, DashLaunch); description layout differences between game pages.
 
+### Batch 4 for review (b20, 2026-11-21)
+
+**Checked on the console by Claude (after a restart that picked up the bridge fix):** Apps shows "Y Options"; Y opens a dialog with Rename; Rename opens the keyboard with the current name, and B leaves it unchanged; Manage game shows "Loading..." as a dialog over the game page, then its list. The Store row de-duplication was not looked at on screen.
+
+| Where | What changed |
+| --- | --- |
+| Apps, Homebrew, Emulators | Y Options: Rename, and Use the original name once renamed; footer shows "Y Options". The grid shows the new name and re-sorts, as games do |
+| Manage game (from Storage or a game page) | "Loading..." is a small dialog over the page it came from, not a screen with the sidebar that then jumps layout |
+| Store front page rows | One tile per name, so regional copies (Scene It) no longer sit side by side |
+
+Looked at, no change: walking down the sidebar to the storage ring shows each page on the way, and B from Storage returns to the ring with the page above it, which is how the sidebar works everywhere; the two DashLaunch tiles are different apps (one is the Bad Update Safe build), and the "..." shortening now shows the difference; Versions' language codes come pre-joined with other notes from the catalog generator, so changing them belongs in the generator.
+
+New from this check (P2): the rename keyboard's help says "the game's files keep theirs" for apps too; it should say "its files" or use the item kind.
+
+Still open: Cancel while pairing waits and telling a timeout from a No; Files menu icons and a caution style for Delete; Versions' language codes (generator); description layout differences between game pages.
+
 ### Found while checking the speed test and PC helper (2026-11-20, Claude)
 
 | Priority | Screen/state | Observed | Expected / suggestion |
