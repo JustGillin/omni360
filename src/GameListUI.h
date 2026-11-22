@@ -142,7 +142,8 @@ enum UiButton
     UI_BUTTON_LBRB,
     UI_BUTTON_START,
     UI_BUTTON_LTRT,
-    UI_BUTTON_DPAD_LR // left and right on the D-pad: a value that they change
+    UI_BUTTON_DPAD_LR, // left and right on the D-pad: a value that they change
+    UI_BUTTON_BACK
 };
 
 // One button hint in the footer. shortLabel, when non-NULL, is used for every
@@ -400,6 +401,7 @@ struct SettingsControlView
     int valueIndex;
     int valueCount;
     bool compact;        // a value's: narrower, beside a folder's path
+    bool radio;          // a checkbox's: drawn round, as one choice of several
     const char *help;    // for the help line, while it has focus
 };
 

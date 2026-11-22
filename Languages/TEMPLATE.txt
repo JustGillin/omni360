@@ -106,6 +106,8 @@ STORE_MORE_LIKE_THIS = More like this
 # ---- Queue
 QUEUE_TO_DO = {1} to do
 QUEUE_INSTALLED = {1} installed
+QUEUE_RECENT_DLC = DLC: {1}
+QUEUE_RECENT_UPDATE = Update: {1}
 QUEUE_FINISHED = {1} finished
 QUEUE_RECENTLY_INSTALLED = Recently installed
 
@@ -918,6 +920,7 @@ TU_COPY_NOT_KNOWN = From XboxUnity. Which release you have couldn't be read, so 
 TU_NONE_FOR_YOUR_COPY = From XboxUnity, but none are listed for your exact copy - these are for other releases of the game.
 STORAGE_DELETE_PARTIALS = Delete partial downloads?
 STORAGE_DELETE_PARTIALS_MESSAGE = This frees {1}. If you download it again, it starts over.
+STORAGE_DELETE_PARTIALS_EMPTY = Nothing was downloaded yet, so this only clears them away. If you download one again, it starts over.
 STORAGE_DELETE_PARTIALS_DETAIL = Installed games, DLC and saves aren't touched.
 STORAGE_DELETE = Delete
 STORAGE_QUEUE_BUSY = Your queue isn't empty
@@ -962,6 +965,8 @@ STORAGE_KIND_DLC = DLC
 STORAGE_KIND_UPDATE = Title update
 STORAGE_PARTS_EMPTY = Nothing of this game is left on this drive.
 STORAGE_PARTS_NOTE = Remove a single DLC or update, or just the game and keep its extras. Saves are kept.
+STORAGE_PARTS_NOTE_NO_GAME = The game isn't installed - these are its DLC and updates. Remove any you don't need.
+STORAGE_SAVES_KEPT = Saves are kept.
 STORAGE_REMOVE_PARTS_MANY = This removes {1} items and frees {3}.
 STORAGE_REMOVED_PARTS_MANY = Removed {1} items
 STORAGE_MANAGE_GAME = Manage game

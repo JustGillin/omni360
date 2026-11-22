@@ -2230,6 +2230,7 @@ static int SpriteForButton(UiButton button)
     case UI_BUTTON_START: return BUTTON_SPRITE_START;
     case UI_BUTTON_LTRT:  return BUTTON_SPRITE_LTRT;
     case UI_BUTTON_DPAD_LR: return BUTTON_SPRITE_DPAD_LR;
+    case UI_BUTTON_BACK:  return BUTTON_SPRITE_BACK;
     }
     return BUTTON_SPRITE_A;
 }
@@ -5790,6 +5791,21 @@ static void DrawCheckQuads(float x, float cy, bool on, bool dim)
     }
 }
 
+// A round mark, for one choice of several (a language): a ring, filled
+// green with a white dot when it's the one.
+static void DrawRadioQuads(float x, float cy, bool on)
+{
+    const float s = SettingsCheck(), y = cy - s * 0.5f;
+    if (on)
+    {
+        FillRound(x, y, s, s, s * 0.5f, COL_GREEN);
+        const float d = s * 0.38f;
+        FillRound(x + (s - d) * 0.5f, y + (s - d) * 0.5f, d, d, d * 0.5f, COL_TEXT);
+    }
+    else
+        StrokeRound(x, y, s, s, s * 0.5f, S(2.0f), COL_CHECK_EDGE);
+}
+
 // The value control's marks: where the value sits among them.
 static void DrawValueQuads(const SettingsControlView &c, float x, float cy)
 {
@@ -5815,7 +5831,10 @@ static void DrawSettingsControlsQuads(const SettingsRowView &row, float cy, floa
         {
             if (focused && !single)
                 FillRound(x, top, w, h, g_M.radius, COL_BUTTON_HI);
-            DrawCheckQuads(x + S(10.0f), cy, ctl.on, false);
+            if (ctl.radio)
+                DrawRadioQuads(x + S(10.0f), cy, ctl.on);
+            else
+                DrawCheckQuads(x + S(10.0f), cy, ctl.on, false);
         }
         else
             DrawValueQuads(ctl, x, cy);
@@ -6822,8 +6841,11 @@ void RenderHomeFrame(HomePageView &view, const UiHint *hints, int hintCount)
 
     // Enough shade for white text at the top and over the row, and none in
     // the middle, where the wallpaper is the point.
-    FillRoundGradient(0.0f, 0.0f, g_M.screenW, S(150.0f), 0.0f, 0xBF000000, 0x00000000, true);
-    FillRoundGradient(0.0f, g_M.screenH - S(460.0f), g_M.screenW, S(460.0f), 0.0f, 0x00000000, 0xE6000000, true);
+    // A little more than looks needed on dark art: a near-white wallpaper
+    // (Soulcalibur II's) otherwise washes out the nav labels and the green
+    // "Continue playing" over the name.
+    FillRoundGradient(0.0f, 0.0f, g_M.screenW, S(180.0f), 0.0f, 0xD9000000, 0x00000000, true);
+    FillRoundGradient(0.0f, g_M.screenH - S(520.0f), g_M.screenW, S(520.0f), 0.0f, 0x00000000, 0xEB000000, true);
 
     // The buttons are circles: the radius is half the button, in real
     // pixels, not an R() measurement taken at 720p.
@@ -9795,11 +9817,12 @@ void RenderFilesFrame(FilesPageView &view, const UiHint *hints, int hintCount)
             else if (on)
                 StrokeRound(x, y, rowW, rowH, 0.0f, S(2.0f), COL_REMEMBERED); // where the other side is
 
-            // A ticked row: a green edge, and the tick where its icon was.
+            // A ticked row: a green edge, and its icon turns green - it stays
+            // a folder or a file, so you can still tell which is which.
             const bool marked = pane.marked != NULL && pane.marked[i];
             if (marked)
                 FillRound(x, y, S(4.0f), rowH, 0.0f, COL_GREEN);
-            const int icon = marked ? NAV_ICON_CHECK : pane.icons != NULL ? NavIconForListIcon(pane.icons[i]) : -1;
+            const int icon = pane.icons != NULL ? NavIconForListIcon(pane.icons[i]) : marked ? NAV_ICON_CHECK : -1;
             if (icon >= 0)
                 DrawNavIcon(icon, x + S(18.0f) + iconSize * 0.5f, y + rowH * 0.5f, iconSize,
                             marked ? COL_GREEN : on && focusedPane ? COL_TEXT : COL_TEXT2);

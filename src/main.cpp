@@ -3278,9 +3278,12 @@ static void AddSettingsControl(SettingsPage &page, SettingsControlKind kind, con
 }
 
 // A row the D-pad stops on: anything but a heading with nothing on it.
+// A row with nothing to press - a heading, or a line that only tells you
+// something (Console software) - is passed over. A folder row always takes
+// focus: A on it scans or stops scanning.
 static bool SettingsRowFocusable(const SettingsRowView &row)
 {
-    return row.kind != SETTINGS_VIEW_HEADING || row.controlCount > 0;
+    return row.kind == SETTINGS_VIEW_FOLDER || row.controlCount > 0;
 }
 
 // Settings' sections, down its sidebar. Each one's rows are built on their own.
@@ -3704,6 +3707,7 @@ static void BuildSettingsPage(SettingsPage &page, const Library &lib, const char
             AddSettingsControl(page, SETTINGS_CONTROL_CHECK, NULL, SETTINGS_ROW_LANGUAGE,
                                i == current ? help : Tr(STR_LANGUAGE_PICK_HELP));
             page.rows[page.count - 1].controls[0].on = (i == current);
+            page.rows[page.count - 1].controls[0].radio = true; // one language at a time
         }
     }
 
@@ -3768,6 +3772,8 @@ static void BuildSettingsPage(SettingsPage &page, const Library &lib, const char
         page.focusRow = 0;
     while (page.focusRow < page.count - 1 && !SettingsRowFocusable(page.rows[page.focusRow]))
         page.focusRow++;
+    while (page.focusRow > 0 && !SettingsRowFocusable(page.rows[page.focusRow]))
+        page.focusRow--; // the last row only tells you something
     const int controls = page.rows[page.focusRow].controlCount;
     if (page.focusCol > controls - 1)
         page.focusCol = controls > 0 ? controls - 1 : 0;
@@ -7587,7 +7593,10 @@ static bool ClearPartialsFromStorage()
 
     char size[32], message[200];
     StorageBytes(g_storageText.partialBytes, size, sizeof(size));
-    TrFormat(message, sizeof(message), STR_STORAGE_DELETE_PARTIALS_MESSAGE, size);
+    if (g_storageText.partialBytes == 0) // "frees 0 B" reads like a mistake
+        TrFormat(message, sizeof(message), STR_STORAGE_DELETE_PARTIALS_EMPTY);
+    else
+        TrFormat(message, sizeof(message), STR_STORAGE_DELETE_PARTIALS_MESSAGE, size);
     if (!ShowConfirmUI(Tr(STR_STORAGE_DELETE_PARTIALS), message, Tr(STR_STORAGE_DELETE_PARTIALS_DETAIL),
                        Tr(STR_STORAGE_DELETE)))
         return false;
@@ -8703,7 +8712,16 @@ static void NoteQueueRecent(Shell &shell, const QueueJobSnapshot &job)
     QueueRecent &r = shell.queueRecents[0];
     r.id = job.id;
     r.titleId = job.titleId;
-    _snprintf(r.name, sizeof(r.name), "%s", job.gameName[0] != '\0' ? job.gameName : job.title);
+    // DLC and updates say so first, so a game's box art over one doesn't
+    // read as the game itself having installed (and survives the tile
+    // shortening the name).
+    const char *who = job.gameName[0] != '\0' ? job.gameName : job.title;
+    if (job.kind == QUEUE_JOB_DLC_PACK)
+        TrFormat(r.name, sizeof(r.name), STR_QUEUE_RECENT_DLC, who);
+    else if (job.kind == QUEUE_JOB_TITLE_UPDATE)
+        TrFormat(r.name, sizeof(r.name), STR_QUEUE_RECENT_UPDATE, who);
+    else
+        _snprintf(r.name, sizeof(r.name), "%s", who);
     r.name[sizeof(r.name) - 1] = '\0';
     shell.queueRecentCount++;
 
@@ -10258,7 +10276,12 @@ static StorageListView MakeStoragePartsView(const Shell &shell, const Library &l
     view.emptyLine = Tr(STR_STORAGE_PARTS_EMPTY);
     view.pickedCount = pickedCount;
     view.pickedSize = pickedSize;
-    view.note = Tr(STR_STORAGE_PARTS_NOTE);
+    // The note talks about the game - only true when the game is one of the
+    // parts. Without it (from Leftover DLC and updates), say what's here.
+    bool hasGame = false;
+    for (int i = 0; i < g_storagePartCount; ++i)
+        hasGame = hasGame || g_storageParts[i].kind == STORAGE_GAME || g_storageParts[i].kind == STORAGE_DISC_INSTALL;
+    view.note = Tr(hasGame ? STR_STORAGE_PARTS_NOTE : STR_STORAGE_PARTS_NOTE_NO_GAME);
     return view;
 }
 
@@ -10351,7 +10374,9 @@ static bool RemoveTickedParts(Shell &shell, const Library &lib, const char *game
     StorageBytes(bytes, size, sizeof(size));
     TrCount(message, sizeof(message), STR_STORAGE_REMOVE_ONE, STR_STORAGE_REMOVE_PARTS_MANY, picked,
             g_storageParts[first].name, size);
-    if (!ShowConfirmUI(Tr(STR_STORAGE_REMOVE_HEADING), message, Tr(STR_STORAGE_PARTS_NOTE), Tr(STR_REMOVE)))
+    // The page's note is right above it already; saying it again here was
+    // only noise. Saves are what someone wants to hear about.
+    if (!ShowConfirmUI(Tr(STR_STORAGE_REMOVE_HEADING), message, Tr(STR_STORAGE_SAVES_KEPT), Tr(STR_REMOVE)))
         return true;
 
     unsigned long long freed = 0;
@@ -12341,6 +12366,9 @@ int main()
                 if (view.recentCount > HomeRecentsAcross())
                     hintCount = AddHint(hints, hintCount, UI_BUTTON_LBRB, TrW(STR_PAGE));
             }
+            // BACK opens the System panel from anywhere on Home - said, so
+            // it's found.
+            hintCount = AddHint(hints, hintCount, UI_BUTTON_BACK, TrW(STR_SYSTEM));
 
             if (shell.systemPopup)
                 ShowSystemPopup();

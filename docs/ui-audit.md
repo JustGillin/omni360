@@ -340,6 +340,25 @@ Not done in this batch: Cancel while pairing waits (needs the wait to stop mid-r
 
 Not changed: the Homebrew item card already carries the item's name (the header shows its kind); "Find more online" is indented to line up with the labels of rows that have icons.
 
+### Batch 3 for review (b19, 2026-11-21)
+
+**Checked on the console by Claude:** BACK hint on Home, Settings › About skipping the Console software row, Language's round marks.
+
+| Where | What changed |
+| --- | --- |
+| Home | Footer adds "BACK System" (new BACK button icon: START's twin, arrow pointing left) |
+| Home over light wallpapers | Stronger shade behind the top bar and the "Continue playing" line |
+| Settings › Language | Languages use round marks (one at a time) instead of checkboxes |
+| Settings rows that only tell you something | Passed over by up/down (Console software in About) |
+| Queue › Recently installed | A DLC or update install is named "DLC: Game" / "Update: Game", so the game's box art doesn't read as the game installing (new installs only; ones already listed keep their names) |
+| Files | A ticked row keeps its folder or file icon, turned green, beside the green edge |
+| Storage › Partial downloads | With nothing downloaded yet, the confirmation says so instead of "This frees 0 B" |
+| Manage game from Leftover DLC and updates | Note says the game isn't installed and these are its DLC and updates; the remove confirmation says "Saves are kept." instead of repeating the note |
+
+Already covered, no change: Night mode has its own screen when armed (the indicator the finding asked for); scrolling names already fade at the edges; the Emulators help now says scanning shows it in Emulators; Files says "Deselect" like Storage; the grey glyph on "Manage game" is the controller's own START button.
+
+Still open after batch 3: Cancel while pairing waits and telling a timeout from a No (need the wait to stop mid-request); Manage game's blocking loading screen; Files menu icons and a caution style for Delete (no icons for them yet); Y Options (Rename) on Apps and Homebrew; walking the sidebar to the storage ring switches pages; Versions rows' language codes; Store data duplicates (Scene It, DashLaunch); description layout differences between game pages.
+
 ### Found while checking the speed test and PC helper (2026-11-20, Claude)
 
 | Priority | Screen/state | Observed | Expected / suggestion |

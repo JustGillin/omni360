@@ -270,6 +270,19 @@ def main():
     sprites.append(("DPAD_LR", dpad_x, 2 * CELL, dpad_cell, CELL, bm, bm, dpad_w, BUMPER_H))
     print("rendered DPAD_LR")
 
+    # BACK: START's twin on the pad - the same small graphite disc, its arrow
+    # pointing left.
+    def back_arrow(draw, cx, cy, R):
+        h = R * 0.78
+        w = h * 0.80
+        ox = -w * 0.12                    # nudged left, as START's is right
+        draw.polygon([(cx + w / 2 + ox, cy - h / 2), (cx - w / 2 + ox, cy), (cx + w / 2 + ox, cy + h / 2)], fill=255)
+
+    img = render_button(CELL, CELL, BUMPER_H / 2.0, 0.0, BUMPER_BASE, back_arrow, BUMPER_TEXT, False)
+    atlas.alpha_composite(img, (0, 3 * CELL))
+    sprites.append(("BACK", 0, 3 * CELL, CELL, CELL, bm, bm, BUMPER_H, BUMPER_H))
+    print("rendered BACK")
+
     atlas.save(OUT_PNG, optimize=True)
     png = open(OUT_PNG, "rb").read()
 
