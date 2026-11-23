@@ -145,7 +145,9 @@ enum UiButton
     UI_BUTTON_DPAD_LR, // left and right on the D-pad: a value that they change
     UI_BUTTON_BACK,
     UI_BUTTON_LBRB_NEXT, // LB RB with LB dimmed: on the first page, only RB moves
-    UI_BUTTON_LBRB_PREV  // and with RB dimmed, on the last
+    UI_BUTTON_LBRB_PREV, // and with RB dimmed, on the last
+    UI_BUTTON_LTRT_NEXT, // the same for LT RT
+    UI_BUTTON_LTRT_PREV
 };
 
 // One button hint in the footer. shortLabel, when non-NULL, is used for every
@@ -610,6 +612,8 @@ struct StoreTileView
     char letter;            // its A to Z tile's
     bool indie;             // an indie game: no cover, so the indie banner beside its name
     bool unavailable;       // nobody has uploaded it: drawn faded, and A does nothing
+    unsigned long gameTitleId; // the game's own title ID (titleId is its cover's key); 0 if unknown
+    bool installed;         // in the library already: an "Installed" pill, as the Store's rows have
 };
 
 // The Filter and sort panel, down the right over a letter's grid: a row each
@@ -755,6 +759,7 @@ enum QueueRowTone
 
 struct QueueRowView
 {
+    unsigned long coverKey; // an indie game's own cover (IndieCoverKey); else 0
     const char *title;    // the pack's or update's filename
     const char *gameName;
     const char *status;   // coloured by tone: "Waiting", "File 2 of 5", "Installed - restart your dashboard..."
@@ -787,6 +792,7 @@ struct QueueRecentView
     const char *name;
     int libraryIndex;      // whose icon, into the view's games; -1 for none
     unsigned long titleId; // whose box art
+    unsigned long coverKey; // an indie game's own cover (IndieCoverKey), when it has one; else 0
 };
 
 // games/gameCount are the library, for the covers - the same array the

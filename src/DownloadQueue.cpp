@@ -202,6 +202,8 @@ static void SaveQueueStateLocked()
 
         if (paused)
             AppendQueueStateText(text, QUEUE_STATE_MAX, &at, "paused=1\n");
+        if (job.view.fraction >= 0.0f)
+            AppendQueueStateText(text, QUEUE_STATE_MAX, &at, "progress=%d\n", (int)(job.view.fraction * 1000.0f));
 
         jobs++;
     }
@@ -546,7 +548,12 @@ static void RunDlcPack(const QueueJob &job, JobResult &result)
         n1[sizeof(n1) - 1] = '\0';
         _snprintf(n2, sizeof(n2), "%d", memberCount);
         n2[sizeof(n2) - 1] = '\0';
-        TrFormat(phase, sizeof(phase), STR_FILE_OF, n1, n2);
+        // "Downloading" for a pack of one file - a game's - and which file
+        // for more; "File 1 of 1" said nothing.
+        if (memberCount == 1)
+            _snprintf(phase, sizeof(phase), "%s", Tr(STR_LIB_DOWNLOADING));
+        else
+            TrFormat(phase, sizeof(phase), STR_DOWNLOADING_FILE_OF, n1, n2);
         phase[sizeof(phase) - 1] = '\0';
         SetActivePhase(phase, PACK_STEP_FILES, PACK_STEP_COUNT, f, memberCount, (float)f / (float)memberCount);
 
@@ -946,7 +953,8 @@ static void FinishJob(QueueJob &job, const JobResult &result, bool notify)
     {
         job.state = QUEUE_PAUSED;
         job.view.phase[0] = '\0';
-        job.view.fraction = -1.0f;
+        // How far it got stays on the row (and in the file): the pieces
+        // stay on the drive, and a bar emptied by Pause looks like losing them.
         SyncView(job);
         SaveQueueStateLocked();
         return;
@@ -1284,6 +1292,7 @@ struct RestoredJob
     char gameName[128];
     unsigned long titleId;
     bool paused;
+    float progress; // how far it had got, 0..1; negative if the file didn't say
 
     // A record's own fields. A job builds its title from the pack or update
     // it names; a record has only what it was called at the time.
@@ -1299,6 +1308,7 @@ static void StartRestored(RestoredJob &job, int kind, bool finished)
     memset(&job, 0, sizeof(job));
     job.kind = kind;
     job.finished = finished;
+    job.progress = -1.0f;
 }
 
 // What a "job=" or "done=" line names, or -1 for a kind this build doesn't
@@ -1394,7 +1404,25 @@ static void QueueRestored(const RestoredJob &job, const char *authHeader, int *q
         return;
 
     if (result == ENQUEUE_ADDED)
+    {
         (*queued)++;
+        // A paused one shows how far it had got, as it did before the app
+        // closed. One that's waiting will say for itself once it starts.
+        if (job.paused && job.progress >= 0.0f)
+        {
+            EnterCriticalSection(&g_lock);
+            for (int i = 0; i < MAX_QUEUE_JOBS; ++i)
+            {
+                QueueJob &q = g_jobs[i];
+                if (q.used && q.id == g_nextId - 1)
+                {
+                    q.view.fraction = job.progress > 1.0f ? 1.0f : job.progress;
+                    SyncView(q);
+                }
+            }
+            LeaveCriticalSection(&g_lock);
+        }
+    }
     else
         dprintf("[queue] couldn't put a kept job back (%d)\n", (int)result);
 }
@@ -1434,6 +1462,8 @@ void RestoreDownloadQueue(const char *authHeader)
             job.titleId = strtoul(value, NULL, 16);
         else if (strcmp(key, "paused") == 0)
             job.paused = (atoi(value) != 0);
+        else if (strcmp(key, "progress") == 0)
+            job.progress = atoi(value) / 1000.0f;
         else if (job.finished)
         {
             if (strcmp(key, "title") == 0)
@@ -1659,9 +1689,9 @@ void PauseQueueJob(int id)
 
         if (job.state == QUEUE_WAITING)
         {
-            // Nothing is in flight, so it is paused as of now.
+            // Nothing is in flight, so it is paused as of now - keeping
+            // whatever it had got to before, if it had.
             job.state = QUEUE_PAUSED;
-            job.view.fraction = -1.0f;
             SyncView(job);
             SaveQueueStateLocked();
         }

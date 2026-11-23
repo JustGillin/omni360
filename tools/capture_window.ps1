@@ -16,15 +16,34 @@ public static class WinCapture {
     [DllImport("user32.dll")] public static extern bool GetClientRect(IntPtr hWnd, out RECT rect);
     [DllImport("user32.dll")] public static extern bool PrintWindow(IntPtr hWnd, IntPtr hdc, uint flags);
     [DllImport("user32.dll")] public static extern bool SetProcessDPIAware();
+    public delegate bool EnumProc(IntPtr hWnd, IntPtr lParam);
+    [DllImport("user32.dll")] public static extern bool EnumWindows(EnumProc proc, IntPtr lParam);
+    [DllImport("user32.dll", CharSet = CharSet.Unicode)] public static extern int GetWindowText(IntPtr hWnd, System.Text.StringBuilder text, int max);
+    [DllImport("user32.dll")] public static extern bool IsWindowVisible(IntPtr hWnd);
+    // The first visible top-level window whose title contains part.
+    public static IntPtr Find(string part) {
+        IntPtr found = IntPtr.Zero;
+        EnumWindows(delegate (IntPtr h, IntPtr l) {
+            if (!IsWindowVisible(h)) return true;
+            var text = new System.Text.StringBuilder(256);
+            GetWindowText(h, text, 256);
+            if (text.ToString().IndexOf(part, StringComparison.OrdinalIgnoreCase) < 0) return true;
+            found = h;
+            return false;
+        }, IntPtr.Zero);
+        return found;
+    }
 }
 "@
 # Without this, sizes come back in scaled units on a high-DPI display while
 # PrintWindow draws at full resolution, so the capture loses its right and bottom.
 [void][WinCapture]::SetProcessDPIAware()
 
-$process = Get-Process | Where-Object { $_.MainWindowTitle -like "*$Title*" } | Select-Object -First 1
-if (-not $process) { Write-Error "No window titled like '$Title'"; exit 1 }
-$handle = $process.MainWindowHandle
+# Every top-level window, not just each process's main one: OBS's main window
+# and its projector belong to one process, and which of them counts as "main"
+# changes with whichever was used last.
+$handle = [WinCapture]::Find($Title)
+if ($handle -eq [IntPtr]::Zero) { Write-Error "No window titled like '$Title'"; exit 1 }
 
 $rect = New-Object WinCapture+RECT
 [void][WinCapture]::GetClientRect($handle, [ref]$rect)

@@ -413,6 +413,8 @@ static void SaveInstallStateLocked()
         // the app closing in between must not restart it.
         if (job.snap.state == QUEUE_PAUSED || (job.pause && !job.cancel))
             AppendQueueStateText(text, sizeof(text), &at, "paused=1\n");
+        if (job.snap.fraction >= 0.0f)
+            AppendQueueStateText(text, sizeof(text), &at, "progress=%d\n", (int)(job.snap.fraction * 1000.0f));
 
         jobs++;
     }
@@ -1521,7 +1523,8 @@ static void Finish(GameJob *job, QueueOutcome outcome, const char *text, const c
     {
         s.state = QUEUE_PAUSED;
         s.phase[0] = '\0';
-        s.fraction = -1.0f;
+        // How far it got stays on the row and in the file - the pieces stay
+        // on the drive, and an emptied bar looks like losing them.
         SaveInstallStateLocked();
         return;
     }
@@ -3188,6 +3191,24 @@ void SetGameInstallerGamesPath(const char *gamesPath)
 
 // paused is for an install coming back from a previous run that was set aside
 // then: everything else is queued ready to run.
+static GameEnqueueResult EnqueueGame(const GameRequest &request, const char *authHeader, bool paused);
+
+// After a restored install is queued: a paused one shows how far it had got
+// before the app closed. One that's waiting says for itself once it starts.
+static void RestoreProgress(bool paused, float progress)
+{
+    if (!paused || progress < 0.0f)
+        return;
+    EnterCriticalSection(&g_lock);
+    for (int i = 0; i < MAX_GAME_JOBS; ++i)
+    {
+        GameJob &job = g_jobs[i];
+        if (job.used && job.snap.id == g_nextId - 1)
+            job.snap.fraction = progress > 1.0f ? 1.0f : progress;
+    }
+    LeaveCriticalSection(&g_lock);
+}
+
 static GameEnqueueResult EnqueueGame(const GameRequest &request, const char *authHeader, bool paused)
 {
     if (!g_running)
@@ -3268,6 +3289,8 @@ void RestoreGameInstalls(const char *authHeader)
     bool paused = false;
     int queued = 0;
 
+    float progress = -1.0f; // how far a job had got, from its "progress=" line
+
     // A record's own fields, reset with the request at each block.
     char title[256] = "", resultText[64] = "", resultDetail[160] = "";
     int outcome = 0;
@@ -3281,7 +3304,10 @@ void RestoreGameInstalls(const char *authHeader)
         if (strcmp(key, "job") == 0 || strcmp(key, "done") == 0)
         {
             if (inJob && request.zipName[0] != '\0' && EnqueueGame(request, authHeader, paused) == GAME_QUEUED)
+            {
                 queued++;
+                RestoreProgress(paused, progress);
+            }
             else if (inDone && request.zipName[0] != '\0')
                 RestoreFinishedInstall(request, title, outcome, resultText, resultDetail, told);
 
@@ -3289,6 +3315,7 @@ void RestoreGameInstalls(const char *authHeader)
             title[0] = resultText[0] = resultDetail[0] = '\0';
             outcome = 0;
             paused = false;
+            progress = -1.0f;
             told = false;
 
             const bool game = (strcmp(value, "game") == 0);
@@ -3331,6 +3358,8 @@ void RestoreGameInstalls(const char *authHeader)
             request.titleId = strtoul(value, NULL, 16);
         else if (strcmp(key, "paused") == 0)
             paused = (atoi(value) != 0);
+        else if (strcmp(key, "progress") == 0)
+            progress = atoi(value) / 1000.0f;
 
         request.item[sizeof(request.item) - 1] = '\0';
         request.zipName[sizeof(request.zipName) - 1] = '\0';
@@ -3339,7 +3368,10 @@ void RestoreGameInstalls(const char *authHeader)
 
     // The last block has no "job=" after it.
     if (inJob && request.zipName[0] != '\0' && EnqueueGame(request, authHeader, paused) == GAME_QUEUED)
+    {
         queued++;
+        RestoreProgress(paused, progress);
+    }
     else if (inDone && request.zipName[0] != '\0')
         RestoreFinishedInstall(request, title, outcome, resultText, resultDetail, told);
 
@@ -3478,9 +3510,9 @@ void PauseGameJob(int id)
 
         if (job.snap.state == QUEUE_WAITING)
         {
-            // Nothing is in flight, so it is paused as of now.
+            // Nothing is in flight, so it is paused as of now, keeping how
+            // far it had got.
             job.snap.state = QUEUE_PAUSED;
-            job.snap.fraction = -1.0f;
             SaveInstallStateLocked();
         }
         else

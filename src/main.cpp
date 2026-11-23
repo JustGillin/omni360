@@ -4273,6 +4273,7 @@ struct QueueRecent
 {
     int id;
     unsigned long titleId;
+    unsigned long coverKey; // an indie game's own cover, by its name; 0 otherwise
     char name[128];
 };
 
@@ -4836,6 +4837,8 @@ static void BuildStoreRows()
             tile.name = g_rowGames[g_rowCount][i].name;
             tile.letter = g_rowGames[g_rowCount][i].letter;
             tile.indie = false;
+            tile.gameTitleId = g_rowGames[g_rowCount][i].titleId;
+            tile.installed = false;
         }
         g_rowCounts[g_rowCount++] = n;
     }
@@ -5600,6 +5603,8 @@ static void OpenStoreLetter(Shell &shell, char letter, int section)
             g_storeTiles[i].letter = g_arcadeGames[i]->letter;
             g_storeTiles[i].indie = indie;
             g_storeTiles[i].unavailable = false;
+            g_storeTiles[i].gameTitleId = indie ? 0 : g_arcadeGames[i]->titleId; // the library doesn't list indie games
+            g_storeTiles[i].installed = false;
         }
     }
     else
@@ -5612,6 +5617,8 @@ static void OpenStoreLetter(Shell &shell, char letter, int section)
             g_storeTiles[i].letter = g_storeGames[i].letter;
             g_storeTiles[i].indie = false;
             g_storeTiles[i].unavailable = StoreGameMissing(g_storeGames[i]);
+            g_storeTiles[i].gameTitleId = g_storeGames[i].titleId;
+            g_storeTiles[i].installed = false;
         }
     }
     shell.storeLetterArcade = arcade;
@@ -5637,6 +5644,8 @@ static void OpenStoreCollection(Shell &shell, int collection)
         g_storeTiles[i].letter = g_storeGames[i].letter;
         g_storeTiles[i].indie = false;
         g_storeTiles[i].unavailable = false; // a collection is games the Store has
+        g_storeTiles[i].gameTitleId = g_storeGames[i].titleId;
+        g_storeTiles[i].installed = false;
     }
     shell.storeLetterArcade = false;
     shell.storeLetterSection = -1;
@@ -5876,8 +5885,10 @@ static bool OpenStoreSearch(Shell &shell)
         const StoreHit &hit = g_searchHits[i];
         StoreTileView &tile = g_storeTiles[i];
         tile.unavailable = false; // a search looks through what the Store has
+        tile.installed = false;
         if (hit.game != NULL)
         {
+            tile.gameTitleId = hit.game->titleId;
             tile.titleId = StoreCoverKey(hit.game->titleId, hit.game->name);
             tile.name = hit.game->name;
             tile.letter = hit.game->letter;
@@ -5886,6 +5897,7 @@ static bool OpenStoreSearch(Shell &shell)
         else
         {
             tile.indie = (hit.kind == STORE_HIT_XBLIG);
+            tile.gameTitleId = tile.indie ? 0 : hit.arcade->titleId;
             tile.titleId = tile.indie ? IndieCoverKey(hit.arcade->name) : hit.arcade->titleId;
             tile.name = hit.arcade->name;
             tile.letter = hit.arcade->letter;
@@ -6075,15 +6087,37 @@ static void OpenSection(Shell &shell, int section)
     PrefetchLetterCovers(kStoreLetters[shell.sectionFocus[section]], section);
 }
 
+// A count with thousands separated, as the lists' "1 of 3,458" has them.
+static const char *Thousands(unsigned long n)
+{
+    static char out[4][24];
+    static int next = 0;
+    char *o = out[next];
+    next = (next + 1) % 4;
+    char digits[16];
+    _snprintf(digits, sizeof(digits), "%lu", n);
+    digits[sizeof(digits) - 1] = '\0';
+    const int len = (int)strlen(digits);
+    int k = 0;
+    for (int i = 0; i < len; ++i)
+    {
+        if (i > 0 && (len - i) % 3 == 0)
+            o[k++] = ',';
+        o[k++] = digits[i];
+    }
+    o[k] = '\0';
+    return o;
+}
+
 static StoreSectionView MakeSectionView(const Shell &shell)
 {
     const int set = shell.storeSection;
     static char subtitle[96];
     if (set == SECTION_XBOX)
-        TrFormat(subtitle, sizeof(subtitle), STR_XBOX_SECTION_SUBTITLE, TrNum(XBOX_GAME_COUNT));
+        TrFormat(subtitle, sizeof(subtitle), STR_XBOX_SECTION_SUBTITLE, Thousands(XBOX_GAME_COUNT));
     else
         TrFormat(subtitle, sizeof(subtitle), STR_SECTION_SUBTITLE,
-                 TrNum(set == SECTION_XBLIG ? XBLIG_GAME_COUNT : XBLA_GAME_COUNT));
+                 Thousands(set == SECTION_XBLIG ? XBLIG_GAME_COUNT : XBLA_GAME_COUNT));
     subtitle[sizeof(subtitle) - 1] = '\0';
 
     StoreSectionView view;
@@ -6400,7 +6434,7 @@ static void ChooseStoreVersion(Shell &shell)
         notes[v][sizeof(notes[v]) - 1] = '\0';
         labels[v] = ver.label;
         rowNotes[v] = notes[v][0] != '\0' ? notes[v] : NULL;
-        icons[v] = v == shell.storeVersionChosen ? UI_ICON_CHECK : UI_ICON_DISC;
+        icons[v] = v == shell.storeVersionChosen ? UI_ICON_CHECK : UI_ICON_NONE; // a mark on the others read as chosen
     }
     char heading[192];
     TrFormat(heading, sizeof(heading), STR_DIALOG_VERSIONS_FOR, g_storeGame.name);
@@ -8676,7 +8710,7 @@ static LibraryPageView MakeShelfView(const Shell &shell, ShelfKind kind)
     else
     {
         view.emptyTitle = none[kind];
-        view.emptyHint = "Each one is a folder with default.xex, default.xbe or one other .xex in it.";
+        view.emptyHint = Tr(STR_SHELF_EMPTY_HINT);
     }
     return view;
 }
@@ -9235,6 +9269,16 @@ static bool JobInstalled(const QueueJobSnapshot &job)
            (job.outcome == QUEUE_OUTCOME_INSTALLED || job.outcome == QUEUE_OUTCOME_ALREADY_INSTALLED);
 }
 
+// An indie game's download: the key of its own cover (they're found by
+// name - see IndieCoverKey); 0 for anything else.
+static unsigned long IndieJobCoverKey(const QueueJobSnapshot &job)
+{
+    if (job.kind != QUEUE_JOB_DLC_PACK)
+        return 0;
+    const XblaGame *game = ArcadeGameByRar(job.title);
+    return (game != NULL && ArcadeSetOf(game) == ARCADE_XBLIG) ? IndieCoverKey(game->name) : 0;
+}
+
 // Puts a job at the front of the row, if it isn't already in it. Already
 // there means it was noted on an earlier frame, and where it sits then is
 // where it belongs - the row is in the order jobs finished.
@@ -9254,11 +9298,12 @@ static void NoteQueueRecent(Shell &shell, const QueueJobSnapshot &job)
     QueueRecent &r = shell.queueRecents[0];
     r.id = job.id;
     r.titleId = job.titleId;
+    r.coverKey = IndieJobCoverKey(job);
     // DLC and updates say so first, so a game's box art over one doesn't
     // read as the game itself having installed (and survives the tile
     // shortening the name).
     const char *who = job.gameName[0] != '\0' ? job.gameName : job.title;
-    if (job.kind == QUEUE_JOB_DLC_PACK)
+    if (job.kind == QUEUE_JOB_DLC_PACK && ArcadeGameByRar(job.title) == NULL) // an arcade or indie game is a game
         TrFormat(r.name, sizeof(r.name), STR_QUEUE_RECENT_DLC, who);
     else if (job.kind == QUEUE_JOB_TITLE_UPDATE)
         TrFormat(r.name, sizeof(r.name), STR_QUEUE_RECENT_UPDATE, who);
@@ -9381,6 +9426,7 @@ static void SnapshotQueue(Shell &shell, const Library &lib)
     {
         shell.queueRecentRows[i].name = shell.queueRecents[i].name;
         shell.queueRecentRows[i].titleId = shell.queueRecents[i].titleId;
+        shell.queueRecentRows[i].coverKey = shell.queueRecents[i].coverKey;
         shell.queueRecentRows[i].libraryIndex = LibraryIndexForTitle(lib, shell.queueRecents[i].titleId);
     }
 
@@ -9412,8 +9458,25 @@ static void SnapshotQueue(Shell &shell, const Library &lib)
         char *numbers = shell.queueNumbers[i];
         const size_t statusSize = sizeof(shell.queueStatus[i]);
 
-        row.title = job.title;
-        row.gameName = job.gameName;
+        // An arcade or indie game is a pack too - its RAR - but reads as the
+        // game; a DLC pack's file name is tidied as Find more online does.
+        static char tidy[MAX_QUEUE_ROWS][MAX_PATH];
+        row.coverKey = IndieJobCoverKey(job);
+        if (job.kind == QUEUE_JOB_DLC_PACK && ArcadeGameByRar(job.title) != NULL)
+        {
+            row.title = job.gameName;
+            row.gameName = NULL;
+        }
+        else
+        {
+            row.title = job.title;
+            if (job.kind == QUEUE_JOB_DLC_PACK)
+            {
+                DlcPackDisplayName(job.title, tidy[i], sizeof(tidy[i]));
+                row.title = tidy[i];
+            }
+            row.gameName = job.gameName;
+        }
         row.status = status;
         row.numbers = NULL;
         row.libraryIndex = LibraryIndexForTitle(lib, job.titleId);
@@ -9444,16 +9507,16 @@ static void SnapshotQueue(Shell &shell, const Library &lib)
             TrFormat(status, statusSize, STR_PAUSED);
             row.tone = QUEUE_ROW_WAITING;
             row.showBar = true;
-            row.fraction = -1.0f;
+            row.fraction = job.fraction; // how far it got, so pausing doesn't look like losing it
         }
         else if (job.state == QUEUE_ACTIVE)
         {
             const char *phase = job.phase[0] != '\0' ? job.phase : Tr(STR_STARTING);
+            // What it's doing and how far into that - the bar's segments
+            // already show which step it's on, so no "Step 2 of 2".
             if (job.stepCount > 1 && job.stepFraction >= 0.0f)
-                TrFormat(status, statusSize, STR_STEP_OF_PCT, TrNum(job.step + 1), TrNum(job.stepCount), phase,
+                TrFormat(status, statusSize, STR_PHASE_PCT, phase,
                          TrNum((int)((job.stepFraction > 1.0f ? 1.0f : job.stepFraction) * 100.0f)));
-            else if (job.stepCount > 1)
-                TrFormat(status, statusSize, STR_STEP_OF, TrNum(job.step + 1), TrNum(job.stepCount), phase);
             else
                 _snprintf(status, statusSize, "%s", phase);
             FormatTransferNumbers(job, numbers, sizeof(shell.queueNumbers[i]));
@@ -11114,7 +11177,17 @@ static void RenderGamePageFrame(Shell &shell, const Library &lib, UiHint *hints,
         if (f >= STORE_GAME_FOCUS_SIMILAR)
             hintCount = AddHint(hints, hintCount, UI_BUTTON_A, TrW(STR_VIEW_GAME), TrW(STR_VIEW));
         else if (f == STORE_GAME_FOCUS_BUTTONS && StoreVersionCount() > 0)
-            hintCount = AddHint(hints, hintCount, UI_BUTTON_A, GamePagePlays(shell, lib) ? TrW(STR_PLAY) : TrW(STR_INSTALL));
+        {
+            float fraction = 0.0f;
+            bool partial = false;
+            const StoreInstallState state = StoreVersionState(lib, shell.storeVersionChosen, &fraction, &partial);
+            if (GamePagePlays(shell, lib))
+                hintCount = AddHint(hints, hintCount, UI_BUTTON_A, TrW(STR_PLAY));
+            else if (state == STORE_INSTALL_QUEUED || state == STORE_INSTALL_INSTALLING)
+                hintCount = AddHint(hints, hintCount, UI_BUTTON_A, TrW(STR_VIEW_IN_QUEUE), TrW(STR_NAV_QUEUE));
+            else if (state == STORE_INSTALL_AVAILABLE)
+                hintCount = AddHint(hints, hintCount, UI_BUTTON_A, TrW(STR_INSTALL));
+        }
         else if (f == STORE_GAME_FOCUS_BUTTONS + 1 && !StoreGameIsIndie() && !StoreGameIsXbox())
             hintCount = AddHint(hints, hintCount, UI_BUTTON_A, TrW(STR_DLC));
         else if (f == STORE_GAME_FOCUS_BUTTONS + 2 && !StoreGameIsIndie() && !StoreGameIsXbox())
@@ -12384,11 +12457,16 @@ int main()
                     acted = true;
                 }
                 else if (f == STORE_GAME_FOCUS_BUTTONS && StoreVersionCount() > 0 &&
+                         (installState == STORE_INSTALL_QUEUED || installState == STORE_INSTALL_INSTALLING))
+                {
+                    // On its way: where to watch it.
+                    shell.page = SHELL_PAGE_QUEUE;
+                    shell.sidebarFocused = false;
+                }
+                else if (f == STORE_GAME_FOCUS_BUTTONS && StoreVersionCount() > 0 &&
                          installState != STORE_INSTALL_AVAILABLE)
                 {
-                    // On its way or already there.
-                    ShowShellToast(installState == STORE_INSTALL_INSTALLED ? Tr(STR_ALREADY_INSTALLED) : Tr(STR_ALREADY_IN_THE_QUEUE),
-                                   g_storeGame.name, UI_TOAST_INFO);
+                    ShowShellToast(Tr(STR_ALREADY_INSTALLED), g_storeGame.name, UI_TOAST_INFO);
                 }
                 else if (f == STORE_GAME_FOCUS_BUTTONS && StoreVersionCount() > 0)
                 {
@@ -13139,10 +13217,30 @@ int main()
                                             PageHintButton(shell.storeSelected, letterPage, shell.storeGameCount),
                                             TrW(STR_PAGE));
                     if (LetterJumps(shell))
-                        hintCount = AddHint(hints, hintCount, UI_BUTTON_LTRT, TrW(STR_LETTER));
+                    {
+                        // Faint on the side that can't go further: LT on the
+                        // very first game, RT anywhere in the last letter.
+                        const int sel = shell.storeSelected;
+                        const bool back = sel > 0;
+                        const bool on = g_storeTiles[sel].letter != g_storeTiles[shell.storeGameCount - 1].letter;
+                        const UiButton button = back == on ? UI_BUTTON_LTRT
+                                                : on       ? UI_BUTTON_LTRT_NEXT
+                                                           : UI_BUTTON_LTRT_PREV;
+                        hintCount = AddHint(hints, hintCount, button, TrW(STR_LETTER));
+                    }
                 }
 
                 StoreLetterView view = MakeStoreLetterView(shell);
+                // Which of the tiles on screen are in the library - only
+                // those, as a letter can hold thousands of games.
+                {
+                    const int cols = StoreGridColumns();
+                    const int from = shell.storeLetterScroll * cols;
+                    const int to = from + (StoreLetterVisibleRows() + 2) * cols;
+                    for (int t = from; t < to && t < shell.storeGameCount; ++t)
+                        g_storeTiles[t].installed = g_storeTiles[t].gameTitleId != 0 &&
+                                                    LibraryGameByTitleId(lib, g_storeTiles[t].gameTitleId) != NULL;
+                }
                 RenderStoreLetterFrame(view, hints, hintCount);
                 shell.storeSelected = view.selected;
                 shell.storeLetterScroll = view.scroll;
@@ -13200,6 +13298,14 @@ int main()
                     hintCount = AddHint(hints, hintCount, UI_BUTTON_Y, TrW(STR_SEARCH));
                 }
 
+                // Which of the rows' games are in the library, for their
+                // "Installed" pill - a few hundred lookups at most.
+                for (int rw = 0; rw < g_rowCount; ++rw)
+                {
+                    for (int t = 0; t < g_rowCounts[rw]; ++t)
+                        g_rowTiles[rw][t].installed = g_rowTiles[rw][t].gameTitleId != 0 &&
+                                                      LibraryGameByTitleId(lib, g_rowTiles[rw][t].gameTitleId) != NULL;
+                }
                 StorePageView view = MakeStoreView(shell);
                 RenderStoreFrame(view, hints, hintCount);
                 shell.storeFocus = view.focus;

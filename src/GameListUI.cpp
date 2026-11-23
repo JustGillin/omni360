@@ -2377,6 +2377,8 @@ static int SpriteForButton(UiButton button)
     case UI_BUTTON_BACK:  return BUTTON_SPRITE_BACK;
     case UI_BUTTON_LBRB_NEXT: return BUTTON_SPRITE_LBRB | SPRITE_DIM_LEFT;
     case UI_BUTTON_LBRB_PREV: return BUTTON_SPRITE_LBRB | SPRITE_DIM_RIGHT;
+    case UI_BUTTON_LTRT_NEXT: return BUTTON_SPRITE_LTRT | SPRITE_DIM_LEFT;
+    case UI_BUTTON_LTRT_PREV: return BUTTON_SPRITE_LTRT | SPRITE_DIM_RIGHT;
     }
     return BUTTON_SPRITE_A;
 }
@@ -6337,8 +6339,18 @@ void RenderSettingsFrame(SettingsPageView &view, const UiHint *hints, int hintCo
     // The help line, beside the hints: what has focus does.
     if (help != NULL && view.focused)
     {
+        // Two smaller lines when one won't hold it, rather than cutting the
+        // end off: the end is often the part that says what happens.
         const float hintsX = footerCount > 0 ? footer[0].badgeX : x0 + w;
-        TextMid(x0, g_M.footerY, 0.78f, COL_TEXT2, help, ATGFONT_TRUNCATED, hintsX - S(28.0f) - x0);
+        const float helpW = hintsX - S(28.0f) - x0;
+        if (TextWrappedLines(help, helpW, 0.78f, 2) <= 1)
+            TextMid(x0, g_M.footerY, 0.78f, COL_TEXT2, help, ATGFONT_TRUNCATED, helpW);
+        else
+        {
+            const float lineH = LineHeight(0.7f) * 1.15f;
+            TextWrapped(x0, TextTopForCenter(g_M.footerY - lineH * 0.5f, 0.7f * g_M.textScale), 0.7f, COL_TEXT2,
+                        help, helpW, lineH, 2);
+        }
     }
 
     g_UiFont.SetBold(false);
@@ -7821,6 +7833,11 @@ void RenderStoreFrame(StorePageView &view, const UiHint *hints, int hintCount)
             float x, y;
             StoreRowTileRect(L, row, i, rowShown[row], &x, &y);
             DrawTileArt(cover, NULL, x, y + sy, L.rowTile, L.rowTile);
+            if (rv.tiles[i].installed)
+            {
+                const TilePill p = PillFor(Tr(STR_PILL_INSTALLED), x, y + sy, L.rowTile);
+                FillRound(p.x, p.y, p.w, p.h, p.h * 0.5f, COL_PILL);
+            }
         }
     }
     RequestMissingStoreCovers(wantCovers, wantCount);
@@ -7838,6 +7855,11 @@ void RenderStoreFrame(StorePageView &view, const UiHint *hints, int hintCount)
             DrawTileArt(cover, NULL, gx, gy, gw, gh);
             if (cover != NULL)
                 FillRoundGradient(gx, gy + gh * 0.55f, gw, gh * 0.45f, r, 0x00000000, 0xD9000000, true);
+            if (view.rows[focusRow].tiles[focusPlace].installed)
+            {
+                const TilePill p = PillFor(Tr(STR_PILL_INSTALLED), gx, gy, gw);
+                FillRound(p.x, p.y, p.w, p.h, p.h * 0.5f, COL_PILL);
+            }
         }
         FocusRing(gx, gy, gw, gh, r);
     }
@@ -8002,16 +8024,26 @@ void RenderStoreFrame(StorePageView &view, const UiHint *hints, int hintCount)
                 continue;
             if (focused)
                 x = gx, y = gy, s = gw;
+            // The pill's own room, not the tile's: a row the page cuts off
+            // at the foot still shows it.
+            const TilePill installedPill = PillFor(Tr(STR_PILL_INSTALLED), x, y, s);
+            if (rv.tiles[i].installed && TextInClip(installedPill.y, installedPill.h))
+            {
+                const TilePill &p = installedPill;
+                TextMid(p.x + p.w * 0.5f, p.y + p.h * 0.5f, 0.56f, COL_TEXT, Tr(STR_PILL_INSTALLED), ATGFONT_CENTER_X,
+                        0.0f, true);
+            }
             const bool hasArt = StoreCoverFor(rv.tiles[i].titleId) != NULL;
             if (hasArt && focused)
             {
                 const float nameY = y + s - pad - LineHeight(0.78f) * 1.2f;
                 if (TextInClip(nameY, LineHeight(0.78f) * 1.2f))
-                    TextFit(x + pad, nameY, 0.78f, COL_TEXT, rv.tiles[i].name, s - pad * 2.0f, true);
+                    MarqueeTextMid(x + pad, nameY + LineHeight(0.78f) * 0.6f, 0.78f, COL_TEXT, rv.tiles[i].name,
+                                   s - pad * 2.0f, true);
             }
             else if (!hasArt && TextInClip(y + pad, s - pad * 2.0f))
             {
-                TextWrapped(x + pad, y + pad, 0.74f, focused ? COL_TEXT : COL_TEXT2, rv.tiles[i].name,
+                TextWrapped(x + pad, y + pad + (rv.tiles[i].installed ? S(34.0f) : 0.0f), 0.74f, focused ? COL_TEXT : COL_TEXT2, rv.tiles[i].name,
                             s - pad * 2.0f, LineHeight(0.74f) * 1.2f, 4, true);
             }
         }
@@ -8224,9 +8256,11 @@ void RenderStoreRowsFrame(StoreRowsView &view, const UiHint *hints, int hintCoun
             if (focused)
                 x = gx, y = gy, s = gw;
 
-            if (view.installed[row] != NULL && view.installed[row][i] && TextInClip(y, s))
+            const TilePill installedPill = PillFor(Tr(STR_PILL_INSTALLED), x, y, s);
+            if (view.installed[row] != NULL && view.installed[row][i] &&
+                TextInClip(installedPill.y, installedPill.h))
             {
-                const TilePill p = PillFor(Tr(STR_PILL_INSTALLED),x, y, s);
+                const TilePill &p = installedPill;
                 TextMid(p.x + p.w * 0.5f, p.y + p.h * 0.5f, 0.56f, COL_TEXT, Tr(STR_PILL_INSTALLED), ATGFONT_CENTER_X, 0.0f,
                         true);
             }
@@ -8674,6 +8708,12 @@ void RenderStoreLetterFrame(StoreLetterView &view, const UiHint *hints, int hint
             if (view.tiles[item].unavailable)
                 FillRound(x, y, L.tile, h, r, COL_TILE_UNAVAILABLE);
 
+            if (!peek && view.tiles[item].installed)
+            {
+                const TilePill p = PillFor(Tr(STR_PILL_INSTALLED), x, y, L.tile);
+                FillRound(p.x, p.y, p.w, p.h, p.h * 0.5f, COL_PILL);
+            }
+
             if (!peek)
             {
                 if (item == selected)
@@ -8715,6 +8755,11 @@ void RenderStoreLetterFrame(StoreLetterView &view, const UiHint *hints, int hint
         DrawTileArt(cover, NULL, focusOX, focusOY, focusS, focusS);
         if (view.tiles[focusItem].unavailable)
             FillRound(focusOX, focusOY, focusS, focusS, r, COL_TILE_UNAVAILABLE);
+        if (view.tiles[focusItem].installed)
+        {
+            const TilePill p = PillFor(Tr(STR_PILL_INSTALLED), focusOX, focusOY, focusS);
+            FillRound(p.x, p.y, p.w, p.h, p.h * 0.5f, COL_PILL);
+        }
         FocusRing(focusOX, focusOY, focusS, focusS, r);
         if (focusHasArt)
             FillRoundGradient(focusOX, focusOY + focusS - bandH, focusS, bandH, r, 0x00000000, 0xD9000000, true);
@@ -8776,6 +8821,12 @@ void RenderStoreLetterFrame(StoreLetterView &view, const UiHint *hints, int hint
     const float pad = S(16.0f);
     for (int i = 0; i < tileTextCount; ++i)
     {
+        if (view.tiles[tileText[i].item].installed)
+        {
+            const TilePill p = PillFor(Tr(STR_PILL_INSTALLED), tileText[i].x, tileText[i].y, tileText[i].s);
+            TextMid(p.x + p.w * 0.5f, p.y + p.h * 0.5f, 0.56f, COL_TEXT, Tr(STR_PILL_INSTALLED), ATGFONT_CENTER_X,
+                    0.0f, true);
+        }
         const TileText &t = tileText[i];
         if (t.x + t.s > textRight)
             continue;
@@ -8789,6 +8840,12 @@ void RenderStoreLetterFrame(StoreLetterView &view, const UiHint *hints, int hint
     if (focusItem >= 0 && focusOX + focusS <= textRight)
     {
         const D3DCOLOR focusText = WithAlpha(COL_TEXT, see);
+        if (view.tiles[focusItem].installed)
+        {
+            const TilePill p = PillFor(Tr(STR_PILL_INSTALLED), focusOX, focusOY, focusS);
+            TextMid(p.x + p.w * 0.5f, p.y + p.h * 0.5f, 0.56f, focusText, Tr(STR_PILL_INSTALLED), ATGFONT_CENTER_X,
+                    0.0f, true);
+        }
         if (focusIndie)
             DrawIndieTileName(focusOX, focusOY, focusS, L.tile, focusText, view.tiles[focusItem].name);
         else if (focusHasArt)
@@ -9251,7 +9308,7 @@ void RenderStoreGameFrame(StoreGameView &view, const UiHint *hints, int hintCoun
         else if (supportBadge)
             TextMid(L.textX + badgeW * 0.5f, badgeY + badgeH * 0.5f, 0.72f, WithAlpha(supportInk, see), supportLabel,
                     ATGFONT_CENTER_X, 0.0f, true);
-        else
+        else if (!view.indie || view.loading) // an indie game's description already says why there are none
             TextFit(L.textX, L.metaY, 0.86f, WithAlpha(COL_DIM, see),
                     Tr(view.loading ? STR_STORE_LOADING_DETAILS : STR_STORE_NO_DETAILS), textW);
     }
@@ -9479,13 +9536,15 @@ void RenderQueueFrame(QueuePageView &view, const UiHint *hints, int hintCount)
         int wantCount = 0;
         for (int row = 0; row < visibleRows && scrollOffset + row < count; ++row)
         {
-            const unsigned long tid = view.rows[scrollOffset + row].titleId;
+            const QueueRowView &q = view.rows[scrollOffset + row];
+            const unsigned long tid = q.coverKey != 0 ? q.coverKey : q.titleId;
             if (tid != 0 && tid != INDIE_TITLE_ID && StoreCoverFor(tid) == NULL && wantCount < MAX_STORE_COVERS)
                 want[wantCount++] = tid;
         }
         for (int i = 0; i < recentAcross && view.recentScroll + i < recentCount; ++i)
         {
-            const unsigned long tid = view.recents[view.recentScroll + i].titleId;
+            const QueueRecentView &r = view.recents[view.recentScroll + i];
+            const unsigned long tid = r.coverKey != 0 ? r.coverKey : r.titleId;
             if (tid != 0 && tid != INDIE_TITLE_ID && StoreCoverFor(tid) == NULL && wantCount < MAX_STORE_COVERS)
                 want[wantCount++] = tid;
         }
@@ -9520,8 +9579,11 @@ void RenderQueueFrame(QueuePageView &view, const UiHint *hints, int hintCount)
 
         const bool inLibrary = (q.libraryIndex >= 0 && q.libraryIndex < gameCount);
         const Icon *icon = (icons != NULL && inLibrary) ? &icons[q.libraryIndex] : NULL;
-        // The library's, else the Store's - or an indie game's tile.
-        D3DTexture *boxArt = (q.titleId == INDIE_TITLE_ID) ? IndieTile() : StoreCoverFor(q.titleId);
+        // The library's, else the Store's - or an indie game's own cover,
+        // and the indie banner until it comes (or if there isn't one).
+        D3DTexture *boxArt = q.coverKey != 0 ? StoreCoverFor(q.coverKey) : NULL;
+        if (boxArt == NULL)
+            boxArt = (q.titleId == INDIE_TITLE_ID) ? IndieTile() : StoreCoverFor(q.titleId);
         DrawCoverFlushLeft(boxArt, icon, coverX, y, coverSize, g_M.radius);
 
         if (q.showBar && q.stepCount > 1)
@@ -9575,7 +9637,9 @@ void RenderQueueFrame(QueuePageView &view, const UiHint *hints, int hintCount)
 
         const bool inLibrary = (r.libraryIndex >= 0 && r.libraryIndex < gameCount);
         const Icon *icon = (icons != NULL && inLibrary) ? &icons[r.libraryIndex] : NULL;
-        D3DTexture *boxArt = (r.titleId == INDIE_TITLE_ID) ? IndieTile() : StoreCoverFor(r.titleId);
+        D3DTexture *boxArt = r.coverKey != 0 ? StoreCoverFor(r.coverKey) : NULL;
+        if (boxArt == NULL)
+            boxArt = (r.titleId == INDIE_TITLE_ID) ? IndieTile() : StoreCoverFor(r.titleId);
         DrawCoverSquare(boxArt, icon, x, recentY, recTile);
 
         if (view.recentFocused && item == view.recentFocus)
@@ -9672,7 +9736,8 @@ void RenderQueueFrame(QueuePageView &view, const UiHint *hints, int hintCount)
             // after the speed's line, so the row itself says it - not only
             // the icon by the clock.
             char lead[160];
-            _snprintf(lead, sizeof(lead), "%s" MIDDOT, q.gameName != NULL ? q.gameName : "");
+            _snprintf(lead, sizeof(lead), (q.gameName != NULL && q.gameName[0] != '\0') ? "%s" MIDDOT : "%s",
+                      q.gameName != NULL ? q.gameName : "");
             lead[sizeof(lead) - 1] = '\0';
             _snprintf(detail, sizeof(detail), "%s   + PC", q.numbers);
             detail[sizeof(detail) - 1] = '\0';
@@ -9682,8 +9747,10 @@ void RenderQueueFrame(QueuePageView &view, const UiHint *hints, int hintCount)
         }
         else
         {
-            if (q.numbers != NULL && q.numbers[0] != '\0')
-                _snprintf(detail, sizeof(detail), "%s" MIDDOT "%s", q.gameName != NULL ? q.gameName : "", q.numbers);
+            if (q.numbers != NULL && q.numbers[0] != '\0' && (q.gameName == NULL || q.gameName[0] == '\0'))
+                _snprintf(detail, sizeof(detail), "%s", q.numbers);
+            else if (q.numbers != NULL && q.numbers[0] != '\0')
+                _snprintf(detail, sizeof(detail), "%s" MIDDOT "%s", q.gameName, q.numbers);
             else
                 _snprintf(detail, sizeof(detail), "%s", q.gameName != NULL ? q.gameName : "");
             detail[sizeof(detail) - 1] = '\0';

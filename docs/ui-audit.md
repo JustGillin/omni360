@@ -52,14 +52,14 @@ This map comes from `ShellPage` and the renderer/input branches in `src/GameList
 
 ## Where it stands (2026-11-23)
 
-Batches 1-8 are done (b17-b26); each has a "for review" table under "Fix first" saying what changed. Every finding below carries its status: **Fixed (bN)** names the build that fixed it, **Fixed (shortening)** is the shared text-shortening fix (fix-first item 2), **OK** is an observation with nothing wrong, **No change** was looked at and kept on purpose, **Partly fixed** says in the batch notes what's left, **Open** is still to do, **Later** belongs to a bigger project.
+Batches 1-9 are done (b17-b33); each has a "for review" table under "Fix first" saying what changed. Every finding below carries its status: **Fixed (bN)** names the build that fixed it, **Fixed (shortening)** is the shared text-shortening fix (fix-first item 2), **OK** is an observation with nothing wrong, **No change** was looked at and kept on purpose, **Partly fixed** says in the batch notes what's left, **Open** is still to do, **Later** belongs to a bigger project.
 
 Still open:
 
 | Finding | Where |
 | --- | --- |
-| Store search: white panel before the keyboard draws - it's the system keyboard's own | Store walkthrough |
-| Multi-version game: choosing a version before installing, not checked | Store walkthrough |
+| Store search: white panel before the keyboard draws - the system keyboard (vk.xex) draws it; Omni360 has no hook into it | Store walkthrough |
+| Indie game's own cover in the Queue: built (b30), not seen - the indie game had left Recently installed | Batch 9 follow-up |
 
 Later, as projects of their own: simple first setup, library sections/filters/saved views, Storage sorted by size, a system-info page, cover flow / accent colours / themes, "See all" tiles at the end of Store rows, retranslating reworded lines.
 
@@ -220,8 +220,8 @@ Nothing was downloaded, installed, queued, launched or changed.
 | No change (b18) | "Find more online" button | Label pushed right by blank space, as if an icon is missing. | Align like other buttons, or add the icon. |
 | Fixed (b21) | Versions rows | Tiny dim language codes "En, Ja, Fr, De, Es, It" (Japan row has none); checkbox meaning unclear. | Spell out or drop languages; clear "Installed" tag. |
 | Fixed (b16) | Store game page, More like this focused | Footer still shows "Y Versions" for the parent game. | Hide Y there. |
-| Open | Uninstalled store page | No Y Versions before install; picking a version before installing a multi-version game not checked. | Check a multi-version game before install. |
-| Open | Search keyboard | Blank white panel for ~1 s before the system keyboard draws. Results: "Search · 21 games · 1 of 21", footer "A View game  B Store  Y Search again  LB/RB Page". | Dark placeholder if possible. |
+| Fixed (b29 check) | Uninstalled store page | No Y Versions before install; picking a version before installing a multi-version game not checked. | Check a multi-version game before install. |
+| Open (system keyboard) | Search keyboard | Blank white panel for ~1 s before the system keyboard draws. Results: "Search · 21 games · 1 of 21", footer "A View game  B Store  Y Search again  LB/RB Page". | Dark placeholder if possible. |
 | Fixed (b23) | Back from a related game | Search → Sonic → More like this → Sonic Generations, then B ×3 landed on Home, skipping the earlier pages. | Confirm the intended back history. |
 | Fixed (b17) | Home › X View game | Opens details inside Games + Apps; B goes to the Games grid, not Home. | Return to Home when opened from Home. |
 
@@ -466,6 +466,39 @@ Copy choices settled first (all as recommended): the FTP address alone on its ro
 | PC helper (PC side) | Rebuilt (Release/dist/helper) with the "Nobody answered on your PC" timeout from batch 5 |
 
 Already done, found while checking: B Home shows on Settings buttons; "A Remove" on a folder you added has its own word and a confirmation; the DLC dialog has ▲/▼ when it overflows; Files has "Clear selection" and no clipped helper line; Rescan drives shows its status once; the Home disc tile shows START.
+
+### Batch 9 for review (b29, 2026-11-23): the screens the first pass didn't reach
+
+Walked on the console first: Indie games, Original Xbox, Collections, a publisher (Activision), Filter and sort, version picking on an uninstalled game, the Queue with a real download (0 Gravity Y3030, an indie game, 91.8 MB - installed, kept) and the Emulators page (Hdd1:\Emulators ticked, looked at, unticked again). Fine as they were: picking a version before installing (007: Blood Stone - Y Versions shows, the tick moves, Install gets it), Collections and publisher lists, Filter and sort.
+
+**Checked on the console by Claude:** Queue's recent tile for the indie game reads "0 Gravity..." (was "DLC: 0 Gravity Y3030"); Indie games says "3,458 games"; LT is faint on the first game of All, as LB is; an installed indie game's page shows "Installed" with no A hint and no "No details found" line; the Store's H list shows "Installed" on Halo 3; a letter list with unavailable games shown says "With games you can't download"; the Store's Popular row scrolls the focused name; Settings' help line wraps to two lines. Not seen (needs another download): the Queue row's new wording and the game page's "A View in the queue".
+
+| Where | What changed |
+| --- | --- |
+| Queue, an arcade or indie game downloading | The row is titled with the game's name, not "0 Gravity Y3030.rar" under "0 Gravity Y3030"; a DLC pack's file name is tidied as in Find more online |
+| Queue status line | "Downloading (89%)" instead of "Step 2 of 2: File 1 of 1 (89%)" - the bar's segments already show the step; a pack of several files says "Downloading file 2 of 5" |
+| Queue › Recently installed | An arcade or indie game no longer gets "DLC:" in front of its name |
+| Store game page while it's queued or installing | Footer "A View in the queue", and A goes there (was "A Install", which only showed a toast); once installed, no A hint where there's nothing to play |
+| Indie game pages | No "No details found for this game" under the name - the description already says why |
+| Store lists (A to Z, collections, publishers, search) | Games in your library show the "Installed" pill, as the Homebrew rows do |
+| "LT RT Letter" | The trigger that can't go further is faint, as LB RB is |
+| Store category pages | "3,458 games", "1,092 games the 360 can run" |
+| Letter lists with Filter's "Show games you can't download" on | Subtitle "With games you can't download" (was "Missing shown") |
+| Store front page rows | The focused game's name scrolls, as everywhere else, instead of ending in "..." |
+| Versions dialog | Only the chosen version has a mark; the others had a disc icon that read like a second choice |
+| Emulators / Apps / Homebrew, empty | "Get some from Store › Homebrew, or copy a program's folder into the one above." (was the folder rule, and not translatable) |
+| Settings help line | Wraps to two smaller lines when one won't hold it, instead of cutting the end off |
+
+#### Batch 9 follow-up (b32, 2026-11-23)
+
+**Checked on the console by Claude:** Popular shows "Installed" on Black Ops II, also with the row cut off by the foot of the page; the FTP server's help fits in two lines; the Queue rows read "Downloading (17%)" and "Downloading file 5 of 26 (16%)" on your Modern Warfare 3 game and DLC, with the DLC titled "Call of Duty Modern Warfare 3 DLC RF X360". Both downloads were paused for the deploy and resumed after.
+
+| Where | What changed |
+| --- | --- |
+| Store front page rows | "Installed" on games in your library, as the lists have; its label shows as long as the pill itself is on screen (also on Homebrew rows) |
+| Queue, an indie game | Its own LaunchBox cover on the row and in Recently installed, the indie banner until it comes |
+| Queue, a paused download (b33) | Keeps its percentage and bar instead of emptying, and the file keeps it too ("progress=331"), so a paused download still shows how far it got after the app restarts. Checked on the console with the Modern Warfare 3 DLC: 33% paused, 33% after a relaunch. On resuming it starts its count again from the pieces already there |
+| Settings › FTP server | Shorter help: "Sign in as xboxftp / xboxftp. Copy files between a PC and the console's drives while Omni360 is open, with FileZilla or Windows Explorer." |
 
 ### Found while checking the speed test and PC helper (2026-11-20, Claude)
 
