@@ -1810,9 +1810,15 @@ static int TextWrappedLines(const char *utf8, float maxW, float mul, int maxLine
 
 // One hint. Laid out once and then drawn twice - the icon in the quad pass
 // and the label in the font pass - so both read positions from here.
+// A ButtonHint's sprite is a BUTTON_SPRITE_* in its low byte, and may carry
+// one of these: a half of a pair sprite to draw faint.
+#define SPRITE_ID_MASK   0xFF
+#define SPRITE_DIM_LEFT  0x100
+#define SPRITE_DIM_RIGHT 0x200
+
 struct ButtonHint
 {
-    int          sprite; // BUTTON_SPRITE_*
+    int          sprite; // BUTTON_SPRITE_*, maybe with SPRITE_DIM_*
     const WCHAR *label;
 
     float badgeX;
@@ -1850,7 +1856,7 @@ static float LayoutButtonHints(ButtonHint *hints, int count, float startX)
     for (int i = 0; i < count; ++i)
     {
         hints[i].badgeX = x;
-        hints[i].badgeW = (float)kButtonSprites[hints[i].sprite].boxW * k;
+        hints[i].badgeW = (float)kButtonSprites[hints[i].sprite & SPRITE_ID_MASK].boxW * k;
         hints[i].labelX = x + hints[i].badgeW + gapBadgeToLabel;
 
         x = hints[i].labelX + g_UiFont.GetTextWidth(hints[i].label) + gapBetweenHints;
@@ -1867,14 +1873,17 @@ static void LayoutButtonHintsRight(ButtonHint *hints, int count)
 }
 
 // One button icon, its left edge at boxX and centred vertically on centerY.
-// Returns the on-screen width of the button itself (not its shadow).
+// Returns the on-screen width of the button itself (not its shadow). A pair
+// sprite (LB RB) can carry SPRITE_DIM_LEFT or SPRITE_DIM_RIGHT, which draws
+// that half faint: the bumper that can't page any further.
 static float DrawButtonSprite(int sprite, float boxX, float centerY)
 {
     const float k = HintSpriteScale();
     const float invW = 1.0f / (float)BUTTON_ATLAS_WIDTH;
     const float invH = 1.0f / (float)BUTTON_ATLAS_HEIGHT;
 
-    const ButtonSprite &s = kButtonSprites[sprite];
+    const int dim = sprite & (SPRITE_DIM_LEFT | SPRITE_DIM_RIGHT);
+    const ButtonSprite &s = kButtonSprites[sprite & SPRITE_ID_MASK];
 
     // Position the button's own box, then draw the whole cell around it. The
     // margin between box and cell is the drop shadow, which is meant to fall
@@ -1882,11 +1891,28 @@ static float DrawButtonSprite(int sprite, float boxX, float centerY)
     float cellX = boxX - (float)s.boxX * k;
     float cellY = centerY - (float)s.boxH * k * 0.5f - (float)s.boxY * k;
 
-    DrawQuadUV(g_pButtonAtlas, cellX, cellY, (float)s.cellW * k, (float)s.cellH * k,
-               (float)s.cellX * invW, (float)s.cellY * invH,
-               (float)(s.cellX + s.cellW) * invW, (float)(s.cellY + s.cellH) * invH,
-               0xFFFFFFFF, 0xFFFFFFFF, 0xFFFFFFFF, true);
+    if (dim == 0)
+    {
+        DrawQuadUV(g_pButtonAtlas, cellX, cellY, (float)s.cellW * k, (float)s.cellH * k,
+                   (float)s.cellX * invW, (float)s.cellY * invH,
+                   (float)(s.cellX + s.cellW) * invW, (float)(s.cellY + s.cellH) * invH,
+                   0xFFFFFFFF, 0xFFFFFFFF, 0xFFFFFFFF, true);
+        return (float)s.boxW * k;
+    }
 
+    // Two halves, split down the middle of the button's box.
+    const int split = s.boxX + s.boxW / 2;
+    const D3DCOLOR faint = 0x52FFFFFF;
+    const D3DCOLOR left = (dim & SPRITE_DIM_LEFT) ? faint : 0xFFFFFFFF;
+    const D3DCOLOR right = (dim & SPRITE_DIM_RIGHT) ? faint : 0xFFFFFFFF;
+    DrawQuadUV(g_pButtonAtlas, cellX, cellY, (float)split * k, (float)s.cellH * k,
+               (float)s.cellX * invW, (float)s.cellY * invH,
+               (float)(s.cellX + split) * invW, (float)(s.cellY + s.cellH) * invH,
+               left, 0xFFFFFFFF, 0xFFFFFFFF, true);
+    DrawQuadUV(g_pButtonAtlas, cellX + (float)split * k, cellY, (float)(s.cellW - split) * k, (float)s.cellH * k,
+               (float)(s.cellX + split) * invW, (float)s.cellY * invH,
+               (float)(s.cellX + s.cellW) * invW, (float)(s.cellY + s.cellH) * invH,
+               right, 0xFFFFFFFF, 0xFFFFFFFF, true);
     return (float)s.boxW * k;
 }
 
@@ -2349,6 +2375,8 @@ static int SpriteForButton(UiButton button)
     case UI_BUTTON_LTRT:  return BUTTON_SPRITE_LTRT;
     case UI_BUTTON_DPAD_LR: return BUTTON_SPRITE_DPAD_LR;
     case UI_BUTTON_BACK:  return BUTTON_SPRITE_BACK;
+    case UI_BUTTON_LBRB_NEXT: return BUTTON_SPRITE_LBRB | SPRITE_DIM_LEFT;
+    case UI_BUTTON_LBRB_PREV: return BUTTON_SPRITE_LBRB | SPRITE_DIM_RIGHT;
     }
     return BUTTON_SPRITE_A;
 }
@@ -3269,10 +3297,11 @@ static void KeepSelectionVisible(int count, int visibleRows, int &selected, int 
 
 // A thin rounded scrollbar down the right edge of the page - only drawn when
 // something is off-screen.
-static void DrawScrollbar(float trackY, float trackH, int count, int visibleRows, int scroll)
+// right: the bar's right edge - the page's, unless a column ends sooner.
+static void DrawScrollbarAt(float right, float trackY, float trackH, int count, int visibleRows, int scroll)
 {
     const float w = S(4.0f);
-    const float x = g_M.contentX + g_M.contentW - w;
+    const float x = right - w;
 
     float thumbH = trackH * ((float)visibleRows / (float)count);
     if (thumbH < S(24.0f)) thumbH = S(24.0f);
@@ -3283,6 +3312,11 @@ static void DrawScrollbar(float trackY, float trackH, int count, int visibleRows
 
     FillRound(x, trackY, w, trackH, w * 0.5f, COL_SURFACE);
     FillRound(x, thumbY, w, thumbH, w * 0.5f, COL_TEXT2);
+}
+
+static void DrawScrollbar(float trackY, float trackH, int count, int visibleRows, int scroll)
+{
+    DrawScrollbarAt(g_M.contentX + g_M.contentW, trackY, trackH, count, visibleRows, scroll);
 }
 
 // The same bar for a page that scrolls by pixels rather than whole rows.
@@ -5221,6 +5255,13 @@ static D3DTexture *TakeBackdrop(bool *owned)
 static bool AlertRowPicks(const int *kinds, int i)     { return kinds == NULL || kinds[i] == ALERT_ROW_PICK; }
 static bool AlertRowFocuses(const int *kinds, int i)   { return kinds == NULL || kinds[i] != ALERT_ROW_HEADING; }
 
+// Set around a list whose Y leaves it - see ShowAlertListCancelUI.
+static bool g_alertYCancels = false;
+
+// Set around a button dialog with a cover - see ShowAlertCoverUI.
+static D3DTexture *g_alertCover = NULL;
+#define ALERT_COVER 150.0f
+
 static int RunAlert(const char *heading, const char *message, const char *detailLine, int maxMessageLines,
                     const char **labels, int count, const char **rowLabels, const char **rowNotes, int listCount,
                     int listFocus, const int *rowIcons = NULL, const int *rowKinds = NULL, bool notesBelow = false,
@@ -5256,11 +5297,15 @@ static int RunAlert(const char *heading, const char *message, const char *detail
             buttonW[i] = S(ALERT_BUTTON_W);
         buttonsW += buttonW[i] + (i > 0 ? gap : 0.0f);
     }
+    // A cover, when there is one, sits left of the text, which moves over.
+    const float coverS = (g_alertCover != NULL && !list) ? S(ALERT_COVER) : 0.0f;
+    const float textX0 = coverS > 0.0f ? coverS + S(24.0f) : 0.0f;
     float wide = (maxMessageLines > 5) ? S(840.0f) : S(ALERT_W);
+    wide += textX0;
     if (wide < buttonsW + pad * 2.0f)
         wide = buttonsW + pad * 2.0f;
     const float cardW = (wide < g_M.screenW - S(80.0f)) ? wide : g_M.screenW - S(80.0f);
-    const float textW = cardW - pad * 2.0f;
+    const float textW = cardW - pad * 2.0f - textX0;
     const float titleH = LineHeight(1.15f);
     const float messageLineH = LineHeight(0.9f) * 1.15f;
     const float detailLineH = LineHeight(0.76f) * 1.15f;
@@ -5275,8 +5320,11 @@ static int RunAlert(const char *heading, const char *message, const char *detail
     const int rowsShown = list ? (listCount < rowsMax ? listCount : rowsMax) : 0;
     const float footH = list ? rowsShown * rowH : buttonH;
     // The button prompts are at the foot of the screen, not in the card.
-    const float cardH = pad + titleH + S(12.0f) + messageLines * messageLineH +
-                        (hasDetail ? S(8.0f) + detailLines * detailLineH : 0.0f) + S(24.0f) + footH + pad;
+    float textBlockH = titleH + S(12.0f) + messageLines * messageLineH +
+                       (hasDetail ? S(8.0f) + detailLines * detailLineH : 0.0f);
+    if (textBlockH < coverS)
+        textBlockH = coverS;
+    const float cardH = pad + textBlockH + S(24.0f) + footH + pad;
     const float cardX = (g_M.screenW - cardW) * 0.5f;
     const float restY = (g_M.screenH - cardH) * 0.5f;
 
@@ -5292,7 +5340,7 @@ static int RunAlert(const char *heading, const char *message, const char *detail
     // Its buttons, in the screen's footer as every page has them: a list's
     // A Select and B Back; a lone button's own word on A; otherwise A Select
     // and B Cancel.
-    ButtonHint hints[2];
+    ButtonHint hints[3];
     int hintCount = 0;
     static WCHAR loneLabel[64];
     hints[hintCount].sprite = SpriteForButton(UI_BUTTON_A);
@@ -5304,7 +5352,12 @@ static int RunAlert(const char *heading, const char *message, const char *detail
     else
     {
         hints[hintCount++].label = TrW(STR_SELECT);
-        hints[hintCount].sprite = SpriteForButton(UI_BUTTON_B);
+        if (list && g_alertYCancels)
+        {
+            hints[hintCount].sprite = SpriteForButton(UI_BUTTON_Y);
+            hints[hintCount++].label = TrW(STR_BUTTON_CANCEL);
+        }
+        hints[hintCount].sprite = SpriteForButton(UI_BUTTON_B); // last, as on every page
         hints[hintCount++].label = list ? TrW(STR_BUTTON_BACK) : TrW(STR_BUTTON_CANCEL);
     }
     LayoutButtonHintsRight(hints, hintCount);
@@ -5340,6 +5393,12 @@ static int RunAlert(const char *heading, const char *message, const char *detail
         {
             PlayUiSound(UI_SOUND_BACK);
             result = (!list && count == 1) ? 0 : -1; // a lone OK is all B can mean
+            break;
+        }
+        if (list && g_alertYCancels && (input.pressed & XINPUT_GAMEPAD_Y))
+        {
+            PlayUiSound(UI_SOUND_BACK);
+            result = ALERT_LIST_CANCELLED;
             break;
         }
         int to = focus;
@@ -5401,6 +5460,12 @@ static int RunAlert(const char *heading, const char *message, const char *detail
 
         const float footY = cardY + cardH - pad - footH;
         const float innerX = cardX + pad;
+        if (coverS > 0.0f)
+        {
+            const D3DCOLOR tint = Faded(0xFFFFFFFF, a);
+            TextureRound(g_alertCover, innerX, cardY + pad, coverS, coverS, R(6.0f), 0.0f, 0.0f, 1.0f, 1.0f, tint,
+                         tint);
+        }
         if (list)
         {
             // Square-cornered rows: pills stacked six deep read as buttons
@@ -5453,13 +5518,14 @@ static int RunAlert(const char *heading, const char *message, const char *detail
 
         TextBegin();
         float y = cardY + pad;
-        Text(innerX, y, 1.15f, Faded(COL_TEXT, a), heading, ATGFONT_TRUNCATED, textW, true);
+        const float textX = innerX + textX0;
+        Text(textX, y, 1.15f, Faded(COL_TEXT, a), heading, ATGFONT_TRUNCATED, textW, true);
         y += titleH + S(12.0f);
         if (hasMessage)
-            TextWrapped(innerX, y, 0.9f, Faded(COL_TEXT, a), message, textW, messageLineH, maxMessageLines);
+            TextWrapped(textX, y, 0.9f, Faded(COL_TEXT, a), message, textW, messageLineH, maxMessageLines);
         y += messageLines * messageLineH;
         if (hasDetail)
-            TextWrapped(innerX, y + S(8.0f), 0.76f, Faded(COL_DIM, a), detailLine, textW, detailLineH, 4);
+            TextWrapped(textX, y + S(8.0f), 0.76f, Faded(COL_DIM, a), detailLine, textW, detailLineH, 4);
 
         if (list)
         {
@@ -5538,6 +5604,15 @@ int ShowAlertListUI(const char *heading, const char *message, const char **label
                     int focus, const int *icons)
 {
     return RunAlert(heading, message, NULL, 5, NULL, 0, labels, notes, count, focus, icons);
+}
+
+int ShowAlertListCancelUI(const char *heading, const char *message, const char **labels, const char **notes,
+                          int count, int focus, const int *icons)
+{
+    g_alertYCancels = true;
+    const int result = RunAlert(heading, message, NULL, 5, NULL, 0, labels, notes, count, focus, icons);
+    g_alertYCancels = false;
+    return result;
 }
 
 int ShowAlertListExUI(const char *heading, const char *message, const char **labels, const char **notes, int count,
@@ -5644,6 +5719,15 @@ bool ShowAlertUI(const char *heading, const char *message, const char *detailLin
     // With a Cancel, start on it: the safe choice is the one a stray A picks.
     return ShowAlertButtonsUI(heading, message, detailLine, labels, cancelLabel != NULL ? 2 : 1, 5,
                               cancelLabel != NULL ? 1 : 0) == 0;
+}
+
+bool ShowAlertCoverUI(const char *heading, const char *message, const char *detailLine, const char *confirmLabel,
+                      const char *cancelLabel, unsigned long titleId)
+{
+    g_alertCover = titleId != 0 ? BoxArtFor(titleId) : NULL;
+    const bool result = ShowAlertUI(heading, message, detailLine, confirmLabel, cancelLabel);
+    g_alertCover = NULL;
+    return result;
 }
 
 bool ShowConfirmUI(const char *heading, const char *message, const char *detailLine,
@@ -6416,6 +6500,8 @@ static const char *LetterTileLabel(char letter)
     static char labels[256][2];
     if (letter == STORE_LETTER_ALL)
         return Tr(STR_STORE_ALL);
+    if (letter == '#')
+        return Tr(STR_STORE_DIGITS); // as the list it opens is headed
     labels[(unsigned char)letter][0] = letter;
     return labels[(unsigned char)letter];
 }
@@ -8100,20 +8186,40 @@ void RenderStoreRowsFrame(StoreRowsView &view, const UiHint *hints, int hintCoun
     SetClip(0.0f, clipTop, g_M.screenW, clipBottom - clipTop);
     const float textLeft = g_M.contentX - S(1.0f), textRight = g_M.contentX + g_M.contentW + S(1.0f);
     const float pad = S(12.0f);
+
+    // Two passes: the tiles wholly on screen, then those cut by the row's
+    // edge - whose names would otherwise be missing until they scroll in.
+    // Text is drawn when the font's batch ends, so the second pass is a batch
+    // of its own, under a scissor at the row's edges.
+    bool anyCut = false;
+    for (int pass = 0; pass < 2; ++pass)
+    {
+    if (pass == 1)
+    {
+        if (!anyCut)
+            break;
+        g_UiFont.End();
+        SetClip(g_M.contentX - S(12.0f), clipTop, g_M.contentW + S(24.0f), clipBottom - clipTop); // the tiles' own clip
+        g_UiFont.Begin();
+    }
     for (int row = 0; row < rowCount; ++row)
     {
         const StoreRowView &rv = view.rows[row];
         const float top = L.rowsY + row * L.rowPitch + sy;
-        if (TextInClip(top, LineHeight(0.95f) * 1.2f))
+        if (pass == 0 && TextInClip(top, LineHeight(0.95f) * 1.2f))
             Text(g_M.contentX, top, 0.95f, COL_TEXT, rv.name, 0, 0.0f, true);
         const int first = (int)floorf(rowShown[row]);
-        for (int i = first; i < rv.count && i <= first + L.across; ++i)
+        for (int i = first; i < rv.count && i <= first + L.across + 1; ++i)
         {
             const bool focused = hasFocus && row == focusRow && i == focusPlace;
             float x, y, s = L.rowTile;
             StoreRowTileRect(L, row, i, rowShown[row], &x, &y);
             y += sy;
-            if (x < textLeft || x + s > textRight)
+            if (x + s <= textLeft || x >= textRight)
+                continue;
+            const bool cut = !focused && (x < textLeft || x + s > textRight);
+            anyCut = anyCut || cut;
+            if (cut != (pass == 1))
                 continue;
             if (focused)
                 x = gx, y = gy, s = gw;
@@ -8133,14 +8239,31 @@ void RenderStoreRowsFrame(StoreRowsView &view, const UiHint *hints, int hintCoun
                     MarqueeTextMid(x + pad, nameY + LineHeight(0.78f) * 0.6f, 0.78f, COL_TEXT, rv.tiles[i].name,
                                    s - pad * 2.0f, true);
             }
-            else if (!hasArt && TextInClip(y + pad, s - pad * 2.0f))
+            else if (!hasArt)
             {
-                // Under the pill, when there's one.
+                // Under the pill, when there's one - and as many of its lines
+                // as fit, on a row the foot of the page cuts off.
                 const float nameTop = (view.installed[row] != NULL && view.installed[row][i]) ? y + S(44.0f) : y + pad;
-                TextWrapped(x + pad, nameTop, 0.74f, focused ? COL_TEXT : COL_TEXT2, rv.tiles[i].name,
-                            s - pad * 2.0f, LineHeight(0.74f) * 1.2f, 4, true);
+                const float lineH = LineHeight(0.74f) * 1.2f;
+                int lines = 4;
+                if (g_clipOn)
+                {
+                    const int fit = (int)(((float)g_clipRect.bottom - nameTop) / lineH);
+                    if (fit < lines)
+                        lines = fit;
+                }
+                if (lines > 0 && TextInClip(nameTop, lineH))
+                    TextWrapped(x + pad, nameTop, 0.74f, focused ? COL_TEXT : COL_TEXT2, rv.tiles[i].name,
+                                s - pad * 2.0f, lineH, lines, true);
             }
         }
+    }
+    if (pass == 1)
+    {
+        g_UiFont.End();
+        ClearClip();
+        g_UiFont.Begin();
+    }
     }
     ClearClip();
 
@@ -8734,7 +8857,10 @@ struct StoreGameLayout
 // scrolling: the box and buttons, then the synopsis with the screenshots
 // beside it, then the row. hasShots false - a game the catalog has none
 // for - gives the synopsis the page's width.
-static StoreGameLayout LayOutStoreGame(bool hasShots)
+// textLines: how many lines the synopsis needs at the page's full width -
+// with no screenshots beside it, it gets that many, from three to eight, so
+// an Original Xbox game's reported issues can be read to the end.
+static StoreGameLayout LayOutStoreGame(bool hasShots, int textLines)
 {
     StoreGameLayout L;
     // The wallpaper fills the page beside the sidebar - which means the
@@ -8784,7 +8910,7 @@ static StoreGameLayout LayOutStoreGame(bool hasShots)
     {
         L.bodyW = width;
         L.shotsX = L.shotsY = L.shotW = L.shotH = 0.0f;
-        L.bodyLines = 3;
+        L.bodyLines = textLines < 3 ? 3 : textLines > 8 ? 8 : textLines;
         end = L.bodyY + L.lineH * L.bodyLines;
     }
 
@@ -8886,7 +9012,11 @@ void RenderStoreGameFrame(StoreGameView &view, const UiHint *hints, int hintCoun
         view.focus = STORE_GAME_FOCUS_BUTTONS;
     const int focusSimilar = (view.focus >= STORE_GAME_FOCUS_SIMILAR) ? view.focus - STORE_GAME_FOCUS_SIMILAR : -1;
 
-    StoreGameLayout L = LayOutStoreGame(view.loading || view.screenshotCount > 0);
+    const bool hasShots = view.loading || view.screenshotCount > 0;
+    const int textLines = (!hasShots && view.description != NULL)
+                              ? TextWrappedLines(view.description, g_M.contentW - ScrollGutter(), 0.86f, 8)
+                              : 3;
+    StoreGameLayout L = LayOutStoreGame(hasShots, textLines);
     const float r = g_M.radius;
 
     // Versions are a dialog over the page now (main.cpp), so the page is
@@ -9951,7 +10081,10 @@ void RenderStorageListFrame(StorageListView &view, const UiHint *hints, int hint
     }
 
     if (showScroll)
-        DrawScrollbar(listTop, visibleRows * rowH - StorageListGap(), count, visibleRows, view.scroll);
+        // In the list's own gutter: at the page's edge it was under the
+        // panel, all but a dot at the panel's corner.
+        DrawScrollbarAt(g_M.contentX + listW, listTop, visibleRows * rowH - StorageListGap(), count, visibleRows,
+                        view.scroll);
 
     // The panel: what's ticked.
     const float panelH = listBottom - listTop;

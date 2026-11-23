@@ -275,6 +275,7 @@ static bool ProbeDisc(bool lastChance)
         g_disc.mediaId = info.title.mediaId;
         g_disc.discNumber = info.title.discNumber;
         g_disc.discCount = info.title.discCount;
+        g_disc.regions = info.title.regions;
         g_disc.outputSize = info.outputSize;
         memcpy(g_disc.name, info.title.name, sizeof(g_disc.name));
         g_disc.name[sizeof(g_disc.name) - 1] = '\0';

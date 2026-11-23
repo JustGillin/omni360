@@ -1885,6 +1885,46 @@ static int FindDlcPackJob(const char *fileName)
     return id;
 }
 
+// An archive.org file name as a name to read: "Sonic.The.Hedgehog.DLC.RF.
+// X360-ZTM.rar" reads "Sonic The Hedgehog DLC RF X360" - no extension, dots
+// and underscores as spaces, and no release group after the last hyphen.
+static void DlcPackDisplayName(const char *fileName, char *out, size_t outSize)
+{
+    _snprintf(out, outSize, "%s", fileName);
+    out[outSize - 1] = '\0';
+
+    char *dot = strrchr(out, '.');
+    if (dot != NULL && (_stricmp(dot, ".rar") == 0 || _stricmp(dot, ".zip") == 0 || _stricmp(dot, ".7z") == 0))
+        *dot = '\0';
+
+    // A group is one word in capitals after the last hyphen - "-ZTM", not
+    // the "-Man" of "Spider-Man".
+    char *dash = strrchr(out, '-');
+    if (dash != NULL && dash > out && dash[1] != '\0' && strlen(dash + 1) <= 12)
+    {
+        bool group = true;
+        for (const char *p = dash + 1; *p != '\0' && group; ++p)
+            group = (*p >= 'A' && *p <= 'Z') || (*p >= '0' && *p <= '9');
+        if (group)
+            *dash = '\0';
+    }
+
+    size_t o = 0;
+    for (size_t i = 0; out[i] != '\0'; ++i)
+    {
+        char c = (out[i] == '.' || out[i] == '_') ? ' ' : out[i];
+        if (c == ' ' && (o == 0 || out[o - 1] == ' '))
+            continue;
+        out[o++] = c;
+    }
+    while (o > 0 && out[o - 1] == ' ')
+        o--;
+    out[o] = '\0';
+    if (o == 0)
+        _snprintf(out, outSize, "%s", fileName); // nothing left: show it as it is
+    out[outSize - 1] = '\0';
+}
+
 // The packs on archive.org: one picked is queued and followed. True if
 // something was queued, so the installed list is read again.
 static bool ShowOnlineDlc(unsigned long titleId, const char *gameName, const char *edition, TitleUpdateAuth &auth)
@@ -1900,15 +1940,34 @@ static bool ShowOnlineDlc(unsigned long titleId, const char *gameName, const cha
     }
 
     static char notes[MAX_DLC_RAR_MATCHES][64];
+    static char names[MAX_DLC_RAR_MATCHES][MAX_PATH];
     const char *labels[MAX_DLC_RAR_MATCHES];
     const char *rowNotes[MAX_DLC_RAR_MATCHES];
+    int best = 0;
+    for (int i = 1; i < count; ++i)
+    {
+        if (packs[i].score > packs[best].score)
+            best = i;
+    }
+    for (int i = 0; i < count; ++i)
+        DlcPackDisplayName(packs[i].filename, names[i], sizeof(names[i]));
     for (int i = 0; i < count; ++i)
     {
         char size[24] = "";
         FormatBytes(packs[i].size, size, sizeof(size));
-        TrFormat(notes[i], sizeof(notes[i]), STR_DLC_PACK_NOTE, size, TrNum(packs[i].score));
+        // The closest one is marked, rather than every row carrying a score.
+        if (i == best)
+            TrFormat(notes[i], sizeof(notes[i]), STR_DLC_PACK_BEST, size);
+        else
+            _snprintf(notes[i], sizeof(notes[i]), "%s", size);
         notes[i][sizeof(notes[i]) - 1] = '\0';
-        labels[i] = packs[i].filename;
+
+        // Two files that tidy to the same name keep their own, so they can
+        // be told apart.
+        bool twin = false;
+        for (int j = 0; j < count && !twin; ++j)
+            twin = (j != i && strcmp(names[i], names[j]) == 0);
+        labels[i] = twin ? packs[i].filename : names[i];
         rowNotes[i] = notes[i];
     }
 
@@ -2535,7 +2594,10 @@ static FolderPickResult PickFolderSteps(const char *heading, const char *start, 
             notes[count++] = NULL;
         }
 
-        const int chosen = ShowAlertListUI(heading, path, labels, notes, count, focus, icons);
+        // B climbs a level; Y leaves from however deep it is.
+        const int chosen = ShowAlertListCancelUI(heading, path, labels, notes, count, focus, icons);
+        if (chosen == ALERT_LIST_CANCELLED)
+            return FOLDER_CANCELLED;
         if (chosen < 0)
         {
             GoUpFolder(path, sizeof(path), cameFrom, sizeof(cameFrom)); // B: up a level
@@ -3050,6 +3112,65 @@ static void UnpairPcHelper()
     ApplyPcHelperSettings();
 }
 
+// Finding the paired PC again by itself. A PC's address can change (DHCP),
+// and then the helper's saved address answers nothing: before, it stayed
+// "not running" until Find PC was pressed. Once the paired helper has been
+// quiet for a minute, with nothing downloading - a scan holds 24 of XNet's 32
+// sockets - the same scan Find PC does runs once on a thread of its own, and
+// again at most every ten minutes while it stays missing. Settings' row and
+// the clock's icon follow the helper's status, so they update when it's found.
+#define HELPER_AUTO_SCAN_QUIET_MS 60000
+#define HELPER_AUTO_SCAN_EVERY_MS 600000
+
+static volatile LONG g_helperAutoScanRunning = 0;
+static volatile LONG g_helperAutoScanFound = 0;
+
+static DWORD WINAPI HelperAutoScanEntry(LPVOID)
+{
+    char id[32], name[64];
+    if (PcHelperScan(id, sizeof(id), name, sizeof(name), NULL) == SCAN_FOUND)
+        InterlockedExchange(&g_helperAutoScanFound, 1);
+    InterlockedExchange(&g_helperAutoScanRunning, 0);
+    return 0;
+}
+
+// Each pass of the main loop.
+static void PumpHelperAutoScan()
+{
+    static DWORD quietSince = 0, lastScan = 0;
+
+    // Saved here, on the UI thread, which is the one that writes settings.txt.
+    if (InterlockedCompareExchange(&g_helperAutoScanFound, 0, 1) == 1)
+    {
+        dprintf("[helper] found the paired PC again by itself\n");
+        SavePcHelperUrl();
+    }
+
+    char name[64];
+    const DWORD now = GetTickCount();
+    if (GetPcHelperStatus(name, sizeof(name)) != PC_HELPER_PAIRED_OFFLINE || !PcHelperUseSetting())
+    {
+        quietSince = 0;
+        return;
+    }
+    if (quietSince == 0)
+        quietSince = now;
+    if (now - quietSince < HELPER_AUTO_SCAN_QUIET_MS)
+        return;
+    if (lastScan != 0 && now - lastScan < HELPER_AUTO_SCAN_EVERY_MS)
+        return;
+    if (g_helperAutoScanRunning != 0 || RunnableDownloadCount() > 0)
+        return;
+
+    lastScan = now;
+    InterlockedExchange(&g_helperAutoScanRunning, 1);
+    HANDLE thread = CreateThread(NULL, 0, HelperAutoScanEntry, NULL, 0, NULL);
+    if (thread == NULL)
+        InterlockedExchange(&g_helperAutoScanRunning, 0);
+    else
+        CloseHandle(thread);
+}
+
 static void ScanProgress(int done, int total)
 {
     char detail[64];
@@ -3066,6 +3187,12 @@ static void ScanForPcHelperInDialog()
 {
     BeginProgressDialog();
     ScanProgress(0, 253);
+    // Not two scans at once: they'd need more sockets than XNet has.
+    while (g_helperAutoScanRunning != 0)
+    {
+        ScanProgress(0, 253);
+        Sleep(50);
+    }
     char id[32], name[64];
     const PcHelperScanResult result = PcHelperScan(id, sizeof(id), name, sizeof(name), ScanProgress);
     if (result == SCAN_NO_NETWORK)
@@ -3315,6 +3442,7 @@ struct SettingsPage
     int helperShown;     // the PcHelperStatus helperStatus was made from, and
     char helperName[64]; // the PC's name then - see SettingsHelperChanged
     char ftpStatus[128];
+    char ftpHelp[320];
     char updatesStatus[96];
     char updatesHelp[96];
 
@@ -3716,11 +3844,18 @@ static void BuildSettingsPage(SettingsPage &page, const Library &lib, const char
                 TrFormat(page.ftpStatus, sizeof(page.ftpStatus), FtpSetting() ? STR_FTP_NOT_RUNNING : STR_FTP_OFF);
             else if (address[0] == '\0')
                 TrFormat(page.ftpStatus, sizeof(page.ftpStatus), STR_SYSTEM_NOT_CONNECTED);
-            else
-                TrFormat(page.ftpStatus, sizeof(page.ftpStatus), STR_FTP_ADDRESS, address, user, password);
+            // The address on the row; what to sign in with only in the help
+            // line, while the row has focus - first, so it's what's read.
+            _snprintf(page.ftpHelp, sizeof(page.ftpHelp), "%s", Tr(STR_FTP_HELP));
+            if (FtpServerRunning() && address[0] != '\0')
+            {
+                TrFormat(page.ftpStatus, sizeof(page.ftpStatus), STR_FTP_URL, address);
+                TrFormat(page.ftpHelp, sizeof(page.ftpHelp), STR_FTP_HELP_SIGN_IN, user, password, Tr(STR_FTP_HELP));
+            }
             page.ftpStatus[sizeof(page.ftpStatus) - 1] = '\0';
+            page.ftpHelp[sizeof(page.ftpHelp) - 1] = '\0';
             AddSettingsRow(page, SETTINGS_VIEW_LINE, Tr(STR_FTP_SERVER)).status = page.ftpStatus;
-            AddSettingsControl(page, SETTINGS_CONTROL_CHECK, NULL, SETTINGS_ROW_FTP, Tr(STR_FTP_HELP));
+            AddSettingsControl(page, SETTINGS_CONTROL_CHECK, NULL, SETTINGS_ROW_FTP, page.ftpHelp);
             page.rows[page.count - 1].controls[0].on = FtpSetting();
         }
     }
@@ -4538,18 +4673,59 @@ static const StringId kStoreButtonNames[STORE_BUTTON_COUNT] = {
 
 static const char kStoreLetters[] = "*#ABCDEFGHIJKLMNOPQRSTUVWXYZ"; // STORE_LETTER_ALL first
 
-// A to Z tile's hint: "Browse B", or "Browse all".
+// A to Z tile's hint: "Browse B", "Browse 0-9", or for All just "Browse",
+// as the category buttons say.
 static void BrowseHint(WCHAR *out, int outSize, char letter)
 {
     if (letter == STORE_LETTER_ALL)
-        _snwprintf(out, outSize, L"%s", TrW(STR_BROWSE_ALL));
+        _snwprintf(out, outSize, L"%s", TrW(STR_BROWSE));
     else
     {
         char one[2] = { letter, '\0' }, line[64];
-        TrFormat(line, sizeof(line), STR_BROWSE_LETTER, one);
+        TrFormat(line, sizeof(line), STR_BROWSE_LETTER, letter == '#' ? Tr(STR_STORE_DIGITS) : one);
         Utf8ToWideText(line, out, outSize);
     }
     out[outSize - 1] = L'\0';
+}
+
+// A genre from the Xbox Live catalog in the words the Store's own rows use:
+// "Action & Adventure" reads "Action and adventure". English only - the
+// catalog's other languages have their own conventions.
+static const char *TidyGenre(const char *genre)
+{
+    static char out[96];
+    const char *locale = XboxLocaleForLanguage();
+    if (locale == NULL || _strnicmp(locale, "en", 2) != 0)
+        return genre;
+
+    size_t o = 0;
+    bool wordStart = true, firstWord = true;
+    for (const char *p = genre; *p != '\0' && o + 4 < sizeof(out); ++p)
+    {
+        if (p[0] == ' ' && p[1] == '&' && p[2] == ' ')
+        {
+            memcpy(out + o, " and ", 5);
+            o += 5;
+            p += 2;
+            wordStart = true;
+            continue;
+        }
+        char c = *p;
+        if (c == ',')
+            firstWord = true; // each genre in a list starts with a capital
+        else if (wordStart && c != ' ')
+        {
+            // A capitalised word after the first goes lower case; one in
+            // capitals throughout (RPG) is a name and stays as it is.
+            if (!firstWord && c >= 'A' && c <= 'Z' && p[1] >= 'a' && p[1] <= 'z')
+                c = (char)(c - 'A' + 'a');
+            firstWord = false;
+        }
+        wordStart = (c == ' ' || c == ',');
+        out[o++] = c;
+    }
+    out[o] = '\0';
+    return out;
 }
 
 // The rows under the A to Z - Popular, Top rated, a genre each - as
@@ -4716,7 +4892,7 @@ static StorePageView MakeStoreView(const Shell &shell)
         g_featuredDetail[0] = '\0';
         AppendText(g_featuredDetail, sizeof(g_featuredDetail), "", details.developer);
         if (details.genre[0] != '\0')
-            AppendText(g_featuredDetail, sizeof(g_featuredDetail), STORE_MIDDOT, details.genre);
+            AppendText(g_featuredDetail, sizeof(g_featuredDetail), STORE_MIDDOT, TidyGenre(details.genre));
         view.featured[0].detail = g_featuredDetail[0] != '\0' ? g_featuredDetail : NULL;
     }
     for (int i = 0; i < STORE_BUTTON_COUNT; ++i)
@@ -6743,6 +6919,10 @@ static bool ExitMenu()
     }
     return g_exitAction != EXIT_NONE;
 }
+
+// Which of the game page's buttons were greyed out when it was last built.
+static bool g_gameButtonOff[STORE_GAME_BUTTONS];
+
 static StoreGameView MakeStoreGameView(Shell &shell, const Library &lib)
 {
     StoreGameView view;
@@ -6762,7 +6942,7 @@ static StoreGameView MakeStoreGameView(Shell &shell, const Library &lib)
         if (_stricmp(d.publisher, d.developer) != 0 && d.publisher[0] != '\0') // "SEGA" and "Sega" once
             AppendText(g_storeMeta, sizeof(g_storeMeta), STORE_MIDDOT, d.publisher);
         if (d.genre[0] != '\0')
-            AppendText(g_storeMeta, sizeof(g_storeMeta), STORE_MIDDOT, d.genre);
+            AppendText(g_storeMeta, sizeof(g_storeMeta), STORE_MIDDOT, TidyGenre(d.genre));
 
         view.meta = g_storeMeta[0] != '\0' ? g_storeMeta : NULL;
         view.players = d.players;
@@ -6872,6 +7052,9 @@ static StoreGameView MakeStoreGameView(Shell &shell, const Library &lib)
     if (GamePageManages(lib))
         view.buttons[3] = Tr(STR_STORAGE_MANAGE_SHORT); // else not shown
 
+    for (int b = 0; b < STORE_GAME_BUTTONS; ++b)
+        g_gameButtonOff[b] = view.buttonDisabled[b];
+
     view.similar = g_similarTiles;
     view.similarCount = g_similarCount;
     view.similarScroll = shell.storeSimilarScroll;
@@ -6901,16 +7084,27 @@ static void StepStoreGame(WORD nav, Shell &shell, const Library &lib)
 
     if (f < STORE_GAME_FOCUS_SIMILAR)
     {
+        // Left and right pass over the greyed-out buttons - an Original Xbox
+        // game's DLC and Title updates - which A can't do anything with.
         const int b = f - STORE_GAME_FOCUS_BUTTONS;
         if (nav == XINPUT_GAMEPAD_DPAD_LEFT)
         {
-            if (b == 0)
+            int to = b - 1;
+            while (to > 0 && g_gameButtonOff[to])
+                to--;
+            if (to < 0 || g_gameButtonOff[to])
                 FocusSidebar(shell);
             else
-                f--;
+                f = STORE_GAME_FOCUS_BUTTONS + to;
         }
-        else if (nav == XINPUT_GAMEPAD_DPAD_RIGHT && b + 1 < buttons)
-            f++;
+        else if (nav == XINPUT_GAMEPAD_DPAD_RIGHT)
+        {
+            int to = b + 1;
+            while (to < buttons && g_gameButtonOff[to])
+                to++;
+            if (to < buttons)
+                f = STORE_GAME_FOCUS_BUTTONS + to;
+        }
         else if (nav == XINPUT_GAMEPAD_DPAD_DOWN && g_similarCount > 0)
             f = STORE_GAME_FOCUS_SIMILAR + shell.storeSimilarScroll;
     }
@@ -7317,8 +7511,7 @@ static void ShowHomebrewItem(Shell &shell, int index)
     if (item.author[0] != '\0')
     {
         char by[96];
-        _snprintf(by, sizeof(by), "by %s", item.author);
-        by[sizeof(by) - 1] = '\0';
+        TrFormat(by, sizeof(by), STR_HOMEBREW_BY, item.author);
         AppendText(facts, sizeof(facts), STORE_MIDDOT, by);
     }
     if (item.size[0] != '\0')
@@ -7326,10 +7519,20 @@ static void ShowHomebrewItem(Shell &shell, int index)
     if (facts[0] != '\0')
         body = std::string(facts) + "\n\n" + body;
 
+    // Where it goes in the words the rest of the app uses - its page and
+    // its drive - rather than the folder's path.
+    char drive[16] = "";
+    const char *colon = strchr(kindFolder, ':');
+    if (colon != NULL && colon - kindFolder < (int)sizeof(drive) - 1)
+    {
+        memcpy(drive, kindFolder, colon - kindFolder + 1);
+        drive[colon - kindFolder + 1] = '\0';
+    }
     char foot[MAX_TEXT_LENGTH + 160];
-    _snprintf(foot, sizeof(foot), "%s %s\\%s%s", g_homebrewInstalled[index] ? "Installed in" : "Installs to",
-              kindFolder, item.folder, mirror[0] != '\0' ? "  -  from your test mirror" : "");
-    foot[sizeof(foot) - 1] = '\0';
+    TrFormat(foot, sizeof(foot), g_homebrewInstalled[index] ? STR_HOMEBREW_INSTALLED_IN : STR_HOMEBREW_INSTALLS_TO,
+             Tr(kHomebrewHeadings[item.kind]), drive[0] != '\0' ? drive : kindFolder);
+    if (mirror[0] != '\0')
+        AppendText(foot, sizeof(foot), "  -  ", "from your test mirror");
 
     if (!ShowNotesUI(Tr(kHomebrewHeadings[item.kind]), item.title, body.c_str(), foot,
                      g_homebrewInstalled[index] ? TrW(STR_INSTALL_AGAIN) : TrW(STR_INSTALL)))
@@ -8707,16 +8910,36 @@ static bool ConfirmDiscPreview(const DiscInfo &disc, const char *name, const cha
     const char *format = disc.original || !InstallAsFolderSetting() ? Tr(STR_GAMES_ON_DEMAND)
                                                                      : Tr(STR_FOLDER_DEFAULT_XEX);
 
-    char facts[160];
+    // In three short groups rather than one run of facts: which disc and
+    // where it plays, then its size and how it installs, then - smaller,
+    // under them - where it goes.
+    char which[96] = "";
     if (count > 1 && disc.discNumber >= 1)
     {
         char n1[8], n2[8];
         _snprintf(n1, sizeof(n1), "%u", disc.discNumber);
         _snprintf(n2, sizeof(n2), "%u", count);
-        TrFormat(facts, sizeof(facts), STR_DISC_PREVIEW_FACTS, n1, n2, sizeText, format);
+        TrFormat(which, sizeof(which), STR_DISC_N_OF, n1, n2);
     }
-    else
-        TrFormat(facts, sizeof(facts), STR_DISC_PREVIEW_FACTS_ONE, sizeText, format);
+    // The regions: what the user most wants to know of a disc from
+    // somewhere else. Not shown when the header didn't say.
+    const unsigned long all = GOD_REGION_NTSC_U | GOD_REGION_NTSC_J | GOD_REGION_PAL;
+    if (disc.regions != 0)
+    {
+        char regions[48] = "";
+        if ((disc.regions & all) == all)
+            _snprintf(regions, sizeof(regions), "%s", Tr(STR_REGION_FREE));
+        else
+        {
+            if (disc.regions & GOD_REGION_NTSC_U) AppendText(regions, sizeof(regions), "/", "NTSC-U");
+            if (disc.regions & GOD_REGION_NTSC_J) AppendText(regions, sizeof(regions), "/", "NTSC-J");
+            if (disc.regions & GOD_REGION_PAL)    AppendText(regions, sizeof(regions), "/", "PAL");
+        }
+        AppendText(which, sizeof(which), STORE_MIDDOT, regions);
+    }
+
+    char what[96];
+    TrFormat(what, sizeof(what), STR_DISC_PREVIEW_FACTS_ONE, sizeText, format);
 
     char drive[16];
     DriveLabel(gamesPath, drive, sizeof(drive), gamesPath);
@@ -8725,10 +8948,13 @@ static bool ConfirmDiscPreview(const DiscInfo &disc, const char *name, const cha
     char where[200];
     TrFormat(where, sizeof(where), STR_DISC_PREVIEW_WHERE, drive, left);
 
-    char message[400];
-    _snprintf(message, sizeof(message), "%s\n%s", facts, where);
+    char message[200];
+    if (which[0] != '\0')
+        _snprintf(message, sizeof(message), "%s\n%s", which, what);
+    else
+        _snprintf(message, sizeof(message), "%s", what);
     message[sizeof(message) - 1] = '\0';
-    return ShowAlertUI(name, message, NULL, Tr(STR_INSTALL), Tr(STR_BUTTON_CANCEL));
+    return ShowAlertCoverUI(name, message, where, Tr(STR_INSTALL), Tr(STR_BUTTON_CANCEL), disc.titleId);
 }
 
 // START on the disc's tile starts this, and so does Install from disc on the
@@ -9471,6 +9697,18 @@ static void ReportEnqueue(EnqueueResult result, const char *filename)
                        UI_TOAST_ERROR);
         break;
     }
+}
+
+// LB RB's icon for a list where they jump `jump` items from `selected` of
+// `count`, stopping at the ends: a side that could only run into the first
+// or last item is drawn faint.
+static UiButton PageHintButton(int selected, int jump, int count)
+{
+    const bool back = selected >= jump;
+    const bool on = selected + jump < count;
+    if (back == on)
+        return UI_BUTTON_LBRB;
+    return on ? UI_BUTTON_LBRB_NEXT : UI_BUTTON_LBRB_PREV;
 }
 
 static int AddHint(UiHint *hints, int count, UiButton button, const WCHAR *label, const WCHAR *shortLabel = NULL)
@@ -11806,6 +12044,7 @@ int main()
         SnapshotQueue(shell, lib);
         PumpCoverArt();
         PumpStoreArt();
+        PumpHelperAutoScan();
         const double partRest = ImageTimerMs();
 
         // The featured games - new ones once featured.json has come - and
@@ -12696,6 +12935,12 @@ int main()
         {
             HomePageView view = MakeHomeView(shell, lib);
 
+            // BACK opens the System panel from anywhere on Home - said, so
+            // it's found. First, with START beside it when there is one: the
+            // two small buttons in the middle of the pad, then the face
+            // buttons, then B.
+            hintCount = AddHint(hints, hintCount, UI_BUTTON_BACK, TrW(STR_SYSTEM));
+
             if (shell.homeFocus == HOME_FOCUS_NAV)
             {
                 if (view.navCount > 0)
@@ -12717,14 +12962,14 @@ int main()
                     switch (DiscTileState(shell))
                     {
                     case DISC_TILE_READY:
+                        hintCount = AddHint(hints, hintCount, UI_BUTTON_START, TrW(STR_INSTALL_TO_HARD_DRIVE), TrW(STR_INSTALL));
                         hintCount = AddHint(hints, hintCount, UI_BUTTON_A, TrW(STR_PLAY));
                         hintCount = AddHint(hints, hintCount, UI_BUTTON_X, TrW(STR_VIEW_GAME), TrW(STR_VIEW));
-                        hintCount = AddHint(hints, hintCount, UI_BUTTON_START, TrW(STR_INSTALL_TO_HARD_DRIVE), TrW(STR_INSTALL));
                         break;
                     case DISC_TILE_INSTALLED:
+                        hintCount = AddHint(hints, hintCount, UI_BUTTON_START, TrW(STR_INSTALL_AGAIN), TrW(STR_REINSTALL));
                         hintCount = AddHint(hints, hintCount, UI_BUTTON_A, TrW(STR_PLAY));
                         hintCount = AddHint(hints, hintCount, UI_BUTTON_X, TrW(STR_VIEW_GAME), TrW(STR_VIEW));
-                        hintCount = AddHint(hints, hintCount, UI_BUTTON_START, TrW(STR_INSTALL_AGAIN), TrW(STR_REINSTALL));
                         break;
                     case DISC_TILE_INSTALLING:
                         hintCount = AddHint(hints, hintCount, UI_BUTTON_A, TrW(STR_VIEW_IN_THE_QUEUE), TrW(STR_NAV_QUEUE));
@@ -12743,12 +12988,10 @@ int main()
                 }
                 hintCount = AddHint(hints, hintCount, UI_BUTTON_B, TrW(STR_EXIT));
                 if (view.recentCount > HomeRecentsAcross())
-                    hintCount = AddHint(hints, hintCount, UI_BUTTON_LBRB, TrW(STR_PAGE));
+                    hintCount = AddHint(hints, hintCount,
+                                        PageHintButton(view.recentFocus, HomeRecentsAcross(), view.recentCount),
+                                        TrW(STR_PAGE));
             }
-            // BACK opens the System panel from anywhere on Home - said, so
-            // it's found.
-            hintCount = AddHint(hints, hintCount, UI_BUTTON_BACK, TrW(STR_SYSTEM));
-
             if (shell.systemPopup)
                 ShowSystemPopup();
             RenderHomeFrame(view, hints, hintCount);
@@ -12777,14 +13020,14 @@ int main()
                         switch (view.discTile)
                         {
                         case DISC_TILE_READY:
+                            hintCount = AddHint(hints, hintCount, UI_BUTTON_START, TrW(STR_INSTALL_TO_HARD_DRIVE), TrW(STR_INSTALL));
                             hintCount = AddHint(hints, hintCount, UI_BUTTON_A, TrW(STR_PLAY));
                             hintCount = AddHint(hints, hintCount, UI_BUTTON_X, TrW(STR_VIEW_GAME), TrW(STR_VIEW));
-                            hintCount = AddHint(hints, hintCount, UI_BUTTON_START, TrW(STR_INSTALL_TO_HARD_DRIVE), TrW(STR_INSTALL));
                             break;
                         case DISC_TILE_INSTALLED:
+                            hintCount = AddHint(hints, hintCount, UI_BUTTON_START, TrW(STR_INSTALL_AGAIN), TrW(STR_REINSTALL));
                             hintCount = AddHint(hints, hintCount, UI_BUTTON_A, TrW(STR_PLAY));
                             hintCount = AddHint(hints, hintCount, UI_BUTTON_X, TrW(STR_VIEW_GAME), TrW(STR_VIEW));
-                            hintCount = AddHint(hints, hintCount, UI_BUTTON_START, TrW(STR_INSTALL_AGAIN), TrW(STR_REINSTALL));
                             break;
                         case DISC_TILE_INSTALLING:
                             hintCount = AddHint(hints, hintCount, UI_BUTTON_A, TrW(STR_VIEW_IN_THE_QUEUE), TrW(STR_NAV_QUEUE));
@@ -12804,8 +13047,10 @@ int main()
                             hintCount = AddHint(hints, hintCount, UI_BUTTON_Y, TrW(STR_OPTIONS));
                     }
                     hintCount = AddHint(hints, hintCount, UI_BUTTON_B, TrW(STR_NAV_HOME));
-                    if (itemCount > LibraryPageVisibleRows(view) * LibraryGridColumns())
-                        hintCount = AddHint(hints, hintCount, UI_BUTTON_LBRB, TrW(STR_PAGE));
+                    const int pageItems = LibraryPageVisibleRows(view) * LibraryGridColumns();
+                    if (itemCount > pageItems)
+                        hintCount = AddHint(hints, hintCount, PageHintButton(shell.librarySelected, pageItems, itemCount),
+                                            TrW(STR_PAGE));
                 }
 
                 RenderLibraryFrame(view, hints, hintCount);
@@ -12831,8 +13076,10 @@ int main()
                 if (view.count > 0)
                     hintCount = AddHint(hints, hintCount, UI_BUTTON_Y, TrW(STR_OPTIONS));
                 hintCount = AddHint(hints, hintCount, UI_BUTTON_B, TrW(STR_NAV_HOME));
-                if (view.count > LibraryPageVisibleRows(view) * LibraryGridColumns())
-                    hintCount = AddHint(hints, hintCount, UI_BUTTON_LBRB, TrW(STR_PAGE));
+                const int pageItems = LibraryPageVisibleRows(view) * LibraryGridColumns();
+                if (view.count > pageItems)
+                    hintCount = AddHint(hints, hintCount, PageHintButton(shelf.selected, pageItems, view.count),
+                                        TrW(STR_PAGE));
             }
 
             RenderLibraryFrame(view, hints, hintCount);
@@ -12851,10 +13098,13 @@ int main()
             {
                 if (!shell.sidebarFocused)
                 {
-                    hintCount = AddHint(hints, hintCount, UI_BUTTON_A, TrW(STR_VIEW));
+                    hintCount = AddHint(hints, hintCount, UI_BUTTON_A, TrW(STR_VIEW_APP), TrW(STR_VIEW));
                     hintCount = AddHint(hints, hintCount, UI_BUTTON_B, TrW(STR_BUTTON_BACK));
                     if (HomebrewRowCount(shell.homebrewRow) > StoreRowTilesAcross())
-                        hintCount = AddHint(hints, hintCount, UI_BUTTON_LBRB, TrW(STR_PAGE));
+                        hintCount = AddHint(hints, hintCount,
+                                            PageHintButton(shell.homebrewPlace, StoreRowTilesAcross(),
+                                                           HomebrewRowCount(shell.homebrewRow)),
+                                            TrW(STR_PAGE));
                 }
 
                 StoreRowsView view = MakeHomebrewView(shell);
@@ -12883,8 +13133,11 @@ int main()
                         hintCount = AddHint(hints, hintCount, UI_BUTTON_Y, TrW(STR_STORE_FILTER_SORT), TrW(STR_FILTER));
                     if (LetterFiltersEmptied(shell))
                         hintCount = AddHint(hints, hintCount, UI_BUTTON_X, TrW(STR_RESET_FILTERS), TrW(STR_RESET));
-                    if (shell.storeGameCount > StoreLetterVisibleRows() * StoreGridColumns())
-                        hintCount = AddHint(hints, hintCount, UI_BUTTON_LBRB, TrW(STR_PAGE));
+                    const int letterPage = StoreLetterVisibleRows() * StoreGridColumns();
+                    if (shell.storeGameCount > letterPage)
+                        hintCount = AddHint(hints, hintCount,
+                                            PageHintButton(shell.storeSelected, letterPage, shell.storeGameCount),
+                                            TrW(STR_PAGE));
                     if (LetterJumps(shell))
                         hintCount = AddHint(hints, hintCount, UI_BUTTON_LTRT, TrW(STR_LETTER));
                 }

@@ -41,6 +41,7 @@ struct DiscInfo
     unsigned long mediaId;
     unsigned int discNumber;
     unsigned int discCount;
+    unsigned long regions;    // GOD_REGION_*; 0 if the disc didn't say
     unsigned long long outputSize; // what the installed package takes
     char reason[96];          // DISC_UNREADABLE: why
 

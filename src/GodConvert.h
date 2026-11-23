@@ -59,8 +59,15 @@ struct GodTitleInfo
     unsigned char executableType;
     unsigned char discNumber;
     unsigned char discCount;
+    unsigned long regions;       // GOD_REGION_* it plays in; 0 if the header didn't say
     char name[96];               // an Original Xbox disc's, from default.xbe's certificate, UTF-8; else empty
 };
+
+// The regions a disc's header allows, boiled down from the XEX's or the
+// XBE's own flags to the three the 360 sells in.
+#define GOD_REGION_NTSC_U 0x1UL
+#define GOD_REGION_NTSC_J 0x2UL
+#define GOD_REGION_PAL    0x4UL
 
 struct GodImageInfo
 {

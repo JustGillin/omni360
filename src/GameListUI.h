@@ -143,7 +143,9 @@ enum UiButton
     UI_BUTTON_START,
     UI_BUTTON_LTRT,
     UI_BUTTON_DPAD_LR, // left and right on the D-pad: a value that they change
-    UI_BUTTON_BACK
+    UI_BUTTON_BACK,
+    UI_BUTTON_LBRB_NEXT, // LB RB with LB dimmed: on the first page, only RB moves
+    UI_BUTTON_LBRB_PREV  // and with RB dimmed, on the last
 };
 
 // One button hint in the footer. shortLabel, when non-NULL, is used for every
@@ -1034,6 +1036,11 @@ bool ShowNotesUI(const char *heading, const char *title, const char *body, const
 bool ShowAlertUI(const char *heading, const char *message, const char *detailLine, const char *confirmLabel,
                  const char *cancelLabel);
 
+// The same, with the game's cover at the card's left - when the cover cache
+// has one for titleId; without, it's ShowAlertUI.
+bool ShowAlertCoverUI(const char *heading, const char *message, const char *detailLine, const char *confirmLabel,
+                      const char *cancelLabel, unsigned long titleId);
+
 // ShowAlertUI with up to four buttons: labels[0] - the one that goes
 // ahead - on the right, the rest leftward in order. Returns the index of
 // the one pressed, or -1 for B (0 when there's only the one). Past five
@@ -1100,6 +1107,12 @@ int FilesVisibleRows();
 // focused first. icons, when not NULL, puts a UiListIcon before each label.
 int ShowAlertListUI(const char *heading, const char *message, const char **labels, const char **notes, int count,
                     int focus, const int *icons = NULL);
+
+// The same, where B steps back (returning -1) and Y leaves altogether,
+// returning ALERT_LIST_CANCELLED: a picker several levels deep.
+#define ALERT_LIST_CANCELLED -2
+int ShowAlertListCancelUI(const char *heading, const char *message, const char **labels, const char **notes,
+                          int count, int focus, const int *icons = NULL);
 
 // The same, with a kind for each row: a pick (as above), a row that's only
 // there to read - it can be moved onto, to scroll, but A does nothing and

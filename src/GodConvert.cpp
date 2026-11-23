@@ -349,6 +349,20 @@ static GodResult ReadExecutionInfo(GodSource *source, unsigned long long xexOffs
     if (!source->ReadAt(xexOffset + infoOffset, info, sizeof(info)))
         return GOD_READ_FAILED;
 
+    // The regions, from the security info (its offset at +16 in the header):
+    // a byte each for North America, Asia and Europe/Australia at +0x178.
+    out->regions = 0;
+    const unsigned long securityOffset = ReadBE32(head + 16);
+    unsigned char region[4];
+    if (securityOffset < xexSize && xexSize - securityOffset >= 0x17C &&
+        source->ReadAt(xexOffset + securityOffset + 0x178, region, sizeof(region)))
+    {
+        const unsigned long r = ReadBE32(region);
+        if (r & 0x000000FFUL) out->regions |= GOD_REGION_NTSC_U;
+        if (r & 0x0000FF00UL) out->regions |= GOD_REGION_NTSC_J;
+        if (r & 0x00FF0000UL) out->regions |= GOD_REGION_PAL;
+    }
+
     out->contentType = CONTENT_TYPE_GOD;
     out->mediaId = ReadBE32(info + 0);
     out->version = ReadBE32(info + 4);
@@ -397,6 +411,13 @@ static GodResult ReadXbeInfo(GodSource *source, unsigned long long xbeOffset, un
     out->executableType = 0;
     out->discNumber = 1;
     out->discCount = 1;
+
+    // Its game regions at +0xA0: 1 North America, 2 Japan, 4 the rest.
+    const unsigned long r = ReadLE32(cert + 0xA0);
+    out->regions = 0;
+    if (r & 0x1UL) out->regions |= GOD_REGION_NTSC_U;
+    if (r & 0x2UL) out->regions |= GOD_REGION_NTSC_J;
+    if (r & 0x4UL) out->regions |= GOD_REGION_PAL;
 
     // The certificate's title name: 40 UTF-16LE characters at +0x0C, to
     // UTF-8 - the name to show for a disc no list knows.
