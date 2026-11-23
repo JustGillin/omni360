@@ -1293,10 +1293,127 @@ static void DrawTick(float cx, float cy, float d, D3DCOLOR color)
     DrawLine(bx, by, tx, ty, thickness, color);
 }
 
+// ---------------------------------------------------------------------------
+// Focus motion
+// ---------------------------------------------------------------------------
+//
+// The ring glides from one thing to the next rather than jumping - about
+// 150 ms, sidebar to grid included - and a page fades in when you arrive on
+// it. Both key off which BeginFrame call drew the frame (its source line, see
+// BeginFrame below): a frame from the same call is the same page, so the
+// ring may glide; a different one - a dialog opening, another page - and the
+// ring is put straight where it belongs.
+//
+// The ring is held as where its target is plus an offset that dies away.
+// When the target jumps (the focus moved) the offset takes up the
+// difference, so the ring starts from where it was on screen; when the
+// target only drifts a little a frame (a tile growing, a row gliding, a card
+// rising into place) the ring moves rigidly with it, so it never lags
+// behind something that is itself animating.
+
+#define FOCUS_GLIDE_MS   150.0
+#define FOCUS_GLIDE_TAU  38.0f   // ms: the offset's e-folding time; ~2% is left at 150 ms
+#define FOCUS_JUMP       24.0f   // S() px a frame: more than this is the focus moving
+#define FOCUS_GAP_MS     250.0   // frames further apart than this start afresh
+#define PAGE_FADE_MS     170.0
+#define FOCUS_RINGS_MAX  4
+
+struct RingGlide
+{
+    float tx, ty, tw, th, trad; // where it was asked to go last frame
+    float ox, oy, ow, oh, orad; // how far from there it is drawn
+};
+
+static RingGlide g_rings[FOCUS_RINGS_MAX];
+static int g_ringsThisFrame = 0, g_ringsLastFrame = 0;
+static bool g_ringsSnap = true;          // this frame starts afresh
+static int g_frameCaller = 0;            // the BeginFrame line that drew the last frame
+static double g_frameAt = 0.0, g_frameDt = 0.0;
+static double g_focusMovedAt = -1.0e9;   // when the first ring last jumped
+
+// How far the focus has settled since it last moved: 0 just after, 1 once
+// the ring has arrived. For anything that brightens with the focus.
+static float FocusSettle()
+{
+    float t = (float)((g_frameAt - g_focusMovedAt) / FOCUS_GLIDE_MS);
+    if (t >= 1.0f)
+        return 1.0f;
+    if (t < 0.0f)
+        t = 0.0f;
+    return 1.0f - (1.0f - t) * (1.0f - t);
+}
+
+// A colour for the focused thing's text: dim as the focus lands, brightening
+// as the ring arrives.
+#define FOCUS_TEXT_FROM 0.45f
+
+static D3DCOLOR WithAlpha(D3DCOLOR color, float alpha);
+
+static D3DCOLOR FocusBright(D3DCOLOR color)
+{
+    const float settle = FocusSettle();
+    return settle >= 1.0f ? color : WithAlpha(color, FOCUS_TEXT_FROM + (1.0f - FOCUS_TEXT_FROM) * settle);
+}
+
+// Where the ring in this frame's slot is drawn, given where it's asked for.
+static void GlideRing(float *x, float *y, float *w, float *h, float *radius)
+{
+    const int slot = g_ringsThisFrame++;
+    if (slot >= FOCUS_RINGS_MAX)
+        return;
+    RingGlide &g = g_rings[slot];
+
+    if (slot >= g_ringsLastFrame)
+    {
+        g.ox = g.oy = g.ow = g.oh = g.orad = 0.0f;
+    }
+    else
+    {
+        const float jump = S(FOCUS_JUMP);
+        if (fabsf(*x - g.tx) > jump || fabsf(*y - g.ty) > jump || fabsf(*w - g.tw) > jump ||
+            fabsf(*h - g.th) > jump)
+        {
+            // Start from where it was drawn last frame.
+            g.ox += g.tx - *x;
+            g.oy += g.ty - *y;
+            g.ow += g.tw - *w;
+            g.oh += g.th - *h;
+            g.orad += g.trad - *radius;
+            if (slot == 0)
+                g_focusMovedAt = g_frameAt;
+        }
+
+        const float dt = (float)(g_frameDt > 100.0 ? 100.0 : g_frameDt);
+        const float keep = expf(-dt / FOCUS_GLIDE_TAU);
+        g.ox *= keep;
+        g.oy *= keep;
+        g.ow *= keep;
+        g.oh *= keep;
+        g.orad *= keep;
+        if (fabsf(g.ox) + fabsf(g.oy) + fabsf(g.ow) + fabsf(g.oh) < 0.5f)
+            g.ox = g.oy = g.ow = g.oh = g.orad = 0.0f;
+    }
+
+    g.tx = *x;
+    g.ty = *y;
+    g.tw = *w;
+    g.th = *h;
+    g.trad = *radius;
+
+    *x += g.ox;
+    *y += g.oy;
+    *w += g.ow;
+    *h += g.oh;
+    *radius += g.orad;
+    if (*radius < 0.0f)
+        *radius = 0.0f;
+}
+
 // The focus ring: white, a little outside the thing focused, its corners
-// following the thing's own.
+// following the thing's own. It glides there - see Focus motion above.
 static void FocusRing(float x, float y, float w, float h, float radius)
 {
+    GlideRing(&x, &y, &w, &h, &radius);
     const float t = S(3.0f), gap = S(3.0f), out = t + gap;
     StrokeRound(x - out, y - out, w + out * 2.0f, h + out * 2.0f, radius > 0.0f ? radius + out : 0.0f, t, COL_FOCUS);
 }
@@ -1456,6 +1573,7 @@ static void MarqueeTextMid(float x, float centerY, float mul, D3DCOLOR color, co
 {
     if (utf8 == NULL || utf8[0] == '\0')
         return;
+    color = FocusBright(color); // only ever the focused thing's name
 
     const DWORD now = GetTickCount();
     if (g_marquee.text != utf8 || g_marquee.mul != mul || g_marquee.bold != bold || now - g_marquee.drawnAt > 250)
@@ -3199,13 +3317,65 @@ static float ScrollGutter()
 // "12 games · 3 of 12"-style counts. "\xC2\xB7" is a middle dot.
 #define MIDDOT "  \xC2\xB7  "
 
+// The page fade: which page frame came last, whether the sidebar was on it,
+// and when the page on screen now arrived.
+static int g_pageCaller = 0;
+static bool g_pageHadSidebar = false;
+static bool g_pageFadeSidebar = true;   // the fade covers the sidebar too
+static double g_pageShownAt = -1.0e9;
+
+// Called by BeginFrame.
+static void StartFrameMotion(int caller, bool page)
+{
+    const double now = TimerMs();
+    g_frameDt = now - g_frameAt;
+    g_ringsSnap = (caller != g_frameCaller) || g_frameDt > FOCUS_GAP_MS;
+    g_frameAt = now;
+    g_frameCaller = caller;
+    g_ringsLastFrame = g_ringsSnap ? 0 : g_ringsThisFrame;
+    g_ringsThisFrame = 0;
+
+    if (page)
+    {
+        if (caller != g_pageCaller)
+        {
+            // Covering the sidebar only if it wasn't already there, so
+            // stepping down it between pages fades just what changes.
+            g_pageFadeSidebar = !(g_pageHadSidebar && g_sidebar.shown);
+            g_pageShownAt = now;
+            g_pageCaller = caller;
+        }
+        g_pageHadSidebar = g_sidebar.shown;
+    }
+}
+
+// Called by EndFrame: the page coming in from the background.
+static void DrawPageFade()
+{
+    const float t = (float)((g_frameAt - g_pageShownAt) / PAGE_FADE_MS);
+    if (t >= 1.0f || t < 0.0f)
+        return;
+    const float a = (1.0f - t) * (1.0f - t); // eased out: most of it early
+    const float x0 = (g_pageFadeSidebar || !g_sidebar.shown) ? 0.0f : g_M.sidebarW;
+    ClearClip();
+    DrawRect(x0, 0.0f, g_M.screenW - x0, g_M.screenH, WithAlpha(COL_BG_BOTTOM, a));
+}
+
 // Resume/Clear and Present/Suspend around every frame. Console::Render()
 // (Common/AtgConsole.cpp) always pairs its Present() with Resume() before and
 // Suspend() after - "Take away GPU control so that the Guide can be rendered".
 // Matching that exactly, per frame, is what fixed a GPU deadlock on hardware;
 // an attempt to bracket a whole session instead made things worse.
-static void BeginFrame()
+//
+// Each call passes its own line, which is what tells one page's frames from
+// another's for the focus motion; BeginPageFrame is a page you navigate to,
+// which fades in, rather than a dialog or a progress screen over one.
+#define BeginFrame()     BeginFrameAt(__LINE__, false)
+#define BeginPageFrame() BeginFrameAt(__LINE__, true)
+
+static void BeginFrameAt(int caller, bool page)
 {
+    StartFrameMotion(caller, page);
     g_pd3dDevice->Resume();
     ClearClip();
     g_pd3dDevice->SetRenderState(D3DRS_SCISSORTESTENABLE, FALSE);
@@ -3743,6 +3913,8 @@ static void DrawShellPopup()
 
 static void EndFrame()
 {
+    DrawPageFade();
+
     if (g_popupShown)
     {
         DrawShellPopup();
@@ -4030,13 +4202,89 @@ static void DrawDiscArt(float x, float y, float s, float h)
     FillRound(cx - d * 0.045f, cy - d * 0.045f, d * 0.09f, d * 0.09f, d * 0.045f, 0xFF141A14);
 }
 
+// A tile with nothing to show - no cover, no icon: an app, or a game whose
+// icon couldn't be read - gets its name's first letter on a colour of its
+// own instead of a blank grey square, so a row of them can still be told
+// apart at a glance. Games only once their icons have loaded, so a tile
+// doesn't show a letter and then swap it for the icon.
+static bool ItemShowsLetter(const LibraryItems &it, int item)
+{
+    if (ItemIsDisc(it, item) || ItemBoxArt(it, item) != NULL)
+        return false;
+    if (it.view->isApps)
+        return true;
+    const Icon *icon = ItemIcon(it, item);
+    return icon != NULL && icon->texture == NULL;
+}
+
+// The letter: the first letter or digit of the name, skipping quotes and
+// brackets. UTF-8, so an accented capital comes whole.
+static void LetterFor(const char *name, char *out, int outSize)
+{
+    out[0] = '\0';
+    if (name == NULL)
+        return;
+    const unsigned char *p = (const unsigned char *)name;
+    while (*p != 0 && *p < 0x80 && !isalnum(*p))
+        ++p;
+    if (*p == 0)
+        return;
+    int n = 1;
+    if (*p >= 0xF0) n = 4;
+    else if (*p >= 0xE0) n = 3;
+    else if (*p >= 0xC0) n = 2;
+    for (int i = 0; i < n && p[i] != 0 && i + 1 < outSize; ++i)
+        out[i] = (char)p[i];
+    out[n < outSize ? n : outSize - 1] = '\0';
+    if (n == 1)
+        out[0] = (char)toupper(out[0]);
+}
+
+// Its colour: one of a few muted ones, by the name, so the same app always
+// gets the same.
+static D3DCOLOR LetterTileColor(const char *name)
+{
+    static const D3DCOLOR colors[] = {
+        0xFF2C4A63, // slate blue
+        0xFF4A3B63, // violet
+        0xFF2D5A48, // green
+        0xFF633F35, // rust
+        0xFF575130, // olive
+        0xFF35525C, // teal
+    };
+    unsigned long hash = 5381;
+    for (const unsigned char *p = (const unsigned char *)name; p != NULL && *p != 0; ++p)
+        hash = hash * 33 + tolower(*p);
+    return colors[hash % (sizeof(colors) / sizeof(colors[0]))];
+}
+
 static void DrawItemArt(const LibraryItems &it, int item, float x, float y, float s, float h)
 {
     D3DTexture *boxArt = ItemBoxArt(it, item);
     if (ItemIsDisc(it, item) && boxArt == NULL)
         DrawDiscArt(x, y, s, h);
+    else if (ItemShowsLetter(it, item))
+        FillRoundGradient(x, y, s, h, g_M.radius, LetterTileColor(ItemName(it, item)), COL_SURFACE, true);
     else
         DrawTileArt(boxArt, ItemIcon(it, item), x, y, s, h);
+}
+
+// Inside the frame's text Begin/End: the letter, in the middle of what the
+// name band leaves of the tile.
+static void DrawItemLetter(const LibraryItems &it, int item, float x, float y, float s, float bandH, bool named)
+{
+    if (!ItemShowsLetter(it, item))
+        return;
+    char letter[8];
+    LetterFor(ItemName(it, item), letter, sizeof(letter));
+    if (letter[0] == '\0')
+        return;
+
+    float mul = s * 0.42f / LineHeight(1.0f);
+    if (mul > 2.6f)
+        mul = 2.6f;
+    const float centerY = y + (named ? s - bandH : s) * 0.5f;
+    TextMid(x + s * 0.5f, centerY, mul, 0xD9FFFFFF, letter, ATGFONT_CENTER_X, 0.0f, true);
 }
 
 // The labels in the disc tile's top-right corner, stacked: that it's in the
@@ -4157,7 +4405,7 @@ void RenderLibraryFrame(LibraryPageView &view, const UiHint *hints, int hintCoun
     const int firstRow = view.scroll;
     const float grow = FocusGrowFor(selected, view.focused && items.count > 0);
 
-    BeginFrame();
+    BeginPageFrame();
 
     const bool showToast = ToastVisibleThisFrame();
 
@@ -4298,6 +4546,7 @@ void RenderLibraryFrame(LibraryPageView &view, const UiHint *hints, int hintCoun
     {
         const TileText &t = tileText[i];
         DrawPillText(PillsFor(items, t.item, t.x, t.y, t.s));
+        DrawItemLetter(items, t.item, t.x, t.y, t.s, bandH, ItemNamedUnfocused(items, t.item));
 
         if (ItemNamedUnfocused(items, t.item))
             TextMid(t.x + S(14.0f), t.y + t.s - bandH * 0.5f + S(4.0f), 0.72f, COL_TEXT2,
@@ -4307,6 +4556,7 @@ void RenderLibraryFrame(LibraryPageView &view, const UiHint *hints, int hintCoun
     if (focusItem >= 0)
     {
         DrawPillText(PillsFor(items, focusItem, focusOX, focusOY, focusS));
+        DrawItemLetter(items, focusItem, focusOX, focusOY, focusS, bandH, true);
         MarqueeTextMid(focusOX + S(14.0f), focusOY + focusS - bandH * 0.5f + S(4.0f), 0.8f, COL_TEXT,
                        ItemName(items, focusItem), focusS - S(28.0f), true);
     }
@@ -5564,7 +5814,7 @@ void RenderListFrame(ListPageView &view, const UiHint *hints, int hintCount)
     if (view.sections != NULL)
         visibleRows = layout.shown;
 
-    BeginFrame();
+    BeginPageFrame();
 
     const bool showToast = ToastVisibleThisFrame();
 
@@ -5891,7 +6141,7 @@ void RenderSettingsFrame(SettingsPageView &view, const UiHint *hints, int hintCo
     const float x0 = g_M.contentX, rowH = SettingsRowH();
     const float w = g_M.contentW - (L.most > 0.5f ? ScrollGutter() : 0.0f);
 
-    BeginFrame();
+    BeginPageFrame();
     const bool showToast = ToastVisibleThisFrame();
     ButtonHint footer[MAX_FOOTER_HINTS];
     const int footerCount = LayoutFooter(hints, hintCount, footer);
@@ -6692,10 +6942,16 @@ static HomeWallpapers HomeWallpaper(const HomePageView &view, int focus)
     const StoreArtTexture *art = wanted != 0 ? StoreArtFor(wanted, STORE_ART_BACKGROUND) : NULL;
 
     if (art == NULL && settled && wanted != 0)
-    {
         RequestStoreArt(wanted, STORE_ART_BACKGROUND);
 
-        // The tiles either side, so stepping along the row is already loaded.
+    // The tiles either side, so stepping along the row is already loaded and
+    // the wallpaper cross-fades straight to the next rather than through the
+    // background - asked for once each time the focus settles, whether or
+    // not this game's own has come yet.
+    static unsigned long neighboursAskedFor = 0;
+    if (settled && wanted != 0 && neighboursAskedFor != wanted)
+    {
+        neighboursAskedFor = wanted;
         for (int n = -1; n <= 1; n += 2)
         {
             const int i = focus + n;
@@ -6835,7 +7091,7 @@ void RenderHomeFrame(HomePageView &view, const UiHint *hints, int hintCount)
     if (navFocus > navCount - 1) navFocus = navCount - 1;
     if (navFocus < 0) navFocus = 0;
 
-    BeginFrame();
+    BeginPageFrame();
     const bool showToast = ToastVisibleThisFrame();
 
     ButtonHint footer[MAX_FOOTER_HINTS];
@@ -6980,9 +7236,9 @@ void RenderHomeFrame(HomePageView &view, const UiHint *hints, int hintCount)
     // over the wallpaper the rest of the time.
     if (navFocused && navCount > 0)
     {
-        TextMid(g_M.screenW * 0.5f + S(2.0f), L.navY + L.navH + S(18.0f), 0.72f, 0xCC000000,
+        TextMid(g_M.screenW * 0.5f + S(2.0f), L.navY + L.navH + S(18.0f), 0.72f, FocusBright(0xCC000000),
                 view.nav[navFocus].label, ATGFONT_CENTER_X, 0.0f, true);
-        TextMid(g_M.screenW * 0.5f, L.navY + L.navH + S(16.0f), 0.72f, COL_TEXT, view.nav[navFocus].label,
+        TextMid(g_M.screenW * 0.5f, L.navY + L.navH + S(16.0f), 0.72f, FocusBright(COL_TEXT), view.nav[navFocus].label,
                 ATGFONT_CENTER_X, 0.0f, true);
     }
 
@@ -7002,8 +7258,8 @@ void RenderHomeFrame(HomePageView &view, const UiHint *hints, int hintCount)
         const float sh = S(2.0f);
         Text(g_M.safeX + sh, L.nameY + sh, 0.62f, 0xCC000000, Tr(caption), 0, 0.0f, true);
         Text(g_M.safeX, L.nameY, 0.62f, COL_GREEN_TEXT, Tr(caption), 0, 0.0f, true);
-        TextFit(g_M.safeX + sh, L.nameY + S(26.0f) + sh, 2.0f, 0x99000000, game.name, nameW, true);
-        TextFit(g_M.safeX, L.nameY + S(26.0f), 2.0f, COL_TEXT, game.name, nameW, true);
+        TextFit(g_M.safeX + sh, L.nameY + S(26.0f) + sh, 2.0f, FocusBright(0x99000000), game.name, nameW, true);
+        TextFit(g_M.safeX, L.nameY + S(26.0f), 2.0f, FocusBright(COL_TEXT), game.name, nameW, true);
     }
 
     if (view.recentCount == 0)
@@ -7371,7 +7627,7 @@ void RenderStoreFrame(StorePageView &view, const UiHint *hints, int hintCount)
         GrowFocused(growT, &gx, &gy, &gw, &gh);
     const float r = g_M.radius;
 
-    BeginFrame();
+    BeginPageFrame();
     const bool showToast = ToastVisibleThisFrame();
 
     ButtonHint footer[MAX_FOOTER_HINTS];
@@ -7769,7 +8025,7 @@ void RenderStoreRowsFrame(StoreRowsView &view, const UiHint *hints, int hintCoun
     }
     const float r = g_M.radius;
 
-    BeginFrame();
+    BeginPageFrame();
     const bool showToast = ToastVisibleThisFrame();
 
     ButtonHint footer[MAX_FOOTER_HINTS];
@@ -7911,7 +8167,7 @@ void RenderStoreSectionFrame(StoreSectionView &view, const UiHint *hints, int hi
     L.azLabelY -= lift;
     L.azY -= lift;
 
-    BeginFrame();
+    BeginPageFrame();
     const bool showToast = ToastVisibleThisFrame();
 
     ButtonHint footer[MAX_FOOTER_HINTS];
@@ -8238,7 +8494,7 @@ void RenderStoreLetterFrame(StoreLetterView &view, const UiHint *hints, int hint
     // these and the row above several times over.
     RequestVisibleStoreCovers(view, firstRow, L.fullRows + 3, L.cols);
 
-    BeginFrame();
+    BeginPageFrame();
     const bool showToast = ToastVisibleThisFrame();
 
     ButtonHint footer[MAX_FOOTER_HINTS];
@@ -8699,7 +8955,7 @@ void RenderStoreGameFrame(StoreGameView &view, const UiHint *hints, int hintCoun
     }
     RequestMissingStoreCovers(wantCovers, wantCount);
 
-    BeginFrame();
+    BeginPageFrame();
     const bool showToast = ToastVisibleThisFrame();
 
     ButtonHint footer[MAX_FOOTER_HINTS];
@@ -9069,7 +9325,7 @@ void RenderQueueFrame(QueuePageView &view, const UiHint *hints, int hintCount)
     if (view.recentScroll > recentCount - recentAcross) view.recentScroll = recentCount - recentAcross;
     if (view.recentScroll < 0) view.recentScroll = 0;
 
-    BeginFrame();
+    BeginPageFrame();
 
     const bool showToast = ToastVisibleThisFrame();
 
@@ -9433,7 +9689,7 @@ void RenderStorageFrame(StoragePageView &view, const UiHint *hints, int hintCoun
     const float right = l.drivesX + l.drivesW - S(24.0f);
     const float barH = S(STORAGE_BAR_H);
 
-    BeginFrame();
+    BeginPageFrame();
     const bool showToast = ToastVisibleThisFrame();
 
     ButtonHint footer[MAX_FOOTER_HINTS];
@@ -9647,7 +9903,7 @@ void RenderStorageListFrame(StorageListView &view, const UiHint *hints, int hint
     const float checkX = g_M.contentX + plateW - S(24.0f) - SettingsCheck();
     const float textRight = checkX - S(20.0f);
 
-    BeginFrame();
+    BeginPageFrame();
     const bool showToast = ToastVisibleThisFrame();
 
     ButtonHint footer[MAX_FOOTER_HINTS];
@@ -9800,7 +10056,7 @@ void RenderFilesFrame(FilesPageView &view, const UiHint *hints, int hintCount)
         KeepSelectionVisible(pane.count, visibleRows, pane.selected, pane.scroll);
     }
 
-    BeginFrame();
+    BeginPageFrame();
     const bool showToast = ToastVisibleThisFrame();
     ButtonHint footer[MAX_FOOTER_HINTS];
     const int footerCount = LayoutFooter(hints, hintCount, footer);
