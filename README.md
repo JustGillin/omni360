@@ -79,22 +79,22 @@ Omni360 is a store and a library in one app on the console.
 <table>
   <tr>
     <td width="50%"><img src="docs/screenshots/home.png" alt="Home: the games played most recently as a row of covers, over Halo 3's wallpaper"><br><sub><b>Home</b>: what you played last, the disc in the drive first, under its own wallpaper.</sub></td>
-    <td width="50%"><img src="docs/screenshots/library.png" alt="Games: installed games as a grid of covers"><br><sub><b>Games</b>: every installed game, Xbox 360 and Original Xbox, with the disc in the drive marked.</sub></td>
+    <td width="50%"><img src="docs/screenshots/library.png" alt="Games: installed games as a grid of covers, with All games, Xbox 360, Original Xbox, Arcade and Indie games filters along the top"><br><sub><b>Games</b>: every installed game, Xbox 360, Original Xbox, Arcade and indie, with a filter for each.</sub></td>
   </tr>
   <tr>
-    <td width="50%"><img src="docs/screenshots/store.png" alt="The Store: this week's featured games and the Homebrew, XBLA, XBLIG and Original Xbox buttons"><br><sub><b>Store</b>: this week's featured games, then Homebrew, XBLA, XBLIG and Original Xbox.</sub></td>
+    <td width="50%"><img src="docs/screenshots/store.png" alt="The Store: this week's featured fighting games and the Homebrew, Arcade, Indie games and Original Xbox buttons"><br><sub><b>Store</b>: this week's featured games, then Homebrew, Arcade, Indie games and Original Xbox.</sub></td>
     <td width="50%"><img src="docs/screenshots/360-game-details.png" alt="Halo 3's page: description, ratings, screenshots and more like this"><br><sub><b>A game's page</b>: description, ratings, screenshots, its DLC and its title updates.</sub></td>
   </tr>
   <tr>
-    <td width="50%"><img src="docs/screenshots/dlc.png" alt="Choosing a Rock Band DLC pack"><br><sub><b>DLC</b>: find the packs for any game and pick the ones you want.</sub></td>
-    <td width="50%"><img src="docs/screenshots/settings.png" alt="Settings: the folders games, apps, homebrew and emulators live in"><br><sub><b>Settings</b>: the folders your games, apps, homebrew and emulators live in, your Internet Archive sign-in and updates.</sub></td>
+    <td width="50%"><img src="docs/screenshots/dlc.png" alt="Choosing a Halo 3 DLC pack from Internet Archive"><br><sub><b>DLC</b>: find the packs for any game and pick the ones you want.</sub></td>
+    <td width="50%"><img src="docs/screenshots/settings.png" alt="Settings: Internet Archive sign-in, the PC helper, disc installs, sign-in at start, the clock and the FTP server"><br><sub><b>Settings</b>: your Internet Archive sign-in, the PC helper, disc installs and more, with your library's folders and updates a section away.</sub></td>
   </tr>
   <tr>
-    <td width="50%"><img src="docs/screenshots/queue.png" alt="The Queue: Grand Theft Auto V waiting while an arcade game downloads"><br><sub><b>Queue</b>: everything downloads and installs in the background.</sub></td>
-    <td width="50%"><img src="docs/screenshots/store-popular.png" alt="The Store's A to Z, Popular and Top rated rows"><br><sub><b>Browse</b>: A to Z, or rows of Popular, Top rated and every genre.</sub></td>
+    <td width="50%"><img src="docs/screenshots/queue.png" alt="The Queue: Castlevania: Mirror of Fate HD downloading through the PC helper, CastleStorm waiting, and the games installed recently above"><br><sub><b>Queue</b>: everything downloads and installs in the background.</sub></td>
+    <td width="50%"><img src="docs/screenshots/store-popular.png" alt="The Store's Collections and Publishers rows"><br><sub><b>Browse</b>: collections and publishers, A to Z, or rows of Popular, Top rated and every genre.</sub></td>
   </tr>
   <tr>
-    <td width="50%"><img src="docs/screenshots/xbla-game-details.png" alt="Alan Wake's American Nightmare installing"><br><sub><b>Xbox Live Arcade</b>: arcade games get the same pages, and show their progress as they install.</sub></td>
+    <td width="50%"><img src="docs/screenshots/xbla-game-details.png" alt="Castlevania: Mirror of Fate HD installing, 17%"><br><sub><b>Xbox Live Arcade</b>: arcade games get the same pages, and show their progress as they install.</sub></td>
     <td width="50%"></td>
   </tr>
   <tr>
