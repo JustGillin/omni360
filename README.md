@@ -34,6 +34,8 @@ Browse thousands of games, DLC and title updates, install them in the background
 2. Copy `Omni360.xex` into a folder of its own on the console, and launch it.
 3. Sign in to Internet Archive when it asks: scan the QR code with your phone and sign in there, or type your email and password with the controller. You can also skip it and sign in later, from the Store or Settings.
 
+   <img src="docs/screenshots/ia-sign-in.png" width="640" alt="Signing in to Internet Archive: a QR code to scan with your phone, or Sign in with the controller">
+
 If you'd rather use keys, get them at [archive.org/account/s3.php](https://archive.org/account/s3.php) and put them in a plain text file, `ArchiveOrgKeys.txt`, beside `Omni360.xex`: access key on line 1, secret key on line 2.
 
 The [Setup Guide](docs/Setup%20Guide.md) covers the whole thing step by step, including where games and downloads go.
