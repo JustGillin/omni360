@@ -6,7 +6,7 @@
 // ---------------------------------------------------------------------------
 //
 // helper/ in the repository is a small PC program. It broadcasts
-// "OMNI360-HELPER 2 <port> <id> <name>" on UDP port 36060 every few seconds,
+// "OMNI360-HELPER <protocol> <port> <id> <name>" on UDP port 36060 every few seconds,
 // and a thread here listens for that. Once the user has paired with it
 // (Settings > General > PC helper - a code the helper shows), a Store download
 // reads the archive.org file from the helper instead of archive.org
@@ -54,11 +54,20 @@ enum PcHelperStatus
     PC_HELPER_NONE,           // nothing heard, and not paired
     PC_HELPER_FOUND,          // a helper is running, but not the one paired with (or none is)
     PC_HELPER_PAIRED_ONLINE,  // paired, and it's running
-    PC_HELPER_PAIRED_OFFLINE  // paired, but it isn't running
+    PC_HELPER_PAIRED_OFFLINE, // paired, but it isn't running
+    // Running (the paired one, or any when not paired), but speaking another
+    // protocol than this Omni360 - see helper/version.go. Not used until the
+    // older side is updated.
+    PC_HELPER_UPDATE_HELPER,  // the helper is older
+    PC_HELPER_UPDATE_APP      // Omni360 is older
 };
 
 // What Settings shows. name gets the PC's name, when one was heard.
 PcHelperStatus GetPcHelperStatus(char *name, unsigned int nameSize);
+
+// Whether this console is paired with a helper, running or not, whatever its
+// protocol.
+bool PcHelperIsPaired();
 
 // The paired helper's base URL ("http://192.168.1.20:36061") and token, if
 // it's running and turned on; false otherwise.

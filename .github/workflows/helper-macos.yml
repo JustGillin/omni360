@@ -69,6 +69,10 @@ jobs:
           mkdir -p "$app/Contents/MacOS" "$app/Contents/Resources"
           cp build/Omni360Helper "$app/Contents/MacOS/Omni360Helper"
           cp macos/Info.plist "$app/Contents/Info.plist"
+          # The version, from version.go - the one place it's kept.
+          v=$(sed -n 's/^const helperVersion = "\([^"]*\)".*/\1/p' version.go)
+          plutil -replace CFBundleShortVersionString -string "$v" "$app/Contents/Info.plist"
+          plutil -replace CFBundleVersion -string "$v" "$app/Contents/Info.plist"
           cp build/icon.icns "$app/Contents/Resources/icon.icns"
           # Ad-hoc signed: Apple Silicon won't run unsigned code at all. It
           # isn't notarised, so the first open still needs right-click > Open.

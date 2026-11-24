@@ -146,6 +146,10 @@ That's it. While the helper is running:
 
 If you switch the computer off or close the helper partway through, the download carries on from archive.org by itself, and moves back to the computer when the helper returns. Pairing keeps other devices on your network out, since the console passes your archive.org keys along with each download.
 
+- **Where downloads go:** **Change downloads folder…** in the helper's menu picks another drive or folder. The helper makes an `Omni360Helper` folder inside the one you pick and clears out the old one.
+- **Updates:** from version 1.1.0 the helper updates itself. When a new release is out, its menu offers **Update to …**, and it installs the update by itself once nothing has downloaded for a while (untick **Install updates automatically** to stop that). It only installs an update signed with the project's key. If you have an older helper, download the new one from the release page once.
+- If the console and the helper are too far apart in version to work together, **Settings → PC helper** says which one needs updating, and so does the helper's menu.
+
 <details>
 <summary><b>Why it can be faster</b></summary>
 <br>

@@ -11,6 +11,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"strconv"
 	"sync"
 	"time"
 )
@@ -38,6 +39,10 @@ type pairing struct {
 	// every 10 seconds - for the tray to say whether one is connected.
 	seenAt   time.Time
 	seenFrom string
+	// What it said it speaks on its last /hello: the protocol, and its
+	// Omni360 version ("" from one too old to say - those speak 2).
+	seenProtocol int
+	seenVersion  string
 }
 
 // xbox is the paired console heard in the last 30 seconds, if there is one.
@@ -45,6 +50,14 @@ func (p *pairing) xbox() (string, bool) {
 	p.mu.Lock()
 	defer p.mu.Unlock()
 	return p.seenFrom, !p.seenAt.IsZero() && time.Since(p.seenAt) < 30*time.Second
+}
+
+// xboxProtocol is the protocol and Omni360 version the paired console last
+// said it has.
+func (p *pairing) xboxProtocol() (int, string) {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	return p.seenProtocol, p.seenVersion
 }
 
 type pairRequest struct {
@@ -193,6 +206,14 @@ func (p *pairing) allowed(r *http.Request) bool {
 	if ok {
 		p.seenAt = time.Now()
 		p.seenFrom, _, _ = net.SplitHostPort(r.RemoteAddr)
+		// Only /hello says; other requests leave what it said alone.
+		if r.URL.Path == "/hello" {
+			p.seenProtocol, p.seenVersion = 2, ""
+			if n, err := strconv.Atoi(r.URL.Query().Get("p")); err == nil {
+				p.seenProtocol = n
+				p.seenVersion = r.URL.Query().Get("v")
+			}
+		}
 	}
 	return ok
 }

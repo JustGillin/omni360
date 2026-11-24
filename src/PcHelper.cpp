@@ -3,6 +3,7 @@
 #include "HttpPlain.h"
 #include "OutputConsole.h"
 #include "parsing.h" // LogEscapePercent, UrlEncodeFormValue
+#include "settings.h" // CURRENT_VERSION
 
 #include <xtl.h>
 #include <stdio.h>
@@ -13,6 +14,12 @@
 #define HELPER_FRESH_MS    15000 // it announces every 3 seconds
 #define XBOX_SO_BYPASS_SECURITY 0x5801
 
+// What this console and the helper say to each other - helper/version.go's
+// protocol. A helper with another number is heard, and Settings says which
+// side needs updating, but nothing is sent its way: an older console used to
+// drop such a helper's announcements, so it looked as if nothing was running.
+#define PC_HELPER_PROTOCOL 2
+
 static CRITICAL_SECTION g_helperLock;
 static bool g_lockReady = false;
 
@@ -20,6 +27,8 @@ static bool g_lockReady = false;
 static char g_heardUrl[64];
 static char g_heardId[32];
 static char g_heardName[64];
+static int g_heardProtocol = PC_HELPER_PROTOCOL;
+static char g_heardVersion[16]; // the helper's own version, from /hello; "" until it answers one
 static DWORD g_heardAt = 0;
 static bool g_heardEver = false;
 static bool g_reportedGone = false; // said in the log that it went quiet
@@ -47,6 +56,18 @@ static void CopyOut(char *out, unsigned int outSize, const char *from)
 }
 
 static bool FreshLocked() { return g_heardEver && GetTickCount() - g_heardAt <= HELPER_FRESH_MS; }
+
+// Heard lately, and speaks this console's protocol: one that can be used.
+static bool UsableLocked() { return FreshLocked() && g_heardProtocol == PC_HELPER_PROTOCOL; }
+
+// Notes the protocol a helper said it speaks, logging a mismatch once.
+static void SetHeardProtocolLocked(int protocol)
+{
+    if (protocol != g_heardProtocol && protocol != PC_HELPER_PROTOCOL)
+        dprintf("[helper] the PC helper speaks protocol %d, this Omni360 %d - %s\n", protocol, PC_HELPER_PROTOCOL,
+                protocol < PC_HELPER_PROTOCOL ? "the helper needs updating" : "Omni360 needs updating");
+    g_heardProtocol = protocol;
+}
 
 static DWORD WINAPI ListenEntry(LPVOID)
 {
@@ -125,10 +146,12 @@ static DWORD WINAPI ListenEntry(LPVOID)
         }
         buf[n] = '\0';
 
-        // "OMNI360-HELPER 2 <port> <id> <name>" - the name may have spaces.
-        int version = 0, port = 0;
+        // "OMNI360-HELPER <protocol> <port> <id> <name>" - the name may have
+        // spaces. Every protocol keeps this shape (helper/version.go), so a
+        // helper on another one is still heard, to say so in Settings.
+        int protocol = 0, port = 0;
         char id[32] = "";
-        if (sscanf(buf, "OMNI360-HELPER %d %d %31s", &version, &port, id) != 3 || version != 2 ||
+        if (sscanf(buf, "OMNI360-HELPER %d %d %31s", &protocol, &port, id) != 3 || protocol < 1 ||
             port <= 0 || port > 65535)
             continue;
         const char *pcName = buf;
@@ -149,6 +172,9 @@ static DWORD WINAPI ListenEntry(LPVOID)
         CopyOut(g_heardUrl, sizeof(g_heardUrl), url);
         CopyOut(g_heardId, sizeof(g_heardId), id);
         CopyOut(g_heardName, sizeof(g_heardName), pcName != NULL ? pcName : "");
+        if (changed)
+            g_heardVersion[0] = '\0'; // until it answers /hello
+        SetHeardProtocolLocked(protocol);
         g_heardAt = GetTickCount();
         g_heardEver = true;
         g_reportedGone = false;
@@ -169,17 +195,30 @@ static DWORD WINAPI ListenEntry(LPVOID)
 // settings.txt, counted as running: some PCs' broadcasts never reach the
 // console - a firewall, a VPN or a second network adapter taking them - and
 // without this, such a helper would drop out 15 seconds after it was found.
-// /hello answers "omni360-helper 2 <id>", so a reply is as good as an
-// announcement. Without a token it needs no pairing, so it works for a
-// helper found but not yet paired with too.
-static bool ParseHello(const char *reply, char *id, unsigned int idSize)
+// /hello answers "omni360-helper <protocol> <id> <version>" (no version from
+// helpers before 1.1.0), so a reply is as good as an announcement. Without a
+// token it needs no pairing, so it works for a helper found but not yet
+// paired with too. The console says its own protocol and version with it
+// (HelloUrl), so the helper's tray can say when Omni360 needs updating.
+static bool ParseHello(const char *reply, char *id, unsigned int idSize, int *protocol, char *version,
+                       unsigned int versionSize)
 {
-    int version = 0;
-    char got[32] = "";
-    if (sscanf(reply, "omni360-helper %d %31s", &version, got) != 2 || version != 2)
+    char got[32] = "", ver[16] = "";
+    *protocol = 0;
+    if (sscanf(reply, "omni360-helper %d %31s %15s", protocol, got, ver) < 2 || *protocol < 1)
         return false;
     CopyOut(id, idSize, got);
+    CopyOut(version, versionSize, ver);
     return true;
+}
+
+// base + "/hello", with this console's protocol and version, and the token
+// when there is one.
+static void HelloUrl(char *url, unsigned int urlSize, const char *base, const char *token)
+{
+    _snprintf(url, urlSize, "%s/hello?p=%d&v=%s%s%s", base, PC_HELPER_PROTOCOL, CURRENT_VERSION,
+              token != NULL && token[0] != '\0' ? "&t=" : "", token != NULL ? token : "");
+    url[urlSize - 1] = '\0';
 }
 
 static DWORD WINAPI CheckInEntry(LPVOID)
@@ -197,15 +236,13 @@ static DWORD WINAPI CheckInEntry(LPVOID)
         if (base[0] == '\0')
             continue;
 
-        char url[160], reply[64];
-        if (token[0] != '\0' && strcmp(heardId, pairedId) == 0)
-            _snprintf(url, sizeof(url), "%s/hello?t=%s", base, token);
-        else
-            _snprintf(url, sizeof(url), "%s/hello", base);
-        url[sizeof(url) - 1] = '\0';
+        char url[192], reply[96];
+        HelloUrl(url, sizeof(url), base, token[0] != '\0' && strcmp(heardId, pairedId) == 0 ? token : NULL);
         unsigned long long len = 0;
-        char id[32];
-        if (HttpGetPlain(url, NULL, reply, sizeof(reply) - 1, &len) != 200 || !ParseHello(reply, id, sizeof(id)))
+        char id[32], version[16];
+        int protocol = 0;
+        if (HttpGetPlain(url, NULL, reply, sizeof(reply) - 1, &len) != 200 ||
+            !ParseHello(reply, id, sizeof(id), &protocol, version, sizeof(version)))
             continue;
 
         EnterCriticalSection(&g_helperLock);
@@ -213,7 +250,11 @@ static DWORD WINAPI CheckInEntry(LPVOID)
         if (strcmp(g_heardUrl, base) == 0)
         {
             const bool back = !FreshLocked();
+            if (strcmp(g_heardVersion, version) != 0 && version[0] != '\0')
+                dprintf("[helper] the PC helper at %s is version %s\n", base, version);
             CopyOut(g_heardId, sizeof(g_heardId), id);
+            CopyOut(g_heardVersion, sizeof(g_heardVersion), version);
+            SetHeardProtocolLocked(protocol);
             g_heardAt = GetTickCount();
             g_reportedGone = false;
             if (back)
@@ -360,13 +401,14 @@ PcHelperScanResult PcHelperScan(char *id, unsigned int idSize, char *name, unsig
         for (int i = 0; i < found; ++i)
         {
             const unsigned char *ip = (const unsigned char *)&open[i];
-            char base[64], url[96], reply[64], gotId[32];
+            char base[64], url[192], reply[96], gotId[32], gotVersion[16];
+            int gotProtocol = 0;
             _snprintf(base, sizeof(base), "http://%u.%u.%u.%u:%d", ip[0], ip[1], ip[2], ip[3], HELPER_HTTP_PORT);
             base[sizeof(base) - 1] = '\0';
-            _snprintf(url, sizeof(url), "%s/hello", base);
-            url[sizeof(url) - 1] = '\0';
+            HelloUrl(url, sizeof(url), base, NULL);
             unsigned long long len = 0;
-            if (HttpGetPlain(url, NULL, reply, sizeof(reply) - 1, &len) != 200 || !ParseHello(reply, gotId, sizeof(gotId)))
+            if (HttpGetPlain(url, NULL, reply, sizeof(reply) - 1, &len) != 200 ||
+                !ParseHello(reply, gotId, sizeof(gotId), &gotProtocol, gotVersion, sizeof(gotVersion)))
                 continue;
 
             char pcName[64];
@@ -378,6 +420,8 @@ PcHelperScanResult PcHelperScan(char *id, unsigned int idSize, char *name, unsig
             g_heardName[sizeof(g_heardName) - 1] = '\0';
             CopyOut(g_heardUrl, sizeof(g_heardUrl), base);
             CopyOut(g_heardId, sizeof(g_heardId), gotId);
+            CopyOut(g_heardVersion, sizeof(g_heardVersion), gotVersion);
+            SetHeardProtocolLocked(gotProtocol);
             g_heardAt = GetTickCount();
             g_heardEver = true;
             g_reportedGone = false;
@@ -443,9 +487,16 @@ PcHelperStatus GetPcHelperStatus(char *name, unsigned int nameSize)
     EnterCriticalSection(&g_helperLock);
     const bool fresh = FreshLocked();
     const bool paired = g_pairedId[0] != '\0' && g_pairedToken[0] != '\0';
+    // The helper heard is the one that matters: the paired one, or any when
+    // not paired.
+    const bool relevant = fresh && (!paired || strcmp(g_heardId, g_pairedId) == 0);
     PcHelperStatus status;
-    if (paired)
-        status = (fresh && strcmp(g_heardId, g_pairedId) == 0) ? PC_HELPER_PAIRED_ONLINE : PC_HELPER_PAIRED_OFFLINE;
+    if (relevant && g_heardProtocol < PC_HELPER_PROTOCOL)
+        status = PC_HELPER_UPDATE_HELPER;
+    else if (relevant && g_heardProtocol > PC_HELPER_PROTOCOL)
+        status = PC_HELPER_UPDATE_APP;
+    else if (paired)
+        status = relevant ? PC_HELPER_PAIRED_ONLINE : PC_HELPER_PAIRED_OFFLINE;
     else
         status = fresh ? PC_HELPER_FOUND : PC_HELPER_NONE;
     CopyOut(name, nameSize, g_heardEver ? g_heardName : "");
@@ -453,12 +504,21 @@ PcHelperStatus GetPcHelperStatus(char *name, unsigned int nameSize)
     return status;
 }
 
+bool PcHelperIsPaired()
+{
+    EnsureLock();
+    EnterCriticalSection(&g_helperLock);
+    const bool paired = g_pairedId[0] != '\0' && g_pairedToken[0] != '\0';
+    LeaveCriticalSection(&g_helperLock);
+    return paired;
+}
+
 bool PcHelperUrl(char *url, unsigned int urlSize, char *token, unsigned int tokenSize,
                  char *name, unsigned int nameSize)
 {
     EnsureLock();
     EnterCriticalSection(&g_helperLock);
-    const bool ok = g_enabled && g_pairedToken[0] != '\0' && FreshLocked() && strcmp(g_heardId, g_pairedId) == 0;
+    const bool ok = g_enabled && g_pairedToken[0] != '\0' && UsableLocked() && strcmp(g_heardId, g_pairedId) == 0;
     if (ok)
     {
         CopyOut(url, urlSize, g_heardUrl);
@@ -479,11 +539,18 @@ bool PcHelperRequestPair(char *requestId, unsigned int requestIdSize, char *code
     EnsureLock();
     EnterCriticalSection(&g_helperLock);
     const bool fresh = FreshLocked();
+    const int protocol = g_heardProtocol;
     CopyOut(g_pairingUrl, sizeof(g_pairingUrl), g_heardUrl);
     LeaveCriticalSection(&g_helperLock);
     if (!fresh)
     {
         CopyOut(message, messageSize, Tr(STR_THE_HELPER_ISNT_RUNNING_ON));
+        return false;
+    }
+    if (protocol != PC_HELPER_PROTOCOL)
+    {
+        CopyOut(message, messageSize, protocol < PC_HELPER_PROTOCOL ? Tr(STR_YOUR_PCS_HELPER_IS_OUT)
+                                                                    : Tr(STR_THE_HELPER_NEEDS_A_NEWER));
         return false;
     }
 

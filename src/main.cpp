@@ -3752,12 +3752,22 @@ static void BuildSettingsPage(SettingsPage &page, const Library &lib, const char
             case PC_HELPER_FOUND:
                 TrFormat(page.helperStatus, sizeof(page.helperStatus), STR_HELPER_FOUND, pcName);
                 break;
+            case PC_HELPER_UPDATE_HELPER:
+                TrFormat(page.helperStatus, sizeof(page.helperStatus), STR_HELPER_UPDATE_HELPER, pcName);
+                break;
+            case PC_HELPER_UPDATE_APP:
+                TrFormat(page.helperStatus, sizeof(page.helperStatus), STR_HELPER_UPDATE_APP, pcName);
+                break;
             default:
                 TrFormat(page.helperStatus, sizeof(page.helperStatus), STR_NOT_FOUND);
                 break;
             }
             page.helperStatus[sizeof(page.helperStatus) - 1] = '\0';
-            const bool paired = helper == PC_HELPER_PAIRED_ONLINE || helper == PC_HELPER_PAIRED_OFFLINE;
+            // A helper on another protocol keeps Use and Unpair when it's the
+            // paired one; it comes back by itself once the older side updates.
+            const bool paired = helper == PC_HELPER_PAIRED_ONLINE || helper == PC_HELPER_PAIRED_OFFLINE ||
+                                ((helper == PC_HELPER_UPDATE_HELPER || helper == PC_HELPER_UPDATE_APP) &&
+                                 PcHelperIsPaired());
             AddSettingsRow(page, SETTINGS_VIEW_LINE, Tr(STR_PC_HELPER)).status = page.helperStatus;
             if (paired)
             {

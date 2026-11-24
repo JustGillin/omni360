@@ -94,13 +94,15 @@ Or in the browser: **Releases → Draft a new release**, choose the tag, attach 
 sh tools/release_helpers.sh v0.2.4-beta
 ```
 
-This attaches all three helper downloads — `Omni360Helper.exe`, `Omni360Helper-linux` and `Omni360Helper-macos.zip` — to the draft. The helper changes far less often than the app, so if nothing in `helper/` changed since the last published release, it copies that release's three files over and builds nothing. Otherwise it builds Windows and Linux here (`tools/build_helper.sh`, which needs Go: `winget install GoLang.Go`) and starts the **Helper for macOS** workflow, which builds on a Mac and attaches its zip itself a few minutes later. Wait for that run before publishing:
+This attaches the helper to the draft: `Omni360Helper.exe`, `Omni360Helper-linux` and `Omni360Helper-macos.zip`, a `.sig` beside each, and `Omni360Helper-version.txt`. Running helpers update themselves from the newest release. They read the version file, and they only install their platform's file if its signature checks out against the release key, the same key as the XEX's. So the script signs with your key and needs it here.
 
-```bash
-gh run list --workflow helper-macos.yml --limit 1
-```
+The helper changes far less often than the app. If nothing in `helper/` changed since the last published release, the script copies that release's helper files over and builds nothing. Otherwise:
 
-The helpers aren't signed: the console never runs them, and people download them from the release page themselves.
+- **Bump `helperVersion` in `helper/version.go` first.** The script stops if it matches the last release's, because running helpers wouldn't see the update. Bump the two `1.x.0.0` versions in `helper/winres/winres.json` to match and remake the `.syso` (the command is in `tools/build_helper.sh`). The Mac app takes its version from `version.go` by itself.
+- It builds Windows and Linux here (`tools/build_helper.sh`, which needs Go: `winget install GoLang.Go`), signs them, and attaches them.
+- It starts the **Helper for macOS** workflow, waits for it to attach the zip (a few minutes), then signs that zip and attaches the signature.
+
+If `protocol` in `helper/version.go` changed, change `PC_HELPER_PROTOCOL` in `src/PcHelper.cpp` to match in the same release. Consoles and helpers on different protocols don't use each other: Settings and the helper's tray each say which one needs updating.
 
 ### 5. Read the notes, then publish
 

@@ -442,7 +442,9 @@ func (s *store) makeRoom(keep string) {
 	var total int64
 	for _, e := range entries {
 		name := e.Name()
-		if e.IsDir() || filepath.Ext(name) != "" { // downloads have no extension; .progress, .json, .log do
+		// Downloads only: not their .progress, nor anything else in a folder
+		// the user may keep other things in.
+		if e.IsDir() || filepath.Ext(name) != "" || !isDownloadFile(name) {
 			continue
 		}
 		info, err := e.Info()

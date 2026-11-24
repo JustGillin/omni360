@@ -2,25 +2,30 @@ package main
 
 import (
 	"fmt"
+	"log"
 	"omni360helper/icon"
+	"os"
 	"os/exec"
 	"runtime"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"fyne.io/systray"
 )
 
 // The tray icon is the helper's whole interface: allowing a console to pair,
-// what it's doing, and a way to quit. A release build has no console window
-// (-ldflags -H=windowsgui), so this is where the code is read from.
-func runTray(s *store, p *pairing, cacheDir, logPath string) {
+// what it's doing, where downloads go, updates, and a way to quit. A release
+// build has no console window (-ldflags -H=windowsgui), so this is where the
+// code is read from.
+func runTray(a *app) {
+	s, p := a.store, a.pair
 	systray.Run(func() {
 		systray.SetIcon(stillIcon())
 		systray.SetTitle("Omni360 Helper")
 		systray.SetTooltip("Omni360 Helper")
 
-		title := systray.AddMenuItem("Omni360 Helper", "")
+		title := systray.AddMenuItem("Omni360 Helper "+helperVersion, "")
 		title.Disable()
 		xbox := systray.AddMenuItem("No Xbox connected", "Whether a paired Xbox has checked in")
 		xbox.Disable()
@@ -28,9 +33,20 @@ func runTray(s *store, p *pairing, cacheDir, logPath string) {
 		allow.Hide()
 		status := systray.AddMenuItem("Waiting for your console", "")
 		status.Disable()
+		update := systray.AddMenuItem("", "")
+		update.Hide()
 		systray.AddSeparator()
-		openCache := systray.AddMenuItem("Open downloads folder", "")
+		openCache := systray.AddMenuItem("Open downloads folder", a.downloadsDir)
+		changeCache := systray.AddMenuItem("Change downloads folder…", "Where this PC keeps games while your Xbox copies them")
+		if a.pinned {
+			changeCache.SetTooltip("Set by -cache when the helper was started")
+			changeCache.Disable()
+		}
 		openLog := systray.AddMenuItem("Open log", "")
+		a.settings.mu.Lock()
+		autoOn := !a.settings.ManualUpdates
+		a.settings.mu.Unlock()
+		autoUpdate := systray.AddMenuItemCheckbox("Install updates automatically", "When nothing has downloaded for a while", autoOn)
 		systray.AddSeparator()
 		quit := systray.AddMenuItem("Quit", "")
 
@@ -43,14 +59,41 @@ func runTray(s *store, p *pairing, cacheDir, logPath string) {
 					allow.Hide()
 				}
 				from, connected := p.xbox()
-				if connected {
-					xbox.SetTitle("Connected to your Xbox (" + from + ")")
-				} else {
+				xboxProtocol, _ := p.xboxProtocol()
+				switch {
+				case !connected:
 					xbox.SetTitle("No Xbox connected")
+				case xboxProtocol < protocol:
+					xbox.SetTitle("Your Xbox needs a newer Omni360 - update it in Settings")
+				case xboxProtocol > protocol:
+					xbox.SetTitle("Your Xbox needs a newer helper - update this one")
+				default:
+					xbox.SetTitle("Connected to your Xbox (" + from + ")")
 				}
 				line := s.summary(connected)
 				status.SetTitle(line)
 				systray.SetTooltip("Omni360 Helper - " + line)
+
+				available, busy, failed := a.updates.state()
+				switch {
+				case available == "":
+					update.Hide()
+				case busy:
+					update.SetTitle("Updating to " + available + "…")
+					update.SetTooltip("")
+					update.Disable()
+					update.Show()
+				case failed != "":
+					update.SetTitle("Update to " + available + " failed - try again")
+					update.SetTooltip(failed)
+					update.Enable()
+					update.Show()
+				default:
+					update.SetTitle("Update to " + available)
+					update.SetTooltip("Downloads it, then restarts the helper")
+					update.Enable()
+					update.Show()
+				}
 				time.Sleep(2 * time.Second)
 			}
 		}()
@@ -62,10 +105,25 @@ func runTray(s *store, p *pairing, cacheDir, logPath string) {
 					if req := p.waiting(); req != nil {
 						p.decide(req, true)
 					}
+				case <-update.ClickedCh:
+					go a.updates.install(a)
 				case <-openCache.ClickedCh:
-					openPath(cacheDir)
+					openPath(a.downloadsDir)
+				case <-changeCache.ClickedCh:
+					go a.changeDownloads()
 				case <-openLog.ClickedCh:
-					openPath(logPath)
+					openPath(a.logPath)
+				case <-autoUpdate.ClickedCh:
+					a.settings.mu.Lock()
+					a.settings.ManualUpdates = !a.settings.ManualUpdates
+					on := !a.settings.ManualUpdates
+					a.settings.save()
+					a.settings.mu.Unlock()
+					if on {
+						autoUpdate.Check()
+					} else {
+						autoUpdate.Uncheck()
+					}
 				case <-quit.ClickedCh:
 					systray.Quit()
 					return
@@ -73,6 +131,90 @@ func runTray(s *store, p *pairing, cacheDir, logPath string) {
 			}
 		}()
 	}, func() {})
+}
+
+var choosingFolder atomic.Bool
+
+// changeDownloads asks for a new downloads folder and restarts the helper
+// to use it. The old folder's downloads are removed by the new start - they
+// can't be while this one has them open, and moving many GB between drives
+// isn't worth it for a cache: the console has its own copy of what it's read.
+func (a *app) changeDownloads() {
+	if !choosingFolder.CompareAndSwap(false, true) {
+		return // a dialog is open already
+	}
+	defer choosingFolder.Store(false)
+	const title = "Omni360 Helper"
+
+	picked, ok, err := chooseFolder("Choose where Omni360 Helper keeps downloads. It makes an "+
+		downloadsSubfolder+" folder inside the one you pick.", a.downloadsDir)
+	if err != nil {
+		showError(title, "Couldn't ask for a folder: "+err.Error())
+		return
+	}
+	if !ok {
+		return
+	}
+	target := downloadsFolderFor(picked)
+	if sameFolder(target, a.downloadsDir) {
+		return
+	}
+	if err := checkWritable(target); err != nil {
+		showError(title, "Omni360 Helper can't save downloads in "+target+":\n\n"+err.Error())
+		return
+	}
+	if a.store.anyBusy() && !askYesNo(title, "A download is running. The helper restarts to change the folder, "+
+		"and your Xbox carries on from archive.org for those few seconds.\n\nChange it now?") {
+		return
+	}
+
+	a.settings.mu.Lock()
+	if sameFolder(target, a.dataDir) {
+		a.settings.Downloads = ""
+	} else {
+		a.settings.Downloads = target
+	}
+	a.settings.CleanUp = a.downloadsDir
+	err = a.settings.save()
+	a.settings.mu.Unlock()
+	if err != nil {
+		showError(title, "Couldn't save the setting: "+err.Error())
+		return
+	}
+	log.Printf("downloads move to %s - restarting", target)
+	if err := a.restartSelf(); err != nil {
+		showError(title, "Couldn't restart the helper - quit it and start it again to use the new folder.\n\n"+err.Error())
+	}
+}
+
+// checkWritable makes dir if it isn't there and checks a file can be
+// written in it.
+func checkWritable(dir string) error {
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		return err
+	}
+	f, err := os.CreateTemp(dir, ".write-test-")
+	if err != nil {
+		return err
+	}
+	name := f.Name()
+	f.Close()
+	return os.Remove(name)
+}
+
+// restartSelf starts this program again, with the same arguments, and quits
+// this one.
+func (a *app) restartSelf() error {
+	exe, err := os.Executable()
+	if err != nil {
+		return err
+	}
+	if runtime.GOOS == "darwin" {
+		if bundle := appBundle(exe); bundle != "" {
+			return a.restart(exec.Command("open", append([]string{"-n", bundle, "--args"}, os.Args[1:]...)...))
+		}
+	}
+	return a.restart(exec.Command(exe, os.Args[1:]...))
 }
 
 func openPath(path string) {
