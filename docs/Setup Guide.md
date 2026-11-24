@@ -7,7 +7,7 @@ Start-to-finish setup for a console you already have modded. Adapted from X-Stor
 **Required:**
 - A soft-modded (BadUpdate, ABadAvatar, PeerPressure) or hard-modded (RGH, JTAG) Xbox 360.
 - A working internet connection on the console. Ethernet recommended — game downloads are several gigabytes.
-- An archive.org account. Every collection Omni360 downloads from is marked private, so an anonymous request gets a hard 401 — the keys below are genuinely required, not optional.
+- A free Internet Archive account. Every collection Omni360 downloads from is marked private, so downloading needs you signed in. Browsing the Store works without it.
 - Room on the drive your games go to, if you'll install games: while a game installs, both its download (around 7GB) and the installed game (3-8GB) are on the drive. The download is removed once it's installed.
 
 **Not required:**
@@ -19,15 +19,19 @@ Start-to-finish setup for a console you already have modded. Adapted from X-Stor
 
 Use a released `Omni360.xex`, or build it: `XboxTLS2.vcxproj` from `Omni360.sln`, in Visual Studio 2010 with the official Microsoft Xbox 360 XDK. The Release configuration produces `Omni360.xex`. See `COMPILING.md`.
 
-## 2. Get your archive.org API keys
+## 2. Signing in to Internet Archive
 
-Log in to archive.org, then visit [archive.org/account/s3.php](https://archive.org/account/s3.php) and copy your **IAS3 access key and secret key**. These are archive.org's official script-friendly credentials — the same pair their own `ia` command-line tool uses. They are *not* your account password.
+Nothing to prepare: the first time Omni360 starts, it asks you to sign in, three ways:
 
-Create a plain text file with the access key on line 1 and the secret key on line 2. You will transfer it as `ArchiveOrgKeys.txt` alongside the XEX.
+- **With your phone** — scan the QR code on screen and sign in on the page it opens. The page only exists while the question is on screen, and only on your home network.
+- **On the console** — your email and password, typed with the controller.
+- **With keys** — your IAS3 access key and secret key from [archive.org/account/s3.php](https://archive.org/account/s3.php), the pair Internet Archive's own `ia` tool uses. The phone page takes them too, pasted.
 
-Doing this on a PC is strongly recommended over the alternative, which is typing a roughly 40-character secret key on an on-screen keyboard with a controller. You can still do it on the console: until keys are saved, the library shows a banner pointing you to **Settings**, where you can add, change or remove them. Keys entered there are checked with archive.org before they're saved, to the same file.
+Or choose **Not now**: browsing works without signing in, and Omni360 asks again when you download something. You can sign in, change account or sign out any time from the top of the Store or **Settings → Internet Archive**.
 
-**This file is plain text either way.** That is fine on a console only you use. Delete it if anyone else has physical or FTP access — and never share it, or a build folder with it inside.
+Your password is only sent to Internet Archive, and never saved. What Omni360 keeps is the account's keys, in `ArchiveOrgKeys.txt` beside the XEX. You can also make that file yourself on a PC — access key on line 1, secret key on line 2 — and copy it over with the XEX.
+
+**That file is plain text.** That is fine on a console only you use. Delete it if anyone else has physical or FTP access — and never share it, or a build folder with it inside.
 
 ## 3. Optional: settings.txt
 
@@ -80,7 +84,7 @@ Remove the line to go back to downloading from consolemods.org.
 
 ## 4. Transfer files to the console
 
-Copy `Omni360.xex`, `ArchiveOrgKeys.txt`, and `settings.txt` if you made one, into a single folder on the console — something like `Hdd1:\Apps\Omni360\` or `Usb0:\Apps\Omni360\`. Keep them together, and do not put any other `.xex` in that folder. Omni360 keeps its caches beside them: `Covers\` and `Store\` for artwork, `Library.cache` for the game list it draws at startup, and `Recents.txt` for what Home shows. All four can be deleted safely; they rebuild.
+Copy `Omni360.xex`, plus `ArchiveOrgKeys.txt` and `settings.txt` if you made them, into a single folder on the console — something like `Hdd1:\Apps\Omni360\` or `Usb0:\Apps\Omni360\`. Keep them together, and do not put any other `.xex` in that folder. Omni360 keeps its caches beside them: `Covers\` and `Store\` for artwork, `Library.cache` for the game list it draws at startup, and `Recents.txt` for what Home shows. All four can be deleted safely; they rebuild.
 
 Three ways to get them across:
 
@@ -102,7 +106,7 @@ Launch `Omni360.xex` from a file manager or your dashboard's home screen.
 2. **Home** is where it starts: the games you played most recently, and a row of icons across the top for **Games + Apps**, **Store**, **Queue** and **Settings**. Move with the **D-pad or left stick**, **up** from the games to reach the icons. **B** goes back to Home from anywhere, and **B** on Home asks whether to exit.
 3. **Games + Apps** has a sidebar of its own — **Games**, and **Apps**, **Homebrew** or **Emulators** once those have folders. Left from the first column reaches it. The Store, the Queue and Settings have no sidebar; they open full width.
 4. **To install a game**, open the **Store**, pick a letter, then a game. Its page has its description, screenshots and versions — USA and World versions first, and a multi-disc game's discs together as one version. Choose one in the list if you want a different version, then press **Install**. It joins the **Queue**: a typical game takes 30-40 minutes to download and 5-10 to install, and you can keep browsing meanwhile. A popup says when it's done.
-5. **For DLC or title updates**, open a game's page — from the Store, or **X** on a game in Games or on Home — and press **Find DLC** or **Title updates**. It searches archive.org by name and shows what it found, ranked. **Nothing downloads automatically** — you pick the pack yourself, and anything already installed is marked as such.
+5. **For DLC or title updates**, open a game's page — from the Store, or **X** on a game in Games or on Home — and press **Find DLC** or **Title updates**. It searches Internet Archive by name and shows what it found, ranked. **Nothing downloads automatically** — you pick the pack yourself, and anything already installed is marked as such.
 6. **To install a disc**, put it in the drive: it shows up as the first tile on Home and in Games. **A** installs it as Games on Demand; you confirm its name, it checks there's room, and it copies the disc to your games folder.
 7. **To remove a game**, press **Uninstall** on its page. Its DLC and title updates stay.
 8. **On the Queue**, **X** stops a download or install (nothing is left behind), or clears a finished one.
@@ -114,13 +118,13 @@ Because DLC matching is deliberately loose — it has to cope with release-group
 `game:\DebugInfo.txt` is the log, and it keeps recording even once the drawn UI takes over the screen. Check it first.
 
 - **Empty game list** — the games folder is pointing somewhere without games. The empty list shows which folder it searched; change it in Settings, or see step 3.
-- **"Keys not accepted"** — archive.org refused your keys. This usually means keys put in `ArchiveOrgKeys.txt` by hand are wrong or in the wrong order (access key line 1, secret key line 2), or were reset on archive.org. Re-enter them in Settings.
+- **"Keys not accepted"** — Internet Archive refused your keys. This usually means keys put in `ArchiveOrgKeys.txt` by hand are wrong or in the wrong order (access key line 1, secret key line 2), or were reset at archive.org. Sign in again in **Settings → Internet Archive**.
 - **"Not enough space"** — the drive needs room for the download and the installed game at once, as in Prerequisites. Free some space, or point the games folder at a bigger drive.
-- **A download slows down, or seems to pause** — archive.org's servers stall every minute or so; Omni360 drops a stalled connection after 10 seconds and carries on where it stopped, and moves to another server if one keeps failing. The speed on screen is the average, pauses included.
-- **A game isn't in the Store** — archive.org doesn't have every game. A few dozen aren't there at all; about 20 more are only there as compressed RARs, which install but take far longer, and the Store asks before starting one.
+- **A download slows down, or seems to pause** — Internet Archive's servers stall every minute or so; Omni360 drops a stalled connection after 10 seconds and carries on where it stopped, and moves to another server if one keeps failing. The speed on screen is the average, pauses included.
+- **A game isn't in the Store** — Internet Archive doesn't have every game. A few dozen aren't there at all; about 20 more are only there as compressed RARs, which install but take far longer, and the Store asks before starting one.
 - **Home's Recent row is empty** — it fills as you start games from Omni360. A game started from another dashboard isn't recorded, and a game that's since been uninstalled drops out.
 - **No DLC or updates for a game you know has them** — the collection may genuinely not have them, or the game's display name may be too abbreviated to match. Not every title has DLC or updates archived.
-- **Game pages with no description, wallpaper or screenshots** — they come from Xbox Live's servers, and DashLaunch's `livestrong` setting blocks those (the log shows `[dns] download.xbox.com: the DNS server says there's no such name`). Box art still comes from xboxunity, and downloads from archive.org are unaffected. Turn `livestrong` off in `launch.ini` if you want the details; `liveblock` on its own doesn't block them.
+- **Game pages with no description, wallpaper or screenshots** — they come from Xbox Live's servers, and DashLaunch's `livestrong` setting blocks those (the log shows `[dns] download.xbox.com: the DNS server says there's no such name`). Box art still comes from xboxunity, and downloads from Internet Archive are unaffected. Turn `livestrong` off in `launch.ini` if you want the details; `liveblock` on its own doesn't block them.
 - **Nothing will connect, but Aurora can** — look for `WSA error 10060` in the log: every connection is timing out, so something between the console and the internet is dropping the app's connections. Open an issue on GitHub with the log; it helps to say how the console is modded and which plugins it runs.
 - **Garbled game names** — STFS display-name encoding. `StfsParser.cpp` detects UTF-8 versus UTF-16BE per file and re-encodes both to UTF-8. If a name still looks wrong, that is worth reporting rather than expected.
 

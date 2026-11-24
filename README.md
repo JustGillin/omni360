@@ -25,14 +25,16 @@ Browse thousands of games, DLC and title updates, install them in the background
 **You need:**
 
 - A soft-modded (BadUpdate, ABadAvatar, PeerPressure) or hard-modded (RGH, JTAG) Xbox 360, connected to the internet. Ethernet is recommended.
-- An archive.org account, and its IAS3 access key and secret key. Every collection Omni360 downloads from is marked private, so archive.org refuses downloads without them.
+- A free Internet Archive account. Every collection Omni360 downloads from is marked private, so Internet Archive refuses downloads without signing in. Browsing works without one.
 - Free space for installing games: the download and the installed game both, while it installs — around 7GB plus 3-8GB for a typical game. The download is removed once it's installed.
 
 **Then:**
 
 1. Download `Omni360.xex` from the [latest release](https://github.com/JustGillin/omni360/releases).
-2. Get your archive.org keys at [archive.org/account/s3.php](https://archive.org/account/s3.php), logged in with your normal account. These are archive.org's official script-friendly credentials, the same pair their `ia` tool uses — not your password. Put them in a plain text file, `ArchiveOrgKeys.txt`, access key on line 1 and secret key on line 2. (Or type them in on the console, in Settings — painful with a controller, but it works.)
-3. Copy `Omni360.xex` and `ArchiveOrgKeys.txt` into a folder of their own on the console, and launch it.
+2. Copy `Omni360.xex` into a folder of its own on the console, and launch it.
+3. Sign in to Internet Archive when it asks: scan the QR code with your phone and sign in there, or type your email and password with the controller. You can also skip it and sign in later, from the Store or Settings.
+
+If you'd rather use keys, get them at [archive.org/account/s3.php](https://archive.org/account/s3.php) and put them in a plain text file, `ArchiveOrgKeys.txt`, beside `Omni360.xex`: access key on line 1, secret key on line 2.
 
 The [Setup Guide](docs/Setup%20Guide.md) covers the whole thing step by step, including where games and downloads go.
 
@@ -54,7 +56,7 @@ Omni360 is a store and a library in one app on the console.
 
 ### Xbox 360
 
-- **About 1,500 disc games** from archive.org, installed as Games on Demand.
+- **About 1,500 disc games** from Internet Archive, installed as Games on Demand.
 - **DLC and title updates** for any of them.
 - **About 700 Xbox Live Arcade and 3,400 indie games**, compilations included.
 - **Play games right from the disc**, or copy one to the hard drive - the tray ejects when it's done.
@@ -62,7 +64,7 @@ Omni360 is a store and a library in one app on the console.
 
 ### Original Xbox
 
-- **About 1,100 games** from archive.org - every one Microsoft made run on the 360, and hundreds more it didn't.
+- **About 1,100 games** from Internet Archive - every one Microsoft made run on the 360, and hundreds more it didn't.
 - **Play games right from the disc**, or copy one to the hard drive - the tray ejects when it's done.
 - **Sets up the emulator for you.** If the console is missing the partition or the files Original Xbox games run on, Omni360 offers to fix it - formatting the partition and installing ConsoleMods' unlocked emulator, which runs games beyond Microsoft's list.
 - **Gets unsupported games running.** Games Microsoft never made work on the 360 are marked as such. Before one starts, Omni360 offers the emulator version players found runs it best - or lets you pick - and puts the usual one back next time it starts.
@@ -83,7 +85,7 @@ Omni360 is a store and a library in one app on the console.
   </tr>
   <tr>
     <td width="50%"><img src="docs/screenshots/dlc.png" alt="Choosing a Rock Band DLC pack"><br><sub><b>DLC</b>: find the packs for any game and pick the ones you want.</sub></td>
-    <td width="50%"><img src="docs/screenshots/settings.png" alt="Settings: the folders games, apps, homebrew and emulators live in"><br><sub><b>Settings</b>: the folders your games, apps, homebrew and emulators live in, your archive.org keys and updates.</sub></td>
+    <td width="50%"><img src="docs/screenshots/settings.png" alt="Settings: the folders games, apps, homebrew and emulators live in"><br><sub><b>Settings</b>: the folders your games, apps, homebrew and emulators live in, your Internet Archive sign-in and updates.</sub></td>
   </tr>
   <tr>
     <td width="50%"><img src="docs/screenshots/queue.png" alt="The Queue: Grand Theft Auto V waiting while an arcade game downloads"><br><sub><b>Queue</b>: everything downloads and installs in the background.</sub></td>
@@ -102,9 +104,9 @@ Omni360 is a store and a library in one app on the console.
 
 ## Faster downloads with the PC helper (optional)
 
-Omni360 works on its own, but if you have a computer on the same network, **Omni360 Helper** can often make Store downloads faster. The computer downloads from archive.org and hands the game straight to the console over your network, while the console still checks, installs and manages everything. It works for disc games, Arcade games, DLC and title updates.
+Omni360 works on its own, but if you have a computer on the same network, **Omni360 Helper** can often make Store downloads faster. The computer downloads from Internet Archive and hands the game straight to the console over your network, while the console still checks, installs and manages everything. It works for disc games, Arcade games, DLC and title updates.
 
-How much faster depends on your internet and on archive.org that day. The console tops out around 10 MB/s through the helper, against usually 2-7 MB/s on its own. Some days it's a big jump, some days barely any - see *Why isn't it faster?* below.
+How much faster depends on your internet and on Internet Archive that day. The console tops out around 10 MB/s through the helper, against usually 2-7 MB/s on its own. Some days it's a big jump, some days barely any - see *Why isn't it faster?* below.
 
 1. Download the helper for your computer from the [latest release](https://github.com/JustGillin/omni360/releases) and run it:
    - **Windows:** `Omni360Helper.exe`. Allow it through Windows Firewall when asked (private networks are enough). It sits in the system tray.
@@ -144,7 +146,7 @@ That's it. While the helper is running:
 - On the Queue, a download coming through your computer shows its speed in green with **+ PC**.
 - The helper's icon is a green disc that spins while it downloads, and its menu shows the game and the speed. It turns grey when no Xbox is connected, such as when Omni360 is closed.
 
-If you switch the computer off or close the helper partway through, the download carries on from archive.org by itself, and moves back to the computer when the helper returns. Pairing keeps other devices on your network out, since the console passes your archive.org keys along with each download.
+If you switch the computer off or close the helper partway through, the download carries on from Internet Archive by itself, and moves back to the computer when the helper returns. Pairing keeps other devices on your network out, since the console passes your Internet Archive keys along with each download.
 
 - **Where downloads go:** **Change downloads folder…** in the helper's menu picks another drive or folder. The helper makes an `Omni360Helper` folder inside the one you pick and clears out the old one.
 - **Updates:** from version 1.1.0 the helper updates itself. When a new release is out, its menu offers **Update to …**, and it installs the update by itself once nothing has downloaded for a while (untick **Install updates automatically** to stop that). It only installs an update signed with the project's key. If you have an older helper, download the new one from the release page once.
@@ -154,7 +156,7 @@ If you switch the computer off or close the helper partway through, the download
 <summary><b>Why it can be faster</b></summary>
 <br>
 
-The 360 gives each connection a fixed 255 KB receive buffer (see *Known limitations*), so from archive.org's servers, tens of milliseconds away, each connection tops out around 3.5 MB/s. On your home network the round trip is about a millisecond, so the console can take data almost as fast as its 100 Mbit network port allows, around 10 MB/s.
+The 360 gives each connection a fixed 255 KB receive buffer (see *Known limitations*), so from Internet Archive's servers, tens of milliseconds away, each connection tops out around 3.5 MB/s. On your home network the round trip is about a millisecond, so the console can take data almost as fast as its 100 Mbit network port allows, around 10 MB/s.
 
 Your computer has no such limit: it downloads with several connections at once. On a good day that's measured at 9 MB/s with four connections and 12 MB/s with eight, which keeps it ahead of the console, so the console's network port becomes the limit instead.
 
@@ -166,14 +168,14 @@ The helper also keeps recent downloads (50 GB by default, oldest removed first),
 <summary><b>Why isn't it faster?</b></summary>
 <br>
 
-The helper can only pass the game on as fast as your computer gets it from archive.org. A few things can make that no faster than the console on its own:
+The helper can only pass the game on as fast as your computer gets it from Internet Archive. A few things can make that no faster than the console on its own:
 
-- **archive.org has slowed your connection down.** After a lot of downloading in one day, archive.org limits a household's speed, and that limit covers your computer and your console alike. Downloads often start fast and then drop off. It usually lifts by the next day.
-- **That game's server is slow.** Each game lives on one of archive.org's servers, and some are much slower than others on a given day. Neither your computer nor your console can do anything about it.
+- **Internet Archive has slowed your connection down.** After a lot of downloading in one day, Internet Archive limits a household's speed, and that limit covers your computer and your console alike. Downloads often start fast and then drop off. It usually lifts by the next day.
+- **That game's server is slow.** Each game lives on one of Internet Archive's servers, and some are much slower than others on a given day. Neither your computer nor your console can do anything about it.
 - **Your console was already doing well.** The console tops out around 10 MB/s through the helper. If it was already getting 6-7 MB/s on its own, there's less room to gain.
 - **Your computer's connection.** A computer on weak Wi-Fi may not get much more than the console does on its cable.
 
-A good check: download the same game in your computer's web browser. If that's slow too, it's archive.org or your internet, not the helper. The helper's menu shows the speed it's getting, and the Queue shows the console's, so you can see which side is slower.
+A good check: download the same game in your computer's web browser. If that's slow too, it's Internet Archive or your internet, not the helper. The helper's menu shows the speed it's getting, and the Queue shows the console's, so you can see which side is slower.
 
 </details>
 
@@ -181,7 +183,7 @@ A good check: download the same game in your computer's web browser. If that's s
 
 ## Known limitations
 
-- **Downloads are slower than on a PC** — usually 2-4 MB/s from archive.org, so a game takes half an hour or more, where a PC on the same internet gets 5-8 MB/s. It's the 360's own networking, not your internet or Omni360. **Settings → Download speed** checks your console in about a minute, and the optional [PC helper](#faster-downloads-with-the-pc-helper-optional) can get around it, up to about 10 MB/s.
+- **Downloads are slower than on a PC** — usually 2-4 MB/s from Internet Archive, so a game takes half an hour or more, where a PC on the same internet gets 5-8 MB/s. It's the 360's own networking, not your internet or Omni360. **Settings → Download speed** checks your console in about a minute, and the optional [PC helper](#faster-downloads-with-the-pc-helper-optional) can get around it, up to about 10 MB/s.
 
   <details>
   <summary><b>Why the 360 is slower over distance</b></summary>
@@ -197,17 +199,17 @@ A good check: download the same game in your computer's web browser. If that's s
   |---|---|---|---|
   | CacheFly, a nearby CDN, plain HTTP | 4 ms | ~60 MB/s — the 100 Mbit port is the limit instead | 11.1 MB/s |
   | thinkbroadband, UK, plain HTTP | 100 ms | ~2.5 MB/s | 2.3 MB/s |
-  | archive.org's storage server | 52 ms | ~4.8 MB/s | 2.2-3.4 MB/s |
+  | Internet Archive's storage server | 52 ms | ~4.8 MB/s | 2.2-3.4 MB/s |
 
   What it isn't:
 
   - **Your internet or the console's network port** — the nearby server reaches the 100 Mbit port's full 11 MB/s.
-  - **The console's processor** — it decrypts HTTPS at about 25 MB/s per core with ChaCha20-Poly1305, which Omni360 asks archive.org for. (archive.org's servers would otherwise pick AES-GCM, which the console only manages at about 5 MB/s.)
-  - **Something more connections would fix** — each connection gets its own buffer, but archive.org drops or stalls extra parallel requests from one console, so game installs use two.
+  - **The console's processor** — it decrypts HTTPS at about 25 MB/s per core with ChaCha20-Poly1305, which Omni360 asks Internet Archive for. (Internet Archive's servers would otherwise pick AES-GCM, which the console only manages at about 5 MB/s.)
+  - **Something more connections would fix** — each connection gets its own buffer, but Internet Archive drops or stalls extra parallel requests from one console, so game installs use two.
 
   </details>
 
-- **About 20 games install slowly.** archive.org only has them as compressed archives (the DiRT series and Deadpool among them), which have to be unpacked on the console as they download. Deadpool took over an hour. The Store marks them and asks before starting one, and if one is stopped it starts over from the beginning. A few dozen games aren't on archive.org at all.
+- **About 20 games install slowly.** Internet Archive only has them as compressed archives (the DiRT series and Deadpool among them), which have to be unpacked on the console as they download. Deadpool took over an hour. The Store marks them and asks before starting one, and if one is stopped it starts over from the beginning. A few dozen games aren't on Internet Archive at all.
 - **A multi-disc game installed some other way** — from real discs, or another tool — can't be uninstalled by version from its Store page, since Omni360 can't tell which disc is which. Its own library entry still can be, if the Store hasn't got it.
 - **A scratched disc can fail partway through a disc install.** Lower the disc read speed in Settings and try again.
 - **Key entry** on the on-screen keyboard isn't masked.
@@ -218,7 +220,7 @@ A good check: download the same game in your computer's web browser. If that's s
 
 ## Check out X-Store too
 
-Omni360 started from [X-Store](https://github.com/951261/X-Store) by 951261, which at the time was a Vimm's Lair downloader. Its networking code gave Omni360 a head start, and that part is still in here (see [Credits](#credits)). The rest went a different way: the archive.org library, installer, DLC and title updates, and the whole interface were written for Omni360. X-Store later added Internet Archive support of its own, written separately.
+Omni360 started from [X-Store](https://github.com/951261/X-Store) by 951261, which at the time was a Vimm's Lair downloader. Its networking code gave Omni360 a head start, and that part is still in here (see [Credits](#credits)). The rest went a different way: the Internet Archive library, installer, DLC and title updates, and the whole interface were written for Omni360. X-Store later added Internet Archive support of its own, written separately.
 
 The two are separate apps now, and X-Store is a great one. It's well worth trying alongside Omni360.
 
@@ -257,8 +259,8 @@ Omni360 was forked from [X-Store](https://github.com/951261/X-Store) by 951261 (
 - **By 951261 (X-Store):** the HTTPS client (`downloadFile.cpp`), DNS (`dns.cpp`), URL helpers (`parsing.cpp`) and the on-screen keyboard (`Keyboard.cpp`).
 - **Brought in by X-Store from other projects:** the TLS wrapper around BearSSL (`XboxTLS.cpp/.h`) from [XboxTLS](https://github.com/JakobRangel/XboxTLS) by JakobRangel, and drive mounting (`driveMount.c`) and the log console (`OutputConsole.cpp`) from [Simple 360 NAND Flasher](https://github.com/Swizzy/XDK_Projects) by Swizzy.
 
-Everything else (the archive.org library, installer, DLC and title updates, the interface) was written for Omni360. Several of the files above carry `PROGRAMMER : 951261` headers. Those headers are copyright notices, and AGPL-3.0 requires them to stay - rename the product as much as you like, but leave them, and this section, in place.
+Everything else (the Internet Archive library, installer, DLC and title updates, the interface) was written for Omni360. Several of the files above carry `PROGRAMMER : 951261` headers. Those headers are copyright notices, and AGPL-3.0 requires them to stay - rename the product as much as you like, but leave them, and this section, in place.
 
-Game data comes from [Redump](http://redump.org) (title IDs, by disc serial), [xboxunity.net](https://xboxunity.net) (covers), [LaunchBox Games Database](https://gamesdb.launchbox-app.com) (covers and wallpapers for the games Xbox Live and xboxunity have none for, picked into `tools/data/launchbox-*.txt`), Xbox Live's own servers (art, details and icons), [MobCat's original Xbox game list](https://github.com/MobCat/MobCats-original-xbox-game-list) (Original Xbox cover art and icons) and [ConsoleMods](https://consolemods.org/wiki/Xbox_360:Original_Xbox_Games_Compatibility_List) (the Hacked Xefu Pack, and the community compatibility list that picks each unsupported game's emulator and its known issues); the games themselves from the archive.org collections named above.
+Game data comes from [Redump](http://redump.org) (title IDs, by disc serial), [xboxunity.net](https://xboxunity.net) (covers), [LaunchBox Games Database](https://gamesdb.launchbox-app.com) (covers and wallpapers for the games Xbox Live and xboxunity have none for, picked into `tools/data/launchbox-*.txt`), Xbox Live's own servers (art, details and icons), [MobCat's original Xbox game list](https://github.com/MobCat/MobCats-original-xbox-game-list) (Original Xbox cover art and icons) and [ConsoleMods](https://consolemods.org/wiki/Xbox_360:Original_Xbox_Games_Compatibility_List) (the Hacked Xefu Pack, and the community compatibility list that picks each unsupported game's emulator and its known issues); the games themselves from the Internet Archive collections named above.
 
 Built with [BearSSL](https://bearssl.org) (TLS), [zlib](https://zlib.net) (inflate), [dmc_unrar](https://github.com/DrMcCoy/dmc_unrar) (RAR unpacking), [cJSON](https://github.com/DaveGamble/cJSON) (JSON) and [stb_image](https://github.com/nothings/stb) (JPEG and PNG decoding, public domain).
