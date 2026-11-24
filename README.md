@@ -78,23 +78,23 @@ Omni360 is a store and a library in one app on the console.
 
 <table>
   <tr>
-    <td width="50%"><img src="docs/screenshots/home.png" alt="Home: the games played most recently as a row of covers, over Halo 3's wallpaper"><br><sub><b>Home</b>: what you played last, the disc in the drive first, under its own wallpaper.</sub></td>
-    <td width="50%"><img src="docs/screenshots/library.png" alt="Games: installed games as a grid of covers, with All games, Xbox 360, Original Xbox, Arcade and Indie games filters along the top"><br><sub><b>Games</b>: every installed game, Xbox 360, Original Xbox, Arcade and indie, with a filter for each.</sub></td>
+    <td width="50%"><img src="docs/screenshots/home.png" alt="Home: the games played most recently as a row of covers, over Halo 3's wallpaper"><br><sub><b>Home</b>: picks up where you left off. The games you played last sit in a row, the disc in the drive first, each under its own full-screen wallpaper, with covers found for you. Your gamertag and gamerscore are up top, and B gets you out, restarts or turns the console off.</sub></td>
+    <td width="50%"><img src="docs/screenshots/library.png" alt="Games: installed games as a grid of covers, with All games, Xbox 360, Original Xbox, Arcade and Indie games filters along the top"><br><sub><b>Games</b>: everything on your drives in one grid, whether it's a Games on Demand package, an arcade or indie game, or a plain folder with a default.xex. Filter by kind, favourite or rename anything with Y, and keep an eye on your downloads and free space from the sidebar.</sub></td>
   </tr>
   <tr>
-    <td width="50%"><img src="docs/screenshots/store.png" alt="The Store: this week's featured fighting games and the Homebrew, Arcade, Indie games and Original Xbox buttons"><br><sub><b>Store</b>: this week's featured games, then Homebrew, Arcade, Indie games and Original Xbox.</sub></td>
-    <td width="50%"><img src="docs/screenshots/360-game-details.png" alt="Halo 3's page: description, ratings, screenshots and more like this"><br><sub><b>A game's page</b>: description, ratings, screenshots, its DLC and its title updates.</sub></td>
+    <td width="50%"><img src="docs/screenshots/store.png" alt="The Store: this week's featured fighting games and the Homebrew, Arcade, Indie games and Original Xbox buttons"><br><sub><b>Store</b>: about 1,500 disc games, 700 arcade games, 3,400 indie games, 1,100 Original Xbox games and a shelf of homebrew. The featured games change every week on their own, and for events like E-Day. Browsing needs no account.</sub></td>
+    <td width="50%"><img src="docs/screenshots/360-game-details.png" alt="Halo 3's page: description, ratings, screenshots and more like this"><br><sub><b>A game's page</b>: details, ratings and screenshots from Xbox Live's own catalog. Install it, or play it if you have it, then pick a different region or edition with Y, grab its DLC and title updates, or manage what's on your drive.</sub></td>
   </tr>
   <tr>
-    <td width="50%"><img src="docs/screenshots/dlc.png" alt="Choosing a Halo 3 DLC pack from Internet Archive"><br><sub><b>DLC</b>: find the packs for any game and pick the ones you want.</sub></td>
-    <td width="50%"><img src="docs/screenshots/settings.png" alt="Settings: Internet Archive sign-in, the PC helper, disc installs, sign-in at start, the clock and the FTP server"><br><sub><b>Settings</b>: your Internet Archive sign-in, the PC helper, disc installs and more, with your library's folders and updates a section away.</sub></td>
+    <td width="50%"><img src="docs/screenshots/dlc.png" alt="Choosing a Halo 3 DLC pack from Internet Archive"><br><sub><b>DLC</b>: searches Internet Archive for packs made for that game and ranks the best match first. A pack can hold several items, and anything you already have is skipped.</sub></td>
+    <td width="50%"><img src="docs/screenshots/settings.png" alt="Settings: Internet Archive sign-in, the PC helper, disc installs, sign-in at start, the clock and the FTP server"><br><sub><b>Settings</b>: sign in to Internet Archive by scanning a QR code with your phone, pair the PC helper, install discs as Games on Demand or plain folders, and turn on the FTP server. Your library's folders, storage, language and updates are a section away.</sub></td>
   </tr>
   <tr>
-    <td width="50%"><img src="docs/screenshots/queue.png" alt="The Queue: Castlevania: Mirror of Fate HD downloading through the PC helper, CastleStorm waiting, and the games installed recently above"><br><sub><b>Queue</b>: everything downloads and installs in the background.</sub></td>
-    <td width="50%"><img src="docs/screenshots/store-popular.png" alt="The Store's Collections and Publishers rows"><br><sub><b>Browse</b>: collections and publishers, A to Z, or rows of Popular, Top rated and every genre.</sub></td>
+    <td width="50%"><img src="docs/screenshots/queue.png" alt="The Queue: Castlevania: Mirror of Fate HD downloading through the PC helper, CastleStorm waiting, and the games installed recently above"><br><sub><b>Queue</b>: downloads and installs happen in the background while you keep browsing, and pick up where they left off after a restart. Pause one, stop one, or press Y to turn the console off when everything's done. With the PC helper, they come through your computer, up to about 10 MB/s.</sub></td>
+    <td width="50%"><img src="docs/screenshots/store-popular.png" alt="The Store's Collections and Publishers rows"><br><sub><b>Browse</b>: collections for the big series, a shelf for each publisher, every game from A to Z, and rows of what's popular and top rated in each genre, ranked by Xbox Live's own ratings.</sub></td>
   </tr>
   <tr>
-    <td width="50%"><img src="docs/screenshots/xbla-game-details.png" alt="Castlevania: Mirror of Fate HD installing, 17%"><br><sub><b>Xbox Live Arcade</b>: arcade games get the same pages, and show their progress as they install.</sub></td>
+    <td width="50%"><img src="docs/screenshots/xbla-game-details.png" alt="Castlevania: Mirror of Fate HD installing, 17%"><br><sub><b>Xbox Live Arcade</b>: arcade games get full pages too. The button shows the install as it goes, A jumps to the Queue, and the game's in your library the moment it's done.</sub></td>
     <td width="50%"></td>
   </tr>
   <tr>
