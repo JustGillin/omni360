@@ -1090,6 +1090,14 @@ bool ShowAlertCoverUI(const char *heading, const char *message, const char *deta
 int ShowAlertButtonsUI(const char *heading, const char *message, const char *detailLine, const char **labels,
                        int count, int maxMessageLines = 5, int focus = 0);
 
+// ShowAlertButtonsUI with a QR code where a cover goes - qr is qrSize *
+// qrSize modules, 1 for dark - and poll, if not NULL, asked every frame
+// whether the dialog can close by itself: when it says so, this returns
+// ALERT_CLOSED_BY_POLL. For a phone doing what the buttons would.
+#define ALERT_CLOSED_BY_POLL (-2)
+int ShowAlertQrUI(const char *heading, const char *message, const char *detailLine, const char **labels, int count,
+                  int focus, const unsigned char *qr, int qrSize, bool (*poll)());
+
 // ShowAlertButtonsUI with the game's cover, as ShowAlertCoverUI.
 int ShowAlertCoverButtonsUI(const char *heading, const char *message, const char *detailLine, const char **labels,
                             int count, int focus, unsigned long titleId);

@@ -452,6 +452,17 @@ KeyCheckResult CheckArchiveOrgKeys(const char *authHeader, char *outReason, size
     // look like refused keys. See the threading note in ArchiveOrgDLC.h.
     int status = HttpGetFollowRedirectRaw(ARCHIVE_S3_CHECK_AUTH_URL, buffer, &bufferSize,
                                           NULL, authHeader, printFunction);
+    // Once more on no answer at all. The first TLS connection to
+    // s3.us.archive.org after a start offers ChaCha20, which it refuses; the
+    // client then offers every suite (XboxTLS_RefusedChacha), but only from
+    // the next connection - so the first check of every session used to come
+    // back unchecked (seen 2026-11-24).
+    if (status <= 0)
+    {
+        bufferSize = sizeof(buffer) - 1;
+        status = HttpGetFollowRedirectRaw(ARCHIVE_S3_CHECK_AUTH_URL, buffer, &bufferSize, NULL, authHeader,
+                                          printFunction);
+    }
 
     // Anything but a 200 means no verdict was given - offline, a TLS failure,
     // the service down. That is "couldn't check", never "wrong keys": telling

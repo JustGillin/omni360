@@ -169,6 +169,12 @@
     <ClCompile Include="src\ArchiveOrgSignIn.cpp">
       <Filter>Source Files\Network</Filter>
     </ClCompile>
+    <ClCompile Include="src\PhoneSignIn.cpp">
+      <Filter>Source Files\Network</Filter>
+    </ClCompile>
+    <ClCompile Include="src\qrcodegen.cpp">
+      <Filter>Source Files\Network</Filter>
+    </ClCompile>
     <ClCompile Include="src\PcHelper.cpp">
       <Filter>Source Files\Network</Filter>
     </ClCompile>
@@ -1213,6 +1219,12 @@
       <Filter>Source Files\Network</Filter>
     </ClInclude>
     <ClInclude Include="src\ArchiveOrgSignIn.h">
+      <Filter>Source Files\Network</Filter>
+    </ClInclude>
+    <ClInclude Include="src\PhoneSignIn.h">
+      <Filter>Source Files\Network</Filter>
+    </ClInclude>
+    <ClInclude Include="src\qrcodegen.h">
       <Filter>Source Files\Network</Filter>
     </ClInclude>
     <ClInclude Include="src\PcHelper.h">

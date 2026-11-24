@@ -5397,6 +5397,13 @@ static bool g_alertYCancels = false;
 static D3DTexture *g_alertCover = NULL;
 #define ALERT_COVER 150.0f
 
+// Set around a button dialog with a QR code in the cover's place, and a
+// check made every frame that can close it - see ShowAlertQrUI.
+static const unsigned char *g_alertQr = NULL; // size * size, 1 for a dark module
+static int g_alertQrSize = 0;
+static bool (*g_alertPoll)() = NULL;
+#define ALERT_QR 190.0f
+
 static int RunAlert(const char *heading, const char *message, const char *detailLine, int maxMessageLines,
                     const char **labels, int count, const char **rowLabels, const char **rowNotes, int listCount,
                     int listFocus, const int *rowIcons = NULL, const int *rowKinds = NULL, bool notesBelow = false,
@@ -5433,7 +5440,9 @@ static int RunAlert(const char *heading, const char *message, const char *detail
         buttonsW += buttonW[i] + (i > 0 ? gap : 0.0f);
     }
     // A cover, when there is one, sits left of the text, which moves over.
-    const float coverS = (g_alertCover != NULL && !list) ? S(ALERT_COVER) : 0.0f;
+    const float coverS = (g_alertQr != NULL && !list)      ? S(ALERT_QR)
+                         : (g_alertCover != NULL && !list) ? S(ALERT_COVER)
+                                                           : 0.0f;
     const float textX0 = coverS > 0.0f ? coverS + S(24.0f) : 0.0f;
     float wide = (maxMessageLines > 5) ? S(840.0f) : S(ALERT_W);
     wide += textX0;
@@ -5518,6 +5527,11 @@ static int RunAlert(const char *heading, const char *message, const char *detail
     for (;;)
     {
         const UiInput input = PollUiInput();
+        if (g_alertPoll != NULL && g_alertPoll())
+        {
+            result = ALERT_CLOSED_BY_POLL; // what it was waiting for happened
+            break;
+        }
         if ((input.pressed & XINPUT_GAMEPAD_A) && (!list || AlertRowPicks(rowKinds, focus)))
         {
             PlayUiSound(list || focus == 0 ? UI_SOUND_SELECT : UI_SOUND_BACK);
@@ -5595,7 +5609,38 @@ static int RunAlert(const char *heading, const char *message, const char *detail
 
         const float footY = cardY + cardH - pad - footH;
         const float innerX = cardX + pad;
-        if (coverS > 0.0f)
+        if (coverS > 0.0f && g_alertQr != NULL)
+        {
+            // A QR code: dark modules on white, with the quiet zone of four
+            // modules a reader needs round it. Whole pixels a module, so the
+            // edges stay sharp for a phone's camera.
+            const int quiet = 4;
+            const int across = g_alertQrSize + quiet * 2;
+            const float module = floorf(coverS / across);
+            const float side = module * across;
+            const float qx = floorf(innerX + (coverS - side) * 0.5f);
+            const float qy = floorf(cardY + pad + (coverS - side) * 0.5f);
+            FillRound(qx, qy, side, side, R(6.0f), Faded(0xFFFFFFFF, a));
+            const D3DCOLOR dark = Faded(0xFF000000, a);
+            for (int y = 0; y < g_alertQrSize; ++y)
+            {
+                // A run of dark modules in a row is one rectangle.
+                for (int x = 0; x < g_alertQrSize;)
+                {
+                    if (!g_alertQr[y * g_alertQrSize + x])
+                    {
+                        ++x;
+                        continue;
+                    }
+                    int end = x + 1;
+                    while (end < g_alertQrSize && g_alertQr[y * g_alertQrSize + end])
+                        ++end;
+                    DrawRect(qx + (quiet + x) * module, qy + (quiet + y) * module, (end - x) * module, module, dark);
+                    x = end;
+                }
+            }
+        }
+        else if (coverS > 0.0f)
         {
             const D3DCOLOR tint = Faded(0xFFFFFFFF, a);
             TextureRound(g_alertCover, innerX, cardY + pad, coverS, coverS, R(6.0f), 0.0f, 0.0f, 1.0f, 1.0f, tint,
@@ -5862,6 +5907,19 @@ bool ShowAlertCoverUI(const char *heading, const char *message, const char *deta
     g_alertCover = titleId != 0 ? BoxArtFor(titleId) : NULL;
     const bool result = ShowAlertUI(heading, message, detailLine, confirmLabel, cancelLabel);
     g_alertCover = NULL;
+    return result;
+}
+
+int ShowAlertQrUI(const char *heading, const char *message, const char *detailLine, const char **labels, int count,
+                  int focus, const unsigned char *qr, int qrSize, bool (*poll)())
+{
+    g_alertQr = qrSize > 0 ? qr : NULL;
+    g_alertQrSize = qrSize;
+    g_alertPoll = poll;
+    const int result = ShowAlertButtonsUI(heading, message, detailLine, labels, count, 5, focus);
+    g_alertQr = NULL;
+    g_alertQrSize = 0;
+    g_alertPoll = NULL;
     return result;
 }
 

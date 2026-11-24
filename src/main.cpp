@@ -56,6 +56,8 @@ end-to-end on real hardware against a real 27-game library.
 #include "UpdateCheck.h"
 #include "ArchiveOrgDLC.h"
 #include "ArchiveOrgSignIn.h"
+#include "PhoneSignIn.h"
+#include "qrcodegen.h"
 #include "downloadFile.h" // DownloadProgressFn + FormatBytes, for the progress callback
 #include "GodConvert.h"
 #include "DiscSource.h"
@@ -1300,19 +1302,86 @@ static KeyEntryOutcome SignInWithPassword()
     }
 }
 
+// What the phone signed in with (PhoneSignIn.h), taken by the question's
+// check each frame.
+static std::string g_phoneAccess, g_phoneSecret, g_phoneName;
+
+static bool PhoneSignedIn()
+{
+    return PhoneSignInDone(g_phoneAccess, g_phoneSecret, g_phoneName);
+}
+
+// The page's address as a QR code, one byte a module. Small: the address is
+// ~40 characters, a version 3 code (29 modules across) at medium correction.
+#define SIGN_IN_QR_VERSION_MAX 6
+static unsigned char g_signInQr[(SIGN_IN_QR_VERSION_MAX * 4 + 17) * (SIGN_IN_QR_VERSION_MAX * 4 + 17)];
+
+static int MakeSignInQr(const char *url)
+{
+    static uint8_t code[qrcodegen_BUFFER_LEN_FOR_VERSION(SIGN_IN_QR_VERSION_MAX)];
+    static uint8_t temp[qrcodegen_BUFFER_LEN_FOR_VERSION(SIGN_IN_QR_VERSION_MAX)];
+    if (!qrcodegen_encodeText(url, temp, code, qrcodegen_Ecc_MEDIUM, qrcodegen_VERSION_MIN, SIGN_IN_QR_VERSION_MAX,
+                              qrcodegen_Mask_AUTO, true))
+        return 0;
+    const int size = qrcodegen_getSize(code);
+    for (int y = 0; y < size; ++y)
+    {
+        for (int x = 0; x < size; ++x)
+            g_signInQr[y * size + x] = qrcodegen_getModule(code, x, y) ? 1 : 0;
+    }
+    return size;
+}
+
 // The sign-in question: what downloading needs, and the ways to give it.
 // forDownload is a download that was just asked for, rather than the banner
 // or Settings - the wording leads with that. Not now leaves things as they
 // were; browsing doesn't need an account.
+//
+// While it's open, a phone can sign in instead (PhoneSignIn.h): the page's
+// address is in it as a QR code and in words, and the question closes by
+// itself once the phone has signed in.
 static KeyEntryOutcome SignInToArchiveOrg(bool forDownload)
 {
     for (;;)
     {
+        char url[96] = "";
+        const bool phone = StartPhoneSignIn(url, sizeof(url));
+        const int qrSize = phone ? MakeSignInQr(url) : 0;
+        char scan[192];
+        if (phone)
+            TrFormat(scan, sizeof(scan), STR_SIGN_IN_SCAN, url + 7); // without "http://": it's typed without
+        else
+            _snprintf(scan, sizeof(scan), "%s", Tr(STR_SIGN_IN_PRIVACY));
+        scan[sizeof(scan) - 1] = '\0';
+
         // labels[0] is the one that goes ahead, on the right.
         const char *labels[3] = { Tr(STR_SIGN_IN), Tr(STR_USE_KEYS), Tr(STR_NOT_NOW) };
-        const int choice = ShowAlertButtonsUI(Tr(STR_SIGN_IN_TO_ARCHIVE_ORG),
-                                              Tr(forDownload ? STR_SIGN_IN_EXPLAIN_DOWNLOAD : STR_SIGN_IN_EXPLAIN),
-                                              Tr(STR_SIGN_IN_PRIVACY), labels, 3, 5, 0);
+        int choice = ShowAlertQrUI(Tr(STR_SIGN_IN_TO_ARCHIVE_ORG),
+                                   Tr(forDownload ? STR_SIGN_IN_EXPLAIN_DOWNLOAD : STR_SIGN_IN_EXPLAIN), scan,
+                                   labels, 3, 0, g_signInQr, qrSize, phone ? PhoneSignedIn : NULL);
+        // A phone that finished as a button was pressed still counts.
+        if (choice != ALERT_CLOSED_BY_POLL && phone && PhoneSignedIn())
+            choice = ALERT_CLOSED_BY_POLL;
+        StopPhoneSignIn();
+
+        if (choice == ALERT_CLOSED_BY_POLL)
+        {
+            const bool saved = SaveKeys(g_phoneAccess, g_phoneSecret);
+            if (!g_phoneSecret.empty())
+                SecureZeroMemory(&g_phoneSecret[0], g_phoneSecret.size());
+            g_phoneSecret.clear();
+            g_phoneAccess.clear();
+            if (!saved)
+            {
+                ShowMessageUI(Tr(STR_KEYS_NOT_SAVED), Tr(STR_ARCHIVEORGKEYS_TXT_COULD_NOT_BE),
+                              Tr(STR_YOUR_PREVIOUS_KEYS_IF_ANY));
+                return KEY_ENTRY_FAILED;
+            }
+            ShowShellToast(Tr(STR_SIGNED_IN), g_phoneName.empty() ? Tr(STR_ARCHIVE_ORG_ROW) : g_phoneName.c_str(),
+                           UI_TOAST_INFO);
+            return KEY_ENTRY_SAVED;
+        }
+
         KeyEntryOutcome outcome;
         if (choice == 0)
         {
