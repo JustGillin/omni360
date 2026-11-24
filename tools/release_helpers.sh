@@ -68,7 +68,12 @@ if [ "$carry" = yes ]; then
     for f in $files; do
         gh release download "$prev" --pattern "$f" --dir "$dir"
     done
-    (cd "$dir" && gh release upload "$tag" $files --clobber)
+    # From here, not inside $dir: gh finds the repository by the folder it's in.
+    paths=""
+    for f in $files; do
+        paths="$paths $dir/$f"
+    done
+    gh release upload "$tag" $paths --clobber
     rm -rf "$dir"
     echo "done: all of the helper's files attached to $tag"
     exit 0
