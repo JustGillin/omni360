@@ -97,9 +97,6 @@ Omni360 is a store and a library in one app on the console.
     <td width="50%"><img src="docs/screenshots/xbla-game-details.png" alt="Castlevania: Mirror of Fate HD installing, 17%"><br><sub><b>Xbox Live Arcade</b>: arcade games get full pages too. The button shows the install as it goes, A jumps to the Queue, and the game's in your library the moment it's done.</sub></td>
     <td width="50%"></td>
   </tr>
-  <tr>
-    <td colspan="2"><sub>The last three shots are older than this release.</sub></td>
-  </tr>
 </table>
 
 <br>
