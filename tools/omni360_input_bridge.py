@@ -18,6 +18,11 @@ from dataclasses import dataclass, field
 DEFAULT_DATA_PORT = 36062
 CONTROL_PORT = 36063
 SLOT_COUNT = 4
+# A virtual pad stays bound to the console only while it's in use: after this
+# long with nothing held and no command, it's unbound, and bound again by the
+# next command. Left bound, the console hung on a black screen whenever a game
+# went to Xbox Home (Guide, Y), and the real controller became player 2.
+IDLE_UNBIND_SECONDS = 30.0
 SEND_INTERVAL = 1.0 / 50.0
 MAX_HANDSHAKE = 8192
 
@@ -73,6 +78,7 @@ def encode_trigger(value: float) -> int:
 @dataclass
 class SlotState:
     active: bool = False
+    last_used: float = 0.0
     held: set[str] = field(default_factory=set)
     timed: dict[str, float] = field(default_factory=dict)
     axes: dict[str, float] = field(
@@ -168,6 +174,7 @@ class BridgeState:
                 raise ValueError("slot must be from 0 to 3")
             with self.lock:
                 slot = self.slots[slot_index]
+                slot.last_used = time.monotonic()
                 if action in ("press", "release", "tap"):
                     raw_buttons = command.get("buttons", [])
                     if not isinstance(raw_buttons, list) or not raw_buttons:
@@ -224,8 +231,19 @@ class BridgeState:
                 result.extend([message, message, message])
             self.disconnect_pending.clear()
             for slot_index, slot in enumerate(self.slots):
-                if slot.active:
-                    result.append(slot.report(slot_index, now).hex())
+                if not slot.active:
+                    continue
+                idle = (not slot.held and not any(t > now for t in slot.timed.values())
+                        and all(v == 0.0 for v in slot.axes.values()))
+                if idle and now - slot.last_used > IDLE_UNBIND_SECONDS:
+                    slot.clear()
+                    slot.active = False
+                    message = "1%d80807f7f0800000000" % slot_index
+                    result.extend([message, message, message])
+                    print("Slot %d idle for %ds: virtual controller unbound" %
+                          (slot_index, IDLE_UNBIND_SECONDS), flush=True)
+                    continue
+                result.append(slot.report(slot_index, now).hex())
             return result
 
     def disconnect_frames(self) -> list[str]:

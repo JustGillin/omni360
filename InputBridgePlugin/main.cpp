@@ -557,21 +557,13 @@ DWORD XamInputSetStateHook(DWORD user, DWORD flags, PXINPUT_VIBRATION pVibration
 		if (!c)
 			return status;
 
-		// Send to server
-		if (pVibration != nullptr) {
-			// userIndex might have flags (like 0xFF), mask them out if necessary, 
-			// though usually SetState receives a clean index (0-3).
-			int cleanIndex = user & 0xFF;
-
-			if (cleanIndex < 4) {
-				SendVibrationUpdate(cleanIndex, pVibration->wLeftMotorSpeed, pVibration->wRightMotorSpeed);
-			}
-		}
-		else {
-			// If pVibration is null, it usually implies stop (0,0)
-			SendVibrationUpdate(user & 0xFF, 0, 0);
-		}
-
+		// Rumble isn't sent to the PC: nothing there uses it, and this runs on
+		// the caller's thread - a game's, even as it shuts down - where a
+		// network send has no business. Suspected, and ruled out, as the cause
+		// of the black screen on going to Xbox Home: that was the virtual pad
+		// staying bound (see tools/omni360_input_bridge.py, IDLE_UNBIND_SECONDS).
+		// SendVibrationUpdate stays for a later, queued version.
+		(void)pVibration;
 		return ERROR_SUCCESS;
 	}
 
