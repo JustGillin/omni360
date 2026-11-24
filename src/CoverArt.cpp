@@ -527,6 +527,16 @@ unsigned long IndieCoverKey(const char *name)
     return LaunchBoxCoverFile(key) != NULL ? key : 0;
 }
 
+unsigned long IndieGameKey(const char *name)
+{
+    return INDIE_KEY_TAG | NameHash(name != NULL ? name : "");
+}
+
+bool IsIndieGameKey(unsigned long key)
+{
+    return (key & 0xFF000000UL) == INDIE_KEY_TAG;
+}
+
 // ---------------------------------------------------------------------------
 // Homebrew, found on xboxunity by name
 // ---------------------------------------------------------------------------

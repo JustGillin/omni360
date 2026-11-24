@@ -416,6 +416,11 @@ bool IsGameContentType(unsigned long contentType)
     }
 }
 
+bool IsIndieGame(unsigned long titleId, unsigned long contentType)
+{
+    return titleId == INDIE_GAMES_TITLE_ID && contentType == INDIE_GAMES_CONTENT_TYPE;
+}
+
 void FreeInstalledGames(InstalledGame *games, int count)
 {
     for (int i = 0; i < count; ++i)
@@ -494,6 +499,12 @@ int EnumerateInstalledGames(const char *contentBasePath, InstalledGame *outGames
 
         bool foundForThisTitle = false;
 
+        // The Indie Games title's folder holds every indie game, so each of
+        // its packages is one - not just the first.
+        unsigned long folderTitleId = 0;
+        const bool indieTitle = ContentTypeFromFolderName(titleFindData.cFileName, &folderTitleId) &&
+                                folderTitleId == INDIE_GAMES_TITLE_ID;
+
         do
         {
             if (!(ctFindData.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY))
@@ -507,7 +518,7 @@ int EnumerateInstalledGames(const char *contentBasePath, InstalledGame *outGames
             // be the game, so don't open them to find that out.
             unsigned long folderType = 0;
             if (!ContentTypeFromFolderName(ctFindData.cFileName, &folderType) ||
-                !IsGameContentType(folderType))
+                !(IsGameContentType(folderType) || (indieTitle && folderType == INDIE_GAMES_CONTENT_TYPE)))
             {
                 contentTypeFoldersSkipped++;
                 continue;
@@ -540,11 +551,13 @@ int EnumerateInstalledGames(const char *contentBasePath, InstalledGame *outGames
                     // Successes aren't logged: each line is a write to the
                     // log file, and a library is dozens of them. A package in
                     // a game folder that isn't a game is worth a line.
-                    if (!IsGameContentType(info.contentType))
+                    const bool indie = IsIndieGame(info.titleId, info.contentType);
+                    const bool game = IsGameContentType(info.contentType) || indie;
+                    if (!game)
                         printFunction("  %s -> contentType=%08lX in a game folder, skipped\n",
                                       packagePath, info.contentType);
 
-                    if (IsGameContentType(info.contentType) && count < maxGames)
+                    if (game && count < maxGames)
                     {
                         InstalledGame *g = &outGames[count];
                         g->titleId = info.titleId;
@@ -565,7 +578,7 @@ int EnumerateInstalledGames(const char *contentBasePath, InstalledGame *outGames
                         info.contentThumbnail = NULL;
 
                         count++;
-                        foundForThisTitle = true;
+                        foundForThisTitle = !indie;
                     }
 
                     StfsFreeTitleInfo(&info);

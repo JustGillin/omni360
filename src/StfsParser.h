@@ -73,6 +73,13 @@ void FreeInstalledGames(InstalledGame *games, int count);
 // under the Content folder but aren't titles someone would pick DLC for.
 bool IsGameContentType(unsigned long contentType);
 
+// Indie games are content of one title, the Indie Games marketplace's, as
+// Marketplace Content - 584E07D2\00000002\<content ID>, every one of them.
+// The scan lists each package there as a game; IsIndieGame tells them apart.
+#define INDIE_GAMES_TITLE_ID     0x584E07D2UL
+#define INDIE_GAMES_CONTENT_TYPE 0x00000002UL
+bool IsIndieGame(unsigned long titleId, unsigned long contentType);
+
 // Walks contentBasePath (e.g. "Hdd1:\Content\0000000000000000") for
 // TitleID\ContentType\* entries, opens one representative package per
 // title, and fills outGames (caller-allocated, up to maxGames).

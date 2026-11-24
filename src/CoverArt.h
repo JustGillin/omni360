@@ -86,6 +86,12 @@ unsigned long StoreCoverKey(unsigned long titleId, const char *name);
 // banner with its name on it.
 unsigned long IndieCoverKey(const char *name);
 
+// An installed indie game's key in the library, in place of the title ID it
+// shares with every other: the same as IndieCoverKey, but never 0, so each
+// game is told apart - in Recents, favourites and the like - cover or not.
+unsigned long IndieGameKey(const char *name);
+bool IsIndieGameKey(unsigned long key);
+
 // The names behind the homebrew keys in the next RequestCoverArt list.
 // Replaces any earlier names.
 void SetHomebrewCoverNames(const char *const *names, int count);

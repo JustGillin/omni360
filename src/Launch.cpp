@@ -10,6 +10,7 @@ DESCRIPTION : Starting games and other apps. See Launch.h.
 #include <xtl.h>
 #include <stdio.h>
 #include <string.h>
+#include <ctype.h>
 #include "driveMount.h" // mount, for the disc's drive
 
 // NTSTATUSes, which xtl.h doesn't define.
@@ -121,8 +122,67 @@ static void LaunchByDriveName(const char *path)
     }
 }
 
+// An indie game isn't a program of its own: it's content the console's XNA
+// launcher runs - a system file, updated by the Indie Games title's update
+// (584E07D2\000B0000\tu32000100_00000000), which is why the update's number
+// names its folder. The launcher learns which game from its launch data, as
+// Aurora was seen to pass it (read from the launcher's memory over XBDM,
+// 2026-11-24): this magic, the package's file name in lower case, and the
+// content device it's on - 1, the hard drive.
+//
+// It has to be booted as a dashboard boots a disc - XamLoaderLaunchTitleEx,
+// its folder as the mount - for the update to be applied: XLaunchNewImage
+// starts the launcher as it shipped, which reads the same launch data and
+// goes straight back to the Xbox Dashboard.
+#define XNA_LAUNCHER_FOLDER "\\Device\\Harddisk0\\SystemExtPartition\\32000100"
+#define XNA_LAUNCHER_PATH   XNA_LAUNCHER_FOLDER "\\Xna_TitleLauncher.xex"
+#define XNA_LAUNCH_MAGIC    0xCAFEBABEUL
+
+struct XnaLaunchData
+{
+    DWORD magic;       // XNA_LAUNCH_MAGIC
+    char fileName[44]; // the package's, lower case: its content ID in hex
+    DWORD deviceId;    // the content device: 1 for the hard drive
+};
+
+// XamLoaderLaunchTitleEx - see LaunchDisc.
+typedef VOID (*XamLoaderLaunchTitleFn)(LPCSTR launchPath, LPCSTR mountPath, LPCSTR commandLine, DWORD flags);
+static XamLoaderLaunchTitleFn FindLoaderLaunchTitle();
+
+static void LaunchIndieGame(const InstalledGame &game)
+{
+    const char *slash = strrchr(game.packagePath, '\\');
+    const char *file = slash != NULL ? slash + 1 : game.packagePath;
+
+    XnaLaunchData data;
+    memset(&data, 0, sizeof(data));
+    data.magic = XNA_LAUNCH_MAGIC;
+    for (size_t i = 0; file[i] != '\0' && i < sizeof(data.fileName) - 1; ++i)
+        data.fileName[i] = (char)tolower((unsigned char)file[i]);
+    data.deviceId = 1;
+    if (_strnicmp(game.packagePath, "Hdd1:", 5) != 0)
+        dprintf("[launch] %s isn't on the hard drive - the XNA launcher may not find it\n", game.packagePath);
+
+    const DWORD set = XSetLaunchData(&data, sizeof(data));
+    const XamLoaderLaunchTitleFn launchTitle = FindLoaderLaunchTitle();
+    if (set != ERROR_SUCCESS || launchTitle == NULL)
+    {
+        dprintf("[launch] can't start the XNA launcher: launch data %08lX, XamLoaderLaunchTitleEx %s\n", set,
+                launchTitle != NULL ? "found" : "missing");
+        return;
+    }
+    dprintf("[launch] indie game %s, through the XNA launcher\n", data.fileName);
+    launchTitle(XNA_LAUNCHER_PATH, XNA_LAUNCHER_FOLDER, NULL, 0);
+    dprintf("[launch] the loader refused the XNA launcher\n");
+}
+
 void LaunchInstalledGame(const InstalledGame &game)
 {
+    if (IsIndieGame(INDIE_GAMES_TITLE_ID, game.contentType) && !game.folder)
+    {
+        LaunchIndieGame(game);
+        return;
+    }
     if (game.folder)
     {
         // Whichever the scan found it by.
@@ -168,7 +228,6 @@ void LaunchApp(const char *path)
 // table, with the arguments xkelib gives it. Its sibling 0x1A4,
 // XamLoaderLaunchTitle(path, flags), took "\Device\Cdrom0\default.xex" and
 // booted the stock dashboard instead.
-typedef VOID (*XamLoaderLaunchTitleFn)(LPCSTR launchPath, LPCSTR mountPath, LPCSTR commandLine, DWORD flags);
 #define XAM_LOADER_LAUNCH_TITLE 0x1A5
 
 static XamLoaderLaunchTitleFn FindLoaderLaunchTitle()

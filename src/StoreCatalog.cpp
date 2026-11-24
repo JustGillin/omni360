@@ -247,6 +247,37 @@ const XblaGame *ArcadeGameByRar(const char *rar)
     return NULL;
 }
 
+const XblaGame *IndieGameByName(const char *name)
+{
+    if (name == NULL)
+        return NULL;
+    for (int i = 0; i < XBLIG_GAME_COUNT; ++i)
+    {
+        if (strcmp(kXbligGames[i].name, name) == 0)
+            return &kXbligGames[i];
+    }
+    return NULL;
+}
+
+const XblaGame *IndieGameByPackage(const char *fileName)
+{
+    if (fileName == NULL || fileName[0] == '\0')
+        return NULL;
+    const size_t n = strlen(fileName);
+    for (int i = 0; i < XBLIG_GAME_COUNT; ++i)
+    {
+        // files is space-separated: match a whole name, in any place.
+        for (const char *f = kXbligGames[i].files; (f = strstr(f, fileName)) != NULL; f += n)
+        {
+            const bool starts = (f == kXbligGames[i].files || f[-1] == ' ');
+            const bool ends = (f[n] == '\0' || f[n] == ' ');
+            if (starts && ends && _strnicmp(f, fileName, n) == 0)
+                return &kXbligGames[i];
+        }
+    }
+    return NULL;
+}
+
 // ---------------------------------------------------------------------------
 // Search
 // ---------------------------------------------------------------------------

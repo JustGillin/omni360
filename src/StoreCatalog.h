@@ -182,6 +182,13 @@ const XblaGame *XblaGameByTitleId(unsigned long titleId);
 // The game from either list with this RAR name, or NULL.
 const XblaGame *ArcadeGameByRar(const char *rar);
 
+// The indie game whose package has this file name - its content ID - or
+// NULL.
+const XblaGame *IndieGameByPackage(const char *fileName);
+
+// The indie game of this name, exactly as listed, or NULL.
+const XblaGame *IndieGameByName(const char *name);
+
 // ---------------------------------------------------------------------------
 // Search
 // ---------------------------------------------------------------------------

@@ -2324,6 +2324,7 @@ static LibraryFilter FilterOfGame(const InstalledGame &game)
     case 0x00005000: return LIBRARY_FILTER_XBOX;
     case 0x000D0000: return LIBRARY_FILTER_ARCADE;
     case 0x000E0000: return LIBRARY_FILTER_INDIE;
+    case INDIE_GAMES_CONTENT_TYPE: return LIBRARY_FILTER_INDIE; // see NameIndieGames
     default:         return LIBRARY_FILTER_360;
     }
 }
@@ -2390,6 +2391,57 @@ static void RequestLibraryCovers(const Library &lib)
     RequestCoverArt(titleIds, n);
 }
 
+// Indie games all carry the Indie Games title's ID, so each is given a key
+// of its own (IndieGameKey) by its Store name, found by its package's file
+// name - or by its own name where the Store doesn't list it. The key finds
+// its LaunchBox cover, as the Store's tiles do, and keeps Recents,
+// favourites and the one-copy-a-title rule below from taking every indie
+// game for the same one. The package path still says what to launch.
+//
+// Some games come as more than one package (Castle Miner Z's two): one tile
+// a game, from its first package - the Store lists them biggest first, the
+// game before its extras. How many of games[0..count) are left.
+static int NameIndieGames(InstalledGame *games, int count)
+{
+    static bool extra[MAX_INSTALLED_GAMES];
+    for (int i = 0; i < count; ++i)
+    {
+        InstalledGame &game = games[i];
+        extra[i] = false;
+        if (game.folder || !IsIndieGame(game.titleId, game.contentType))
+            continue;
+        const char *slash = strrchr(game.packagePath, '\\');
+        const char *file = slash != NULL ? slash + 1 : game.packagePath;
+        const XblaGame *store = IndieGameByPackage(file);
+        if (store != NULL)
+        {
+            _snprintf(game.displayName, sizeof(game.displayName), "%s", store->name);
+            game.displayName[sizeof(game.displayName) - 1] = '\0';
+            extra[i] = _strnicmp(store->files, file, strlen(file)) != 0;
+        }
+        game.titleId = IndieGameKey(game.displayName);
+    }
+
+    // An extra package goes when its game is listed - by its first package,
+    // or, without that, by another extra before it.
+    int kept = 0;
+    for (int i = 0; i < count; ++i)
+    {
+        bool drop = false;
+        for (int j = 0; j < count && !drop && IsIndieGameKey(games[i].titleId); ++j)
+            drop = j != i && games[j].titleId == games[i].titleId && (!extra[j] || (extra[i] && j < i));
+        if (drop)
+        {
+            FreeInstalledGames(&games[i], 1);
+            continue;
+        }
+        if (kept != i)
+            games[kept] = games[i];
+        kept++;
+    }
+    return kept;
+}
+
 // The games found at lib.games[from..from+found), less any whose title is
 // already listed before them, kept at the end of the list. How many were kept.
 static int KeepNewTitles(Library &lib, int from, int found)
@@ -2420,6 +2472,7 @@ static int ScanLibraryFolder(Library &lib, const char *path)
     int added = 0;
     const double start = ImageTimerMs();
     int found = EnumerateInstalledGames(path, lib.games + lib.count, MAX_INSTALLED_GAMES - lib.count, dprintf);
+    found = NameIndieGames(lib.games + lib.count, found);
     if (found > 0)
         added += KeepNewTitles(lib, lib.count, found);
     const double packagesDone = ImageTimerMs();
@@ -6914,8 +6967,9 @@ static void OpenGameByTitleId(Shell &shell, const Library &lib, unsigned long ti
     StoreGame game;
     if (!StoreGameByTitleId(titleId, &game))
     {
-        // An arcade game the Store has: its page from there.
-        const XblaGame *xbla = XblaGameByTitleId(titleId);
+        // An arcade or indie game the Store has: its page from there. An
+        // indie game is known by its name (see NameIndieGames).
+        const XblaGame *xbla = IsIndieGameKey(titleId) ? IndieGameByName(name) : XblaGameByTitleId(titleId);
         if (xbla != NULL)
         {
             OpenArcadeGame(shell, *xbla);
@@ -6955,6 +7009,16 @@ static const InstalledGame *LibraryGameByTitleId(const Library &lib, unsigned lo
         if (lib.games[i].titleId == titleId)
             return &lib.games[i];
     return NULL;
+}
+
+// The library's copy of the game whose page is open, or NULL. An indie
+// game's page has no title ID - they all share one - so its copy is found
+// by the key the library gives it (NameIndieGames).
+static const InstalledGame *PageLibraryGame(const Library &lib)
+{
+    if (StoreGameIsIndie())
+        return LibraryGameByTitleId(lib, IndieGameKey(g_storeArcade->name));
+    return LibraryGameByTitleId(lib, g_storeGame.titleId);
 }
 
 // Leaving stops the queue, so it asks first when there's anything in it
@@ -7249,7 +7313,7 @@ static StoreGameView MakeStoreGameView(Shell &shell, const Library &lib)
         break;
     case STORE_INSTALL_INSTALLED:
         // Played from here too, where the library has it to play.
-        view.buttons[0] = LibraryGameByTitleId(lib, g_storeGame.titleId) != NULL ? Tr(STR_PLAY) : Tr(STR_INSTALLED);
+        view.buttons[0] = PageLibraryGame(lib) != NULL ? Tr(STR_PLAY) : Tr(STR_INSTALLED);
         break;
     default:
         if (DiscInDriveFor(shell, g_storeGame.titleId))
@@ -7337,7 +7401,7 @@ static bool GamePagePlays(const Shell &shell, const Library &lib)
     float fraction = 0.0f;
     bool partial = false;
     return StoreVersionState(lib, shell.storeVersionChosen, &fraction, &partial) == STORE_INSTALL_INSTALLED &&
-           LibraryGameByTitleId(lib, g_storeGame.titleId) != NULL;
+           PageLibraryGame(lib) != NULL;
 }
 
 // The D-pad on a game page: along the buttons, and down to More like this,
@@ -12881,7 +12945,7 @@ int main()
                 }
                 else if (f == STORE_GAME_FOCUS_BUTTONS && StoreVersionCount() > 0 && GamePagePlays(shell, lib))
                 {
-                    PlayLibraryGame(*LibraryGameByTitleId(lib, g_storeGame.titleId));
+                    PlayLibraryGame(*PageLibraryGame(lib));
                     acted = true;
                 }
                 else if (f == STORE_GAME_FOCUS_BUTTONS && StoreVersionCount() > 0 &&
