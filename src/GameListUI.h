@@ -21,9 +21,9 @@ void ShutdownGameListUI();
 // down (progress, messages, confirmations) are still their own loops for now;
 // they draw the sidebar too, so the app reads as one place throughout.
 
-// In the order the sidebar lists them. Home, Library, Apps, Homebrew,
-// Emulators and Store are one group, Queue and Settings the other, with a
-// divider between.
+// In the order the sidebar lists them: Library, Favourites, Apps, Homebrew
+// and Emulators, then a divider and the Queue. Home, the Store and Settings
+// aren't in it; they're in Home's nav row (as is the Queue).
 //
 // Home is the app's root, and the one page the sidebar isn't drawn over: it
 // has a nav row of its own across the top so the wallpaper can run the full
@@ -55,9 +55,9 @@ const char *ShellPageName(ShellPage page);
 struct ShellSidebar
 {
     // Whether this page draws it at all. It is the Games/Apps/Homebrew/
-    // Emulators group's own navigation, not the app's: Home, the Store, the
-    // Queue and Settings run full width without it, and setting this also
-    // moves where their content starts.
+    // Emulators/Queue group's own navigation, not the app's: Home and the
+    // Store run full width without it (Settings shows its own sections in
+    // it), and setting this also moves where their content starts.
     bool shown;
 
     ShellPage page;       // the highlighted page
@@ -68,6 +68,18 @@ struct ShellSidebar
     int homebrewCount;    // beside Homebrew
     int emulatorsCount;   // beside Emulators
     int queueCount;       // shown beside Queue; 0 shows nothing
+
+    // The download under way, previewed above the storage ring as the
+    // dashboard does: its name, then its percentage and speed (green through
+    // the PC helper) - or, with no bytes moving, what it's doing - and a bar
+    // (fraction negative: none).
+    // queueName empty: nothing under way, or on the Queue page itself.
+    // Copies, as the blocking screens draw the sidebar after the fact.
+    char queueName[96];
+    char queueStatus[96];
+    char queueNumbers[64];
+    float queueFraction;
+    bool queueViaPc;
 
     // Pages left out of the sidebar - Apps, Homebrew or Emulators with no
     // folders. The ones under them move up into their place.
@@ -311,6 +323,15 @@ struct LibraryPageView
     // library either way - the covers are built for all of it.
     const int *order;
     int orderCount;
+
+    // Games' filters, a row of pills under the heading as on the dashboard:
+    // filterCount labels, filter the chosen one. 0 draws no row (Favourites,
+    // the shelves, a library of one kind). filterFocused: the row has focus,
+    // not the grid.
+    const char *const *filters;
+    int filterCount;
+    int filter;
+    bool filterFocused;
 
     // Per game in games, or NULL: the name to show in place of displayName
     // (a rename; NULL entries keep the package's). Favourites carry no mark
@@ -1055,6 +1076,10 @@ bool ShowAlertCoverUI(const char *heading, const char *message, const char *deta
 // ahead can't be undone.
 int ShowAlertButtonsUI(const char *heading, const char *message, const char *detailLine, const char **labels,
                        int count, int maxMessageLines = 5, int focus = 0);
+
+// ShowAlertButtonsUI with the game's cover, as ShowAlertCoverUI.
+int ShowAlertCoverButtonsUI(const char *heading, const char *message, const char *detailLine, const char **labels,
+                            int count, int focus, unsigned long titleId);
 
 // Icons for a list card's rows, so what a row is reads at a glance.
 enum UiListIcon

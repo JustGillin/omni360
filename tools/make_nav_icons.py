@@ -297,6 +297,20 @@ def icon_trash(d):
         line(d, (x0 + w * t, lidY + w * 0.18), (x0 + w * t, y1 - w * 0.14), STROKE * 0.8)
 
 
+def icon_star(d):
+    """Favourites: a five-pointed star, outlined, its joins rounded."""
+    x0, y0, x1, y1 = box()
+    cx, cy = (x0 + x1) * 0.5, (y0 + y1) * 0.5 + px(1.5)
+    outer = (x1 - x0) * 0.52
+    inner = outer * 0.45
+    pts = []
+    for i in range(10):
+        r = outer if i % 2 == 0 else inner
+        a = -math.pi / 2 + i * math.pi / 5
+        pts.append((cx + r * math.cos(a), cy + r * math.sin(a)))
+    d.line(pts + [pts[0], pts[1]], fill=255, width=int(round(px(STROKE))), joint="curve")
+
+
 ICONS = [
     ("LIBRARY", icon_library),
     ("APPS", icon_apps),
@@ -315,6 +329,7 @@ ICONS = [
     ("COPY", icon_copy),
     ("MOVE", icon_move),
     ("TRASH", icon_trash),
+    ("STAR", icon_star),  # added last, so the others keep their places
 ]
 
 

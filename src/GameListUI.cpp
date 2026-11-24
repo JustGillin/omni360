@@ -2087,7 +2087,10 @@ static float NavItemY(int page)
             before++;
         shown++;
     }
-    return g_M.listY + before * S(shown > 6 ? 58.0f : 62.0f);
+    float y = g_M.listY + before * S(shown > 6 ? 58.0f : 62.0f);
+    if (page >= SHELL_PAGE_QUEUE)
+        y += S(26.0f); // the divider's gap
+    return y;
 }
 
 // A section's, when the sidebar lists a page's sections: spaced as the pages
@@ -2208,6 +2211,80 @@ static float StorageCenterY()
     return g_M.footerY - S(8.0f);
 }
 
+static void DrawNavIcon(int icon, float cx, float cy, float size, D3DCOLOR tint); // with Home's nav row
+static int NavIconForPage(int page);
+
+// The download under way, above the storage ring: its name, what it's doing,
+// its numbers, and a bar. Laid out from the ring up, so it keeps its place
+// whatever the sidebar lists; left out where it would reach the pages - a
+// 480p screen with every shelf showing.
+struct QueuePreviewLayout
+{
+    float top;
+    float nameH, lineH;
+    float barY, barH;
+};
+
+static bool LayOutQueuePreview(QueuePreviewLayout *p)
+{
+    if (g_sidebar.queueName[0] == '\0' || g_sidebar.sectionCount > 0)
+        return false;
+    p->nameH = LineHeight(0.82f) * 1.2f;
+    p->lineH = LineHeight(0.68f) * 1.2f;
+    p->barH = S(4.0f);
+    const float h = p->nameH + p->lineH + S(8.0f) + p->barH; // the name, then one line
+
+    const float bottom = g_sidebar.storageUsed >= 0.0f
+                             ? StorageCenterY() - StorageRingSize() * 0.5f - S(26.0f)
+                             : StorageCenterY();
+    p->top = bottom - h;
+    p->barY = bottom - p->barH;
+
+    float pagesBottom = 0.0f;
+    for (int page = 0; page < SHELL_PAGE_COUNT; ++page)
+    {
+        if (!NavShown(page))
+            continue;
+        const float b = NavItemY(page) + NavItemHeight();
+        if (b > pagesBottom)
+            pagesBottom = b;
+    }
+    return p->top >= pagesBottom + S(18.0f);
+}
+
+static void DrawQueuePreviewQuads()
+{
+    QueuePreviewLayout p;
+    if (!LayOutQueuePreview(&p) || g_sidebar.queueFraction < 0.0f)
+        return;
+    const float x = g_M.safeX;
+    const float w = g_M.navX + g_M.navW - x;
+    FillRound(x, p.barY, w, p.barH, p.barH * 0.5f, COL_TRACK);
+    if (g_sidebar.queueFraction > 0.0f)
+        FillRound(x, p.barY, w * g_sidebar.queueFraction, p.barH, p.barH * 0.5f, COL_GREEN);
+}
+
+static void DrawQueuePreviewText()
+{
+    QueuePreviewLayout p;
+    if (!LayOutQueuePreview(&p))
+        return;
+    const float x = g_M.safeX;
+    const float w = g_M.navX + g_M.navW - x;
+    TextFit(x, p.top, 0.82f, COL_TEXT, g_sidebar.queueName, w, true);
+    // Its numbers while it downloads - green through the PC - or else what
+    // it's doing.
+    if (g_sidebar.queueNumbers[0] != '\0')
+        TextFit(x, p.top + p.nameH, 0.68f, g_sidebar.queueViaPc ? COL_GREEN : COL_TEXT2, g_sidebar.queueNumbers, w);
+    else
+        TextFit(x, p.top + p.nameH, 0.68f, COL_TEXT2, g_sidebar.queueStatus, w);
+}
+
+// Each page's icon in the sidebar, left of its name; the name starts past it.
+#define SIDEBAR_ICON_SIZE 24.0f
+static float SidebarIconX() { return g_M.navX + S(32.0f); } // the icon's centre
+static float SidebarTextX() { return g_M.navX + S(54.0f); }
+
 // focused is passed separately from g_sidebar.focused so the blocking screens
 // can draw it unfocused without changing what main.cpp set.
 static void DrawSidebarQuads(bool focused)
@@ -2226,10 +2303,11 @@ static void DrawSidebarQuads(bool focused)
         FillRound(beta.x, beta.centerY - beta.h * 0.5f, beta.w, beta.h, beta.h * 0.5f, COL_GREEN);
     }
 
-    // The divider split the things you browse from the things you manage.
-    // The sidebar is one group now - Games and the shelves - and the Queue
-    // and Settings it separated are in Home's nav row, so there is nothing
-    // left for it to divide.
+    // The divider splits the things you browse from the Queue, where what's
+    // on its way into them is. Not over a page's own sections (Settings').
+    if (g_sidebar.sectionCount == 0 && NavShown(SHELL_PAGE_QUEUE))
+        FillRound(g_M.safeX, NavItemY(SHELL_PAGE_QUEUE) - S(15.0f), g_M.navX + g_M.navW - g_M.safeX, S(2.0f),
+                  R(1.0f), COL_DIVIDER);
 
     const float itemH = NavItemHeight();
 
@@ -2259,6 +2337,9 @@ static void DrawSidebarQuads(bool focused)
                 FocusRing(g_M.navX, y, g_M.navW, itemH, g_M.radius);
         }
 
+        DrawNavIcon(NavIconForPage(page), SidebarIconX(), y + itemH * 0.5f, S(SIDEBAR_ICON_SIZE),
+                    page == g_sidebar.page ? COL_TEXT : COL_TEXT2);
+
         NavCount count;
         if (NavCountFor(page, &count))
         {
@@ -2266,6 +2347,8 @@ static void DrawSidebarQuads(bool focused)
                       page == SHELL_PAGE_QUEUE ? COL_GREEN : COL_TRACK);
         }
     }
+
+    DrawQueuePreviewQuads();
 
     // Storage: how full the drive content installs to is, as a ring.
     if (g_sidebar.storageUsed >= 0.0f)
@@ -2315,7 +2398,7 @@ static void DrawSidebarText(bool focused)
             continue;
         const bool current = (page == g_sidebar.page);
         const float centerY = NavItemY(page) + itemH * 0.5f;
-        const float textX = g_M.navX + S(26.0f);
+        const float textX = SidebarTextX();
         float nameMaxW = NavRight() - textX;
 
         NavCount count;
@@ -2328,6 +2411,8 @@ static void DrawSidebarText(bool focused)
         TextMid(textX, centerY, 0.95f, current ? COL_TEXT : COL_TEXT2, Tr(kShellPageNames[page]),
                 ATGFONT_TRUNCATED, nameMaxW, current);
     }
+
+    DrawQueuePreviewText();
 
     if (g_sidebar.storageUsed >= 0.0f)
     {
@@ -4108,7 +4193,10 @@ static TilePill PillFor(const char *label, float tileX, float tileY, float tileS
 // under them so it's clear the library carries on.
 struct LibraryLayout
 {
+    bool showFilters;
+    float filtersH;
     bool showBanner;
+    float bannerY;
     float bannerH;
     float top;      // first row's top edge
     float bottom;   // where the peeking row is cut off
@@ -4133,13 +4221,52 @@ static LibraryLayout ComputeLibraryLayout(const LibraryPageView &view)
     L.tile = (g_M.contentW - ScrollGutter() - (L.cols - 1) * L.gap) / (float)L.cols;
     L.pitch = L.tile + L.gap;
 
-    L.top = g_M.listYTitleOnly + (L.showBanner ? L.bannerH + S(18.0f) : 0.0f);
+    // The filters first, under the heading, then the keys notice, then the grid.
+    L.showFilters = view.filters != NULL && view.filterCount > 0;
+    L.filtersH = S(42.0f);
+    L.bannerY = g_M.listYTitleOnly + (L.showFilters ? L.filtersH + S(18.0f) : 0.0f);
+    L.top = L.bannerY + (L.showBanner ? L.bannerH + S(18.0f) : 0.0f);
     L.bottom = g_M.footerY - S(30.0f);
 
     L.fullRows = (int)((L.bottom - L.top + L.gap) / L.pitch);
     if (L.fullRows < 1) L.fullRows = 1;
 
     return L;
+}
+
+// Games' filter pills, left to right under the heading: the chosen one
+// filled green, the others just their names, as the dashboard's are. text
+// picks the pass - the plates and focus ring, or the names.
+#define FILTER_LABEL_SIZE 0.85f
+
+static void DrawLibraryFilters(const LibraryPageView &view, const LibraryLayout &L, bool text)
+{
+    float x = g_M.contentX;
+    const float right = g_M.contentX + g_M.contentW;
+    for (int i = 0; i < view.filterCount; ++i)
+    {
+        const char *label = view.filters[i];
+        const float w = TextWidth(label, FILTER_LABEL_SIZE, true) + S(40.0f);
+        if (x + w > right)
+            break; // five fit on a 480p screen; never draw past the edge
+        const bool chosen = (i == view.filter);
+        const float y = g_M.listYTitleOnly;
+        if (!text)
+        {
+            if (chosen)
+            {
+                FillRound(x, y, w, L.filtersH, L.filtersH * 0.5f, COL_GREEN);
+                if (view.filterFocused)
+                    FocusRing(x, y, w, L.filtersH, L.filtersH * 0.5f);
+            }
+        }
+        else
+        {
+            TextMid(x + w * 0.5f, y + L.filtersH * 0.5f, FILTER_LABEL_SIZE, chosen ? COL_TEXT : COL_TEXT2, label,
+                    ATGFONT_CENTER_X, 0.0f, true);
+        }
+        x += w + S(6.0f);
+    }
 }
 
 int LibraryPageVisibleRows(const LibraryPageView &view)
@@ -4458,10 +4585,13 @@ void RenderLibraryFrame(LibraryPageView &view, const UiHint *hints, int hintCoun
     {
         // The keys notice: a card with an amber edge and the Y button that
         // fixes it - the badge and the edge read as one thing.
-        FillRound(g_M.contentX, g_M.listYTitleOnly, g_M.contentW, L.bannerH, r, COL_SURFACE);
-        FillRound(g_M.contentX, g_M.listYTitleOnly, S(6.0f), L.bannerH, R(3.0f), COL_AMBER);
-        DrawButtonSprite(BUTTON_SPRITE_Y, g_M.contentX + S(22.0f), g_M.listYTitleOnly + L.bannerH * 0.5f);
+        FillRound(g_M.contentX, L.bannerY, g_M.contentW, L.bannerH, r, COL_SURFACE);
+        FillRound(g_M.contentX, L.bannerY, S(6.0f), L.bannerH, R(3.0f), COL_AMBER);
+        DrawButtonSprite(BUTTON_SPRITE_Y, g_M.contentX + S(22.0f), L.bannerY + L.bannerH * 0.5f);
     }
+
+    if (L.showFilters)
+        DrawLibraryFilters(view, L, false);
 
     // Tiles whose text the second pass draws: their pills, and a disc's name.
     struct TileText { float x, y, s; int item; };
@@ -4571,10 +4701,13 @@ void RenderLibraryFrame(LibraryPageView &view, const UiHint *hints, int hintCoun
 
     DrawButtonHintText(footer, footerCount, g_M.footerY);
 
+    if (L.showFilters)
+        DrawLibraryFilters(view, L, true);
+
     if (L.showBanner)
     {
         float textX = g_M.contentX + S(22.0f) + HintBadgeHeight() + S(14.0f);
-        TextMid(textX, g_M.listYTitleOnly + L.bannerH * 0.5f, 0.85f, COL_TEXT, view.bannerText,
+        TextMid(textX, L.bannerY + L.bannerH * 0.5f, 0.85f, COL_TEXT, view.bannerText,
                 ATGFONT_TRUNCATED, g_M.contentX + g_M.contentW - textX - S(20.0f));
     }
 
@@ -5728,6 +5861,15 @@ bool ShowAlertCoverUI(const char *heading, const char *message, const char *deta
 {
     g_alertCover = titleId != 0 ? BoxArtFor(titleId) : NULL;
     const bool result = ShowAlertUI(heading, message, detailLine, confirmLabel, cancelLabel);
+    g_alertCover = NULL;
+    return result;
+}
+
+int ShowAlertCoverButtonsUI(const char *heading, const char *message, const char *detailLine, const char **labels,
+                            int count, int focus, unsigned long titleId)
+{
+    g_alertCover = titleId != 0 ? BoxArtFor(titleId) : NULL;
+    const int result = ShowAlertButtonsUI(heading, message, detailLine, labels, count, 5, focus);
     g_alertCover = NULL;
     return result;
 }
@@ -6969,6 +7111,7 @@ static int NavIconForPage(int page)
     case SHELL_PAGE_STORE:     return NAV_ICON_STORE;
     case SHELL_PAGE_QUEUE:     return NAV_ICON_QUEUE;
     case SHELL_PAGE_SETTINGS:  return NAV_ICON_SETTINGS;
+    case SHELL_PAGE_FAVOURITES: return NAV_ICON_STAR; // the sidebar's; Home's row hasn't it
     default:                   return NAV_ICON_LIBRARY;
     }
 }

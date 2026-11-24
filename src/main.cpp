@@ -2115,6 +2115,39 @@ static int g_libraryGeneration = 0;
 static const char *g_shownNames[MAX_INSTALLED_GAMES]; // a rename, or NULL
 static int g_favouriteOrder[MAX_INSTALLED_GAMES];     // the favourites, as library indexes, in its order
 static int g_favouriteShown = 0;
+
+// Games' filters, across the top as the dashboard's library has them: every
+// game, or one kind. A kind with no games isn't offered, and with fewer than
+// two kinds there is nothing to choose between, so no row at all.
+enum LibraryFilter
+{
+    LIBRARY_FILTER_ALL,
+    LIBRARY_FILTER_360,
+    LIBRARY_FILTER_XBOX,
+    LIBRARY_FILTER_ARCADE,
+    LIBRARY_FILTER_INDIE,
+    LIBRARY_FILTER_COUNT
+};
+static int g_filterOrder[MAX_INSTALLED_GAMES]; // the chosen kind's games, as library indexes
+static int g_filterShown = 0;
+static int g_filterOffered[LIBRARY_FILTER_COUNT]; // the filters the row shows, as LibraryFilter
+static int g_filterOfferedCount = 0;              // 0: no row
+static const char *g_filterLabels[LIBRARY_FILTER_COUNT];
+
+// Which filter a game falls under, by its content type: Arcade and indie
+// games have their own; an Original Xbox game is one whether it's a package
+// or a folder; everything else - discs installed, Games on Demand, demos,
+// extracted folders - is an Xbox 360 game.
+static LibraryFilter FilterOfGame(const InstalledGame &game)
+{
+    switch (game.contentType)
+    {
+    case 0x00005000: return LIBRARY_FILTER_XBOX;
+    case 0x000D0000: return LIBRARY_FILTER_ARCADE;
+    case 0x000E0000: return LIBRARY_FILTER_INDIE;
+    default:         return LIBRARY_FILTER_360;
+    }
+}
 static int g_marksVersion = 0; // up with every favourite or rename made here
 
 // The media ID of the title's installed copy - which release it is, for
@@ -4466,6 +4499,10 @@ struct Shell
     // The library's page showing only the favourites - Favourites in the
     // sidebar. librarySelected counts its tiles then, not the library's.
     bool libraryFavourites;
+    // Games' filters across the top (LibraryFilter): which is chosen, and
+    // whether the row has focus rather than the grid.
+    int libraryFilter;
+    bool libraryOnFilters;
     int storeGameFocus;     // STORE_GAME_FOCUS_*
     int storeVersionChosen; // the one Install installs - Y picks another (ChooseStoreVersion)
     bool storeShotsAsked;   // its screenshots, once its details came
@@ -4511,26 +4548,27 @@ static const XblaGame *g_storeArcade = NULL;
 // Static rather than on main's stack: the queue's snapshot alone is tens of KB.
 static Shell g_shell;
 
-// An empty Queue has nothing to choose - on it, the sidebar keeps focus.
+// An empty Queue has nothing to choose - on it, the sidebar keeps focus. One
+// with only its row of recent installs has that row.
 static bool PageTakesFocus(const Shell &shell, ShellPage page)
 {
     if (page == SHELL_PAGE_QUEUE)
-        return shell.queueCount > 0;
+        return shell.queueCount > 0 || shell.queueRecentCount > 0;
     ShelfKind shelf;
     return page == SHELL_PAGE_HOME || page == SHELL_PAGE_LIBRARY || ShelfForPage(page, &shelf) ||
            page == SHELL_PAGE_STORE || page == SHELL_PAGE_SETTINGS;
 }
 
-// The sidebar is this group's own navigation, not the app's: Games and the
-// three shelves share it, and it lists only them. Settings draws the same
-// sidebar listing its own sections instead. Home, the Store and the Queue
-// draw full width and are reached from Home's nav row, so
+// The sidebar is this group's own navigation, not the app's: Games, the
+// three shelves and the Queue share it, and it lists only them. Settings
+// draws the same sidebar listing its own sections instead. Home and the
+// Store draw full width and are reached from Home's nav row, so
 // shell.sidebarFocused means nothing on them and is held false.
 static bool SidebarShown(const Shell &shell)
 {
     ShelfKind shelf;
     return shell.page == SHELL_PAGE_LIBRARY || shell.page == SHELL_PAGE_SETTINGS ||
-           ShelfForPage(shell.page, &shelf);
+           shell.page == SHELL_PAGE_QUEUE || ShelfForPage(shell.page, &shelf);
 }
 
 // Left out of a page's first column goes to the sidebar - where the page has
@@ -4541,9 +4579,10 @@ static void FocusSidebar(Shell &shell)
         shell.sidebarFocused = true;
 }
 
-// Not in the sidebar. It lists its own group and nothing else: Games, and
-// Apps, Homebrew or Emulators while each has folders set. Home, the Store,
-// the Queue and Settings are reached from Home's nav row instead.
+// Not in the sidebar. It lists its own group and nothing else: Games, Apps,
+// Homebrew or Emulators while each has folders set, and below a divider the
+// Queue - where what's installing into them is. Home, the Store and Settings
+// are reached from Home's nav row instead (the Queue is there too).
 static bool PageHidden(ShellPage page)
 {
     ShelfKind shelf;
@@ -4551,7 +4590,7 @@ static bool PageHidden(ShellPage page)
         return g_shelves[shelf].pathCount == 0;
     // Favourites is listed even with none, so there's somewhere that says
     // how to make one.
-    return page != SHELL_PAGE_LIBRARY && page != SHELL_PAGE_FAVOURITES;
+    return page != SHELL_PAGE_LIBRARY && page != SHELL_PAGE_FAVOURITES && page != SHELL_PAGE_QUEUE;
 }
 
 // What the sidebar highlights: Favourites is the library's page in its
@@ -4608,6 +4647,15 @@ static void EnterPage(Shell &shell, ShellPage page, bool fromSidebar)
     else
     {
         shell.sidebarFocused = fromSidebar;
+        // A Queue with no cards: its row of recent installs, or with none of
+        // those either, the sidebar - nothing on the page to stand on.
+        if (page == SHELL_PAGE_QUEUE && !fromSidebar && shell.queueCount == 0)
+        {
+            if (shell.queueRecentCount > 0)
+                shell.queueOnRecents = true;
+            else
+                shell.sidebarFocused = true;
+        }
     }
 }
 
@@ -7208,7 +7256,18 @@ static bool QueueIndieRuntime(const char *authHeader)
     return EnqueueDlcPack(pack, INDIE_RUNTIME_NAME, carrier->titleId, authHeader) == ENQUEUE_ADDED;
 }
 
-static void InstallArcadeGame(const char *authHeader)
+// After a game is added from its page: the Queue is where it's watched, so
+// offer to go there - Install then A, without backing out to Home first. It
+// opens on View in the Queue; Stay here, or B, leaves the page as it is.
+// True to go.
+static bool AskViewQueue(const char *message, unsigned long titleId)
+{
+    const char *labels[2] = { Tr(STR_VIEW_IN_QUEUE), Tr(STR_STAY_HERE) };
+    return ShowAlertCoverButtonsUI(Tr(STR_ADDED_TO_THE_QUEUE), message, NULL, labels, 2, 0, titleId) == 0;
+}
+
+// True if the user chose to go to the Queue.
+static bool InstallArcadeGame(const char *authHeader)
 {
     // An indie game's runtime goes first, if it's needed.
     const bool runtime = StoreGameIsIndie() && QueueIndieRuntime(authHeader);
@@ -7222,17 +7281,18 @@ static void InstallArcadeGame(const char *authHeader)
     pack.size = g_storeArcade->size;
     pack.score = 100;
     const EnqueueResult result = EnqueueDlcPack(pack, g_storeArcade->name, g_storeArcade->titleId, authHeader);
-    if (runtime && result == ENQUEUE_ADDED)
-    {
-        char message[192];
-        TrFormat(message, sizeof(message), STR_INDIE_RUNTIME_ADDED, g_storeArcade->name);
-        message[sizeof(message) - 1] = '\0';
-        ShowShellToast(Tr(STR_ADDED_TO_THE_QUEUE), message, UI_TOAST_INFO);
-    }
-    else
+    if (result != ENQUEUE_ADDED)
     {
         ReportEnqueue(result, g_storeArcade->name);
+        return false;
     }
+    char message[192];
+    if (runtime)
+        TrFormat(message, sizeof(message), STR_INDIE_RUNTIME_ADDED, g_storeArcade->name);
+    else
+        _snprintf(message, sizeof(message), "%s", g_storeArcade->name);
+    message[sizeof(message) - 1] = '\0';
+    return AskViewQueue(message, g_storeArcade->titleId);
 }
 
 // Before an Arcade compilation disc installs, from the Store or the drive:
@@ -7250,12 +7310,13 @@ static bool ConfirmCompilationInstall()
 // installed or on its way, in disc order, queued for GameInstaller. One that's
 // unpacked on the console asks first, as it takes a lot longer. True if that
 // question took over the screen.
-static bool InstallStoreVersion(const Shell &shell, const Library &lib, const char *authHeader)
+static bool InstallStoreVersion(const Shell &shell, const Library &lib, const char *authHeader, bool *viewQueue)
 {
+    *viewQueue = false;
     if (g_storeArcade != NULL)
     {
-        InstallArcadeGame(authHeader);
-        return false;
+        *viewQueue = InstallArcadeGame(authHeader);
+        return true; // the question took over the screen, or a toast did nothing to it
     }
 
     const StoreRelease *release = StoreReleaseOf(&g_storeGame, shell.storeVersionChosen);
@@ -7351,15 +7412,17 @@ static bool InstallStoreVersion(const Shell &shell, const Library &lib, const ch
                                                       : Tr(STR_WAIT_FOR_AN_INSTALL_TO), UI_TOAST_ERROR);
     else if (failure != GAME_QUEUED)
         ShowShellToast(Tr(STR_COULDNT_ADD_IT), Tr(STR_THE_GAME_INSTALLER_ISNT_RUNNING), UI_TOAST_ERROR);
-    else if (added > 1)
+    else if (added > 0)
     {
-        char message[64];
-        TrFormat(message, sizeof(message), STR_DISCS_OF, TrNum(added), g_storeGame.name);
+        char message[192];
+        if (added > 1)
+            TrFormat(message, sizeof(message), STR_DISCS_OF, TrNum(added), g_storeGame.name);
+        else
+            _snprintf(message, sizeof(message), "%s", g_storeGame.name);
         message[sizeof(message) - 1] = '\0';
-        ShowShellToast(Tr(STR_ADDED_TO_THE_QUEUE), message, UI_TOAST_INFO);
+        *viewQueue = AskViewQueue(message, g_storeGame.titleId);
+        return true; // the question took over the screen
     }
-    else if (added == 1)
-        ShowShellToast(Tr(STR_ADDED_TO_THE_QUEUE), g_storeGame.name, UI_TOAST_INFO);
     else
         ShowShellToast(Tr(STR_ALREADY_IN_THE_QUEUE), g_storeGame.name, UI_TOAST_INFO);
     return unpacks || compilation;
@@ -7742,6 +7805,46 @@ static void PublishSidebar(const Shell &shell, const Library &lib)
     for (int p = 0; p < SHELL_PAGE_COUNT; ++p)
         sidebar.hidden[p] = PageHidden((ShellPage)p);
     sidebar.queueCount = PendingDownloadCount() + PendingDiscJobCount() + PendingGameJobCount() + PendingFileJobCount();
+
+    // The first job under way, previewed above the storage ring - not on the
+    // Queue page, which is the same thing at full size. The rows are this
+    // frame's (SnapshotQueue runs first).
+    sidebar.queueName[0] = sidebar.queueStatus[0] = sidebar.queueNumbers[0] = '\0';
+    sidebar.queueFraction = -1.0f;
+    sidebar.queueViaPc = false;
+    for (int i = 0; i < shell.queueCount && shell.page != SHELL_PAGE_QUEUE; ++i)
+    {
+        const QueueJobSnapshot &job = shell.queueJobs[i];
+        if (job.state != QUEUE_ACTIVE)
+            continue;
+        const QueueRowView &row = shell.queueRows[i];
+        // A game's install is titled by its zip on the card, with the game's
+        // name under it; the name is what fits here.
+        const char *name = row.title;
+        if ((job.kind == QUEUE_JOB_GAME_INSTALL || job.kind == QUEUE_JOB_DISC_INSTALL) && job.gameName[0] != '\0')
+            name = job.gameName;
+        _snprintf(sidebar.queueName, sizeof(sidebar.queueName), "%s", name != NULL ? name : "");
+        sidebar.queueName[sizeof(sidebar.queueName) - 1] = '\0';
+        if (job.bytesPerSec > 0 && job.fraction >= 0.0f)
+        {
+            // Downloading: the numbers say it, and the green says through the
+            // PC - the card's longer line wouldn't fit the sidebar.
+            char speed[32];
+            FormatBytes(job.bytesPerSec, speed, sizeof(speed));
+            TrFormat(sidebar.queueNumbers, sizeof(sidebar.queueNumbers), STR_SIDEBAR_QUEUE_NUMBERS,
+                     TrNum((int)(job.fraction * 100.0f)), speed);
+            sidebar.queueNumbers[sizeof(sidebar.queueNumbers) - 1] = '\0';
+        }
+        else
+        {
+            // Not moving bytes - unpacking, installing, starting: what it's doing.
+            _snprintf(sidebar.queueStatus, sizeof(sidebar.queueStatus), "%s", row.status != NULL ? row.status : "");
+            sidebar.queueStatus[sizeof(sidebar.queueStatus) - 1] = '\0';
+        }
+        sidebar.queueFraction = job.fraction > 1.0f ? 1.0f : job.fraction;
+        sidebar.queueViaPc = job.viaPc;
+        break;
+    }
     sidebar.storageUsed = shell.storage.used;
     strncpy(sidebar.storageLabel, shell.storage.label, sizeof(sidebar.storageLabel) - 1);
     sidebar.storageLabel[sizeof(sidebar.storageLabel) - 1] = '\0';
@@ -8503,15 +8606,20 @@ static HomePageView MakeHomeView(const Shell &shell, const Library &lib)
     return view;
 }
 
+static const int *LibraryOrder(const Shell &shell, int *count); // with the library's page, below
+static int LibraryDiscItems(const Shell &shell);
+
 // The library's tile for a library game, on the page as it's showing - so
 // the focus can follow a game the library has just moved.
 static int LibraryItemFor(const Shell &shell, int index)
 {
-    if (!shell.libraryFavourites)
-        return index + ((shell.hasDisc) ? 1 : 0);
-    for (int i = 0; i < g_favouriteShown; ++i)
+    int count = 0;
+    const int *order = LibraryOrder(shell, &count);
+    if (order == NULL)
+        return index + LibraryDiscItems(shell);
+    for (int i = 0; i < count; ++i)
     {
-        if (g_favouriteOrder[i] == index)
+        if (order[i] == index)
             return i;
     }
     return 0;
@@ -8619,14 +8727,39 @@ static void LibraryGameOptions(Shell &shell, Library &lib, int index)
 // The library's page, all of it or the favourites: how many tiles lead the
 // games (the disc's, which Favourites doesn't show), how many games follow,
 // and which library game a tile is - -1 for the disc's.
+static bool LibraryFiltered(const Shell &shell)
+{
+    return !shell.libraryFavourites && g_filterOfferedCount > 0 && shell.libraryFilter != LIBRARY_FILTER_ALL;
+}
+
+// The games the page shows, as library indexes: the favourites, or one
+// filter's kind; NULL for every game in the library's own order.
+static const int *LibraryOrder(const Shell &shell, int *count)
+{
+    if (shell.libraryFavourites)
+    {
+        *count = g_favouriteShown;
+        return g_favouriteOrder;
+    }
+    if (LibraryFiltered(shell))
+    {
+        *count = g_filterShown;
+        return g_filterOrder;
+    }
+    *count = 0;
+    return NULL;
+}
+
+// The disc's tile leads All, and nothing else - Favourites, or a kind.
 static int LibraryDiscItems(const Shell &shell)
 {
-    return (shell.hasDisc && !shell.libraryFavourites) ? 1 : 0;
+    return (shell.hasDisc && !shell.libraryFavourites && !LibraryFiltered(shell)) ? 1 : 0;
 }
 
 static int LibraryShownGames(const Shell &shell, const Library &lib)
 {
-    return shell.libraryFavourites ? g_favouriteShown : lib.count;
+    int count = 0;
+    return LibraryOrder(shell, &count) != NULL ? count : lib.count;
 }
 
 static int LibraryGameAt(const Shell &shell, const Library &lib, int item)
@@ -8634,7 +8767,73 @@ static int LibraryGameAt(const Shell &shell, const Library &lib, int item)
     const int i = item - LibraryDiscItems(shell);
     if (i < 0 || i >= LibraryShownGames(shell, lib))
         return -1;
-    return shell.libraryFavourites ? g_favouriteOrder[i] : i;
+    int count = 0;
+    const int *order = LibraryOrder(shell, &count);
+    return order != NULL ? order[i] : i;
+}
+
+// Sorts the library into the filters, every frame: which kinds it has - the
+// row offers only those - and the chosen kind's games. A chosen kind whose
+// last game went goes back to All.
+static void UpdateLibraryFilters(Shell &shell, const Library &lib)
+{
+    int perKind[LIBRARY_FILTER_COUNT] = { 0 };
+    g_filterShown = 0;
+    for (int i = 0; i < lib.count; ++i)
+    {
+        const int kind = FilterOfGame(lib.games[i]);
+        perKind[kind]++;
+        if (kind == shell.libraryFilter)
+            g_filterOrder[g_filterShown++] = i;
+    }
+
+    int kinds = 0;
+    for (int k = LIBRARY_FILTER_ALL + 1; k < LIBRARY_FILTER_COUNT; ++k)
+        kinds += perKind[k] > 0 ? 1 : 0;
+    g_filterOfferedCount = 0;
+    if (kinds >= 2)
+    {
+        for (int k = 0; k < LIBRARY_FILTER_COUNT; ++k)
+        {
+            if (k == LIBRARY_FILTER_ALL || perKind[k] > 0)
+                g_filterOffered[g_filterOfferedCount++] = k;
+        }
+    }
+
+    const StringId ids[LIBRARY_FILTER_COUNT] = { STR_FILTER_ALL_GAMES, STR_FILTER_XBOX_360, STR_FILTER_ORIGINAL_XBOX,
+                                                 STR_FILTER_ARCADE, STR_FILTER_INDIE_GAMES };
+    for (int i = 0; i < g_filterOfferedCount; ++i)
+        g_filterLabels[i] = Tr(ids[g_filterOffered[i]]);
+
+    if (shell.libraryFilter != LIBRARY_FILTER_ALL &&
+        (g_filterOfferedCount == 0 || perKind[shell.libraryFilter] == 0))
+    {
+        shell.libraryFilter = LIBRARY_FILTER_ALL;
+        shell.libraryOnFilters = false;
+        shell.librarySelected = 0;
+        shell.libraryScroll = 0;
+    }
+    if (g_filterOfferedCount == 0 || shell.libraryFavourites)
+        shell.libraryOnFilters = false;
+}
+
+// Left or right along the row: the next filter offered, the grid starting
+// over at the top as its tiles are different ones. False at either end.
+static bool StepLibraryFilter(Shell &shell, int step)
+{
+    int at = 0;
+    for (int i = 0; i < g_filterOfferedCount; ++i)
+    {
+        if (g_filterOffered[i] == shell.libraryFilter)
+            at = i;
+    }
+    const int next = at + step;
+    if (next < 0 || next >= g_filterOfferedCount)
+        return false;
+    shell.libraryFilter = g_filterOffered[next];
+    shell.librarySelected = 0;
+    shell.libraryScroll = 0;
+    return true;
 }
 
 static LibraryPageView MakeLibraryView(const Shell &shell, const Library &lib, const char *gamesPath)
@@ -8643,20 +8842,34 @@ static LibraryPageView MakeLibraryView(const Shell &shell, const Library &lib, c
     view.games = lib.games;
     view.count = lib.count;
     view.names = g_shownNames;
-    view.order = shell.libraryFavourites ? g_favouriteOrder : NULL;
-    view.orderCount = g_favouriteShown;
+    view.order = LibraryOrder(shell, &view.orderCount);
+    view.filters = NULL;
+    view.filterCount = 0;
+    view.filter = 0;
+    view.filterFocused = false;
+    if (!shell.libraryFavourites && g_filterOfferedCount > 0)
+    {
+        view.filters = g_filterLabels;
+        view.filterCount = g_filterOfferedCount;
+        for (int i = 0; i < g_filterOfferedCount; ++i)
+        {
+            if (g_filterOffered[i] == shell.libraryFilter)
+                view.filter = i;
+        }
+        view.filterFocused = shell.libraryOnFilters && !shell.sidebarFocused;
+    }
     view.selected = shell.librarySelected;
     view.scroll = shell.libraryScroll;
     view.gamesPath = gamesPath;
     view.bannerText = shell.keysSaved ? NULL : Tr(STR_KEYS_BANNER);
-    view.focused = !shell.sidebarFocused;
+    view.focused = !shell.sidebarFocused && !view.filterFocused; // the filter row may have it instead
     view.heading = NULL;
     view.emptyTitle = NULL;
     view.emptyHint = NULL;
     view.isApps = false;
     view.coverKeys = NULL;
 
-    view.hasDisc = shell.hasDisc;
+    view.hasDisc = LibraryDiscItems(shell) > 0;
     view.discTitleId = (shell.disc.state == DISC_READY) ? shell.disc.titleId : 0;
     view.discName = shell.discName;
     view.discProgress = -1.0f;
@@ -12125,6 +12338,7 @@ int main()
         const double partPumps = ImageTimerMs();
 
         SnapshotQueue(shell, lib);
+        UpdateLibraryFilters(shell, lib);
         PumpCoverArt();
         PumpStoreArt();
         PumpHelperAutoScan();
@@ -12200,9 +12414,9 @@ int main()
                     shell.homeFocus = HOME_FOCUS_RECENTS;
                 else if ((pressed & XINPUT_GAMEPAD_A) && home.navCount > 0)
                 {
-                    // Straight into the page's content. Only Games has a
-                    // sidebar now, and landing in it rather than on the
-                    // games would be a stop on the way to nowhere.
+                    // Straight into the page's content. Landing in the
+                    // sidebar (Games and the Queue have it) rather than on
+                    // the page would be a stop on the way to nowhere.
                     EnterPage(shell, (ShellPage)home.nav[shell.homeNavFocus].page, false);
                     shell.homeReturnToNav = true;
                 }
@@ -12289,7 +12503,11 @@ int main()
             }
             else if ((input.nav == XINPUT_GAMEPAD_DPAD_RIGHT || (pressed & XINPUT_GAMEPAD_A)) &&
                      PageTakesFocus(shell, shell.page))
+            {
                 shell.sidebarFocused = false;
+                if (shell.page == SHELL_PAGE_QUEUE && shell.queueCount == 0)
+                    shell.queueOnRecents = true; // no cards: the row is all there is
+            }
             else if (pressed & XINPUT_GAMEPAD_B)
                 EnterPage(shell, SHELL_PAGE_HOME, false); // the root, as B is everywhere but Home
         }
@@ -12307,12 +12525,39 @@ int main()
             const int itemCount = LibraryShownGames(shell, lib) + discItems;
             const bool onDisc = discItems > 0 && shell.librarySelected == 0;
             const int chosenGame = LibraryGameAt(shell, lib, shell.librarySelected);
+            const bool hasFilters = !shell.libraryFavourites && g_filterOfferedCount > 0;
+            // On the row at the start of the frame: its press is spent there,
+            // even when it took focus down into the games.
+            const bool onFilters = hasFilters && shell.libraryOnFilters;
 
-            if (StepGrid(input, itemCount, LibraryPageVisibleRows(MakeLibraryView(shell, lib, gamesPath)),
-                         shell.librarySelected))
+            if (onFilters)
+            {
+                // The filter row: left and right choose - the grid follows
+                // at once, as on the dashboard - left off the first is the
+                // sidebar, and down or A goes into the games.
+                if (input.nav == XINPUT_GAMEPAD_DPAD_LEFT && !StepLibraryFilter(shell, -1))
+                    FocusSidebar(shell);
+                else if (input.nav == XINPUT_GAMEPAD_DPAD_RIGHT)
+                    StepLibraryFilter(shell, 1);
+                else if ((input.nav == XINPUT_GAMEPAD_DPAD_DOWN || (pressed & XINPUT_GAMEPAD_A)) && itemCount > 0)
+                    shell.libraryOnFilters = false;
+                else if (toHome)
+                    EnterPage(shell, SHELL_PAGE_HOME, false);
+            }
+            else if (hasFilters && input.nav == XINPUT_GAMEPAD_DPAD_UP &&
+                     shell.librarySelected < LibraryGridColumns())
+            {
+                shell.libraryOnFilters = true; // up off the first row
+            }
+            else if (StepGrid(input, itemCount, LibraryPageVisibleRows(MakeLibraryView(shell, lib, gamesPath)),
+                              shell.librarySelected))
                 toSidebar = true;
 
-            if (toHome)
+            if (onFilters || shell.libraryOnFilters)
+            {
+                // Spent on the row, or on reaching it.
+            }
+            else if (toHome)
             {
                 EnterPage(shell, SHELL_PAGE_HOME, false);
             }
@@ -12484,11 +12729,23 @@ int main()
                     // A slow install's question takes over the screen, so
                     // resync after it too.
                     const bool hadAuth = haveAuth;
+                    bool viewQueue = false;
                     if (EnsureAuthHeader(haveAuth, authHeader, sizeof(authHeader)) &&
-                        InstallStoreVersion(shell, lib, authHeader))
+                        InstallStoreVersion(shell, lib, authHeader, &viewQueue))
                         acted = true;
                     if (!hadAuth)
                         acted = true;
+                    if (viewQueue)
+                    {
+                        // Chosen in its question. On the cards, where it now
+                        // is - shell.queueCount doesn't count it until the
+                        // next refresh, so EnterPage alone would see an
+                        // empty Queue and pick the recents row.
+                        EnterPage(shell, SHELL_PAGE_QUEUE, false);
+                        shell.sidebarFocused = false;
+                        shell.queueOnRecents = false;
+                        shell.queueSelected = 0;
+                    }
                 }
                 else if ((f == STORE_GAME_FOCUS_BUTTONS + 1 || f == STORE_GAME_FOCUS_BUTTONS + 2) && !StoreGameIsIndie() &&
                          !StoreGameIsXbox())
@@ -13103,7 +13360,13 @@ int main()
                     const int itemCount = LibraryShownGames(shell, lib) + LibraryDiscItems(shell);
                     const bool onDisc = LibraryDiscItems(shell) > 0 && shell.librarySelected == 0;
 
-                    if (onDisc)
+                    if (view.filterFocused)
+                    {
+                        // On the filter row: left and right choose, and the
+                        // grid follows as they do.
+                        hintCount = AddHint(hints, hintCount, UI_BUTTON_DPAD_LR, TrW(STR_FILTER));
+                    }
+                    else if (onDisc)
                     {
                         switch (view.discTile)
                         {
