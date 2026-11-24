@@ -164,7 +164,7 @@ func (a *app) changeDownloads() {
 		return
 	}
 	if a.store.anyBusy() && !askYesNo(title, "A download is running. The helper restarts to change the folder, "+
-		"and your Xbox carries on from archive.org for those few seconds.\n\nChange it now?") {
+		"and your Xbox carries on from Internet Archive for those few seconds.\n\nChange it now?") {
 		return
 	}
 

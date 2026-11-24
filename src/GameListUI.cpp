@@ -6669,6 +6669,7 @@ int StoreLettersPerRow()
 struct StoreLayout
 {
     float gap;
+    float bannerY, bannerH; // the sign-in banner; bannerH 0 for none
     float labelY;          // "Featured"
     float top;             // the featured tiles
     float heroW, heroH;
@@ -6697,12 +6698,22 @@ struct StoreLayout
 
 static void RequestMissingStoreCovers(const unsigned long *want, int wantCount); // with the letter pages', below
 
+static bool g_storeSignIn = false;
+
+void SetStoreSignInBanner(bool shown)
+{
+    g_storeSignIn = shown;
+}
+
 static StoreLayout LayOutStore(bool spotlight = false, int cardRows = 1)
 {
     StoreLayout L;
     L.gap = S(18.0f);
-    L.labelY = g_M.listYTitleOnly;
-    L.top = g_M.listYTitleOnly + LineHeight(1.05f) * 1.3f + S(10.0f);
+    // The sign-in banner first, when there is one, and everything under it.
+    L.bannerY = g_M.listYTitleOnly;
+    L.bannerH = g_storeSignIn ? S(56.0f) : 0.0f;
+    L.labelY = g_M.listYTitleOnly + (g_storeSignIn ? L.bannerH + S(24.0f) : 0.0f);
+    L.top = L.labelY + LineHeight(1.05f) * 1.3f + S(10.0f);
 
     // No scrollbar here: the page centres what has focus, so there's always
     // something showing above and below, and it gets the full width.
@@ -7775,7 +7786,14 @@ void RenderStoreFrame(StorePageView &view, const UiHint *hints, int hintCount)
     // says it goes on without having to be told. The clamps keep the top
     // and the foot flush, so the ends don't drift into empty space.
     float bandTop = L.labelY, bandBottom = L.top + L.heroH;
-    if (view.focus == STORE_FOCUS_SPOTLIGHT && hasSpot)
+    if (view.signIn != NULL)
+        bandTop = L.bannerY; // the page's top is the banner's
+    if (view.signInFocused && view.signIn != NULL)
+    {
+        bandTop = L.bannerY;
+        bandBottom = L.bannerY + L.bannerH;
+    }
+    else if (view.focus == STORE_FOCUS_SPOTLIGHT && hasSpot)
     {
         bandTop = L.spotY;
         bandBottom = L.spotY + L.spotH;
@@ -7862,7 +7880,9 @@ void RenderStoreFrame(StorePageView &view, const UiHint *hints, int hintCount)
     // neighbours, with a shadow - and its text placed by it.
     const float growT = (FocusGrowFor(view.focus, view.focused) - 1.0f) / (FOCUS_GROW - 1.0f);
     float gx = 0.0f, gy = 0.0f, gw = 0.0f, gh = 0.0f;
-    const bool hasFocus = view.focused && StoreFocusRect(L, view, featuredCount, sy, collShown, rowShown, view.focus,
+    const bool signInFocus = view.focused && view.signInFocused && view.signIn != NULL;
+    const bool hasFocus = view.focused && !signInFocus &&
+                          StoreFocusRect(L, view, featuredCount, sy, collShown, rowShown, view.focus,
                                                          &gx, &gy, &gw, &gh);
     if (hasFocus)
         GrowFocused(growT, &gx, &gy, &gw, &gh);
@@ -7878,6 +7898,26 @@ void RenderStoreFrame(StorePageView &view, const UiHint *hints, int hintCount)
     DrawFrameBase(g_sidebar.focused);
 
     SetClip(0.0f, clipTop, g_M.screenW, clipBottom - clipTop);
+
+    // The sign-in banner: a card with an amber edge, as the keys notice was,
+    // and its button at the end - green with focus.
+    float signInBtnX = 0.0f, signInBtnW = 0.0f;
+    const float signInBtnH = S(38.0f);
+    if (view.signIn != NULL)
+    {
+        const float y = L.bannerY + sy;
+        FillRound(g_M.contentX, y, g_M.contentW, L.bannerH, g_M.radius, COL_SURFACE);
+        FillRound(g_M.contentX, y, S(6.0f), L.bannerH, R(3.0f), COL_AMBER);
+        if (view.signInButton != NULL)
+        {
+            signInBtnW = TextWidth(view.signInButton, 0.85f, true) + S(40.0f);
+            signInBtnX = g_M.contentX + g_M.contentW - signInBtnW - S(10.0f);
+            FillRound(signInBtnX, y + (L.bannerH - signInBtnH) * 0.5f, signInBtnW, signInBtnH, signInBtnH * 0.5f,
+                      signInFocus ? COL_GREEN : COL_SURFACE_HI);
+        }
+        if (signInFocus)
+            FocusRing(g_M.contentX, y, g_M.contentW, L.bannerH, g_M.radius);
+    }
 
     for (int i = 0; i < featuredCount; ++i)
     {
@@ -8022,6 +8062,17 @@ void RenderStoreFrame(StorePageView &view, const UiHint *hints, int hintCount)
 
     // Only lines wholly inside the page: text can't be cut part way.
     SetClip(0.0f, clipTop, g_M.screenW, clipBottom - clipTop);
+
+    if (view.signIn != NULL && TextInClip(L.bannerY + sy, L.bannerH))
+    {
+        const float y = L.bannerY + sy + L.bannerH * 0.5f;
+        const float textX = g_M.contentX + S(26.0f);
+        const float textW = (signInBtnW > 0.0f ? signInBtnX - S(16.0f) : g_M.contentX + g_M.contentW - S(20.0f)) - textX;
+        TextMid(textX, y, 0.85f, COL_TEXT, view.signIn, ATGFONT_TRUNCATED, textW);
+        if (view.signInButton != NULL)
+            TextMid(signInBtnX + signInBtnW * 0.5f, y, 0.85f, COL_TEXT, view.signInButton, ATGFONT_CENTER_X, 0.0f,
+                    true);
+    }
 
     if (TextInClip(L.labelY + sy, LineHeight(1.05f) * 1.2f))
         TextFit(g_M.contentX, L.labelY + sy, 1.05f, COL_TEXT,

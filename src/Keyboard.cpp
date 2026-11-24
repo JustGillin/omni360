@@ -36,7 +36,8 @@ DWORD OpenKeyboardToString(
     std::string *outputString,
     LPCWSTR title,
     LPCWSTR description,
-    LPCWSTR defaultText)
+    LPCWSTR defaultText,
+    DWORD layout)
 {
     const DWORD MAX_KEYBOARD_CHARS = 256;
     WCHAR wideResult[MAX_KEYBOARD_CHARS];
@@ -70,7 +71,7 @@ DWORD OpenKeyboardToString(
     {
         result = XShowKeyboardUI(
             userIndex,
-            VKBD_LATIN_FULL | VKBD_HIGHLIGHT_TEXT,
+            layout | VKBD_HIGHLIGHT_TEXT,
             defaultText,
             title,
             description,

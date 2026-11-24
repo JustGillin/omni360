@@ -66,7 +66,7 @@ func main() {
 	beDpiAware() // before the tray makes any window
 	cacheDir := flag.String("cache", "", "where downloads are kept (default: the folder chosen in the tray, or the data folder)")
 	dataDir := flag.String("data", defaultDataDir(), "where pairing, settings and the log are kept")
-	conns := flag.Int("connections", 8, "connections to archive.org, shared by every download")
+	conns := flag.Int("connections", 8, "connections to Internet Archive, shared by every download")
 	cacheGB := flag.Int64("cache-gb", 50, "how much the downloads folder may hold, in GB")
 	flag.IntVar(&httpPort, "port", httpPort, "HTTP port the console reads from")
 	showVersion := flag.Bool("version", false, "print the version and quit")

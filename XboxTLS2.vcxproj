@@ -379,6 +379,7 @@
     <ClInclude Include="zlib\gzguts.h" />
     <ClInclude Include="src\GameInstaller.h" />
     <ClInclude Include="src\HttpPlain.h" />
+    <ClInclude Include="src\ArchiveOrgSignIn.h" />
     <ClInclude Include="src\PcHelper.h" />
     <ClInclude Include="src\SevenZip.h" />
     <ClInclude Include="src\HomebrewCatalog.h" />
@@ -489,6 +490,7 @@
     <ClCompile Include="src\DiscWorker.cpp" />
     <ClCompile Include="src\GameInstaller.cpp" />
     <ClCompile Include="src\HttpPlain.cpp" />
+    <ClCompile Include="src\ArchiveOrgSignIn.cpp" />
     <ClCompile Include="src\PcHelper.cpp" />
     <ClCompile Include="src\SpeedTest.cpp" />
     <ClCompile Include="src\StoreCatalog.cpp" />

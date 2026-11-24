@@ -55,6 +55,7 @@ end-to-end on real hardware against a real 27-game library.
 #include "XboxUnity.h"    // title updates to download, from xboxunity.net
 #include "UpdateCheck.h"
 #include "ArchiveOrgDLC.h"
+#include "ArchiveOrgSignIn.h"
 #include "downloadFile.h" // DownloadProgressFn + FormatBytes, for the progress callback
 #include "GodConvert.h"
 #include "DiscSource.h"
@@ -1208,6 +1209,131 @@ static KeyEntryOutcome EnterCheckAndSaveKeys(std::string &accessKey, std::string
     }
 }
 
+// ---------------------------------------------------------------------------
+// Signing in to archive.org
+// ---------------------------------------------------------------------------
+//
+// Downloads need archive.org's IAS3 keys. Rather than sending people off to
+// archive.org/account/s3.php to copy two keys and type them with a
+// controller, this asks for the account's email and password and gets the
+// keys from archive.org (ArchiveOrgSignIn.h) - the keys are saved, the
+// password isn't. Typing the keys is still there, as Use keys.
+//
+// The email typed is remembered until Omni360 closes, so a wrong password
+// doesn't mean typing the address again. Never written anywhere.
+static std::string g_signInEmail;
+
+// The email and password, then archive.org's answer. A failure says why and
+// offers to try again; true once keys are saved.
+static KeyEntryOutcome SignInWithPassword()
+{
+    for (;;)
+    {
+        WCHAR lastEmail[256];
+        NarrowToWide(g_signInEmail.c_str(), lastEmail, 256);
+        std::string email;
+        if (OpenKeyboardToString(XUSER_INDEX_ANY, &email, TrW(STR_ARCHIVE_ORG_EMAIL), TrW(STR_ARCHIVE_ORG_EMAIL_HELP),
+                                 lastEmail, VKBD_LATIN_EMAIL) != ERROR_SUCCESS)
+            return KEY_ENTRY_CANCELLED;
+        TrimInPlace(email);
+        if (email.empty())
+            return KEY_ENTRY_CANCELLED;
+        g_signInEmail = email;
+
+        // Hidden as it's typed: VKBD_LATIN_PASSWORD.
+        std::string password;
+        if (OpenKeyboardToString(XUSER_INDEX_ANY, &password, TrW(STR_ARCHIVE_ORG_PASSWORD),
+                                 TrW(STR_ARCHIVE_ORG_PASSWORD_HELP), L"", VKBD_LATIN_PASSWORD) != ERROR_SUCCESS ||
+            password.empty())
+            return KEY_ENTRY_CANCELLED;
+
+        RenderStatusFrame(Tr(STR_SIGNING_IN), Tr(STR_ASKING_ARCHIVE_ORG), NULL);
+        std::string access, secret, screenName, reason;
+        const ArchiveOrgSignInResult result =
+            ArchiveOrgSignIn(email.c_str(), password.c_str(), access, secret, screenName, reason);
+        // Gone as soon as it's used.
+        if (!password.empty())
+            SecureZeroMemory(&password[0], password.size());
+        password.clear();
+
+        if (result == SIGN_IN_OK)
+        {
+            if (!SaveKeys(access, secret))
+            {
+                ShowMessageUI(Tr(STR_KEYS_NOT_SAVED), Tr(STR_ARCHIVEORGKEYS_TXT_COULD_NOT_BE),
+                              Tr(STR_YOUR_PREVIOUS_KEYS_IF_ANY));
+                return KEY_ENTRY_FAILED;
+            }
+            ShowShellToast(Tr(STR_SIGNED_IN), screenName.empty() ? email.c_str() : screenName.c_str(), UI_TOAST_INFO);
+            return KEY_ENTRY_SAVED;
+        }
+
+        char message[256];
+        const char *heading;
+        const char *detail = NULL;
+        switch (result)
+        {
+        case SIGN_IN_NO_ACCOUNT:
+            heading = Tr(STR_NO_ACCOUNT_WITH_THAT_EMAIL);
+            TrFormat(message, sizeof(message), STR_ARCHIVE_ORG_DOESNT_KNOW, email.c_str());
+            break;
+        case SIGN_IN_BAD_PASSWORD:
+            heading = Tr(STR_WRONG_PASSWORD);
+            TrFormat(message, sizeof(message), STR_THAT_PASSWORD_ISNT_RIGHT, email.c_str());
+            break;
+        case SIGN_IN_WRONG_DETAILS:
+            heading = Tr(STR_COULDNT_SIGN_IN);
+            TrFormat(message, sizeof(message), STR_EMAIL_OR_PASSWORD_WRONG, email.c_str());
+            break;
+        case SIGN_IN_REFUSED:
+            heading = Tr(STR_ARCHIVE_ORG_DIDNT_SIGN_IN);
+            TrFormat(message, sizeof(message), STR_IT_SAID, reason.c_str());
+            break;
+        default:
+            heading = Tr(STR_COULDNT_REACH_ARCHIVE_ORG);
+            _snprintf(message, sizeof(message), "%s", Tr(STR_CHECK_THE_CONSOLE_IS_ONLINE));
+            break;
+        }
+        message[sizeof(message) - 1] = '\0';
+        if (!ShowConfirmUI(heading, message, detail, Tr(STR_TRY_AGAIN)))
+            return KEY_ENTRY_FAILED;
+    }
+}
+
+// The sign-in question: what downloading needs, and the ways to give it.
+// forDownload is a download that was just asked for, rather than the banner
+// or Settings - the wording leads with that. Not now leaves things as they
+// were; browsing doesn't need an account.
+static KeyEntryOutcome SignInToArchiveOrg(bool forDownload)
+{
+    for (;;)
+    {
+        // labels[0] is the one that goes ahead, on the right.
+        const char *labels[3] = { Tr(STR_SIGN_IN), Tr(STR_USE_KEYS), Tr(STR_NOT_NOW) };
+        const int choice = ShowAlertButtonsUI(Tr(STR_SIGN_IN_TO_ARCHIVE_ORG),
+                                              Tr(forDownload ? STR_SIGN_IN_EXPLAIN_DOWNLOAD : STR_SIGN_IN_EXPLAIN),
+                                              Tr(STR_SIGN_IN_PRIVACY), labels, 3, 5, 0);
+        KeyEntryOutcome outcome;
+        if (choice == 0)
+        {
+            outcome = SignInWithPassword();
+        }
+        else if (choice == 1)
+        {
+            std::string access, secret;
+            LoadSavedKeys(access, secret);
+            outcome = EnterCheckAndSaveKeys(access, secret);
+        }
+        else
+        {
+            return KEY_ENTRY_CANCELLED; // Not now, or B
+        }
+        // Backing out of a keyboard comes back to the question, not out of it.
+        if (outcome != KEY_ENTRY_CANCELLED)
+            return outcome;
+    }
+}
+
 // A full drive, said plainly with both numbers. It used to show up only as a
 // disk write error in the log, under a generic "download failed" - after the
 // download had already filled what space there was.
@@ -1302,33 +1428,17 @@ static bool GetArchiveOrgAuthHeader(char *authHeader, unsigned long long authHea
 
     if (!LoadSavedKeys(accessKey, secretKey))
     {
-        // Typing a ~40-character secret key with an on-screen keyboard and a
-        // controller is painful - FTPing %s onto the console yourself ahead
-        // of time (access key on line 1, secret key on line 2, plain text)
-        // skips this prompt entirely, since LoadSavedKeys() above already
-        // succeeds if the file is there. The keyboard is only a fallback for
-        // when that's not convenient in the moment.
-        dprintf("Archive.org IAS3 keys required.\n");
-        dprintf("Get them (logged in to your own account) at: archive.org/account/s3.php\n");
-        dprintf("Tip: FTP them directly into %s (access key on line 1, secret key on\n", CREDENTIALS_FILE);
-        dprintf("line 2) ahead of time to skip typing them in on the console.\n");
+        // Keys can still be put in ArchiveOrgKeys.txt by hand (access key on
+        // line 1, secret on line 2) - LoadSavedKeys above finds them, and
+        // nothing is asked.
+        dprintf("archive.org sign-in needed for a download\n");
 
-        // Drawn, not printed. By this point the console no longer paints to
-        // the screen (see SetConsoleQuiet), and this is the one piece of
-        // guidance the user genuinely cannot act without - it tells them
-        // where to get the keys they're about to be asked for.
-        ShowMessageUI(Tr(STR_ARCHIVE_ORG_KEYS_NEEDED),
-                      Tr(STR_GET_YOUR_ACCESS_AND_SECRET),
-                      Tr(STR_PRESS_A_TO_TYPE_THEM));
-
-        KeyEntryOutcome entry = EnterCheckAndSaveKeys(accessKey, secretKey);
-
-        if (entry == KEY_ENTRY_CANCELLED)
-        {
-            dprintf("ERROR: no keys entered\n");
-            ShowMessageUI(Tr(STR_NO_KEYS_ENTERED), Tr(STR_BOTH_KEYS_ARE_REQUIRED_TO),
-                          Tr(STR_YOU_CAN_ADD_THEM_ANY));
-        }
+        // Drawn, not printed: the sign-in question, worded for a download
+        // that was just asked for. Not now needs no second message - the
+        // question already said browsing works without an account.
+        KeyEntryOutcome entry = SignInToArchiveOrg(true);
+        if (entry == KEY_ENTRY_SAVED && !LoadSavedKeys(accessKey, secretKey))
+            entry = KEY_ENTRY_FAILED;
 
         if (entry != KEY_ENTRY_SAVED)
             return false; // every other outcome has already shown its own screen
@@ -1607,7 +1717,7 @@ static void ShowOnlineTitleUpdates(unsigned long titleId, const char *gameName, 
                 _snprintf(labels[rows], sizeof(labels[rows]), "%s", archive[i].filename);
             char size[24] = "";
             FormatBytes(archive[i].size, size, sizeof(size));
-            _snprintf(notes[rows], sizeof(notes[rows]), "%s%s%s  \xC2\xB7  archive.org", archive[i].region,
+            _snprintf(notes[rows], sizeof(notes[rows]), "%s%s%s  \xC2\xB7  Internet Archive", archive[i].region,
                       archive[i].region[0] != '\0' ? "  \xC2\xB7  " : "", size);
         }
         for (int i = 0; i < rows; ++i)
@@ -2774,12 +2884,10 @@ static void ChangeGamesFolder(Library &lib, char *gamesPath, size_t gamesPathSiz
 
 static void ChangeKeys(SettingsOutcome &outcome)
 {
-    std::string accessKey, secretKey;
-    LoadSavedKeys(accessKey, secretKey); // leaves both empty if there are none yet
-
     // Cancelling here needs no message - the user is already on the screen
-    // that says what's saved.
-    if (EnterCheckAndSaveKeys(accessKey, secretKey) == KEY_ENTRY_SAVED)
+    // that says what's saved. The same question as a first download, worded
+    // for browsing; Use keys there is the old way in.
+    if (SignInToArchiveOrg(false) == KEY_ENTRY_SAVED)
         outcome.keysChanged = true;
 }
 
@@ -3437,8 +3545,7 @@ static void SetClockNow()
 
 static void RemoveKeys(SettingsOutcome &outcome)
 {
-    if (!ShowConfirmUI(Tr(STR_REMOVE_KEYS), Tr(STR_REMOVE_THE_ARCHIVE_ORG_KEYS),
-                       Tr(STR_YOULL_NEED_TO_ADD_THEM), Tr(STR_REMOVE)))
+    if (!ShowConfirmUI(Tr(STR_SIGN_OUT_QUESTION), Tr(STR_SIGN_OUT_HELP), NULL, Tr(STR_SIGN_OUT)))
         return;
 
     if (remove(CREDENTIALS_FILE) != 0)
@@ -3447,9 +3554,9 @@ static void RemoveKeys(SettingsOutcome &outcome)
         return;
     }
 
-    dprintf("Saved archive.org keys removed\n");
+    dprintf("Signed out of archive.org: saved keys removed\n");
     outcome.keysChanged = true;
-    ShowMessageUI(Tr(STR_KEYS_REMOVED), Tr(STR_YOUR_ARCHIVE_ORG_KEYS_HAVE), NULL);
+    ShowShellToast(Tr(STR_SIGNED_OUT), Tr(STR_SIGN_IN_BANNER), UI_TOAST_INFO);
 }
 
 // The settings page, as GameListUI's SettingsRowView rows: the library
@@ -3746,26 +3853,15 @@ static void BuildSettingsPage(SettingsPage &page, const Library &lib, const char
                            Tr(STR_A_SOFT_TICK_AS_YOU));
         page.rows[page.count - 1].controls[0].on = UiSoundsSetting();
 
-        // Only the start of the access key is shown - enough to tell which keys
-        // are saved. The secret key is never shown anywhere.
-        if (haveKeys)
-        {
-            char shown[5] = "";
-            strncpy(shown, accessKey.c_str(), 4);
-            shown[4] = '\0';
-            TrFormat(page.keysStatus, sizeof(page.keysStatus), STR_KEYS_SAVED_STATUS, shown);
-        }
-        else
-        {
-            TrFormat(page.keysStatus, sizeof(page.keysStatus), STR_KEYS_NOT_SET_STATUS);
-        }
+        // Signed in or not - however the keys got there. Neither key is shown.
+        TrFormat(page.keysStatus, sizeof(page.keysStatus), haveKeys ? STR_SIGNED_IN_STATUS : STR_NOT_SIGNED_IN_STATUS);
         page.keysStatus[sizeof(page.keysStatus) - 1] = '\0';
-        AddSettingsRow(page, SETTINGS_VIEW_LINE, Tr(STR_ARCHIVE_ORG_KEYS)).status = page.keysStatus;
-        AddSettingsControl(page, SETTINGS_CONTROL_BUTTON, haveKeys ? Tr(STR_CHANGE) : Tr(STR_ADD_KEYS), SETTINGS_ROW_KEYS,
-                           Tr(STR_TYPE_YOUR_ACCESS_KEY_AND));
+        AddSettingsRow(page, SETTINGS_VIEW_LINE, Tr(STR_ARCHIVE_ORG_ROW)).status = page.keysStatus;
+        AddSettingsControl(page, SETTINGS_CONTROL_BUTTON, haveKeys ? Tr(STR_CHANGE) : Tr(STR_SIGN_IN), SETTINGS_ROW_KEYS,
+                           haveKeys ? Tr(STR_CHANGE_ACCOUNT_HELP) : Tr(STR_SIGN_IN_ROW_HELP));
         if (haveKeys)
-            AddSettingsControl(page, SETTINGS_CONTROL_BUTTON, Tr(STR_REMOVE), SETTINGS_ROW_REMOVE_KEYS,
-                               Tr(STR_DELETES_THE_SAVED_KEYS_FROM));
+            AddSettingsControl(page, SETTINGS_CONTROL_BUTTON, Tr(STR_SIGN_OUT), SETTINGS_ROW_REMOVE_KEYS,
+                               Tr(STR_SIGN_OUT_HELP));
 
         // The PC helper: what's running, and pairing with it.
         {
@@ -4453,6 +4549,7 @@ struct Shell
     // The Store's front page: which tile has focus (STORE_FOCUS_*), how far
     // it has scrolled, and whether its wallpapers have been asked for yet.
     int storeFocus;
+    bool storeOnSignIn; // the sign-in banner over it has focus instead
     float storeScroll;
     int storeRowScroll[STORE_ROWS_MAX]; // each row of games' first shown
     int storeCardScroll[STORE_CARD_ROWS]; // each row of cards' first shown
@@ -4916,6 +5013,14 @@ static StorePageView MakeStoreView(const Shell &shell)
 {
     StorePageView view;
     memset(&view, 0, sizeof(view));
+    // Not signed in: the banner that asks, over everything - the Store is
+    // where downloading starts.
+    if (!shell.keysSaved)
+    {
+        view.signIn = Tr(STR_SIGN_IN_BANNER);
+        view.signInButton = Tr(STR_SIGN_IN);
+        view.signInFocused = shell.storeOnSignIn;
+    }
     view.featuredLabel = g_featured.label;
     view.featuredCount = g_featuredCount;
     view.spotlight = g_spotlight;
@@ -7805,6 +7910,7 @@ static void PublishSidebar(const Shell &shell, const Library &lib)
     for (int p = 0; p < SHELL_PAGE_COUNT; ++p)
         sidebar.hidden[p] = PageHidden((ShellPage)p);
     sidebar.queueCount = PendingDownloadCount() + PendingDiscJobCount() + PendingGameJobCount() + PendingFileJobCount();
+    SetStoreSignInBanner(!shell.keysSaved);
 
     // The first job under way, previewed above the storage ring - not on the
     // Queue page, which is the same thing at full size. The rows are this
@@ -8861,7 +8967,7 @@ static LibraryPageView MakeLibraryView(const Shell &shell, const Library &lib, c
     view.selected = shell.librarySelected;
     view.scroll = shell.libraryScroll;
     view.gamesPath = gamesPath;
-    view.bannerText = shell.keysSaved ? NULL : Tr(STR_KEYS_BANNER);
+    view.bannerText = NULL; // signing in is asked on the Store, where downloading starts
     view.focused = !shell.sidebarFocused && !view.filterFocused; // the filter row may have it instead
     view.heading = NULL;
     view.emptyTitle = NULL;
@@ -12585,18 +12691,16 @@ int main()
                 shell.gameFromHome = false;
                 OpenLibraryGame(shell, lib, chosen);
             }
-            else if ((pressed & XINPUT_GAMEPAD_Y) && chosenGame >= 0 && (shell.keysSaved || shell.libraryFavourites))
+            else if ((pressed & XINPUT_GAMEPAD_Y) && chosenGame >= 0)
             {
-                // On a game: favourite it, or rename it. Not while the keys
-                // banner is up on Games, whose Y badge goes to Settings.
+                // On a game: favourite it, or rename it.
                 LibraryGameOptions(shell, lib, chosenGame);
                 acted = true;
             }
             else if ((pressed & XINPUT_GAMEPAD_Y) && !shell.libraryFavourites)
             {
-                // A shortcut, for the keys banner and the empty library, which
-                // both send you to Settings with a Y badge: to the keys, or
-                // to the paths the library is read from.
+                // A shortcut, for the empty library, whose Y badge sends you
+                // to Settings: to the paths the library is read from.
                 shell.page = SHELL_PAGE_SETTINGS;
                 shell.sidebarFocused = false;
                 shell.settings.section = lib.count == 0 ? SETTINGS_SECTION_STORAGE : SETTINGS_SECTION_GENERAL;
@@ -12937,14 +13041,33 @@ int main()
         else if (shell.page == SHELL_PAGE_STORE)
         {
             const int focusBefore = shell.storeFocus;
+            if (shell.keysSaved)
+                shell.storeOnSignIn = false; // signed in: the banner's gone
             if (pressed & XINPUT_GAMEPAD_B)
                 EnterPage(shell, SHELL_PAGE_HOME, false);
             else if (pressed & XINPUT_GAMEPAD_Y)
                 acted = OpenStoreSearch(shell); // from anywhere on the page
+            else if (shell.storeOnSignIn)
+            {
+                // The sign-in banner: A asks, down goes back to the games.
+                if (pressed & XINPUT_GAMEPAD_A)
+                {
+                    SignInToArchiveOrg(false);
+                    acted = true;
+                }
+                else if (input.nav == XINPUT_GAMEPAD_DPAD_DOWN)
+                    shell.storeOnSignIn = false;
+            }
             else if (pressed & XINPUT_GAMEPAD_A)
                 acted = ActOnStoreFocus(shell);
             else if (input.nav != 0)
+            {
                 StepStoreFocus(input.nav, shell);
+                // Up off the featured games, which are the top: the banner.
+                if (input.nav == XINPUT_GAMEPAD_DPAD_UP && shell.storeFocus == focusBefore && !shell.keysSaved &&
+                    shell.storeFocus < STORE_FOCUS_BUTTONS)
+                    shell.storeOnSignIn = true;
+            }
 
             if (!shell.storeInLetter && shell.storeFocus != focusBefore && shell.storeFocus >= STORE_FOCUS_LETTERS &&
                 shell.storeFocus < STORE_FOCUS_SPOTLIGHT)
@@ -13394,8 +13517,7 @@ int main()
                     {
                         hintCount = AddHint(hints, hintCount, UI_BUTTON_A, TrW(STR_PLAY));
                         hintCount = AddHint(hints, hintCount, UI_BUTTON_X, TrW(STR_VIEW_GAME), TrW(STR_VIEW));
-                        if (shell.keysSaved || shell.libraryFavourites)
-                            hintCount = AddHint(hints, hintCount, UI_BUTTON_Y, TrW(STR_OPTIONS));
+                        hintCount = AddHint(hints, hintCount, UI_BUTTON_Y, TrW(STR_OPTIONS));
                     }
                     hintCount = AddHint(hints, hintCount, UI_BUTTON_B, TrW(STR_NAV_HOME));
                     const int pageItems = LibraryPageVisibleRows(view) * LibraryGridColumns();
@@ -13545,7 +13667,11 @@ int main()
                     // that isn't ready.
                     static WCHAR browse[32];
                     const int i = shell.storeFocus;
-                    if (i < STORE_FOCUS_BUTTONS)
+                    if (shell.storeOnSignIn && !shell.keysSaved)
+                    {
+                        hintCount = AddHint(hints, hintCount, UI_BUTTON_A, TrW(STR_SIGN_IN));
+                    }
+                    else if (i < STORE_FOCUS_BUTTONS)
                     {
                         hintCount = AddHint(hints, hintCount, UI_BUTTON_A, TrW(STR_VIEW_GAME), TrW(STR_VIEW));
                     }

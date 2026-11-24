@@ -560,7 +560,20 @@ struct StorePageView
     int focus;
     float scroll;          // pixels the page has moved up; starts at 0
     bool focused;
+
+    // The sign-in banner across the top, with no archive.org keys saved:
+    // signIn its line and signInButton the button at its end (NULL: no
+    // banner - SetStoreSignInBanner must agree, as it moves the page down).
+    // signInFocused: it has focus, rather than focus.
+    const char *signIn;
+    const char *signInButton;
+    bool signInFocused;
 };
+
+// Whether the Store's front page has the sign-in banner, which moves
+// everything under it down - the rects below included. main.cpp sets it
+// every frame, before anything asks where a tile is.
+void SetStoreSignInBanner(bool shown);
 
 // How many A-Z tiles fit across: they wrap onto as many rows as it takes.
 int StoreLettersPerRow();
