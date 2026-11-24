@@ -85,6 +85,8 @@ extern "C" NTSTATUS XexGetModuleHandle(PSZ moduleName, PHANDLE outHandle);
 #define GAMES_PATH_KEY "games-path: "
 #define UPDATE_CHECK_KEY "check-updates: " // "off" stops the check at start
 #define SOUNDS_KEY "nav-sounds: "         // "off" silences the interface
+#define THEME_KEY "theme: "                // series (unset), xbox360, original or light
+#define ACCENT_KEY "accent: "              // an accent name, or unset for the theme's own
 #define INSTALL_TYPE_KEY "install-type: "   // "folder" copies a game's files out rather than making a GOD package - Store and disc installs
 #define HELPER_ID_KEY "helper-id: "       // the paired PC helper (PcHelper.h); empty when not paired
 #define HELPER_TOKEN_KEY "helper-token: " // what it gave this console when it paired
@@ -386,6 +388,33 @@ static bool InstallAsFolderSetting()
     char value[16];
     GetSettingsPath(INSTALL_TYPE_KEY, "god", value, sizeof(value));
     return _stricmp(value, "folder") == 0;
+}
+
+// The theme and its accent, as UI_THEME_* and UI_ACCENT_* - the names as
+// settings.txt spells them, in the same order.
+static const char *const kThemeNames[UI_THEME_COUNT] = { "series", "xbox360", "original", "light" };
+static const char *const kAccentNames[UI_ACCENT_COUNT] = { "green", "lime", "blue", "teal", "purple", "pink", "red",
+                                                           "orange" };
+
+static int ThemeSetting()
+{
+    char value[16];
+    GetSettingsPath(THEME_KEY, "series", value, sizeof(value));
+    for (int i = 0; i < UI_THEME_COUNT; ++i)
+        if (_stricmp(value, kThemeNames[i]) == 0)
+            return i;
+    return UI_THEME_SERIES;
+}
+
+// The accent picked, or the theme's own when none has been.
+static int AccentSetting()
+{
+    char value[16];
+    GetSettingsPath(ACCENT_KEY, "", value, sizeof(value));
+    for (int i = 0; i < UI_ACCENT_COUNT; ++i)
+        if (_stricmp(value, kAccentNames[i]) == 0)
+            return i;
+    return UiThemeDefaultAccent(ThemeSetting());
 }
 
 // The PC helper's pairing, from settings.txt into PcHelper.
@@ -2609,6 +2638,8 @@ enum SettingsRow
     SETTINGS_ROW_HELPER_SCAN,  // look for it on the network, then pair
     SETTINGS_ROW_HELPER_USE,   // whether downloads go through it
     SETTINGS_ROW_INSTALL_TYPE, // Games on Demand or folder games, for Store installs
+    SETTINGS_ROW_THEME,        // the theme: left and right change it
+    SETTINGS_ROW_ACCENT,       // its accent: left and right change it
     SETTINGS_ROW_RESYNC_LIBRARY, // re-read the library from disk and re-fetch missing icons
     SETTINGS_ROW_LANGUAGE,     // a language's row: A picks it (arg is its index)
     SETTINGS_ROW_LANGUAGE_REFRESH, // looks again for language files beside Omni360
@@ -3219,6 +3250,32 @@ static void PickLanguage(int index)
     if (!SetSettingsValue(LANGUAGE_KEY, LanguageCode(now)))
         ShowMessageUI(Tr(STR_NOT_SAVED), Tr(STR_SETTINGS_TXT_COULD_NOT_BE), NULL);
     dprintf("Language set to %s (%s)\n", LanguageCode(now), LanguageName(now));
+}
+
+// Left and right on the theme's row: the next theme, saved and shown at once.
+// A new theme brings its own accent - Original Xbox is lime - so the accent
+// picked before is dropped.
+static void StepTheme(int step)
+{
+    const int theme = ThemeSetting() + step;
+    if (theme < 0 || theme >= UI_THEME_COUNT)
+        return;
+    if (!SetSettingsValue(THEME_KEY, kThemeNames[theme]) || !SetSettingsValue(ACCENT_KEY, ""))
+        ShowMessageUI(Tr(STR_NOT_SAVED), Tr(STR_SETTINGS_TXT_COULD_NOT_BE), NULL);
+    UiSetTheme(theme, -1);
+    dprintf("Theme set to %s\n", kThemeNames[theme]);
+}
+
+// Left and right on the accent's row.
+static void StepAccent(int step)
+{
+    const int accent = AccentSetting() + step;
+    if (accent < 0 || accent >= UI_ACCENT_COUNT)
+        return;
+    if (!SetSettingsValue(ACCENT_KEY, kAccentNames[accent]))
+        ShowMessageUI(Tr(STR_NOT_SAVED), Tr(STR_SETTINGS_TXT_COULD_NOT_BE), NULL);
+    UiSetTheme(ThemeSetting(), accent);
+    dprintf("Accent set to %s\n", kAccentNames[accent]);
 }
 
 // Left, right or A on the install type's row: the other one, saved.
@@ -3974,6 +4031,34 @@ static void BuildSettingsPage(SettingsPage &page, const Library &lib, const char
         AddSettingsControl(page, SETTINGS_CONTROL_CHECK, NULL, SETTINGS_ROW_SOUNDS,
                            Tr(STR_A_SOFT_TICK_AS_YOU));
         page.rows[page.count - 1].controls[0].on = UiSoundsSetting();
+
+        // The theme and its accent: left and right change them, and the
+        // page changes with them.
+        {
+            const StringId themeNames[UI_THEME_COUNT] = { STR_THEME_SERIES, STR_THEME_XBOX360, STR_THEME_ORIGINAL,
+                                                          STR_THEME_LIGHT };
+            const StringId accentNames[UI_ACCENT_COUNT] = { STR_ACCENT_GREEN, STR_ACCENT_LIME, STR_ACCENT_BLUE,
+                                                            STR_ACCENT_TEAL, STR_ACCENT_PURPLE, STR_ACCENT_PINK,
+                                                            STR_ACCENT_RED, STR_ACCENT_ORANGE };
+            const int theme = ThemeSetting();
+            const int accent = AccentSetting();
+            AddSettingsRow(page, SETTINGS_VIEW_LINE, Tr(STR_THEME));
+            AddSettingsControl(page, SETTINGS_CONTROL_VALUE, Tr(themeNames[theme]), SETTINGS_ROW_THEME,
+                               Tr(STR_THEME_HELP));
+            {
+                SettingsControlView &c = page.rows[page.count - 1].controls[0];
+                c.valueIndex = theme;
+                c.valueCount = UI_THEME_COUNT;
+            }
+            AddSettingsRow(page, SETTINGS_VIEW_LINE, Tr(STR_ACCENT_COLOR));
+            AddSettingsControl(page, SETTINGS_CONTROL_VALUE, Tr(accentNames[accent]), SETTINGS_ROW_ACCENT,
+                               Tr(STR_ACCENT_HELP));
+            {
+                SettingsControlView &c = page.rows[page.count - 1].controls[0];
+                c.valueIndex = accent;
+                c.valueCount = UI_ACCENT_COUNT;
+            }
+        }
 
         // Signed in or not - however the keys got there. Neither key is shown.
         TrFormat(page.keysStatus, sizeof(page.keysStatus), haveKeys ? STR_SIGNED_IN_STATUS : STR_NOT_SIGNED_IN_STATUS);
@@ -12127,6 +12212,7 @@ int main()
     }
     StartupStep("language");
 
+    UiSetTheme(ThemeSetting(), AccentSetting());
     if (!InitGameListUI())
     {
         SetConsoleQuiet(false);
@@ -13417,6 +13503,16 @@ int main()
                 else if (onValue && settings.actions[settings.focusRow][settings.focusCol] == SETTINGS_ROW_CLOCK)
                 {
                     StepClock(right ? 1 : -1);
+                    shell.stale = true;
+                }
+                else if (onValue && settings.actions[settings.focusRow][settings.focusCol] == SETTINGS_ROW_THEME)
+                {
+                    StepTheme(right ? 1 : -1);
+                    shell.stale = true;
+                }
+                else if (onValue && settings.actions[settings.focusRow][settings.focusCol] == SETTINGS_ROW_ACCENT)
+                {
+                    StepAccent(right ? 1 : -1);
                     shell.stale = true;
                 }
                 else if (onValue && settings.actions[settings.focusRow][settings.focusCol] == SETTINGS_ROW_INSTALL_TYPE)

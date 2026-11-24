@@ -11,6 +11,41 @@
 bool InitGameListUI();
 void ShutdownGameListUI();
 
+// The footer's controller buttons: BUTTON_STYLE_JEWEL (the 360's glossy
+// ones), _FLAT (the default - solid colour, white letter) or _OG (the
+// Original Xbox's green ovals), from ButtonAtlas.h. Safe before
+// InitGameListUI; the theme picks one.
+void UiSetButtonStyle(int style);
+
+// Themes: a preset's colours plus an accent. UiSetTheme also picks the
+// preset's button style. Safe before InitGameListUI; until it is called the
+// UI is Series with green. Pass accent -1 for the preset's own.
+enum UiThemeId
+{
+    UI_THEME_SERIES,   // the default: charcoal, as the Xbox Series dashboard
+    UI_THEME_XBOX360,  // the NXE's silver and white
+    UI_THEME_ORIGINAL, // the Original Xbox's black and green
+    UI_THEME_LIGHT,    // Series, light
+    UI_THEME_COUNT
+};
+
+enum UiAccentId
+{
+    UI_ACCENT_GREEN,
+    UI_ACCENT_LIME,
+    UI_ACCENT_BLUE,
+    UI_ACCENT_TEAL,
+    UI_ACCENT_PURPLE,
+    UI_ACCENT_PINK,
+    UI_ACCENT_RED,
+    UI_ACCENT_ORANGE,
+    UI_ACCENT_COUNT
+};
+
+void UiSetTheme(int theme, int accent);
+int UiThemeDefaultAccent(int theme);
+unsigned long UiAccentSwatch(int accent); // its fill (ARGB), for a swatch beside its name
+
 // ---------------------------------------------------------------------------
 // The shell: a sidebar of pages, with the current page beside it
 // ---------------------------------------------------------------------------

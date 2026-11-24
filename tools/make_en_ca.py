@@ -48,6 +48,7 @@ LINES = {
     'NO_FAVOURITES_YET': 'No favourites yet, eh',
     'PRESS_Y_ON_A_GAME_TO': 'Press Y on a game in Games and choose Add to favourites.',
     'ADD_TO_FAVOURITES': 'Add to favourites',
+    'ACCENT_COLOR': 'Accent colour',
     'REMOVE_FROM_FAVOURITES': 'Remove from favourites',
     'ADDED_TO_FAVOURITES': 'Added to favourites',
     'REMOVED_FROM_FAVOURITES': 'Removed from favourites',

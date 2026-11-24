@@ -164,7 +164,10 @@ static D3DTexture *g_pWhiteTexture = NULL; // 1x1 white, for DrawRect (solid-col
 // The footer's controller button icons: every button in one texture, built
 // from the PNG compiled in from ButtonAtlas.h. Created in CreateButtonAtlas,
 // which is defined below but called from CreateQuadResources above it.
+// ButtonAtlas.h carries one atlas per style (jewel, flat, Original Xbox); only
+// the current style's is decoded - UiSetButtonStyle swaps it.
 static D3DTexture *g_pButtonAtlas = NULL;
+static int g_buttonStyle = BUTTON_STYLE_FLAT;
 static D3DTexture *g_pNavIcons = NULL; // Home's nav row; NULL falls back to names
 static D3DTexture *g_pPublisherLogos = NULL; // the Store's Publishers row; NULL draws the names alone
 static D3DTexture *g_pFlags = NULL; // Settings' language flags; NULL draws the names alone
@@ -561,7 +564,8 @@ static bool CreateButtonAtlas()
     unsigned long w = 0, h = 0;
     const char *error = NULL;
 
-    if (!PngDecodeToArgb(kButtonAtlasPng, kButtonAtlasPngSize, &pixels, &w, &h, &error))
+    if (!PngDecodeToArgb(kButtonAtlasPngs[g_buttonStyle], kButtonAtlasPngSizes[g_buttonStyle],
+                         &pixels, &w, &h, &error))
     {
         dprintf("[ui] button atlas would not decode: %s\n", error != NULL ? error : "?");
         return false;
@@ -571,6 +575,32 @@ static bool CreateButtonAtlas()
     PngFree(pixels);
 
     return g_pButtonAtlas != NULL;
+}
+
+// Switches the footer's buttons to another style (BUTTON_STYLE_*). Before the
+// UI is up it only records the choice; after, it rebuilds the one texture, and
+// keeps the old one if the new one won't decode.
+void UiSetButtonStyle(int style)
+{
+    if (style < 0 || style >= BUTTON_STYLE_COUNT || style == g_buttonStyle)
+        return;
+
+    const int previous = g_buttonStyle;
+    g_buttonStyle = style;
+    if (!g_Initialized)
+        return;
+
+    D3DTexture *old = g_pButtonAtlas;
+    g_pButtonAtlas = NULL;
+    if (CreateButtonAtlas())
+    {
+        if (old != NULL)
+            old->Release();
+        return;
+    }
+
+    g_buttonStyle = previous;
+    g_pButtonAtlas = old;
 }
 
 // Home's nav icons, the same way. White with an alpha mask, so one copy
@@ -881,39 +911,228 @@ static void Utf8ToWide(const char *in, WCHAR *out, int outSize)
 // Theme
 // ---------------------------------------------------------------------------
 
-// The Xbox Series dashboard's look: charcoal surfaces with no colour cast,
-// white text, a white ring round whatever has focus, and one green spent only
-// where something is current or in progress - the page you're on, a download
-// bar, the storage ring, a count of waiting downloads.
-#define COL_BG_TOP         0xFF1C1C1C // the page wash, lightest at the top
-#define COL_BG_BOTTOM      0xFF0E0E0E
-#define COL_RAIL           0xFF161616 // the sidebar
-#define COL_SURFACE        0xFF232323 // rows, cards, a tile's backing
-#define COL_SURFACE_HI     0xFF2F2F2F // the current page in the sidebar, the selected row
-#define COL_TRACK          0xFF3A3A3A // progress and storage troughs, the library count
-#define COL_DIVIDER        0xFF2A2A2A
-#define COL_TEXT           0xFFFFFFFF
-#define COL_TEXT2          0xFFC4C4C4 // secondary text
-#define COL_DIM            0xFF8F8F8F // captions; 5.5:1 on the background
-#define COL_GREEN          0xFF107C10 // fills only - too dark to read as text
-#define COL_GREEN_HI       0xFF1FA01F // the top of a green gradient
-#define COL_GREEN_TEXT     0xFF6CC96C // green that has to read as text on charcoal
+// The colours come from a theme (UiSetTheme): one of the presets below plus
+// an accent. The COL_* names read the current one, so drawing code never
+// needs to know which is on.
+//
+// Series, the default, is the Xbox Series dashboard's look: charcoal surfaces
+// with no colour cast, white text, a white ring round whatever has focus, and
+// one accent (green unless picked otherwise) spent only where something is
+// current or in progress - the page you're on, a download bar, the storage
+// ring, a count of waiting downloads.
+struct UiPalette
+{
+    D3DCOLOR bgTop, bgBottom;   // the page wash, lightest at the top
+    D3DCOLOR rail;              // the sidebar
+    D3DCOLOR surface;           // rows, cards, a tile's backing
+    D3DCOLOR surfaceHi;         // the current page in the sidebar, the selected row
+    D3DCOLOR track;             // progress and storage troughs, the library count
+    D3DCOLOR divider;
+    D3DCOLOR text;
+    D3DCOLOR text2;             // secondary text
+    D3DCOLOR dim;               // captions; at least 4.5:1 on the background
+    D3DCOLOR focus;             // the ring round what has focus; 0 = the accent's text shade
+    D3DCOLOR remembered;        // where focus will land, while something else has it: much fainter than focus
+    D3DCOLOR peekTop;           // the cut-off row, fading into the background
+    D3DCOLOR ambientTop, ambientBottom; // Home's wash behind the wallpapers (g_strAmbientShader)
+    D3DCOLOR ambientGlowB;      // its quieter two bands; the main one is the accent's
+    D3DCOLOR button, buttonHi;  // a button on a row; one with focus
+    D3DCOLOR checkEdge, checkEdgeDim;
+    D3DCOLOR valueEnd;          // an arrow with nowhere further to go
+    D3DCOLOR filterDisabled;    // a filter row that does nothing here
+    D3DCOLOR storageOther;      // Storage's "the rest of what's in use"
+    bool light;                 // dark text on a light page
+    bool glow;                  // a soft glow round the focus ring (Original Xbox)
+    int buttonStyle;            // BUTTON_STYLE_*, the footer's controller buttons
+    int accent;                 // UI_ACCENT_*, the one it comes with
+};
+
+static const UiPalette kUiPalettes[UI_THEME_COUNT] =
+{
+    {   // UI_THEME_SERIES
+        0xFF1C1C1C, 0xFF0E0E0E, 0xFF161616, 0xFF232323, 0xFF2F2F2F, 0xFF3A3A3A, 0xFF2A2A2A,
+        0xFFFFFFFF, 0xFFC4C4C4, 0xFF8F8F8F, 0xFFFFFFFF, 0x2EFFFFFF, 0x590E0E0E,
+        0xFF121613, 0xFF060807, 0x3C184A62,
+        0xFF383838, 0xFF4A4A4A, 0xFF9A9A9A, 0xFF555555, 0xFF4A4A4A, 0xFF666666, 0xFF6E6E6E,
+        false, false, BUTTON_STYLE_FLAT, UI_ACCENT_GREEN
+    },
+    {   // UI_THEME_XBOX360 - the NXE's silver and white
+        0xFFF4F5F6, 0xFFC7CBCF, 0xFFE3E6E8, 0xFFFFFFFF, 0xFFE2E9DC, 0xFFC3C8CC, 0xFFCFD3D6,
+        0xFF1E1E1E, 0xFF434343, 0xFF636363, 0, 0x33000000, 0x59C7CBCF,
+        0xFFE9ECEE, 0xFFB9BEC2, 0x30184A62,
+        0xFFE4E7EA, 0xFFD3D8DC, 0xFF7A7F84, 0xFFB0B5BA, 0xFFB8BDC1, 0xFF9A9FA4, 0xFF9A9FA4,
+        true, false, BUTTON_STYLE_JEWEL, UI_ACCENT_LIME
+    },
+    {   // UI_THEME_ORIGINAL - the first dashboard's black and green
+        0xFF102006, 0xFF020501, 0xFF081205, 0xFF12230C, 0xFF1C3713, 0xFF2A4A1E, 0xFF1A2E12,
+        0xFFE6FFD6, 0xFFA9D98F, 0xFF7FA86A, 0, 0x3396DE28, 0x59020501,
+        0xFF0C1A06, 0xFF020501, 0x2C2A6E14,
+        0xFF21401A, 0xFF2E5524, 0xFF7FA86A, 0xFF3A5A2E, 0xFF2E4A24, 0xFF4E6E40, 0xFF4E6E40,
+        false, true, BUTTON_STYLE_OG, UI_ACCENT_LIME
+    },
+    {   // UI_THEME_LIGHT - Series, light
+        0xFFF7F7F7, 0xFFE8E8E8, 0xFFEEEEEE, 0xFFFFFFFF, 0xFFE2E2E2, 0xFFD0D0D0, 0xFFDDDDDD,
+        0xFF1A1A1A, 0xFF474747, 0xFF6B6B6B, 0xFF1A1A1A, 0x33000000, 0x59E8E8E8,
+        0xFFF0F0F0, 0xFFDCDCDC, 0x30184A62,
+        0xFFE6E6E6, 0xFFD6D6D6, 0xFF7A7A7A, 0xFFBBBBBB, 0xFFBBBBBB, 0xFF9A9A9A, 0xFF9A9A9A,
+        true, false, BUTTON_STYLE_FLAT, UI_ACCENT_GREEN
+    },
+};
+
+// An accent: the fill, the top of its gradients, and the shades that read as
+// text on a dark page and on a light one. Green is the Series dashboard's.
+struct UiAccent
+{
+    D3DCOLOR fill, hi, textDark, textLight;
+};
+
+static const UiAccent kUiAccents[UI_ACCENT_COUNT] =
+{
+    { 0xFF107C10, 0xFF1FA01F, 0xFF6CC96C, 0xFF0E6B0E }, // green
+    { 0xFF3F9F15, 0xFF5CC12A, 0xFF8FE05A, 0xFF2F7A0E }, // lime
+    { 0xFF0078D4, 0xFF1E8FE6, 0xFF5EB0F0, 0xFF005FA8 }, // blue
+    { 0xFF038387, 0xFF0C9DA1, 0xFF4CC6C9, 0xFF026B6E }, // teal
+    { 0xFF8764B8, 0xFF9C7CCB, 0xFFB9A0E0, 0xFF6A4A9A }, // purple
+    { 0xFFC239B3, 0xFFD457C6, 0xFFE58ADA, 0xFF9E2A92 }, // pink
+    { 0xFFD13438, 0xFFE04F52, 0xFFF28083, 0xFFB0282C }, // red
+    { 0xFFCA5010, 0xFFDD6A28, 0xFFF0965C, 0xFFA8420C }, // orange
+};
+
+// The current theme, resolved: the preset's colours plus those its accent
+// gives. UiSetTheme fills it; until then it is Series with green.
+struct UiTheme
+{
+    UiPalette p;
+    D3DCOLOR accent, accentHi, accentText, accentDim, onAccent, focus, storeGlow, ambientGlowA;
+    int id, accentId;
+};
+
+static UiTheme g_theme;
+static void ResolveTheme(int theme, int accent);
+
+#define COL_BG_TOP         (g_theme.p.bgTop)
+#define COL_BG_BOTTOM      (g_theme.p.bgBottom)
+#define COL_RAIL           (g_theme.p.rail)
+#define COL_SURFACE        (g_theme.p.surface)
+#define COL_SURFACE_HI     (g_theme.p.surfaceHi)
+#define COL_TRACK          (g_theme.p.track)
+#define COL_DIVIDER        (g_theme.p.divider)
+#define COL_TEXT           (g_theme.p.text)
+#define COL_TEXT2          (g_theme.p.text2)
+#define COL_DIM            (g_theme.p.dim)
+#define COL_GREEN          (g_theme.accent)     // the accent: fills only - too dark to read as text
+#define COL_GREEN_HI       (g_theme.accentHi)   // the top of an accent gradient
+#define COL_GREEN_TEXT     (g_theme.accentText) // the accent where it has to read as text
+#define COL_ON_ACCENT      (g_theme.onAccent)   // text and ticks on an accent fill
+#define COL_FOCUS          (g_theme.focus)
+#define COL_REMEMBERED     (g_theme.p.remembered)
+#define COL_PEEK_TOP       (g_theme.p.peekTop)
+#define COL_STORE_GLOW     (g_theme.storeGlow)  // the left end of a placeholder card
 #define COL_ERROR          0xFFFF6B61
 #define COL_AMBER          0xFFF0BE12 // the Y button's colour, for the keys notice
-#define COL_FOCUS          0xFFFFFFFF
-#define COL_REMEMBERED     0x2EFFFFFF // where focus will land, while something else has it: much fainter than COL_FOCUS
 #define COL_PILL           0xB8000000 // the disc's labels over artwork
 #define COL_SHADOW         0x99000000
-#define COL_PEEK_TOP       0x590E0E0E // the cut-off row, fading into the background
-#define COL_STORE_GLOW     0xFF17351A // the left end of a placeholder card
+#define COL_ON_IMAGE       0xFFFFFFFF // text over artwork or a dark scrim: white on any theme
+#define COL_ON_IMAGE2      0xFFC4C4C4 // and its secondary text
 
 // Home's background behind the wallpapers (see g_strAmbientShader). The
 // glows' alpha is how strongly they are added over the wash, not an opacity:
 // the background itself is always solid.
-#define COL_AMBIENT_TOP    0xFF121613 // the wash, a shade warmer than the other pages'
-#define COL_AMBIENT_BOTTOM 0xFF060807
-#define COL_AMBIENT_GLOW_A 0x4D1E7C2E // the main band: the dashboard's green, well off full
-#define COL_AMBIENT_GLOW_B 0x3C184A62 // the quieter two: a cold blue, to keep it from reading as one colour
+#define COL_AMBIENT_TOP    (g_theme.p.ambientTop)
+#define COL_AMBIENT_BOTTOM (g_theme.p.ambientBottom)
+#define COL_AMBIENT_GLOW_A (g_theme.ambientGlowA) // the main band: the accent, well off full
+#define COL_AMBIENT_GLOW_B (g_theme.p.ambientGlowB) // the quieter two: a cold blue, to keep it from reading as one colour
+
+static bool g_themeResolved = false;
+
+// a + (b - a) * t per channel, alpha included.
+static D3DCOLOR MixColor(D3DCOLOR a, D3DCOLOR b, float t)
+{
+    D3DCOLOR out = 0;
+    for (int shift = 0; shift < 32; shift += 8)
+    {
+        const float ca = (float)((a >> shift) & 0xFF);
+        const float cb = (float)((b >> shift) & 0xFF);
+        out |= ((D3DCOLOR)(ca + (cb - ca) * t + 0.5f) & 0xFF) << shift;
+    }
+    return out;
+}
+
+// Rec. 709 luma, 0..1 - enough to tell whether white or near-black text reads
+// better on a fill.
+static float ColorLuma(D3DCOLOR c)
+{
+    return (0.2126f * (float)((c >> 16) & 0xFF) + 0.7152f * (float)((c >> 8) & 0xFF) +
+            0.0722f * (float)(c & 0xFF)) / 255.0f;
+}
+
+static void ResolveTheme(int theme, int accent)
+{
+    if (theme < 0 || theme >= UI_THEME_COUNT)
+        theme = UI_THEME_SERIES;
+    const UiPalette &p = kUiPalettes[theme];
+    if (accent < 0 || accent >= UI_ACCENT_COUNT)
+        accent = p.accent;
+    const UiAccent &a = kUiAccents[accent];
+
+    g_theme.p = p;
+    g_theme.id = theme;
+    g_theme.accentId = accent;
+    g_theme.accent = a.fill;
+    g_theme.accentHi = a.hi;
+    g_theme.accentText = p.light ? a.textLight : a.textDark;
+    g_theme.accentDim = (a.fill & 0x00FFFFFF) | 0x8C000000;
+    g_theme.onAccent = ColorLuma(a.fill) > 0.55f ? 0xFF101010 : 0xFFFFFFFF;
+    g_theme.focus = p.focus != 0 ? p.focus : g_theme.accentText;
+    g_theme.storeGlow = MixColor(p.bgTop, a.fill, 0.22f) | 0xFF000000;
+    g_theme.ambientGlowA = (a.fill & 0x00FFFFFF) | 0x4D000000;
+    if (theme == UI_THEME_SERIES && accent == UI_ACCENT_GREEN)
+    {
+        // Series' own, tuned by hand before there were themes.
+        g_theme.storeGlow = 0xFF17351A;
+        g_theme.ambientGlowA = 0x4D1E7C2E;
+    }
+    g_themeResolved = true;
+}
+
+// The pages drawn over a game's wallpaper - Home, a game's page, the launch
+// screen - keep white text on a dark scrim on every theme, as the dashboards
+// do: on a light theme they take Series' colours, with its accent, for the
+// frame. Declare one at the top of such a Render call.
+struct DarkThemeScope
+{
+    UiTheme saved;
+    bool active;
+    DarkThemeScope() : active(g_theme.p.light)
+    {
+        if (active)
+        {
+            saved = g_theme;
+            ResolveTheme(UI_THEME_SERIES, saved.accentId);
+        }
+    }
+    ~DarkThemeScope()
+    {
+        if (active)
+            g_theme = saved;
+    }
+};
+
+void UiSetTheme(int theme, int accent)
+{
+    ResolveTheme(theme, accent);
+    UiSetButtonStyle(g_theme.p.buttonStyle);
+}
+
+int UiThemeDefaultAccent(int theme)
+{
+    return (theme >= 0 && theme < UI_THEME_COUNT) ? kUiPalettes[theme].accent : UI_ACCENT_GREEN;
+}
+
+unsigned long UiAccentSwatch(int accent)
+{
+    return (accent >= 0 && accent < UI_ACCENT_COUNT) ? kUiAccents[accent].fill : kUiAccents[0].fill;
+}
 
 // Rounded corners need the shape shader; with it missing they come out square
 // anyway. Turning this off squares them deliberately.
@@ -1856,7 +2075,7 @@ static float LayoutButtonHints(ButtonHint *hints, int count, float startX)
     for (int i = 0; i < count; ++i)
     {
         hints[i].badgeX = x;
-        hints[i].badgeW = (float)kButtonSprites[hints[i].sprite & SPRITE_ID_MASK].boxW * k;
+        hints[i].badgeW = (float)kButtonSprites[g_buttonStyle][hints[i].sprite & SPRITE_ID_MASK].boxW * k;
         hints[i].labelX = x + hints[i].badgeW + gapBadgeToLabel;
 
         x = hints[i].labelX + g_UiFont.GetTextWidth(hints[i].label) + gapBetweenHints;
@@ -1883,7 +2102,7 @@ static float DrawButtonSprite(int sprite, float boxX, float centerY)
     const float invH = 1.0f / (float)BUTTON_ATLAS_HEIGHT;
 
     const int dim = sprite & (SPRITE_DIM_LEFT | SPRITE_DIM_RIGHT);
-    const ButtonSprite &s = kButtonSprites[sprite & SPRITE_ID_MASK];
+    const ButtonSprite &s = kButtonSprites[g_buttonStyle][sprite & SPRITE_ID_MASK];
 
     // Position the button's own box, then draw the whole cell around it. The
     // margin between box and cell is the drop shadow, which is meant to fall
@@ -2775,6 +2994,9 @@ static void DrawHeaderText(const char *title, const char *subtitle, bool showToa
 
 bool InitGameListUI()
 {
+    if (!g_themeResolved)
+        ResolveTheme(UI_THEME_SERIES, -1);
+
     if (g_Initialized)
         return true;
 
@@ -4502,7 +4724,7 @@ static void DrawPillQuads(const TilePills &p)
 static void DrawPillText(const TilePills &p)
 {
     for (int i = 0; i < p.count; ++i)
-        TextMid(p.rect[i].x + p.rect[i].w * 0.5f, p.rect[i].y + p.rect[i].h * 0.5f, 0.56f, COL_TEXT,
+        TextMid(p.rect[i].x + p.rect[i].w * 0.5f, p.rect[i].y + p.rect[i].h * 0.5f, 0.56f, COL_ON_IMAGE,
                 p.label[i], ATGFONT_CENTER_X, 0.0f, true);
 }
 
@@ -4718,7 +4940,7 @@ void RenderLibraryFrame(LibraryPageView &view, const UiHint *hints, int hintCoun
         DrawItemLetter(items, t.item, t.x, t.y, t.s, bandH, ItemNamedUnfocused(items, t.item));
 
         if (ItemNamedUnfocused(items, t.item))
-            TextMid(t.x + S(14.0f), t.y + t.s - bandH * 0.5f + S(4.0f), 0.72f, COL_TEXT2,
+            TextMid(t.x + S(14.0f), t.y + t.s - bandH * 0.5f + S(4.0f), 0.72f, COL_ON_IMAGE2,
                     ItemName(items, t.item), ATGFONT_TRUNCATED, t.s - S(28.0f));
     }
 
@@ -4726,7 +4948,7 @@ void RenderLibraryFrame(LibraryPageView &view, const UiHint *hints, int hintCoun
     {
         DrawPillText(PillsFor(items, focusItem, focusOX, focusOY, focusS));
         DrawItemLetter(items, focusItem, focusOX, focusOY, focusS, bandH, true);
-        MarqueeTextMid(focusOX + S(14.0f), focusOY + focusS - bandH * 0.5f + S(4.0f), 0.8f, COL_TEXT,
+        MarqueeTextMid(focusOX + S(14.0f), focusOY + focusS - bandH * 0.5f + S(4.0f), 0.8f, COL_ON_IMAGE,
                        ItemName(items, focusItem), focusS - S(28.0f), true);
     }
 
@@ -5260,8 +5482,8 @@ bool ShowNotesUI(const char *heading, const char *title, const char *body, const
 #define ALERT_BUTTON_W  140.0f // at least; wider for a longer label
 #define ALERT_OPEN_MS   150.0f
 #define COL_ALERT_DIM   0xB0000000
-#define COL_ALERT_BTN   0xFF383838 // the other button - as COL_BUTTON, defined further down
-#define COL_ALERT_BTN_HI 0xFF4A4A4A
+#define COL_ALERT_BTN   (g_theme.p.button) // the other button - as COL_BUTTON
+#define COL_ALERT_BTN_HI (g_theme.p.buttonHi)
 
 // The last frame presented, copied into a texture of its own - the front
 // buffer is overwritten by the alert's own frames. NULL if it couldn't be.
@@ -6197,12 +6419,12 @@ void RenderListFrame(ListPageView &view, const UiHint *hints, int hintCount)
 // ---------------------------------------------------------------------------
 
 #define SETTINGS_ROWS_MAX   64
-#define COL_BUTTON          0xFF383838 // a button on a row
-#define COL_BUTTON_HI       0xFF4A4A4A // one with focus
-#define COL_CHECK_EDGE      0xFF9A9A9A
-#define COL_CHECK_EDGE_DIM  0xFF555555
-#define COL_GREEN_DIM       0x8C107C10 // a locked box: green, faded
-#define COL_VALUE_END       0xFF4A4A4A // an arrow with nowhere further to go
+#define COL_BUTTON          (g_theme.p.button) // a button on a row
+#define COL_BUTTON_HI       (g_theme.p.buttonHi) // one with focus
+#define COL_CHECK_EDGE      (g_theme.p.checkEdge)
+#define COL_CHECK_EDGE_DIM  (g_theme.p.checkEdgeDim)
+#define COL_GREEN_DIM       (g_theme.accentDim) // a locked box: the accent, faded
+#define COL_VALUE_END       (g_theme.p.valueEnd) // an arrow with nowhere further to go
 
 static float SettingsRowH()     { return S(44.0f); }
 static float SettingsFlagH()    { return S(21.0f); } // a language row's flag; 4:3, so 28 wide
@@ -7008,6 +7230,7 @@ static void RenderLaunchArtFrame(const StoreArtTexture *art)
 
 void RenderLaunchFrame(const char *heading, const char *name, unsigned long titleId)
 {
+    DarkThemeScope darkScope; // over the wallpaper: white text on any theme
     if (!g_Initialized)
         return;
 
@@ -7351,6 +7574,7 @@ static void DrawHomeTileArt(const HomeRecentView &tile, float x, float y, float 
 
 void RenderHomeFrame(HomePageView &view, const UiHint *hints, int hintCount)
 {
+    DarkThemeScope darkScope; // over the wallpaper: white text on any theme
     if (!g_Initialized)
         return;
 
@@ -8152,9 +8376,9 @@ void RenderStoreFrame(StorePageView &view, const UiHint *hints, int hintCount)
             const float detailY = y + h - S(26.0f) - LineHeight(0.8f) * 1.2f;
             const float nameY = detailY - S(6.0f) - LineHeight(1.4f) * 1.2f;
             if (TextInClip(nameY, LineHeight(1.4f) * 1.2f))
-                TextFit(x + pad, nameY, 1.4f, COL_TEXT, f.name, w - pad * 2.0f, true);
+                TextFit(x + pad, nameY, 1.4f, COL_ON_IMAGE, f.name, w - pad * 2.0f, true);
             if (f.detail != NULL && TextInClip(detailY, LineHeight(0.8f) * 1.2f))
-                TextFit(x + pad, detailY, 0.8f, COL_TEXT2, f.detail, w - pad * 2.0f);
+                TextFit(x + pad, detailY, 0.8f, COL_ON_IMAGE2, f.detail, w - pad * 2.0f);
         }
         else
         {
@@ -8164,9 +8388,9 @@ void RenderStoreFrame(StorePageView &view, const UiHint *hints, int hintCount)
             if (!TextInClip(nameY, LineHeight(0.9f) * 1.2f))
                 continue;
             if (focused)
-                MarqueeTextMid(x + pad, nameY + LineHeight(0.9f) * 0.6f, 0.9f, COL_TEXT, f.name, w - pad * 2.0f, true);
+                MarqueeTextMid(x + pad, nameY + LineHeight(0.9f) * 0.6f, 0.9f, COL_ON_IMAGE, f.name, w - pad * 2.0f, true);
             else
-                TextFit(x + pad, nameY, 0.9f, COL_TEXT, f.name, w - pad * 2.0f, true);
+                TextFit(x + pad, nameY, 0.9f, COL_ON_IMAGE, f.name, w - pad * 2.0f, true);
         }
     }
 
@@ -8221,9 +8445,9 @@ void RenderStoreFrame(StorePageView &view, const UiHint *hints, int hintCount)
         const float textH = nameH + (view.spotlightDetail != NULL ? S(4.0f) + detailH : 0.0f);
         const float nameY = y + (h - textH) * 0.5f;
         if (TextInClip(nameY, nameH))
-            TextFit(x + spad, nameY, 1.4f, COL_TEXT, view.spotlight.name, w * 0.6f, true);
+            TextFit(x + spad, nameY, 1.4f, COL_ON_IMAGE, view.spotlight.name, w * 0.6f, true);
         if (view.spotlightDetail != NULL && TextInClip(nameY + nameH + S(4.0f), detailH))
-            TextFit(x + spad, nameY + nameH + S(4.0f), 0.8f, COL_TEXT2, view.spotlightDetail, w * 0.6f);
+            TextFit(x + spad, nameY + nameH + S(4.0f), 0.8f, COL_ON_IMAGE2, view.spotlightDetail, w * 0.6f);
     }
 
     for (int cr = 0; cr < cardRowCount; ++cr)
@@ -8250,9 +8474,9 @@ void RenderStoreFrame(StorePageView &view, const UiHint *hints, int hintCount)
             if (c.publisher)
                 continue; // its logos are its name
             if (focused)
-                MarqueeTextMid(x + cpad, nameY + LineHeight(1.0f) * 0.6f, 1.0f, COL_TEXT, c.name, w - cpad * 2.0f, true);
+                MarqueeTextMid(x + cpad, nameY + LineHeight(1.0f) * 0.6f, 1.0f, COL_ON_IMAGE, c.name, w - cpad * 2.0f, true);
             else
-                TextFit(x + cpad, nameY, 1.0f, COL_TEXT, c.name, w - cpad * 2.0f, true);
+                TextFit(x + cpad, nameY, 1.0f, COL_ON_IMAGE, c.name, w - cpad * 2.0f, true);
         }
     }
 
@@ -8282,7 +8506,7 @@ void RenderStoreFrame(StorePageView &view, const UiHint *hints, int hintCount)
             if (rv.tiles[i].installed && TextInClip(installedPill.y, installedPill.h))
             {
                 const TilePill &p = installedPill;
-                TextMid(p.x + p.w * 0.5f, p.y + p.h * 0.5f, 0.56f, COL_TEXT, Tr(STR_PILL_INSTALLED), ATGFONT_CENTER_X,
+                TextMid(p.x + p.w * 0.5f, p.y + p.h * 0.5f, 0.56f, COL_ON_IMAGE, Tr(STR_PILL_INSTALLED), ATGFONT_CENTER_X,
                         0.0f, true);
             }
             const bool hasArt = StoreCoverFor(rv.tiles[i].titleId) != NULL;
@@ -8513,7 +8737,7 @@ void RenderStoreRowsFrame(StoreRowsView &view, const UiHint *hints, int hintCoun
                 TextInClip(installedPill.y, installedPill.h))
             {
                 const TilePill &p = installedPill;
-                TextMid(p.x + p.w * 0.5f, p.y + p.h * 0.5f, 0.56f, COL_TEXT, Tr(STR_PILL_INSTALLED), ATGFONT_CENTER_X, 0.0f,
+                TextMid(p.x + p.w * 0.5f, p.y + p.h * 0.5f, 0.56f, COL_ON_IMAGE, Tr(STR_PILL_INSTALLED), ATGFONT_CENTER_X, 0.0f,
                         true);
             }
 
@@ -8781,7 +9005,7 @@ static void RequestVisibleStoreCovers(const StoreLetterView &view, int firstRow,
 #define FILTER_PANEL_VALUE_W  290.0f // a value control's, arrows and all
 #define FILTER_PANEL_ROWS_MAX 16
 #define FILTER_SCRIM_SEE      0.4f   // how much of the page shows through the scrim: COL_SHADOW's
-#define COL_FILTER_DISABLED   0xFF666666 // a row that does nothing here
+#define COL_FILTER_DISABLED   (g_theme.p.filterDisabled) // a row that does nothing here
 
 struct FilterPanelLayout
 {
@@ -9076,7 +9300,7 @@ void RenderStoreLetterFrame(StoreLetterView &view, const UiHint *hints, int hint
         if (view.tiles[tileText[i].item].installed)
         {
             const TilePill p = PillFor(Tr(STR_PILL_INSTALLED), tileText[i].x, tileText[i].y, tileText[i].s);
-            TextMid(p.x + p.w * 0.5f, p.y + p.h * 0.5f, 0.56f, COL_TEXT, Tr(STR_PILL_INSTALLED), ATGFONT_CENTER_X,
+            TextMid(p.x + p.w * 0.5f, p.y + p.h * 0.5f, 0.56f, COL_ON_IMAGE, Tr(STR_PILL_INSTALLED), ATGFONT_CENTER_X,
                     0.0f, true);
         }
         const TileText &t = tileText[i];
@@ -9092,16 +9316,17 @@ void RenderStoreLetterFrame(StoreLetterView &view, const UiHint *hints, int hint
     if (focusItem >= 0 && focusOX + focusS <= textRight)
     {
         const D3DCOLOR focusText = WithAlpha(COL_TEXT, see);
+        const D3DCOLOR focusOnArt = WithAlpha(COL_ON_IMAGE, see);
         if (view.tiles[focusItem].installed)
         {
             const TilePill p = PillFor(Tr(STR_PILL_INSTALLED), focusOX, focusOY, focusS);
-            TextMid(p.x + p.w * 0.5f, p.y + p.h * 0.5f, 0.56f, focusText, Tr(STR_PILL_INSTALLED), ATGFONT_CENTER_X,
+            TextMid(p.x + p.w * 0.5f, p.y + p.h * 0.5f, 0.56f, focusOnArt, Tr(STR_PILL_INSTALLED), ATGFONT_CENTER_X,
                     0.0f, true);
         }
         if (focusIndie)
             DrawIndieTileName(focusOX, focusOY, focusS, L.tile, focusText, view.tiles[focusItem].name);
         else if (focusHasArt)
-            MarqueeTextMid(focusOX + S(14.0f), focusOY + focusS - bandH * 0.5f + S(4.0f), 0.8f, focusText,
+            MarqueeTextMid(focusOX + S(14.0f), focusOY + focusS - bandH * 0.5f + S(4.0f), 0.8f, focusOnArt,
                            view.tiles[focusItem].name, focusS - S(28.0f), true);
         else
             TextWrapped(focusOX + pad, focusOY + pad + S(30.0f), 0.82f, focusText, view.tiles[focusItem].name,
@@ -9292,6 +9517,7 @@ static float StoreGameButtonPad(const StoreGameView &view, float availableW)
 
 void RenderStoreGameFrame(StoreGameView &view, const UiHint *hints, int hintCount)
 {
+    DarkThemeScope darkScope; // over the wallpaper: white text on any theme
     if (!g_Initialized)
         return;
 
@@ -10056,9 +10282,18 @@ void RenderQueueFrame(QueuePageView &view, const UiHint *hints, int hintCount)
 // ---------------------------------------------------------------------------
 
 #define COL_STORAGE_EXTRAS 0xFF3A8FD6 // DLC and updates, beside the games' green
-#define COL_STORAGE_OTHER  0xFF6E6E6E // the rest of what's in use
+#define COL_STORAGE_OTHER  (g_theme.p.storageOther) // the rest of what's in use
 
-static const D3DCOLOR kStorageShareColors[STORAGE_SHARE_COUNT] = { COL_GREEN, COL_STORAGE_EXTRAS, COL_STORAGE_OTHER };
+#define kStorageShareColors (StorageShareColors()) // the accent, so it follows the theme
+static const D3DCOLOR *StorageShareColors()
+{
+    static D3DCOLOR colors[STORAGE_SHARE_COUNT];
+    colors[0] = COL_GREEN;
+    colors[1] = (g_theme.accentId == UI_ACCENT_BLUE || g_theme.accentId == UI_ACCENT_TEAL)
+        ? 0xFFE08A2E : COL_STORAGE_EXTRAS; // orange beside a blue accent
+    colors[2] = COL_STORAGE_OTHER;
+    return colors;
+}
 
 struct StorageLayout
 {
