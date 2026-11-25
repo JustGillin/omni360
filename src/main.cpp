@@ -42,6 +42,7 @@ end-to-end on real hardware against a real 27-game library.
 #include "StoreCatalog.h"
 #include "DiscWorker.h"
 #include "PcHelper.h"
+#include "Wallpapers.h"
 #include "GameInstaller.h"
 #include "QueueState.h" // TakeRestoredTally, for the one line about last time
 #include "NightMode.h"
@@ -2658,6 +2659,7 @@ enum SettingsRow
     SETTINGS_ROW_THEME,        // the theme: left and right change it
     SETTINGS_ROW_ACCENT,       // its accent: left and right change it
     SETTINGS_ROW_HOME_BACKGROUND, // what's behind Home: left and right change it
+    SETTINGS_ROW_WALLPAPER,    // opens the wallpaper picker
     SETTINGS_ROW_RESYNC_LIBRARY, // re-read the library from disk and re-fetch missing icons
     SETTINGS_ROW_LANGUAGE,     // a language's row: A picks it (arg is its index)
     SETTINGS_ROW_LANGUAGE_REFRESH, // looks again for language files beside Omni360
@@ -3582,18 +3584,26 @@ static void ToggleEjectAfterInstall()
     SetEjectAfterInstall(on);
 }
 
-// Left and right on Home's background row. Your own wallpaper isn't one of
-// the steps yet - it comes with picking one.
-#define HOME_BACKGROUND_STEPS 2
+// Left and right on Home's background row. The picked wallpaper is one of
+// the steps once there is one.
+static int HomeBackgroundSteps()
+{
+    return HasHomeWallpaper() ? UI_HOME_BG_COUNT : UI_HOME_BG_CUSTOM;
+}
 
 static void StepHomeBackground(int step)
 {
-    const int mode = HomeBackgroundSetting() + step;
-    if (mode < 0 || mode >= HOME_BACKGROUND_STEPS)
+    int mode = HomeBackgroundSetting();
+    if (mode >= HomeBackgroundSteps())
+        mode = UI_HOME_BG_THEME; // its wallpaper has gone; it showed as the theme's
+    mode += step;
+    if (mode < 0 || mode >= HomeBackgroundSteps())
         return;
     if (!SetSettingsValue(HOME_BACKGROUND_KEY, kHomeBackgroundNames[mode]))
         ShowMessageUI(Tr(STR_NOT_SAVED), Tr(STR_SETTINGS_TXT_COULD_NOT_BE), NULL);
     UiSetHomeBackground(mode);
+    if (mode == UI_HOME_BG_CUSTOM)
+        RequestHomeWallpaper();
 }
 
 static void ToggleUiSounds()
@@ -4090,15 +4100,26 @@ static void BuildSettingsPage(SettingsPage &page, const Library &lib, const char
         }
 
         {
-            const int mode = HomeBackgroundSetting();
-            const int shown = mode < HOME_BACKGROUND_STEPS ? mode : UI_HOME_BG_GAME;
+            const StringId modeNames[UI_HOME_BG_COUNT] = { STR_HOME_BG_GAME, STR_HOME_BG_THEME, STR_HOME_BG_CUSTOM };
+            const StringId modeHelp[UI_HOME_BG_COUNT] = { STR_HOME_BG_GAME_HELP, STR_HOME_BG_THEME_HELP,
+                                                          STR_HOME_BG_CUSTOM_HELP };
+            int shown = HomeBackgroundSetting();
+            if (shown >= HomeBackgroundSteps())
+                shown = UI_HOME_BG_THEME;
             AddSettingsRow(page, SETTINGS_VIEW_LINE, Tr(STR_HOME_BACKGROUND));
-            AddSettingsControl(page, SETTINGS_CONTROL_VALUE, Tr(shown == UI_HOME_BG_THEME ? STR_HOME_BG_THEME : STR_HOME_BG_GAME),
-                               SETTINGS_ROW_HOME_BACKGROUND,
-                               Tr(shown == UI_HOME_BG_THEME ? STR_HOME_BG_THEME_HELP : STR_HOME_BG_GAME_HELP));
+            AddSettingsControl(page, SETTINGS_CONTROL_VALUE, Tr(modeNames[shown]), SETTINGS_ROW_HOME_BACKGROUND,
+                               Tr(modeHelp[shown]));
             SettingsControlView &c = page.rows[page.count - 1].controls[0];
             c.valueIndex = shown;
-            c.valueCount = HOME_BACKGROUND_STEPS;
+            c.valueCount = HomeBackgroundSteps();
+
+            // The picked one's name, and the picker.
+            static char wallpaperTitle[128];
+            HomeWallpaperTitle(wallpaperTitle, sizeof(wallpaperTitle));
+            AddSettingsRow(page, SETTINGS_VIEW_LINE, Tr(STR_WALLPAPER)).status =
+                wallpaperTitle[0] != '\0' ? wallpaperTitle : Tr(STR_WP_NONE);
+            AddSettingsControl(page, SETTINGS_CONTROL_BUTTON, Tr(STR_CHOOSE), SETTINGS_ROW_WALLPAPER,
+                               Tr(STR_WP_ROW_HELP));
         }
 
         AddSettingsRow(page, SETTINGS_VIEW_LINE, Tr(STR_NAVIGATION_SOUNDS));
@@ -4437,6 +4458,187 @@ static void RunSpeedTest(const char *gamesPath)
 
 static void StartIconSync(const InstalledGame *games, int count);
 
+// ---------------------------------------------------------------------------
+// The wallpaper picker
+// ---------------------------------------------------------------------------
+
+// Xbox's wallpapers from xbox.com, a grid of previews over Settings. A picks
+// one: it's downloaded, saved, and Home's background set to it. B leaves.
+// It moves as the library does: up off the first row is the category row,
+// where left and right change the category and down or A goes back into the
+// grid; LB and RB jump a screenful.
+static void RunWallpaperPicker()
+{
+    static int items[1024];
+    static const char *names[1024];
+    const char *filterNames[1 + WALLPAPER_CATEGORY_COUNT] = { Tr(STR_WP_ALL), Tr(STR_WP_GAMES), Tr(STR_WP_COMMUNITY),
+                                                              Tr(STR_WP_DEVICES), Tr(STR_WP_EVENTS) };
+    const UiHint gridHints[] = {
+        { UI_BUTTON_A, TrW(STR_WP_SET_AS), NULL },
+        { UI_BUTTON_B, TrW(STR_BUTTON_BACK), NULL },
+        { UI_BUTTON_LBRB, TrW(STR_PAGE), NULL },
+    };
+    const UiHint filterHints[] = {
+        { UI_BUTTON_B, TrW(STR_BUTTON_BACK), NULL },
+    };
+
+    RequestWallpaperList();
+    ResyncUiInput();
+
+    int filter = 0, selected = 0, scroll = 0, count = 0, current = -1;
+    bool built = false, onFilters = false;
+    char currentTitle[128];
+    HomeWallpaperTitle(currentTitle, sizeof(currentTitle));
+
+    for (;;)
+    {
+        const WallpaperListState state = WallpaperListStatus();
+        if (state == WALLPAPER_LIST_READY && !built)
+        {
+            count = 0;
+            current = -1;
+            for (int i = 0; i < WallpaperCount() && count < 1024; ++i)
+            {
+                const WallpaperEntry *e = WallpaperAt(i);
+                if (currentTitle[0] != '\0' && current < 0 && strcmp(e->title, currentTitle) == 0)
+                    current = i;
+                if (filter == 0 || e->category == filter - 1)
+                {
+                    items[count] = i;
+                    names[count] = e->title;
+                    count++;
+                }
+            }
+            built = true;
+        }
+
+        const UiInput input = PollUiInput();
+        const int cols = WallpaperGridColumns();
+        const int rows = WallpaperGridRows();
+
+        if (input.pressed & XINPUT_GAMEPAD_B)
+        {
+            PlayUiSound(UI_SOUND_BACK);
+            break;
+        }
+        if (onFilters || count == 0)
+        {
+            // The category row: the grid follows at once, as the library's.
+            const int step = input.nav == XINPUT_GAMEPAD_DPAD_RIGHT ? 1 : input.nav == XINPUT_GAMEPAD_DPAD_LEFT ? -1 : 0;
+            if (step != 0 && filter + step >= 0 && filter + step <= WALLPAPER_CATEGORY_COUNT)
+            {
+                PlayUiSound(UI_SOUND_MOVE);
+                filter += step;
+                selected = 0;
+                scroll = 0;
+                built = false;
+            }
+            else if ((input.nav == XINPUT_GAMEPAD_DPAD_DOWN || (input.pressed & XINPUT_GAMEPAD_A)) && count > 0)
+            {
+                PlayUiSound(UI_SOUND_MOVE);
+                onFilters = false;
+            }
+        }
+        else if (input.nav == XINPUT_GAMEPAD_DPAD_UP && selected < cols)
+        {
+            PlayUiSound(UI_SOUND_MOVE);
+            onFilters = true; // up off the first row
+        }
+        else if (input.nav != 0 || (input.pressed & (XINPUT_GAMEPAD_LEFT_SHOULDER | XINPUT_GAMEPAD_RIGHT_SHOULDER)))
+        {
+            int moved = selected;
+            if (input.nav == XINPUT_GAMEPAD_DPAD_LEFT && selected % cols > 0)
+                moved = selected - 1;
+            else if (input.nav == XINPUT_GAMEPAD_DPAD_RIGHT && selected % cols < cols - 1 && selected + 1 < count)
+                moved = selected + 1;
+            else if (input.nav == XINPUT_GAMEPAD_DPAD_UP && selected >= cols)
+                moved = selected - cols;
+            else if (input.nav == XINPUT_GAMEPAD_DPAD_DOWN)
+            {
+                if (selected + cols < count)
+                    moved = selected + cols;
+                else if (selected / cols < (count - 1) / cols)
+                    moved = count - 1; // the last row is short: its last one
+            }
+            // A screenful at a time, as the library's shoulders.
+            if (input.pressed & XINPUT_GAMEPAD_LEFT_SHOULDER)
+                moved -= rows * cols;
+            if (input.pressed & XINPUT_GAMEPAD_RIGHT_SHOULDER)
+                moved += rows * cols;
+            if (moved > count - 1) moved = count - 1;
+            if (moved < 0) moved = 0;
+            if (moved != selected)
+            {
+                PlayUiSound(UI_SOUND_MOVE);
+                selected = moved;
+            }
+        }
+        else if ((input.pressed & XINPUT_GAMEPAD_A) && count > 0 && selected < count)
+        {
+            PlayUiSound(UI_SOUND_SELECT);
+            const int index = items[selected];
+            RequestWallpaperPick(index);
+            BeginProgressDialog();
+            while (WallpaperPickStatus() == WALLPAPER_PICK_WORKING)
+            {
+                PollUiInput();
+                RenderProgressDialog(Tr(STR_WALLPAPER), Tr(STR_WP_DOWNLOADING), names[selected], -1.0f, UI_BUTTON_B,
+                                     NULL);
+                Sleep(16);
+            }
+            EndProgressDialog();
+            const bool ok = WallpaperPickStatus() == WALLPAPER_PICK_DONE;
+            ResetWallpaperPick();
+            if (ok)
+            {
+                if (!SetSettingsValue(HOME_BACKGROUND_KEY, kHomeBackgroundNames[UI_HOME_BG_CUSTOM]))
+                    ShowMessageUI(Tr(STR_NOT_SAVED), Tr(STR_SETTINGS_TXT_COULD_NOT_BE), NULL);
+                UiSetHomeBackground(UI_HOME_BG_CUSTOM);
+                ShowShellToast(Tr(STR_WP_SET), names[selected], UI_TOAST_SUCCESS);
+                break;
+            }
+            ShowAlertUI(Tr(STR_WP_COULDNT), Tr(STR_WP_COULDNT_HELP), NULL, NULL, NULL);
+            ResyncUiInput();
+        }
+
+        // The focused row on screen.
+        if (count > 0)
+        {
+            const int row = selected / cols;
+            if (row < scroll)
+                scroll = row;
+            if (row >= scroll + rows)
+                scroll = row - rows + 1;
+        }
+
+        WallpaperPageView view;
+        view.title = Tr(STR_WALLPAPERS);
+        view.filters = filterNames;
+        view.filterCount = 1 + WALLPAPER_CATEGORY_COUNT;
+        view.filter = filter;
+        view.items = items;
+        view.names = names;
+        view.count = built ? count : 0;
+        view.selected = selected;
+        view.scroll = scroll;
+        view.current = current;
+        view.focused = !onFilters;
+        view.filterFocused = onFilters || (built && count == 0);
+        view.message = state == WALLPAPER_LIST_FAILED  ? Tr(STR_WP_FAILED)
+                       : state != WALLPAPER_LIST_READY ? Tr(STR_WP_LOADING)
+                                                       : Tr(STR_WP_EMPTY);
+        if (view.filterFocused)
+            RenderWallpaperFrame(view, filterHints, 1);
+        else
+            RenderWallpaperFrame(view, gridHints, 3);
+        scroll = view.scroll;
+
+        // Paced as the main loop is: input's repeat counts frames.
+        Sleep(16);
+    }
+    ResyncUiInput();
+}
+
 static SettingsOutcome RunSettingsRow(SettingsRow row, int arg, Library &lib, char *gamesPath, size_t gamesPathSize)
 {
     SettingsOutcome outcome = {false, false};
@@ -4451,6 +4653,7 @@ static SettingsOutcome RunSettingsRow(SettingsRow row, int arg, Library &lib, ch
     case SETTINGS_ROW_LIBRARY_FOLDER: ToggleLibraryFolder(arg, lib, gamesPath, outcome); break;
     case SETTINGS_ROW_ADD_FOLDER:   AddLibraryFolder(lib, gamesPath, outcome); break;
     case SETTINGS_ROW_SOUNDS:       ToggleUiSounds(); break;
+    case SETTINGS_ROW_WALLPAPER:    RunWallpaperPicker(); break;
     case SETTINGS_ROW_INSTALL_TYPE: ToggleInstallType(); break;
     case SETTINGS_ROW_EJECT:        ToggleEjectAfterInstall(); break;
     case SETTINGS_ROW_CLOCK_SYNC_NOW: SetClockNow(); break;
@@ -7313,6 +7516,7 @@ static bool XboxEmulatorReady(unsigned long titleId)
         StopSearchWorker(3000);
         StopCoverArt(3000);
         StopStoreArt(3000);
+        StopWallpapers(3000);
         PowerOffConsole();
         return false; // only if the SMC didn't take it
     }
@@ -12318,6 +12522,13 @@ int main()
     if (!StartStoreArt())
         dprintf("ERROR: the Store's art worker didn't start - its tiles stay plain\n");
 
+    // xbox.com's wallpapers: nothing fetched until the picker opens, but
+    // Home's own, if it has one, is read now.
+    if (!StartWallpapers())
+        dprintf("ERROR: the wallpaper worker didn't start - Home shows the theme's instead\n");
+    else if (HomeBackgroundSetting() == UI_HOME_BG_CUSTOM)
+        RequestHomeWallpaper();
+
     // Listens for the PC helper on the LAN, which Store downloads use once paired.
     ApplyPcHelperSettings();
     StartPcHelperListener();
@@ -12684,6 +12895,7 @@ int main()
             StopSearchWorker(3000);
             StopCoverArt(3000);
             StopStoreArt(3000);
+            StopWallpapers(3000);
 
             PowerOffConsole();
 

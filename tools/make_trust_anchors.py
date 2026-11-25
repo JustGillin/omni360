@@ -38,6 +38,17 @@ And a fifth, for the Store's Homebrew page (Oct 2026):
     it; the leaf and WE1 verified against this root alone with `openssl
     verify`.
 
+And two more, for Home wallpapers from xbox.com (Nov 2026):
+  - DigiCert_Global_Root_G2.pem: DigiCert Global Root G2, exported from the
+    Windows root store (SHA-256 CB3CCBB7...5AB1CB5F, as Mozilla's store lists
+    it). assets.xboxservices.com, which serves the wallpapers themselves,
+    sends a chain through GeoTrust TLS RSA CA G1 to it.
+  - DigiCert_Global_Root_G3.pem: DigiCert Global Root G3, the same way
+    (SHA-256 31AD6648...EF6731D0). www.xbox.com, which serves the list of
+    them, sends a chain through Microsoft TLS G2 ECC CA OCSP 02 and Microsoft
+    TLS ECC Root G2, cross-signed by G3.
+  Both chains verified against their root alone with `openssl verify`.
+
 For each certificate this emits what BearSSL's br_x509_trust_anchor needs:
 the subject DN, exactly as DER-encoded in the certificate (BearSSL compares
 DNs byte for byte against each issuer), and the public key - an RSA modulus

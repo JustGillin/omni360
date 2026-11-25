@@ -187,6 +187,9 @@
     <ClCompile Include="src\StoreArt.cpp">
       <Filter>Source Files\Store</Filter>
     </ClCompile>
+    <ClCompile Include="src\Wallpapers.cpp">
+      <Filter>Source Files\Store</Filter>
+    </ClCompile>
     <ClCompile Include="src\UpdateCheck.cpp">
       <Filter>Source Files\Network</Filter>
     </ClCompile>
@@ -1237,6 +1240,9 @@
       <Filter>Source Files\Store</Filter>
     </ClInclude>
     <ClInclude Include="src\StoreArt.h">
+      <Filter>Source Files\Store</Filter>
+    </ClInclude>
+    <ClInclude Include="src\Wallpapers.h">
       <Filter>Source Files\Store</Filter>
     </ClInclude>
     <ClInclude Include="src\UpdateCheck.h">

@@ -55,6 +55,38 @@ enum UiHomeBackground
     UI_HOME_BG_COUNT
 };
 void UiSetHomeBackground(int mode);
+
+// The wallpaper picker: Xbox's wallpapers from xbox.com in a grid of
+// previews, by category. items are indexes into Wallpapers.h's list, in the
+// order shown; names their titles, alike. current is the index of Home's
+// own, -1 if it isn't in the list. message stands in for an empty grid -
+// loading, or couldn't reach xbox.com. scroll is in rows, the caller's to
+// keep between frames; the Render call keeps it in range.
+struct UiHint; // below, with the footer hints
+
+struct WallpaperPageView
+{
+    const char *title;
+    const char *const *filters;
+    int filterCount;
+    int filter;
+    const int *items;
+    const char *const *names;
+    int count;
+    int selected;
+    int scroll;
+    int current;
+    bool focused;
+    bool filterFocused; // the category row has focus instead
+    const char *message;
+};
+
+void RenderWallpaperFrame(WallpaperPageView &view, const UiHint *hints, int hintCount);
+int WallpaperGridColumns();
+int WallpaperGridRows();
+// Turns finished previews and Home's wallpaper into textures; Render calls do
+// it themselves, so only needed while something else holds the screen.
+void PumpWallpapers();
 unsigned long UiAccentSwatch(int accent); // its fill (ARGB), for a swatch beside its name
 
 // ---------------------------------------------------------------------------

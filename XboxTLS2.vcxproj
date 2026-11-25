@@ -388,6 +388,7 @@
     <ClInclude Include="src\SpeedTest.h" />
     <ClInclude Include="src\StoreCatalog.h" />
     <ClInclude Include="src\StoreArt.h" />
+    <ClInclude Include="src\Wallpapers.h" />
     <ClInclude Include="src\UpdateCheck.h" />
     <ClInclude Include="src\UpdateKey.h" />
     <ClInclude Include="src\StoreTitles.h" />
@@ -499,6 +500,7 @@
     <ClCompile Include="src\SpeedTest.cpp" />
     <ClCompile Include="src\StoreCatalog.cpp" />
     <ClCompile Include="src\StoreArt.cpp" />
+    <ClCompile Include="src\Wallpapers.cpp" />
     <ClCompile Include="src\UpdateCheck.cpp" />
     <ClCompile Include="src\InflateSource.cpp" />
     <ClCompile Include="src\DownloadQueue.cpp" />
