@@ -1845,6 +1845,10 @@ static float TextWidth(const char *utf8, float mul, bool bold = false)
 static struct
 {
     const char *text; // what's measured below: another name starts over
+    // ...and what it said. The disc's name is one buffer rewritten in place
+    // ("Reading the disc", then the game's), so the pointer alone kept the
+    // old words scrolling under the new name's tile (2026-11-25).
+    char said[MARQUEE_MAX_CHARS * 4 + 1];
     float mul;
     bool bold;
     DWORD startedAt;
@@ -1872,6 +1876,8 @@ static D3DCOLOR WithAlpha(D3DCOLOR color, float alpha)
 static void MeasureMarquee(const char *utf8, float mul, bool bold)
 {
     g_marquee.text = utf8;
+    _snprintf(g_marquee.said, sizeof(g_marquee.said) - 1, "%s", utf8);
+    g_marquee.said[sizeof(g_marquee.said) - 1] = '\0';
     g_marquee.mul = mul;
     g_marquee.bold = bold;
 
@@ -1914,7 +1920,8 @@ static void MarqueeTextMid(float x, float centerY, float mul, D3DCOLOR color, co
     color = FocusBright(color); // only ever the focused thing's name
 
     const DWORD now = GetTickCount();
-    if (g_marquee.text != utf8 || g_marquee.mul != mul || g_marquee.bold != bold || now - g_marquee.drawnAt > 250)
+    if (g_marquee.text != utf8 || strncmp(g_marquee.said, utf8, sizeof(g_marquee.said) - 1) != 0 ||
+        g_marquee.mul != mul || g_marquee.bold != bold || now - g_marquee.drawnAt > 250)
     {
         MeasureMarquee(utf8, mul, bold);
         g_marquee.startedAt = now;
