@@ -419,3 +419,123 @@ bool DefaultDashboardIsOmni360()
     }
     return false;
 }
+
+// ---------------------------------------------------------------------------
+// The Guide plugin
+// ---------------------------------------------------------------------------
+//
+// Loaded by DashLaunch, which every console running Omni360 has: launch.xex
+// exports "start a system module" (ordinal 2 - DL_ORDINALS_STARTSYSMOD),
+// returning the kernel loader's NTSTATUS. Two ways that didn't work first:
+// - the kernel's XexLoadImage from this title's thread: access denied
+//   (C0000022);
+// - XexLoadImageFromMemory on a system thread of our own: the thread was
+//   made but never ran, and outlived Omni360 pointing into its memory.
+// DashLaunch's code stays loaded, so nothing is left pointing at ours.
+//
+// It wants a device path, and game: is only this title's name for its
+// folder, so the plugin is copied to a place whose device is known first.
+
+typedef DWORD (*DLaunchStartSysModuleFn)(char *modulePath);
+#define DL_ORDINAL_START_SYS_MODULE 2
+
+#define GUIDE_PLUGIN_SOURCE "game:\\Omni360Guide.xex"
+#define GUIDE_PLUGIN_NAME   "Omni360Guide.xex"
+#define GUIDE_PLUGIN_COPY   "Hdd1:\\Omni360\\Omni360Guide.xex"
+#define GUIDE_PLUGIN_DEVICE "\\Device\\Harddisk0\\Partition1\\Omni360\\Omni360Guide.xex"
+
+struct GuidePluginLoad
+{
+    DLaunchStartSysModuleFn start;
+    char path[128];
+    volatile LONG status;
+    volatile LONG done;
+};
+
+// On a thread of this title's: if DashLaunch never answers, the thread goes
+// when Omni360 does, rather than being left behind in the system.
+static DWORD WINAPI GuidePluginLoadEntry(LPVOID parameter)
+{
+    GuidePluginLoad *job = (GuidePluginLoad *)parameter;
+    const DWORD status = job->start(job->path);
+    InterlockedExchange(&job->status, (LONG)status);
+    InterlockedExchange(&job->done, 1);
+    return 0;
+}
+
+// The plugin from beside Omni360 to GUIDE_PLUGIN_COPY, unless that's the
+// same file already.
+static bool CopyGuidePlugin()
+{
+    FILE *in = NULL;
+    if (fopen_s(&in, GUIDE_PLUGIN_SOURCE, "rb") != 0 || in == NULL)
+        return false;
+    CreateDirectoryA("Hdd1:\\Omni360", NULL);
+    FILE *out = NULL;
+    if (fopen_s(&out, GUIDE_PLUGIN_COPY, "wb") != 0 || out == NULL)
+    {
+        fclose(in);
+        dprintf("[guide] couldn't write %s\n", GUIDE_PLUGIN_COPY);
+        return false;
+    }
+    char buffer[16 * 1024];
+    size_t got;
+    bool ok = true;
+    while ((got = fread(buffer, 1, sizeof(buffer), in)) > 0)
+        ok = fwrite(buffer, 1, got, out) == got && ok;
+    fclose(in);
+    ok = (fclose(out) == 0) && ok;
+    if (!ok)
+        dprintf("[guide] couldn't copy the plugin to %s\n", GUIDE_PLUGIN_COPY);
+    return ok;
+}
+
+void LoadGuidePlugin()
+{
+    HANDLE loaded = NULL;
+    if (XexGetModuleHandle((PSZ)GUIDE_PLUGIN_NAME, &loaded) >= 0 && loaded != NULL)
+    {
+        dprintf("[guide] the plugin is loaded already (%p)\n", loaded);
+        return;
+    }
+    if (GetFileAttributesA(GUIDE_PLUGIN_SOURCE) == (DWORD)-1)
+        return; // not there: nothing to try
+
+    HANDLE dashLaunch = NULL;
+    PVOID address = NULL;
+    if (XexGetModuleHandle("launch.xex", &dashLaunch) < 0 || dashLaunch == NULL ||
+        XexGetProcedureAddress(dashLaunch, DL_ORDINAL_START_SYS_MODULE, &address) < 0 || address == NULL)
+    {
+        dprintf("[guide] DashLaunch isn't loaded, or has no export %d: no plugin\n", DL_ORDINAL_START_SYS_MODULE);
+        return;
+    }
+    if (!CopyGuidePlugin())
+        return;
+
+    static GuidePluginLoad job; // the thread may outlive a timed-out wait
+    job.start = (DLaunchStartSysModuleFn)address;
+    _snprintf(job.path, sizeof(job.path), "%s", GUIDE_PLUGIN_DEVICE);
+    job.path[sizeof(job.path) - 1] = '\0';
+    job.status = 0;
+    job.done = 0;
+
+    HANDLE thread = CreateThread(NULL, 64 * 1024, GuidePluginLoadEntry, &job, 0, NULL);
+    if (thread == NULL)
+    {
+        dprintf("[guide] couldn't start a thread to load the plugin\n");
+        return;
+    }
+    const DWORD started = GetTickCount();
+    while (job.done == 0 && GetTickCount() - started < 5000)
+        Sleep(10);
+    CloseHandle(thread);
+    if (job.done == 0)
+    {
+        dprintf("[guide] DashLaunch didn't answer within 5 s\n");
+        return;
+    }
+    loaded = NULL;
+    XexGetModuleHandle((PSZ)GUIDE_PLUGIN_NAME, &loaded);
+    dprintf("[guide] DashLaunch loading %s: status %08lX, now loaded: %s (%p)\n", job.path,
+            (unsigned long)job.status, loaded != NULL ? "yes" : "no", loaded);
+}

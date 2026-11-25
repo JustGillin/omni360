@@ -35,4 +35,10 @@ void LaunchXboxDashboard();
 // file can't be read.
 bool DefaultDashboardIsOmni360();
 
+// The Guide plugin (GuidePlugin/), loaded into the system as Aurora loads its
+// own, so it outlives Omni360 until the console is turned off. Proof of
+// concept, step 1: only if game:\Omni360Guide.xex is there, and not loaded
+// already. Says how it went in the log.
+void LoadGuidePlugin();
+
 #endif

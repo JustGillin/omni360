@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="utf-8"?>
+<xex>
+  <format>
+    <compressed/>
+  </format>
+  <mediatypes>
+    <flash/>
+  </mediatypes>
+  <version major="2" minor="0" build="0x4497" qfe="0"/>
+  <!-- Between the input bridge (81C00000-81C30000) and a title (82000000),
+       clear of everything seen loaded on the dev console on 2026-11-25.
+       imagexex refuses a system DLL's base in the 0x9... range. -->
+  <baseaddr addr="0x81D00000"/>
+  <sysdll/>
+</xex>

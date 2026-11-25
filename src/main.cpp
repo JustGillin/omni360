@@ -13110,6 +13110,8 @@ int main()
     CleanUpInterruptedInstall();
     StartupStep("paths + interrupted-install cleanup");
 
+    LoadGuidePlugin();
+
 
     // From here on the screen belongs to the UI rather than the debug console.
     // The dprintf calls stay - they're the log, and the log is still how
