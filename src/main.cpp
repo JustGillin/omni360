@@ -85,6 +85,7 @@ extern "C" NTSTATUS XexGetModuleHandle(PSZ moduleName, PHANDLE outHandle);
 #define GAMES_PATH_KEY "games-path: "
 #define UPDATE_CHECK_KEY "check-updates: " // "off" stops the check at start
 #define SOUNDS_KEY "nav-sounds: "         // "off" silences the interface
+#define HOME_WALLPAPER_KEY "home-wallpaper: " // "off" shows Home without the games' wallpapers
 #define THEME_KEY "theme: "                // series (unset), xbox360, original or light
 #define ACCENT_KEY "accent: "              // an accent name, or unset for the theme's own
 #define INSTALL_TYPE_KEY "install-type: "   // "folder" copies a game's files out rather than making a GOD package - Store and disc installs
@@ -415,6 +416,14 @@ static int AccentSetting()
         if (_stricmp(value, kAccentNames[i]) == 0)
             return i;
     return UiThemeDefaultAccent(ThemeSetting());
+}
+
+// Whether Home shows the focused game's wallpaper. On unless turned off.
+static bool HomeWallpaperSetting()
+{
+    char value[16];
+    GetSettingsPath(HOME_WALLPAPER_KEY, "yes", value, sizeof(value));
+    return _stricmp(value, "off") != 0;
 }
 
 // The PC helper's pairing, from settings.txt into PcHelper.
@@ -2640,6 +2649,7 @@ enum SettingsRow
     SETTINGS_ROW_INSTALL_TYPE, // Games on Demand or folder games, for Store installs
     SETTINGS_ROW_THEME,        // the theme: left and right change it
     SETTINGS_ROW_ACCENT,       // its accent: left and right change it
+    SETTINGS_ROW_HOME_WALLPAPER, // the game's wallpaper behind Home, or not
     SETTINGS_ROW_RESYNC_LIBRARY, // re-read the library from disk and re-fetch missing icons
     SETTINGS_ROW_LANGUAGE,     // a language's row: A picks it (arg is its index)
     SETTINGS_ROW_LANGUAGE_REFRESH, // looks again for language files beside Omni360
@@ -3564,6 +3574,14 @@ static void ToggleEjectAfterInstall()
     SetEjectAfterInstall(on);
 }
 
+static void ToggleHomeWallpaper()
+{
+    const bool on = !HomeWallpaperSetting();
+    if (!SetSettingsValue(HOME_WALLPAPER_KEY, on ? "yes" : "off"))
+        ShowMessageUI(Tr(STR_NOT_SAVED), Tr(STR_SETTINGS_TXT_COULD_NOT_BE), NULL);
+    UiSetHomeWallpaper(on);
+}
+
 static void ToggleUiSounds()
 {
     const bool on = !UiSoundsSetting();
@@ -3812,6 +3830,7 @@ static bool SettingsRowFocusable(const SettingsRowView &row)
 enum SettingsSection
 {
     SETTINGS_SECTION_GENERAL,
+    SETTINGS_SECTION_PERSONALIZE,
     SETTINGS_SECTION_ASSETS,
     SETTINGS_SECTION_STORAGE,
     SETTINGS_SECTION_LANGUAGE,
@@ -3822,6 +3841,7 @@ enum SettingsSection
 static const StringId kSettingsSectionIds[SETTINGS_SECTION_COUNT] =
 {
     STR_SETTINGS_GENERAL,
+    STR_SETTINGS_PERSONALIZE,
     STR_SETTINGS_ASSETS,
     STR_SETTINGS_STORAGE,
     STR_SETTINGS_LANGUAGE,
@@ -4025,15 +4045,10 @@ static void BuildSettingsPage(SettingsPage &page, const Library &lib, const char
         }
     }
 
-    if (page.section == SETTINGS_SECTION_GENERAL)
+    // Personalize: the theme, its accent, and Home's wallpaper. Left and
+    // right change the first two, and the page changes with them.
+    if (page.section == SETTINGS_SECTION_PERSONALIZE)
     {
-        AddSettingsRow(page, SETTINGS_VIEW_LINE, Tr(STR_NAVIGATION_SOUNDS));
-        AddSettingsControl(page, SETTINGS_CONTROL_CHECK, NULL, SETTINGS_ROW_SOUNDS,
-                           Tr(STR_A_SOFT_TICK_AS_YOU));
-        page.rows[page.count - 1].controls[0].on = UiSoundsSetting();
-
-        // The theme and its accent: left and right change them, and the
-        // page changes with them.
         {
             const StringId themeNames[UI_THEME_COUNT] = { STR_THEME_SERIES, STR_THEME_XBOX360, STR_THEME_ORIGINAL,
                                                           STR_THEME_LIGHT };
@@ -4060,6 +4075,19 @@ static void BuildSettingsPage(SettingsPage &page, const Library &lib, const char
             }
         }
 
+        AddSettingsRow(page, SETTINGS_VIEW_LINE, Tr(STR_HOME_WALLPAPER));
+        AddSettingsControl(page, SETTINGS_CONTROL_CHECK, NULL, SETTINGS_ROW_HOME_WALLPAPER,
+                           Tr(STR_HOME_WALLPAPER_HELP));
+        page.rows[page.count - 1].controls[0].on = HomeWallpaperSetting();
+
+        AddSettingsRow(page, SETTINGS_VIEW_LINE, Tr(STR_NAVIGATION_SOUNDS));
+        AddSettingsControl(page, SETTINGS_CONTROL_CHECK, NULL, SETTINGS_ROW_SOUNDS,
+                           Tr(STR_A_SOFT_TICK_AS_YOU));
+        page.rows[page.count - 1].controls[0].on = UiSoundsSetting();
+    }
+
+    if (page.section == SETTINGS_SECTION_GENERAL)
+    {
         // Signed in or not - however the keys got there. Neither key is shown.
         TrFormat(page.keysStatus, sizeof(page.keysStatus), haveKeys ? STR_SIGNED_IN_STATUS : STR_NOT_SIGNED_IN_STATUS);
         page.keysStatus[sizeof(page.keysStatus) - 1] = '\0';
@@ -4402,6 +4430,7 @@ static SettingsOutcome RunSettingsRow(SettingsRow row, int arg, Library &lib, ch
     case SETTINGS_ROW_LIBRARY_FOLDER: ToggleLibraryFolder(arg, lib, gamesPath, outcome); break;
     case SETTINGS_ROW_ADD_FOLDER:   AddLibraryFolder(lib, gamesPath, outcome); break;
     case SETTINGS_ROW_SOUNDS:       ToggleUiSounds(); break;
+    case SETTINGS_ROW_HOME_WALLPAPER: ToggleHomeWallpaper(); break;
     case SETTINGS_ROW_INSTALL_TYPE: ToggleInstallType(); break;
     case SETTINGS_ROW_EJECT:        ToggleEjectAfterInstall(); break;
     case SETTINGS_ROW_CLOCK_SYNC_NOW: SetClockNow(); break;
@@ -12213,6 +12242,7 @@ int main()
     StartupStep("language");
 
     UiSetTheme(ThemeSetting(), AccentSetting());
+    UiSetHomeWallpaper(HomeWallpaperSetting());
     if (!InitGameListUI())
     {
         SetConsoleQuiet(false);

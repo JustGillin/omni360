@@ -44,6 +44,10 @@ enum UiAccentId
 
 void UiSetTheme(int theme, int accent);
 int UiThemeDefaultAccent(int theme);
+
+// Whether Home shows the focused game's wallpaper behind it. Off, it is the
+// theme's plain background. On unless turned off.
+void UiSetHomeWallpaper(bool on);
 unsigned long UiAccentSwatch(int accent); // its fill (ARGB), for a swatch beside its name
 
 // ---------------------------------------------------------------------------

@@ -49,6 +49,7 @@ LINES = {
     'PRESS_Y_ON_A_GAME_TO': 'Press Y on a game in Games and choose Add to favourites.',
     'ADD_TO_FAVOURITES': 'Add to favourites',
     'ACCENT_COLOR': 'Accent colour',
+    'HOME_WALLPAPER_HELP': "The selected game's art behind Home. Off, Home uses the theme's colours.",
     'REMOVE_FROM_FAVOURITES': 'Remove from favourites',
     'ADDED_TO_FAVOURITES': 'Added to favourites',
     'REMOVED_FROM_FAVOURITES': 'Removed from favourites',

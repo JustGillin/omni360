@@ -1004,6 +1004,9 @@ struct UiTheme
 {
     UiPalette p;
     D3DCOLOR accent, accentHi, accentText, accentDim, onAccent, focus, storeGlow, ambientGlowA;
+    D3DCOLOR shadow;   // drop shadows: softer on a light page, where black ones look cut out
+    D3DCOLOR scrim;    // behind a dialog: the page dimmed, or on a light theme frosted
+    D3DCOLOR band;     // the dialog's footer band, its alpha the strongest
     int id, accentId;
 };
 
@@ -1031,7 +1034,7 @@ static void ResolveTheme(int theme, int accent);
 #define COL_ERROR          0xFFFF6B61
 #define COL_AMBER          0xFFF0BE12 // the Y button's colour, for the keys notice
 #define COL_PILL           0xB8000000 // the disc's labels over artwork
-#define COL_SHADOW         0x99000000
+#define COL_SHADOW         (g_theme.shadow)
 #define COL_ON_IMAGE       0xFFFFFFFF // text over artwork or a dark scrim: white on any theme
 #define COL_ON_IMAGE2      0xFFC4C4C4 // and its secondary text
 
@@ -1082,7 +1085,10 @@ static void ResolveTheme(int theme, int accent)
     g_theme.accentHi = a.hi;
     g_theme.accentText = p.light ? a.textLight : a.textDark;
     g_theme.accentDim = (a.fill & 0x00FFFFFF) | 0x8C000000;
-    g_theme.onAccent = ColorLuma(a.fill) > 0.55f ? 0xFF101010 : 0xFFFFFFFF;
+    g_theme.onAccent = 0xFFFFFFFF; // white on every accent: dark text on one looked muddy
+    g_theme.shadow = p.light ? 0x38000000 : 0x99000000;
+    g_theme.scrim = p.light ? ((p.bgBottom & 0x00FFFFFF) | 0xB8000000) : 0xB0000000;
+    g_theme.band = p.light ? ((p.bgBottom & 0x00FFFFFF) | 0xF0000000) : 0xE8000000;
     g_theme.focus = p.focus != 0 ? p.focus : g_theme.accentText;
     g_theme.storeGlow = MixColor(p.bgTop, a.fill, 0.22f) | 0xFF000000;
     g_theme.ambientGlowA = (a.fill & 0x00FFFFFF) | 0x4D000000;
@@ -1099,11 +1105,13 @@ static void ResolveTheme(int theme, int accent)
 // screen - keep white text on a dark scrim on every theme, as the dashboards
 // do: on a light theme they take Series' colours, with its accent, for the
 // frame. Declare one at the top of such a Render call.
+static bool g_homeWallpaper = true; // UiSetHomeWallpaper
+
 struct DarkThemeScope
 {
     UiTheme saved;
     bool active;
-    DarkThemeScope() : active(g_theme.p.light)
+    explicit DarkThemeScope(bool want = true) : active(want && g_theme.p.light)
     {
         if (active)
         {
@@ -1122,6 +1130,11 @@ void UiSetTheme(int theme, int accent)
 {
     ResolveTheme(theme, accent);
     UiSetButtonStyle(g_theme.p.buttonStyle);
+}
+
+void UiSetHomeWallpaper(bool on)
+{
+    g_homeWallpaper = on;
 }
 
 int UiThemeDefaultAccent(int theme)
@@ -2598,7 +2611,7 @@ static void DrawSidebarText(bool focused)
     if (IsBetaBuild())
     {
         const BetaBadge beta = LayOutBetaBadge();
-        TextMid(beta.x + beta.w * 0.5f, beta.centerY, BETA_LABEL_SIZE, COL_TEXT, "BETA", ATGFONT_CENTER_X, 0.0f, true);
+        TextMid(beta.x + beta.w * 0.5f, beta.centerY, BETA_LABEL_SIZE, COL_ON_ACCENT, "BETA", ATGFONT_CENTER_X, 0.0f, true);
     }
 
     const float itemH = NavItemHeight();
@@ -2623,7 +2636,8 @@ static void DrawSidebarText(bool focused)
         NavCount count;
         if (NavCountFor(page, &count))
         {
-            TextMid(NavRight() - count.w * 0.5f, centerY, 0.68f, COL_TEXT, count.text, ATGFONT_CENTER_X, 0.0f, true);
+            TextMid(NavRight() - count.w * 0.5f, centerY, 0.68f, page == SHELL_PAGE_QUEUE ? COL_ON_ACCENT : COL_TEXT,
+                    count.text, ATGFONT_CENTER_X, 0.0f, true);
             nameMaxW -= count.w + S(12.0f);
         }
 
@@ -2793,7 +2807,7 @@ static void DrawToastQuads()
     // Success is a white tick in the green disc - drawn, since the font has
     // none.
     if (g_toast.tone == UI_TOAST_SUCCESS)
-        DrawTick(r.iconX + r.iconD * 0.5f, r.iconCY, r.iconD, COL_TEXT);
+        DrawTick(r.iconX + r.iconD * 0.5f, r.iconCY, r.iconD, COL_ON_ACCENT);
 }
 
 static void DrawToastText()
@@ -3958,7 +3972,7 @@ static void DrawStartupMark(float hold, float alpha)
         FillRound(w.badgeX, w.digitTop + rise, w.badgeW, w.badgeH, w.badgeH * 0.5f, WithAlpha(COL_GREEN, badge * alpha));
         TextBegin();
         TextMid(w.badgeX + w.badgeW * 0.5f, w.digitTop + rise + w.badgeH * 0.5f, w.badgeMul,
-                WithAlpha(COL_TEXT, badge * alpha), "BETA", ATGFONT_CENTER_X, 0.0f, true);
+                WithAlpha(COL_ON_ACCENT, badge * alpha), "BETA", ATGFONT_CENTER_X, 0.0f, true);
         TextEnd();
     }
 }
@@ -4484,7 +4498,7 @@ static void DrawLibraryFilters(const LibraryPageView &view, const LibraryLayout 
         }
         else
         {
-            TextMid(x + w * 0.5f, y + L.filtersH * 0.5f, FILTER_LABEL_SIZE, chosen ? COL_TEXT : COL_TEXT2, label,
+            TextMid(x + w * 0.5f, y + L.filtersH * 0.5f, FILTER_LABEL_SIZE, chosen ? COL_ON_ACCENT : COL_TEXT2, label,
                     ATGFONT_CENTER_X, 0.0f, true);
         }
         x += w + S(6.0f);
@@ -5481,7 +5495,7 @@ bool ShowNotesUI(const char *heading, const char *title, const char *body, const
 #define ALERT_BUTTON_H  48.0f
 #define ALERT_BUTTON_W  140.0f // at least; wider for a longer label
 #define ALERT_OPEN_MS   150.0f
-#define COL_ALERT_DIM   0xB0000000
+#define COL_ALERT_DIM   (g_theme.scrim)
 #define COL_ALERT_BTN   (g_theme.p.button) // the other button - as COL_BUTTON
 #define COL_ALERT_BTN_HI (g_theme.p.buttonHi)
 
@@ -5552,8 +5566,9 @@ static void DrawDialogFooterBand(float a)
 {
     const float solidTop = g_M.footerY - S(30.0f);
     const float fadeTop = solidTop - S(40.0f);
-    DrawGradientRect(0.0f, fadeTop, g_M.screenW, solidTop - fadeTop, 0x00000000, Faded(0xE8000000, a), true);
-    DrawRect(0.0f, solidTop, g_M.screenW, g_M.screenH - solidTop, Faded(0xE8000000, a));
+    const D3DCOLOR band = g_theme.band;
+    DrawGradientRect(0.0f, fadeTop, g_M.screenW, solidTop - fadeTop, band & 0x00FFFFFF, Faded(band, a), true);
+    DrawRect(0.0f, solidTop, g_M.screenW, g_M.screenH - solidTop, Faded(band, a));
 }
 
 static void DrawDialogHints(const ButtonHint *hints, int count, float a)
@@ -5979,7 +5994,8 @@ static int RunAlert(const char *heading, const char *message, const char *detail
         {
             for (int i = 0; i < count; ++i)
                 TextMid(buttonX[i] + buttonW[i] * 0.5f, footY + buttonH * 0.5f, 0.85f,
-                        Faded(i == 0 || i == focus ? COL_TEXT : COL_TEXT2, a), labels[i], ATGFONT_CENTER_X, 0.0f,
+                        Faded(i == 0 && focus == 0 ? COL_ON_ACCENT : i == 0 || i == focus ? COL_TEXT : COL_TEXT2, a),
+                        labels[i], ATGFONT_CENTER_X, 0.0f,
                         true);
         }
         DrawDialogHintText(hints + firstHint, hintCount - firstHint, a);
@@ -6546,8 +6562,8 @@ static void DrawCheckQuads(float x, float cy, bool on, bool dim)
     {
         FillRound(x, y, s, s, S(4.0f), dim ? COL_GREEN_DIM : COL_GREEN);
         const float t = S(2.6f);
-        DrawLine(x + s * 0.24f, y + s * 0.53f, x + s * 0.43f, y + s * 0.72f, t, dim ? 0xB3FFFFFF : COL_TEXT);
-        DrawLine(x + s * 0.43f, y + s * 0.72f, x + s * 0.77f, y + s * 0.30f, t, dim ? 0xB3FFFFFF : COL_TEXT);
+        DrawLine(x + s * 0.24f, y + s * 0.53f, x + s * 0.43f, y + s * 0.72f, t, dim ? 0xB3FFFFFF : COL_ON_ACCENT);
+        DrawLine(x + s * 0.43f, y + s * 0.72f, x + s * 0.77f, y + s * 0.30f, t, dim ? 0xB3FFFFFF : COL_ON_ACCENT);
     }
     else
     {
@@ -6564,7 +6580,7 @@ static void DrawRadioQuads(float x, float cy, bool on)
     {
         FillRound(x, y, s, s, s * 0.5f, COL_GREEN);
         const float d = s * 0.38f;
-        FillRound(x + (s - d) * 0.5f, y + (s - d) * 0.5f, d, d, d * 0.5f, COL_TEXT);
+        FillRound(x + (s - d) * 0.5f, y + (s - d) * 0.5f, d, d, d * 0.5f, COL_ON_ACCENT);
     }
     else
         StrokeRound(x, y, s, s, s * 0.5f, S(2.0f), COL_CHECK_EDGE);
@@ -7574,7 +7590,11 @@ static void DrawHomeTileArt(const HomeRecentView &tile, float x, float y, float 
 
 void RenderHomeFrame(HomePageView &view, const UiHint *hints, int hintCount)
 {
-    DarkThemeScope darkScope; // over the wallpaper: white text on any theme
+    // Over the wallpaper, white text on any theme. With the wallpaper turned
+    // off, Home is the theme's own, light or dark, and on a light one the
+    // shades and text shadows that were there for the art are left out.
+    DarkThemeScope darkScope(g_homeWallpaper);
+    const bool plainLight = !g_homeWallpaper && g_theme.p.light;
     if (!g_Initialized)
         return;
 
@@ -7633,15 +7653,22 @@ void RenderHomeFrame(HomePageView &view, const UiHint *hints, int hintCount)
 
     // --- Pass 1: quads ---
 
-    DrawHomeWallpaper(HomeWallpaper(view, focusTile));
+    if (g_homeWallpaper)
+        DrawHomeWallpaper(HomeWallpaper(view, focusTile));
+    else
+        DrawAmbientBackground();
 
     // Enough shade for white text at the top and over the row, and none in
     // the middle, where the wallpaper is the point.
     // A little more than looks needed on dark art: a near-white wallpaper
     // (Soulcalibur II's) otherwise washes out the nav labels and the green
     // "Continue playing" over the name.
-    FillRoundGradient(0.0f, 0.0f, g_M.screenW, S(180.0f), 0.0f, 0xD9000000, 0x00000000, true);
-    FillRoundGradient(0.0f, g_M.screenH - S(520.0f), g_M.screenW, S(520.0f), 0.0f, 0x00000000, 0xEB000000, true);
+    if (!plainLight)
+    {
+        FillRoundGradient(0.0f, 0.0f, g_M.screenW, S(180.0f), 0.0f, 0xD9000000, 0x00000000, true);
+        FillRoundGradient(0.0f, g_M.screenH - S(520.0f), g_M.screenW, S(520.0f), 0.0f, 0x00000000, 0xEB000000,
+                          true);
+    }
 
     // The buttons are circles: the radius is half the button, in real
     // pixels, not an R() measurement taken at 720p.
@@ -7650,7 +7677,8 @@ void RenderHomeFrame(HomePageView &view, const UiHint *hints, int hintCount)
     for (int i = 0; i < navCount; ++i)
     {
         const bool isFocused = navFocused && i == navFocus;
-        FillRound(nav[i].x, L.navY, nav[i].w, L.navH, navR, isFocused ? COL_SURFACE_HI : 0x59000000);
+        FillRound(nav[i].x, L.navY, nav[i].w, L.navH, navR,
+                  isFocused ? COL_SURFACE_HI : (plainLight ? COL_SURFACE : 0x59000000));
         if (isFocused)
             FocusRing(nav[i].x, L.navY, nav[i].w, L.navH, navR);
 
@@ -7694,7 +7722,8 @@ void RenderHomeFrame(HomePageView &view, const UiHint *hints, int hintCount)
 
     if (view.recentCount == 0)
     {
-        FillRound(g_M.safeX, L.rowY, g_M.screenW - g_M.safeX * 2.0f, L.tile, g_M.radius, 0x8C000000);
+        FillRound(g_M.safeX, L.rowY, g_M.screenW - g_M.safeX * 2.0f, L.tile, g_M.radius,
+                  plainLight ? COL_SURFACE : 0x8C000000);
     }
 
     DrawButtonHintShapes(footer, footerCount, g_M.footerY);
@@ -7762,7 +7791,7 @@ void RenderHomeFrame(HomePageView &view, const UiHint *hints, int hintCount)
         char count[8];
         _snprintf(count, sizeof(count), "%d", view.nav[i].count > 99 ? 99 : view.nav[i].count);
         count[sizeof(count) - 1] = '\0';
-        TextMid(px + pw * 0.5f, py + ph * 0.5f, 0.62f, COL_TEXT, count, ATGFONT_CENTER_X, 0.0f, true);
+        TextMid(px + pw * 0.5f, py + ph * 0.5f, 0.62f, COL_ON_ACCENT, count, ATGFONT_CENTER_X, 0.0f, true);
     }
 
     // What the focused icon is, under the row - icons alone give no way to
@@ -7770,8 +7799,9 @@ void RenderHomeFrame(HomePageView &view, const UiHint *hints, int hintCount)
     // over the wallpaper the rest of the time.
     if (navFocused && navCount > 0)
     {
-        TextMid(g_M.screenW * 0.5f + S(2.0f), L.navY + L.navH + S(18.0f), 0.72f, FocusBright(0xCC000000),
-                view.nav[navFocus].label, ATGFONT_CENTER_X, 0.0f, true);
+        if (!plainLight)
+            TextMid(g_M.screenW * 0.5f + S(2.0f), L.navY + L.navH + S(18.0f), 0.72f, FocusBright(0xCC000000),
+                    view.nav[navFocus].label, ATGFONT_CENTER_X, 0.0f, true);
         TextMid(g_M.screenW * 0.5f, L.navY + L.navH + S(16.0f), 0.72f, FocusBright(COL_TEXT), view.nav[navFocus].label,
                 ATGFONT_CENTER_X, 0.0f, true);
     }
@@ -7790,9 +7820,11 @@ void RenderHomeFrame(HomePageView &view, const UiHint *hints, int hintCount)
         // caption and the name still read over a light wallpaper (Sonic's
         // sky) - shading the whole band enough would hide the art.
         const float sh = S(2.0f);
-        Text(g_M.safeX + sh, L.nameY + sh, 0.62f, 0xCC000000, Tr(caption), 0, 0.0f, true);
+        if (!plainLight)
+            Text(g_M.safeX + sh, L.nameY + sh, 0.62f, 0xCC000000, Tr(caption), 0, 0.0f, true);
         Text(g_M.safeX, L.nameY, 0.62f, COL_GREEN_TEXT, Tr(caption), 0, 0.0f, true);
-        TextFit(g_M.safeX + sh, L.nameY + S(26.0f) + sh, 2.0f, FocusBright(0x99000000), game.name, nameW, true);
+        if (!plainLight)
+            TextFit(g_M.safeX + sh, L.nameY + S(26.0f) + sh, 2.0f, FocusBright(0x99000000), game.name, nameW, true);
         TextFit(g_M.safeX, L.nameY + S(26.0f), 2.0f, FocusBright(COL_TEXT), game.name, nameW, true);
     }
 
@@ -8352,7 +8384,8 @@ void RenderStoreFrame(StorePageView &view, const UiHint *hints, int hintCount)
         const float textW = (signInBtnW > 0.0f ? signInBtnX - S(16.0f) : g_M.contentX + g_M.contentW - S(20.0f)) - textX;
         TextMid(textX, y, 0.85f, COL_TEXT, view.signIn, ATGFONT_TRUNCATED, textW);
         if (view.signInButton != NULL)
-            TextMid(signInBtnX + signInBtnW * 0.5f, y, 0.85f, COL_TEXT, view.signInButton, ATGFONT_CENTER_X, 0.0f,
+            TextMid(signInBtnX + signInBtnW * 0.5f, y, 0.85f, signInFocus ? COL_ON_ACCENT : COL_TEXT, view.signInButton,
+                    ATGFONT_CENTER_X, 0.0f,
                     true);
     }
 
@@ -9698,7 +9731,7 @@ void RenderStoreGameFrame(StoreGameView &view, const UiHint *hints, int hintCoun
     const bool supportBadge = (view.meta == NULL && !view.loading && view.xboxSupport != STORE_XBOX_NONE);
     // Green, amber, red and grey; amber is light, so it takes dark text.
     StringId supportText = STR_OFFICIALLY_SUPPORTED;
-    D3DCOLOR supportFill = COL_GREEN, supportInk = COL_TEXT;
+    D3DCOLOR supportFill = COL_GREEN, supportInk = COL_ON_ACCENT;
     switch (view.xboxSupport)
     {
     case STORE_XBOX_COMMUNITY:
