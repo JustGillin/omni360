@@ -170,6 +170,7 @@ static D3DTexture *g_pWhiteTexture = NULL; // 1x1 white, for DrawRect (solid-col
 static D3DTexture *g_pButtonAtlas = NULL;
 static int g_buttonStyle = BUTTON_STYLE_FLAT;
 static D3DTexture *g_pNavIcons = NULL; // Home's nav row; NULL falls back to names
+static int g_navIconStyle = NAV_ICON_STYLE_OUTLINE; // follows the buttons' style
 static D3DTexture *g_pPublisherLogos = NULL; // the Store's Publishers row; NULL draws the names alone
 static D3DTexture *g_pFlags = NULL; // Settings' language flags; NULL draws the names alone
 
@@ -664,7 +665,8 @@ static bool CreateNavIcons()
     unsigned long w = 0, h = 0;
     const char *error = NULL;
 
-    if (!PngDecodeToArgb(kNavIconsPng, kNavIconsPngSize, &pixels, &w, &h, &error))
+    if (!PngDecodeToArgb(kNavIconsPngs[g_navIconStyle], kNavIconsPngSizes[g_navIconStyle], &pixels, &w, &h,
+                         &error))
     {
         dprintf("[ui] nav icons would not decode: %s\n", error != NULL ? error : "?");
         return false;
@@ -674,6 +676,32 @@ static bool CreateNavIcons()
     PngFree(pixels);
 
     return g_pNavIcons != NULL;
+}
+
+// Switches the icons to another style (NAV_ICON_STYLE_*), as UiSetButtonStyle
+// does the buttons: before the UI is up it only records it; after, it rebuilds
+// the texture, keeping the old one if the new one won't decode.
+static void UiSetNavIconStyle(int style)
+{
+    if (style < 0 || style >= NAV_ICON_STYLE_COUNT || style == g_navIconStyle)
+        return;
+
+    const int previous = g_navIconStyle;
+    g_navIconStyle = style;
+    if (!g_Initialized)
+        return;
+
+    D3DTexture *old = g_pNavIcons;
+    g_pNavIcons = NULL;
+    if (CreateNavIcons())
+    {
+        if (old != NULL)
+            old->Release();
+        return;
+    }
+
+    g_navIconStyle = previous;
+    g_pNavIcons = old;
 }
 
 // Settings' language flags: full colour, drawn untinted.
@@ -1183,6 +1211,18 @@ void UiSetTheme(int theme, int accent)
 {
     ResolveTheme(theme, accent);
     UiSetButtonStyle(g_theme.p.buttonStyle);
+    // The Series dashboard's type is Segoe UI, which can't be shipped; Open
+    // Sans is the openly licensed face nearest it. The original's own type
+    // can't be either, so Space Grotesk stands in, for something as
+    // futuristic. The 360 keeps Selawik.
+    g_UiFont.SetFace(g_theme.id == UI_THEME_SERIES || g_theme.id == UI_THEME_LIGHT ? UI_FACE_OPEN_SANS
+                     : g_theme.id == UI_THEME_ORIGINAL                            ? UI_FACE_SPACE_GROTESK
+                                                                                  : UI_FACE_SELAWIK);
+    // The icons go with the buttons: solid beside the 360's jewels, glowing
+    // beside the original's ovals, outlines beside the flat ones.
+    UiSetNavIconStyle(g_theme.p.buttonStyle == BUTTON_STYLE_JEWEL ? NAV_ICON_STYLE_FILLED
+                      : g_theme.p.buttonStyle == BUTTON_STYLE_OG  ? NAV_ICON_STYLE_OG
+                                                                  : NAV_ICON_STYLE_OUTLINE);
 }
 
 void UiSetHomeBackground(int mode)
@@ -2431,7 +2471,9 @@ static bool NavCountFor(int page, NavCount *out)
 
 // Selawik Bold, in its units: 2048 to the em. The O's outline and its hole -
 // thick sides, thin top and bottom - its advance, and the digits' height.
-// Read from Media/Fonts/selawkb.ttf.
+// Read from Media/Fonts/selawkb.ttf. The startup wordmark is drawn from
+// these; the BETA badge reads the face in use (BoldGlyphs).
+
 #define SELAWIK_EM        2048.0f
 #define SELAWIK_O_ADVANCE 1553.0f
 #define SELAWIK_O_CX       777.0f // from the pen
@@ -2444,13 +2486,48 @@ static bool NavCountFor(int page, NavCount *out)
 #define SELAWIK_DIGIT_TOP 1460.0f // the top of "3", above the baseline
 #define SELAWIK_CAP       1434.0f
 
-// Selawik Bold's em in pixels at a text size, measured rather than assumed:
+// The bold face's O advance, capitals and digits, in its units, for the face
+// being drawn: Selawik Bold's above, Open Sans SemiBold's or Space Grotesk
+// Bold's (from their files in Media/Fonts).
+struct BoldGlyphs
+{
+    float em, oAdvance, cap, digitTop;
+};
+
+static BoldGlyphs BoldGlyphsInUse()
+{
+    BoldGlyphs g;
+    if (g_UiFont.GetFace() == UI_FACE_OPEN_SANS)
+    {
+        g.em = 2048.0f;
+        g.oAdvance = 1612.0f;
+        g.cap = 1462.0f;
+        g.digitTop = 1483.0f;
+    }
+    else if (g_UiFont.GetFace() == UI_FACE_SPACE_GROTESK)
+    {
+        g.em = 1000.0f;
+        g.oAdvance = 676.0f;
+        g.cap = 700.0f;
+        g.digitTop = 700.0f;
+    }
+    else
+    {
+        g.em = SELAWIK_EM;
+        g.oAdvance = SELAWIK_O_ADVANCE;
+        g.cap = SELAWIK_CAP;
+        g.digitTop = SELAWIK_DIGIT_TOP;
+    }
+    return g;
+}
+
+// The bold face's em in pixels at a text size, measured rather than assumed:
 // the width ten O's add over one is nine advances, whatever padding XUI puts
 // around a string.
 static float BoldEm(float mul)
 {
-    const float em = (TextWidth("OOOOOOOOOO", mul, true) - TextWidth("O", mul, true)) /
-                     (9.0f * SELAWIK_O_ADVANCE / SELAWIK_EM);
+    const BoldGlyphs g = BoldGlyphsInUse();
+    const float em = (TextWidth("OOOOOOOOOO", mul, true) - TextWidth("O", mul, true)) / (9.0f * g.oAdvance / g.em);
     return em > 0.0f ? em : LineHeight(mul);
 }
 
@@ -2474,10 +2551,12 @@ struct BetaBadge
 
 static BetaBadge LayOutBetaBadge()
 {
-    // Measured once: the sidebar draws this every frame.
+    // Measured once a face: the sidebar draws this every frame.
     static float nameEm = 0.0f, labelEm = 0.0f, nameW = 0.0f, labelW = 0.0f;
-    if (nameEm == 0.0f)
+    static int measuredFace = -1;
+    if (nameEm == 0.0f || measuredFace != g_UiFont.GetFace())
     {
+        measuredFace = g_UiFont.GetFace();
         nameEm = BoldEm(1.1f);
         labelEm = BoldEm(BETA_LABEL_SIZE);
         nameW = TextWidth("Omni360", 1.1f, true);
@@ -2487,10 +2566,11 @@ static BetaBadge LayOutBetaBadge()
     BetaBadge b;
     const float nameTop = g_M.headerY + S(4.0f);
     const float capMid = nameTop + LineHeight(1.1f) * (0.5f + TEXT_CAP_DROP);
-    b.h = SELAWIK_CAP / SELAWIK_EM * labelEm * 2.0f;
+    const BoldGlyphs g = BoldGlyphsInUse();
+    b.h = g.cap / g.em * labelEm * 2.0f;
     b.w = labelW + b.h * 0.9f;
     b.x = g_M.safeX + nameW + nameEm * 0.07f;
-    b.centerY = capMid - (SELAWIK_DIGIT_TOP - SELAWIK_CAP * 0.5f) / SELAWIK_EM * nameEm;
+    b.centerY = capMid - (g.digitTop - g.cap * 0.5f) / g.em * nameEm;
     return b;
 }
 
@@ -4485,6 +4565,14 @@ static TilePill PillFor(const char *label, float tileX, float tileY, float tileS
     return p;
 }
 
+// What's in the drive, on its tile: a small disc on a dark dot, centred on
+// (cx, cy), `d` across. Home's row and the library's grid both wear it.
+static void DrawDiscBadge(float cx, float cy, float d)
+{
+    FillRound(cx - d * 0.5f, cy - d * 0.5f, d, d, d * 0.5f, 0xB3000000);
+    DrawNavIcon(NAV_ICON_DISC, cx, cy, d * 0.86f, 0xFFFFFFFF);
+}
+
 // ---------------------------------------------------------------------------
 // Library page
 // ---------------------------------------------------------------------------
@@ -4751,12 +4839,14 @@ static void DrawItemLetter(const LibraryItems &it, int item, float x, float y, f
     TextMid(x + s * 0.5f, centerY, mul, 0xD9FFFFFF, letter, ATGFONT_CENTER_X, 0.0f, true);
 }
 
-// The labels in the disc tile's top-right corner, stacked: that it's in the
-// drive and what's happening with it.
-#define MAX_TILE_PILLS 2
+// The disc tile's top-right corner: the disc mark that says it's in the
+// drive, and left of it a label for what's happening with it.
+#define MAX_TILE_PILLS 1
 
 struct TilePills
 {
+    bool disc;
+    float discX, discY, discD; // the mark's centre and size
     int count;
     const char *label[MAX_TILE_PILLS];
     D3DCOLOR color[MAX_TILE_PILLS];
@@ -4767,12 +4857,13 @@ static TilePills PillsFor(const LibraryItems &it, int item, float x, float y, fl
 {
     TilePills p;
     p.count = 0;
+    p.disc = ItemIsDisc(it, item);
+    p.discD = S(30.0f);
+    p.discX = x + s - S(10.0f) - p.discD * 0.5f;
+    p.discY = y + S(10.0f) + p.discD * 0.5f;
 
-    if (ItemIsDisc(it, item))
+    if (p.disc)
     {
-        p.label[p.count] = Tr(STR_PILL_IN_DRIVE);
-        p.color[p.count++] = COL_GREEN;
-
         if (it.view->discTile == DISC_TILE_INSTALLED)
         {
             p.label[p.count] = Tr(STR_PILL_INSTALLED);
@@ -4785,17 +4876,20 @@ static TilePills PillsFor(const LibraryItems &it, int item, float x, float y, fl
         }
     }
 
-    float py = y;
+    // Beside the mark, level with it.
     for (int i = 0; i < p.count; ++i)
     {
-        p.rect[i] = PillFor(p.label[i], x, py, s);
-        py += p.rect[i].h + S(6.0f);
+        p.rect[i] = PillFor(p.label[i], x, y, s);
+        p.rect[i].x -= p.discD + S(6.0f);
+        p.rect[i].y = p.discY - p.rect[i].h * 0.5f;
     }
     return p;
 }
 
 static void DrawPillQuads(const TilePills &p)
 {
+    if (p.disc)
+        DrawDiscBadge(p.discX, p.discY, p.discD);
     for (int i = 0; i < p.count; ++i)
         FillRound(p.rect[i].x, p.rect[i].y, p.rect[i].w, p.rect[i].h, p.rect[i].h * 0.5f, p.color[i]);
 }
@@ -7391,7 +7485,6 @@ static double g_homeArtWantedAt = 0.0;
 struct HomeLayout
 {
     float navY, navH;
-    float nameY;
     float rowY;
     float tile, gap;
     int across;
@@ -7417,11 +7510,6 @@ static HomeLayout LayOutHome()
     // Up from the footer, so the row clears the button hints whatever the
     // screen is; the name block then takes what's left above it.
     L.rowY = g_M.footerY - S(46.0f) - L.tile;
-    // The name block stops well clear of the row: the focused tile's growth
-    // and its ring reach S(15) and S(6) past the top of an unfocused one.
-    L.nameY = L.rowY - S(140.0f);
-    if (L.nameY < L.navY + L.navH + S(30.0f))
-        L.nameY = L.navY + L.navH + S(30.0f);
 
     return L;
 }
@@ -8001,6 +8089,29 @@ static void DrawHomeTileArt(const HomeRecentView &tile, float x, float y, float 
         DrawDiscArt(x, y, s, s);
     else
         DrawTileArt(cover, NULL, x, y, s, s);
+
+    // What's in the drive: a small disc in the top right corner, on a dark
+    // dot so it reads over any cover.
+    if (tile.disc)
+    {
+        const float d = s * 0.24f;
+        DrawDiscBadge(x + s - d * 0.5f - s * 0.05f, y + d * 0.5f + s * 0.05f, d);
+    }
+}
+
+// The focused tile's name, in a band along its foot, as the library's grid
+// has it. The favourites tile is named for the page it opens.
+static void DrawHomeTileBand(const HomeRecentView &tile, float x, float y, float s, bool text)
+{
+    const float bandH = LineHeight(0.8f) * 1.2f + S(18.0f);
+    if (!text)
+    {
+        FillRoundGradient(x, y + s - bandH, s, bandH, g_M.radius, 0x00000000, 0xD9000000, true);
+        return;
+    }
+    const char *name = tile.favourites ? Tr(STR_NAV_FAVOURITES) : tile.name;
+    if (name != NULL)
+        MarqueeTextMid(x + S(10.0f), y + s - bandH * 0.5f + S(4.0f), 0.8f, COL_ON_IMAGE, name, s - S(20.0f), true);
 }
 
 void RenderHomeFrame(HomePageView &view, const UiHint *hints, int hintCount)
@@ -8053,9 +8164,8 @@ void RenderHomeFrame(HomePageView &view, const UiHint *hints, int hintCount)
     const float focusOX = g_M.safeX + focusCol * (L.tile + L.gap) - (focusS - L.tile) * 0.5f;
     const float focusOY = L.rowY - (focusS - L.tile) * 0.5f;
 
-    // No names on these tiles, and so no band to carry them: the focused
-    // game's name is already across the page above the row, in full size,
-    // and a second copy under the cover only crowded it.
+    // Only the focused tile is named, in a band on it: the name no longer
+    // sits over the wallpaper, so the wallpaper needs far less shade.
 
     HomeNavRect nav[HOME_NAV_MAX];
     const int navCount = LayOutHomeNav(view, L.navH, nav);
@@ -8078,16 +8188,13 @@ void RenderHomeFrame(HomePageView &view, const UiHint *hints, int hintCount)
     else
         DrawHomeWallpaper(HomeWallpaper(view, focusTile));
 
-    // Enough shade for white text at the top and over the row, and none in
-    // the middle, where the wallpaper is the point.
-    // A little more than looks needed on dark art: a near-white wallpaper
-    // (Soulcalibur II's) otherwise washes out the nav labels and the green
-    // "Continue playing" over the name.
+    // Light shade, only where there's text on the wallpaper: the gamertag,
+    // nav row and clock at the top, the footer's hints at the bottom. The
+    // middle is the wallpaper's, and the tiles carry their own names.
     if (!plainLight)
     {
-        FillRoundGradient(0.0f, 0.0f, g_M.screenW, S(180.0f), 0.0f, 0xD9000000, 0x00000000, true);
-        FillRoundGradient(0.0f, g_M.screenH - S(520.0f), g_M.screenW, S(520.0f), 0.0f, 0x00000000, 0xEB000000,
-                          true);
+        FillRoundGradient(0.0f, 0.0f, g_M.screenW, S(140.0f), 0.0f, 0x66000000, 0x00000000, true);
+        FillRoundGradient(0.0f, L.rowY, g_M.screenW, g_M.screenH - L.rowY, 0.0f, 0x00000000, 0x80000000, true);
     }
 
     // The buttons are circles: the radius is half the button, in real
@@ -8137,6 +8244,7 @@ void RenderHomeFrame(HomePageView &view, const UiHint *hints, int hintCount)
     {
         ShadowRound(focusOX, focusOY + S(10.0f), focusS, focusS, g_M.radius, S(26.0f), COL_SHADOW);
         DrawHomeTileArt(view.recents[focusTile], focusOX, focusOY, focusS);
+        DrawHomeTileBand(view.recents[focusTile], focusOX, focusOY, focusS, false);
         FocusRing(focusOX, focusOY, focusS, focusS, g_M.radius);
     }
 
@@ -8164,7 +8272,8 @@ void RenderHomeFrame(HomePageView &view, const UiHint *hints, int hintCount)
     }
 
     // With a gamerscore, the gamertag moves up and the score sits under it,
-    // after the dashboard's circled G.
+    // after the dashboard's G: a solid disc in the text's colour, the letter
+    // cut out of it in the background's.
     const bool showScore = view.gamertag != NULL && view.gamerscore != NULL;
     const float navMid = L.navY + L.navH * 0.5f;
     // Spread to the picture's top and bottom, so the two lines span it
@@ -8173,7 +8282,7 @@ void RenderHomeFrame(HomePageView &view, const UiHint *hints, int hintCount)
     const float scoreMid = navMid + LineHeight(0.66f);
     const float scoreRing = LineHeight(0.68f);
     if (showScore)
-        DrawRing(nameX + scoreRing * 0.5f, scoreMid, scoreRing * 0.5f, S(1.5f), 1.0f, COL_TEXT2, COL_TEXT2);
+        FillRound(nameX, scoreMid - scoreRing * 0.5f, scoreRing, scoreRing, scoreRing * 0.5f, COL_TEXT);
     g_pd3dDevice->SetRenderState(D3DRS_SCISSORTESTENABLE, FALSE);
 
     // --- Pass 2: all text, one Begin/End ---
@@ -8183,8 +8292,9 @@ void RenderHomeFrame(HomePageView &view, const UiHint *hints, int hintCount)
     TextMid(nameX, nameMid, 1.0f, COL_TEXT, view.gamertag != NULL ? view.gamertag : "Omni360", 0, 0.0f, true);
     if (showScore)
     {
-        TextMid(nameX + scoreRing * 0.5f, scoreMid, 0.5f, COL_TEXT2, "G", ATGFONT_CENTER_X, 0.0f, true);
-        TextMid(nameX + scoreRing + S(8.0f), scoreMid, 0.8f, COL_TEXT2, view.gamerscore, 0, 0.0f, true);
+        TextMid(nameX + scoreRing * 0.5f, scoreMid, 0.5f, g_theme.p.light ? 0xFFFFFFFF : 0xFF000000, "G",
+                ATGFONT_CENTER_X, 0.0f, true);
+        TextMid(nameX + scoreRing + S(8.0f), scoreMid, 0.8f, COL_TEXT, view.gamerscore, 0, 0.0f, true);
     }
 
     // The clock, right-aligned, with its icons left of it - unless the toast
@@ -8226,27 +8336,9 @@ void RenderHomeFrame(HomePageView &view, const UiHint *hints, int hintCount)
                 ATGFONT_CENTER_X, 0.0f, true);
     }
 
-    // The focused game, over the wallpaper - or, on the favourites tile,
-    // FAVORITES and how many.
-    if (focusTile >= 0)
-    {
-        const HomeRecentView &game = view.recents[focusTile];
-        const float nameW = g_M.screenW * 0.55f;
-
-        const StringId caption = game.favourites ? STR_HOME_FAVOURITES
-                                 : game.disc     ? STR_HOME_IN_THE_DRIVE
-                                                 : STR_HOME_CONTINUE_PLAYING;
-        // A dark copy just below and right of each, so the small green
-        // caption and the name still read over a light wallpaper (Sonic's
-        // sky) - shading the whole band enough would hide the art.
-        const float sh = S(2.0f);
-        if (!plainLight)
-            Text(g_M.safeX + sh, L.nameY + sh, 0.62f, 0xCC000000, Tr(caption), 0, 0.0f, true);
-        Text(g_M.safeX, L.nameY, 0.62f, COL_GREEN_TEXT, Tr(caption), 0, 0.0f, true);
-        if (!plainLight)
-            TextFit(g_M.safeX + sh, L.nameY + S(26.0f) + sh, 2.0f, FocusBright(0x99000000), game.name, nameW, true);
-        TextFit(g_M.safeX, L.nameY + S(26.0f), 2.0f, FocusBright(COL_TEXT), game.name, nameW, true);
-    }
+    // The focused tile's name, on its band.
+    if (growTile)
+        DrawHomeTileBand(view.recents[focusTile], focusOX, focusOY, focusS, true);
 
     if (view.recentCount == 0)
     {

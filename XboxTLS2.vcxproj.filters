@@ -1164,7 +1164,7 @@
     <ClInclude Include="src\Wordmark.h">
       <Filter>Source Files\Interface</Filter>
     </ClInclude>
-    <ClInclude Include="src\SelawikBold.h">
+    <ClInclude Include="src\FontData.h">
       <Filter>Source Files\Interface</Filter>
     </ClInclude>
     <ClInclude Include="src\Keyboard.h">

@@ -360,7 +360,7 @@
     <ClInclude Include="src\PublisherLogos.h" />
     <ClInclude Include="src\BoxArtBanner.h" />
     <ClInclude Include="src\Wordmark.h" />
-    <ClInclude Include="src\SelawikBold.h" />
+    <ClInclude Include="src\FontData.h" />
     <ClInclude Include="src\Keyboard.h" />
     <ClInclude Include="src\OutputConsole.h" />
     <ClInclude Include="src\PngDecode.h" />

@@ -44,6 +44,17 @@ pre-UI log output, which has to work before any of this is initialised.
 #define UITEXT_CENTER_Y   0x00000004
 #define UITEXT_TRUNCATED  0x00000008
 
+// The typefaces the UI can draw in; the theme picks one. Every face is sized
+// and placed to match Selawik's capitals, measured on the console, so the
+// layout - written against Selawik - holds whichever is drawn.
+enum UiFace
+{
+    UI_FACE_SELAWIK,   // the Xbox 360 theme's, and the fallback for any other
+    UI_FACE_OPEN_SANS, // the Series and Light themes'
+    UI_FACE_SPACE_GROTESK, // the Original Xbox theme's
+    UI_FACE_COUNT
+};
+
 class UiFont
 {
 public:
@@ -76,6 +87,14 @@ public:
     // bold quietly draws regular instead.
     void SetBold(bool bold);
 
+    // The typeface for subsequent draws (UI_FACE_*). Before Create it only
+    // records the choice. A face that can't be loaded draws Selawik instead.
+    void SetFace(int face);
+
+    // The face text is actually drawn in: SetFace's, or Selawik if that
+    // couldn't be loaded.
+    int GetFace() const;
+
     // dwFlags takes UITEXT_* (identical to ATGFONT_*). fMaxPixelWidth bounds
     // the text and, with UITEXT_TRUNCATED, shortens it to a word and "...".
     void DrawText(float sx, float sy, DWORD dwColor, const WCHAR *strText,
@@ -103,6 +122,7 @@ private:
     float m_scale;
     bool  m_bold;
     bool  m_ready;
+    int   m_face;
 };
 
 #endif // __UiText_h
