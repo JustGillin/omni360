@@ -3559,28 +3559,129 @@ bool PrepareGameListIcons(const InstalledGame *games, int gameCount, int maxNew)
 //
 // The covers CoverArt.cpp fetches and caches, as textures, by title ID - so a
 // rescan, or the queue drawing a game's cover, finds the same one. Each is a
-// 512x512 linear texture, a megabyte; a library of a few dozen games is a few
-// dozen megabytes, kept for the session.
+// 512x512 linear texture, a megabyte.
+//
+// At most 128 of them. A library that size or smaller has every cover kept
+// for the session, as it always has. A bigger one - issue #20's has 355
+// games, and every cover was being loaded, a megabyte each - keeps the ones
+// drawn most recently: the one drawn longest ago goes (never one drawn this
+// frame or the last), and the worker is told it's gone (ForgetCoverArt).
+// A tile drawn without its cover asks for it again (TakeWantedCovers), from
+// the cover cache on the drive - at most once in 30 s a title, so a game
+// with no cover at all isn't asked about every frame.
 
-#define MAX_BOX_ART 256
+#define MAX_BOX_ART       128
+#define BOX_ART_ASK_EVERY 30000
+#define MAX_COVER_ASKS    1280
+#define MAX_WANTED_COVERS 32
 
 struct BoxArt
 {
     unsigned long titleId;
     D3DTexture *texture;
+    unsigned long lastUsed; // g_boxArtFrame when last looked up
 };
 
 static BoxArt g_boxArt[MAX_BOX_ART];
 static int g_boxArtCount = 0;
+static unsigned long g_boxArtFrame = 1;
 
+// When each title's cover was last asked for, for the 30 s.
+struct CoverAsk
+{
+    unsigned long titleId;
+    DWORD at;
+};
+static CoverAsk g_coverAsks[MAX_COVER_ASKS];
+static int g_coverAskCount = 0;
+static unsigned long g_wantedCovers[MAX_WANTED_COVERS];
+static int g_wantedCount = 0;
+
+// A cover drawn without its texture: wanted, unless asked for lately.
+static void WantCover(unsigned long titleId)
+{
+    if (titleId == 0)
+        return;
+    for (int i = 0; i < g_wantedCount; ++i)
+        if (g_wantedCovers[i] == titleId)
+            return;
+    const DWORD now = GetTickCount();
+    int slot = -1;
+    for (int i = 0; i < g_coverAskCount && slot < 0; ++i)
+        if (g_coverAsks[i].titleId == titleId)
+            slot = i;
+    if (slot >= 0 && now - g_coverAsks[slot].at < BOX_ART_ASK_EVERY)
+        return;
+    if (g_wantedCount >= MAX_WANTED_COVERS)
+        return;
+    if (slot < 0)
+    {
+        slot = g_coverAskCount < MAX_COVER_ASKS ? g_coverAskCount++ : (int)(titleId % MAX_COVER_ASKS);
+        g_coverAsks[slot].titleId = titleId;
+    }
+    g_coverAsks[slot].at = now;
+    g_wantedCovers[g_wantedCount++] = titleId;
+}
+
+int TakeWantedCovers(unsigned long *out, int max)
+{
+    int n = g_wantedCount < max ? g_wantedCount : max;
+    for (int i = 0; i < n; ++i)
+        out[i] = g_wantedCovers[i];
+    g_wantedCount = 0;
+    return n;
+}
+
+int LibraryCoverRoom()
+{
+    return MAX_BOX_ART;
+}
+
+// The cover for titleId, noted as used now - or NULL, and asked for.
 static D3DTexture *BoxArtFor(unsigned long titleId)
 {
     for (int i = 0; i < g_boxArtCount; ++i)
     {
         if (g_boxArt[i].titleId == titleId)
+        {
+            g_boxArt[i].lastUsed = g_boxArtFrame;
             return g_boxArt[i].texture;
+        }
     }
+    WantCover(titleId);
     return NULL;
+}
+
+// Whether there's a cover for titleId, without counting it as drawn.
+static bool HaveBoxArt(unsigned long titleId)
+{
+    for (int i = 0; i < g_boxArtCount; ++i)
+        if (g_boxArt[i].titleId == titleId)
+            return true;
+    return false;
+}
+
+// Room for one more: the slot to put it in, the cover drawn longest ago let
+// go if the cache is full - or -1 if every one was drawn this frame or last.
+static int BoxArtSlot()
+{
+    if (g_boxArtCount < MAX_BOX_ART)
+        return g_boxArtCount++;
+    int oldest = -1;
+    for (int i = 0; i < g_boxArtCount; ++i)
+    {
+        if (g_boxArt[i].lastUsed + 1 >= g_boxArtFrame)
+            continue; // on screen
+        if (oldest < 0 || g_boxArt[i].lastUsed < g_boxArt[oldest].lastUsed)
+            oldest = i;
+    }
+    if (oldest < 0)
+        return -1;
+    ForgetCoverArt(g_boxArt[oldest].titleId);
+    if (g_boxArt[oldest].texture != NULL)
+        g_boxArt[oldest].texture->Release();
+    g_boxArt[oldest].texture = NULL;
+    return oldest;
 }
 
 static void ReleaseBoxArt()
@@ -3722,13 +3823,15 @@ void PumpCoverArt()
     if (!g_Initialized)
         return;
 
+    // A frame of the library's cache - this is called once a frame.
+    g_boxArtFrame++;
+
     CoverData data;
     if (!TakeCoverData(&data))
         return;
 
     const bool forStore = data.forStore;
-    if (forStore ? StoreCoverFor(data.titleId) != NULL
-                 : (BoxArtFor(data.titleId) != NULL || g_boxArtCount >= MAX_BOX_ART))
+    if (forStore ? StoreCoverFor(data.titleId) != NULL : HaveBoxArt(data.titleId))
     {
         free(data.pixels);
         return;
@@ -3750,9 +3853,30 @@ void PumpCoverArt()
     }
     else
     {
-        g_boxArt[g_boxArtCount].titleId = data.titleId;
-        g_boxArt[g_boxArtCount].texture = texture;
-        g_boxArtCount++;
+        const int slot = BoxArtSlot();
+        if (slot < 0)
+        {
+            // Every cover is on screen: this one waits, a name on its tile,
+            // and is asked for again when there's room.
+            texture->Release();
+            ForgetCoverArt(data.titleId);
+            return;
+        }
+        g_boxArt[slot].titleId = data.titleId;
+        g_boxArt[slot].texture = texture;
+        g_boxArt[slot].lastUsed = g_boxArtFrame;
+
+        // It has one: if it's let go of later, ask straight away when it's
+        // drawn again. The 30 s is for covers that don't come at all - kept
+        // for one that did, scrolling back up a big library waited it out.
+        for (int i = 0; i < g_coverAskCount; ++i)
+        {
+            if (g_coverAsks[i].titleId == data.titleId)
+            {
+                g_coverAsks[i].at = GetTickCount() - BOX_ART_ASK_EVERY;
+                break;
+            }
+        }
     }
 }
 

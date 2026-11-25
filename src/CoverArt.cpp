@@ -1456,6 +1456,22 @@ void RequestCoverArt(const unsigned long *titleIds, int count)
     SetEvent(g_wake);
 }
 
+void ForgetCoverArt(unsigned long titleId)
+{
+    if (!g_running)
+        return;
+    EnterCriticalSection(&g_lock);
+    for (int i = 0; i < g_deliveredCount; ++i)
+    {
+        if (g_delivered[i] == titleId)
+        {
+            g_delivered[i] = g_delivered[--g_deliveredCount];
+            break;
+        }
+    }
+    LeaveCriticalSection(&g_lock);
+}
+
 void RequestStoreCoverArt(const unsigned long *titleIds, int count)
 {
     if (!g_running)

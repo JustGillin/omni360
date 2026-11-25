@@ -7,8 +7,10 @@ DESCRIPTION : Games kept as extracted disc folders. See FolderGames.h.
 #include "FolderGames.h"
 #include "GodConvert.h" // GodReadExecutableFile
 #include "OutputConsole.h" // dprintf
+#include "StfsParser.h" // EnumerateInstalledGames, for packages kept under named folders
 
 #include <xtl.h>
+#include <stdarg.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -85,8 +87,28 @@ struct FolderScan
     int count;
     int foldersSeen;
     int unreadable;
+    int packageFolders; // named folders read as Content trees - see Visit
+    int packageGames;
     void (*print)(const char *_format, ...);
 };
+
+// The package scan's own lines, less its per-folder summary: a library
+// sorted into a folder a game has hundreds of them (issue #20, 355). The
+// lines saying something went wrong still come through.
+static void (*g_nestedPrint)(const char *_format, ...) = NULL;
+
+static void NestedPackagePrint(const char *format, ...)
+{
+    if (g_nestedPrint == NULL || strncmp(format, "Scan summary", 12) == 0)
+        return;
+    char line[700];
+    va_list args;
+    va_start(args, format);
+    _vsnprintf(line, sizeof(line) - 1, format, args);
+    va_end(args);
+    line[sizeof(line) - 1] = '\0';
+    g_nestedPrint("%s", line);
+}
 
 // The game in dir, whose executable is exe: added unless it's another disc
 // of one already found.
@@ -170,11 +192,14 @@ static void Visit(FolderScan &scan, const char *dir, int depth)
     HANDLE h = FindFirstFileA(pattern, &found);
     if (h == INVALID_HANDLE_VALUE)
         return;
+    bool titleFolders = false;
     do
     {
         if (!(found.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY))
             continue;
         const char *name = found.cFileName;
+        if (strlen(name) == 8 && IsHexFolderName(name))
+            titleFolders = true;
         if (SkippedFolder(name))
             continue;
 
@@ -184,6 +209,42 @@ static void Visit(FolderScan &scan, const char *dir, int depth)
         Visit(scan, sub, depth + 1);
     } while (scan.count < scan.max && FindNextFileA(h, &found));
     FindClose(h);
+
+    // Title folders below the top - "Games\Xbox 360\Halo 3\4D5307E6\00007000"
+    // and its package - are packages kept in a folder a game, as some sort a
+    // big library (issue #20: 355 of them). Read as a Content folder is. At
+    // the top they're the library folder's own Content tree, which the
+    // package scan has read already.
+    if (titleFolders && depth > 0 && scan.count < scan.max)
+    {
+        g_nestedPrint = scan.print;
+        int packages = EnumerateInstalledGames(dir, scan.out + scan.count, scan.max - scan.count,
+                                               NestedPackagePrint);
+        g_nestedPrint = NULL;
+
+        // Not indie games: the XNA launcher is told only the package's file
+        // name and looks for it in the Content folder itself, so one kept
+        // anywhere else "is missing or corrupt" (tried 2026-11-25).
+        int kept = 0;
+        for (int i = 0; i < packages; ++i)
+        {
+            InstalledGame &game = scan.out[scan.count + i];
+            if (IsIndieGame(game.titleId, game.contentType))
+            {
+                scan.print("  %s -> an indie game outside a Content folder can't be started, skipped\n",
+                           game.packagePath);
+                FreeInstalledGames(&game, 1);
+                continue;
+            }
+            if (kept != i)
+                scan.out[scan.count + kept] = game;
+            kept++;
+        }
+        packages = kept;
+        scan.count += packages;
+        scan.packageFolders++;
+        scan.packageGames += packages;
+    }
 }
 
 int EnumerateFolderGames(const char *root, InstalledGame *outGames, int maxGames,
@@ -199,8 +260,10 @@ int EnumerateFolderGames(const char *root, InstalledGame *outGames, int maxGames
     Visit(scan, root, 0);
 
     if (scan.count > 0 || scan.unreadable > 0)
-        printFunction("Folder scan of %s: %d folder(s), %d game(s), %d unreadable, %lu ms\n", root,
-                      scan.foldersSeen, scan.count, scan.unreadable, (unsigned long)(GetTickCount() - startedAt));
+        printFunction("Folder scan of %s: %d folder(s), %d game(s) (%d of them packages, in %d named folder(s)), "
+                      "%d unreadable, %lu ms\n",
+                      root, scan.foldersSeen, scan.count, scan.packageGames, scan.packageFolders, scan.unreadable,
+                      (unsigned long)(GetTickCount() - startedAt));
     return scan.count;
 }
 

@@ -85,6 +85,7 @@ extern "C" NTSTATUS XexGetModuleHandle(PSZ moduleName, PHANDLE outHandle);
 #define SETTINGS_TEMP_FILE "game:\\settings.tmp"
 #define GAMES_PATH_KEY "games-path: "
 #define UPDATE_CHECK_KEY "check-updates: " // "off" stops the check at start
+#define AUTO_UPDATE_KEY "auto-update: "    // "yes" installs one found at start
 #define SOUNDS_KEY "nav-sounds: "         // "off" silences the interface
 #define HOME_BACKGROUND_KEY "home-background: " // game (unset), theme or custom
 #define HOME_WALLPAPER_KEY "home-wallpaper: "   // before home-background: "off" meant the theme's
@@ -111,7 +112,7 @@ extern "C" NTSTATUS XexGetModuleHandle(PSZ moduleName, PHANDLE outHandle);
 #define CONTENT_BASE_SUFFIX "\\Content\\0000000000000000" // the layout the dashboard and Aurora read content from
 #define CONTENT_BASE_PATH_DEFAULT "Hdd1:" CONTENT_BASE_SUFFIX
 #define GAMES_PATH_DEFAULT CONTENT_BASE_PATH_DEFAULT // where the dashboard itself keeps installed games
-#define MAX_INSTALLED_GAMES 256
+#define MAX_INSTALLED_GAMES 1024 // issue #20 has 355; covers are kept to LibraryCoverRoom()
 
 // (There is deliberately no auto-select threshold here any more - see the
 // comment above the pickers.)
@@ -556,6 +557,32 @@ static bool UpdateChecksOn()
     char value[16];
     GetSettingsPath(UPDATE_CHECK_KEY, "yes", value, sizeof(value));
     return _stricmp(value, "off") != 0;
+}
+
+// Whether a newer version found at start is installed without asking. Off
+// unless turned on: a console shouldn't change under someone who didn't
+// choose it.
+static bool AutoUpdateOn()
+{
+    char value[16];
+    GetSettingsPath(AUTO_UPDATE_KEY, "off", value, sizeof(value));
+    return _stricmp(value, "yes") == 0;
+}
+
+// The two as Settings shows them: one row, three ways.
+enum UpdatesAtStartMode
+{
+    UPDATES_AT_START_OFF,
+    UPDATES_AT_START_CHECK,
+    UPDATES_AT_START_INSTALL,
+    UPDATES_AT_START_COUNT
+};
+
+static int UpdatesAtStart()
+{
+    if (!UpdateChecksOn())
+        return UPDATES_AT_START_OFF;
+    return AutoUpdateOn() ? UPDATES_AT_START_INSTALL : UPDATES_AT_START_CHECK;
 }
 
 // Whether to set the clock from the internet at start. Off unless turned on:
@@ -2830,6 +2857,11 @@ static unsigned long g_coverDiscTitleId = 0;
 
 static void NameHomebrewCovers(); // with the Store's Homebrew page
 
+// What RequestLibraryCovers asked for, and whether that was all of it.
+static unsigned long g_coverPrefetch[MAX_INSTALLED_GAMES + 1 + SHELF_COUNT * MAX_SHELF_ITEMS];
+static int g_coverPrefetchCount = 0;
+static bool g_coverPrefetchFits = true;
+
 static void RequestLibraryCovers(const Library &lib)
 {
     static unsigned long titleIds[MAX_INSTALLED_GAMES + 1 + SHELF_COUNT * MAX_SHELF_ITEMS];
@@ -2847,7 +2879,41 @@ static void RequestLibraryCovers(const Library &lib)
                 titleIds[n++] = g_shelves[s].coverKeys[i];
     }
     NameHomebrewCovers(); // by name, which the cover worker searches xboxunity for
+
+    // All of them when they fit the UI's cover cache, as it always was; for a
+    // bigger library, the first that many - the rest are asked for as their
+    // tiles are drawn (PumpWantedCovers).
+    const int room = LibraryCoverRoom();
+    g_coverPrefetchFits = (n <= room);
+    if (n > room)
+        n = room;
+    memcpy(g_coverPrefetch, titleIds, n * sizeof(titleIds[0]));
+    g_coverPrefetchCount = n;
     RequestCoverArt(titleIds, n);
+}
+
+// Covers a tile was drawn without - let go of to make room, or not asked for
+// up front in a big library - asked for, a few times a second. With a
+// library that fits the cache, the whole list again with them first (what's
+// been handed over already is skipped); a bigger one, just them, or the
+// covers let go of would be fetched again only to push out others.
+static void PumpWantedCovers()
+{
+    static DWORD last = 0;
+    const DWORD now = GetTickCount();
+    if (now - last < 250)
+        return;
+    last = now;
+    static unsigned long list[64 + MAX_INSTALLED_GAMES + 1 + SHELF_COUNT * MAX_SHELF_ITEMS];
+    int n = TakeWantedCovers(list, 64);
+    if (n == 0)
+        return;
+    if (g_coverPrefetchFits)
+    {
+        for (int i = 0; i < g_coverPrefetchCount; ++i)
+            list[n++] = g_coverPrefetch[i];
+    }
+    RequestCoverArt(list, n);
 }
 
 // Indie games all carry the Indie Games title's ID, so each is given a key
@@ -2948,6 +3014,10 @@ static int ScanLibraryFolder(Library &lib, const char *path)
         added += KeepNewTitles(lib, lib.count, found);
     const double packagesDone = ImageTimerMs();
     found = EnumerateFolderGames(path, lib.games + lib.count, MAX_INSTALLED_GAMES - lib.count, dprintf);
+    // Packages kept in folders a game (Games\Xbox 360\Halo 3\4D5307E6\...)
+    // come back from the folder scan too: indie ones are named here as the
+    // Content folder's are. Folder games are left as they are.
+    found = NameIndieGames(lib.games + lib.count, found);
     if (found > 0)
         added += KeepNewTitles(lib, lib.count, found);
     dprintf("[timing] scan %s: packages %.1f + folder games %.1f ms (%d games)\n", path,
@@ -3080,7 +3150,7 @@ enum SettingsRow
     SETTINGS_ROW_KEYS,
     SETTINGS_ROW_REMOVE_KEYS,
     SETTINGS_ROW_UPDATES,      // the version, and what's newer
-    SETTINGS_ROW_UPDATE_CHECKS, // checking at start, on or off
+    SETTINGS_ROW_UPDATES_AT_START, // don't check, check, or install: left and right
     SETTINGS_ROW_LIBRARY_FOLDER, // one of g_folderRows: A adds or removes it
     SETTINGS_ROW_ADD_FOLDER,   // another library folder, typed
     SETTINGS_ROW_SOUNDS,       // the interface's sounds, on or off
@@ -3527,6 +3597,8 @@ static bool AnythingQueued()
     return PendingDownloadCount() > 0 || PendingGameJobCount() > 0 || PendingDiscJobCount() > 0;
 }
 
+static void InstallUpdateAndRestart(const UpdateInfo &info, bool automatic);
+
 // The Updates row: what's new in a newer version - and, for a signed one,
 // installing it and restarting into it - or a check now.
 static void ShowUpdate()
@@ -3553,6 +3625,15 @@ static void ShowUpdate()
     if (!ShowNotesUI(heading, info.title, info.notes, foot, installable && !busy ? TrW(STR_UPDATE) : NULL))
         return;
 
+    InstallUpdateAndRestart(info, false);
+}
+
+// Downloads and installs info, then restarts into it. automatic: found at
+// start with "Install automatically" on - so no "press A" between, and a
+// failure is a popup that lets the app carry on rather than a message to
+// dismiss. Returns only if it didn't work.
+static void InstallUpdateAndRestart(const UpdateInfo &info, bool automatic)
+{
     _snprintf(g_updatingTo, sizeof(g_updatingTo), "%s", info.version);
     g_updatingTo[sizeof(g_updatingTo) - 1] = '\0';
     DrawUpdateProgress(0, info.xexSize);
@@ -3561,14 +3642,29 @@ static void ShowUpdate()
     const UpdateInstallResult result = InstallUpdate(info, DrawUpdateProgress, xexPath, sizeof(xexPath));
     if (result != UPDATE_INSTALL_OK)
     {
-        ShowMessageUI(Tr(STR_COULDNT_UPDATE), UpdateInstallResultText(result), Tr(STR_OMNI360_HASNT_CHANGED));
+        dprintf("[update] installing %s %s didn't work: %s\n", info.version, automatic ? "by itself" : "",
+                UpdateInstallResultText(result));
+        if (automatic)
+            ShowShellToast(Tr(STR_COULDNT_UPDATE), UpdateInstallResultText(result), UI_TOAST_ERROR);
+        else
+            ShowMessageUI(Tr(STR_COULDNT_UPDATE), UpdateInstallResultText(result), Tr(STR_OMNI360_HASNT_CHANGED));
         return;
     }
 
     char message[96];
-    TrFormat(message, sizeof(message), STR_OMNI360_INSTALLED, info.version);
-    message[sizeof(message) - 1] = '\0';
-    ShowMessageUI(Tr(STR_UPDATED), message, Tr(STR_IT_STARTS_WHEN_YOU_CONTINUE));
+    if (automatic)
+    {
+        TrFormat(message, sizeof(message), STR_RESTARTING_INTO_OMNI360, info.version);
+        message[sizeof(message) - 1] = '\0';
+        RenderStatusFrame(Tr(STR_UPDATED), message, NULL);
+        Sleep(1200); // long enough to read what's happening
+    }
+    else
+    {
+        TrFormat(message, sizeof(message), STR_OMNI360_INSTALLED, info.version);
+        message[sizeof(message) - 1] = '\0';
+        ShowMessageUI(Tr(STR_UPDATED), message, Tr(STR_IT_STARTS_WHEN_YOU_CONTINUE));
+    }
 
     dprintf("Restarting into %s\n", xexPath);
     LogFlush();
@@ -4056,10 +4152,18 @@ static void ToggleUiSounds()
     SetUiSoundsOn(on);
 }
 
-static void ToggleUpdateChecks()
+
+// Left and right on "Updates at start": don't check, check, install -
+// stopping at either end, like the clock. Kept as the two lines
+// settings.txt already had, check-updates and auto-update.
+static void StepUpdatesAtStart(int step)
 {
-    const bool on = !UpdateChecksOn();
-    if (!SetSettingsValue(UPDATE_CHECK_KEY, on ? "yes" : "off"))
+    const int next = UpdatesAtStart() + step;
+    if (next < 0 || next >= UPDATES_AT_START_COUNT)
+        return;
+    bool saved = SetSettingsValue(UPDATE_CHECK_KEY, next != UPDATES_AT_START_OFF ? "yes" : "off");
+    saved = SetSettingsValue(AUTO_UPDATE_KEY, next == UPDATES_AT_START_INSTALL ? "yes" : "off") && saved;
+    if (!saved)
         ShowMessageUI(Tr(STR_NOT_SAVED), Tr(STR_SETTINGS_TXT_COULD_NOT_BE), NULL);
 }
 
@@ -4813,9 +4917,20 @@ static void BuildSettingsPage(SettingsPage &page, const Library &lib, const char
         else
             AddSettingsControl(page, SETTINGS_CONTROL_BUTTON, Tr(STR_CHECK_NOW), SETTINGS_ROW_UPDATES,
                                Tr(STR_ASKS_GITHUB_FOR_THE_LATEST));
-        AddSettingsControl(page, SETTINGS_CONTROL_CHECK, Tr(STR_AT_START), SETTINGS_ROW_UPDATE_CHECKS,
-                           Tr(STR_ASKS_GITHUB_FOR_THE_LATEST_2));
-        page.rows[page.count - 1].controls[1].on = UpdateChecksOn();
+
+        // What happens at start, on a row of its own - three checkboxes on
+        // the Updates row were too many.
+        {
+            static const StringId atStartNames[UPDATES_AT_START_COUNT] = {
+                STR_UPDATES_AT_START_OFF, STR_UPDATES_AT_START_CHECK, STR_UPDATES_AT_START_INSTALL };
+            const int mode = UpdatesAtStart();
+            AddSettingsRow(page, SETTINGS_VIEW_LINE, Tr(STR_UPDATES_AT_START));
+            AddSettingsControl(page, SETTINGS_CONTROL_VALUE, Tr(atStartNames[mode]), SETTINGS_ROW_UPDATES_AT_START,
+                               Tr(STR_UPDATES_AT_START_HELP));
+            SettingsControlView &c = page.rows[page.count - 1].controls[0];
+            c.valueIndex = mode;
+            c.valueCount = UPDATES_AT_START_COUNT;
+        }
 
         {
             static char versionInfo[96];
@@ -5092,7 +5207,6 @@ static SettingsOutcome RunSettingsRow(SettingsRow row, int arg, Library &lib, ch
     case SETTINGS_ROW_KEYS:         ChangeKeys(outcome); break;
     case SETTINGS_ROW_REMOVE_KEYS:  RemoveKeys(outcome); break;
     case SETTINGS_ROW_UPDATES:      ShowUpdate(); break;
-    case SETTINGS_ROW_UPDATE_CHECKS: ToggleUpdateChecks(); break;
     case SETTINGS_ROW_LIBRARY_FOLDER: ToggleLibraryFolder(arg, lib, gamesPath, outcome); break;
     case SETTINGS_ROW_ADD_FOLDER:   AddLibraryFolder(lib, gamesPath, outcome); break;
     case SETTINGS_ROW_SOUNDS:       ToggleUiSounds(); break;
@@ -10834,8 +10948,9 @@ static void PollUpdateCheck(Shell &shell)
 {
     static unsigned long seen = 0;
     static bool announced = false;
+    static bool firstAnswer = true;
     unsigned long changes = 0;
-    UpdateInfo info;
+    static UpdateInfo info; // too big for the stack beside what calls this
     const UpdateState state = GetUpdateState(&info, &changes);
     if (changes == seen)
         return;
@@ -10843,6 +10958,27 @@ static void PollUpdateCheck(Shell &shell)
     // Just the Settings row - a whole refresh walks every game's folders
     // again, which froze the library for most of a second.
     shell.settingsStale = true;
+
+    // "Install automatically": only the check at start's answer, so a
+    // "Check now" later never restarts the app from under someone. And not
+    // while the Queue has something to finish, as for the Update button.
+    const bool answered = (state == UPDATE_CURRENT || state == UPDATE_AVAILABLE || state == UPDATE_FAILED);
+    const bool atStart = answered && firstAnswer;
+    if (answered)
+        firstAnswer = false;
+    if (state == UPDATE_AVAILABLE && atStart && UpdateChecksOn() && AutoUpdateOn() && UpdateInstallable(info))
+    {
+        if (!AnythingQueued())
+        {
+            announced = true;
+            dprintf("[update] %s found at start: installing it by itself\n", info.version);
+            InstallUpdateAndRestart(info, true);
+            ResyncUiInput();
+            shell.stale = true;
+            return; // still here: it didn't work, and a popup said so
+        }
+        dprintf("[update] %s found at start, but the Queue is busy: not installing it by itself\n", info.version);
+    }
 
     if (state == UPDATE_AVAILABLE && !announced)
     {
@@ -12974,6 +13110,7 @@ int main()
     CleanUpInterruptedInstall();
     StartupStep("paths + interrupted-install cleanup");
 
+
     // From here on the screen belongs to the UI rather than the debug console.
     // The dprintf calls stay - they're the log, and the log is still how
     // anything that goes wrong gets diagnosed - but every phase the user
@@ -13442,6 +13579,7 @@ int main()
         UpdateLibraryFilters(shell, lib);
         const double partCovers = ImageTimerMs();
         PumpCoverArt();
+        PumpWantedCovers();
         const double partStoreArt = ImageTimerMs();
         PumpStoreArt();
         const double partHelperScan = ImageTimerMs();
@@ -14283,6 +14421,12 @@ int main()
                 {
                     StepClock(right ? 1 : -1);
                     shell.stale = true;
+                }
+                else if (onValue &&
+                         settings.actions[settings.focusRow][settings.focusCol] == SETTINGS_ROW_UPDATES_AT_START)
+                {
+                    StepUpdatesAtStart(right ? 1 : -1);
+                    shell.settingsStale = true;
                 }
                 else if (onValue && settings.actions[settings.focusRow][settings.focusCol] == SETTINGS_ROW_THEME)
                 {

@@ -66,6 +66,10 @@ bool StopCoverArt(DWORD timeoutMs);
 // covers already handed over aren't asked for again.
 void RequestCoverArt(const unsigned long *titleIds, int count);
 
+// A library cover the UI has let go of - its cache keeps only so many - so
+// a later RequestCoverArt listing it hands it over again.
+void ForgetCoverArt(unsigned long titleId);
+
 // Homebrew - the Apps, Homebrew and Emulators pages' - has no title ID to
 // find a cover by: most homebrew executables carry none, and xboxunity files
 // homebrew under numbers of its own. So each is asked for by a key made from

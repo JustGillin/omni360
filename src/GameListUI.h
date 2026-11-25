@@ -442,6 +442,15 @@ void RenderLibraryFrame(LibraryPageView &view, const UiHint *hints, int hintCoun
 // cached cover next to nothing.
 void PumpCoverArt();
 
+// The library's cover cache holds this many; a library bigger than that has
+// covers asked for as their tiles are drawn. RequestLibraryCovers asks for
+// no more than this up front.
+int LibraryCoverRoom();
+
+// Covers drawn without their texture since the last call, each at most once
+// in 30 s: the main loop asks the cover worker for them.
+int TakeWantedCovers(unsigned long *out, int max);
+
 // Drops the cached cover art, so the next library frame loads it afresh. Call
 // after rescanning the library: the cache is matched to the game list by count
 // alone, so a new library of the same size would otherwise show the old one's
