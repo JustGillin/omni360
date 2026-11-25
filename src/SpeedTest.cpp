@@ -925,7 +925,7 @@ static void RunSpeedTestHeld(const char *authHeader, const char *scratchPath)
         detail[sizeof(detail) - 1] = '\0';
 
         RenderProgressDialog(Tr(STR_SPEED_TEST), phase, detail, fraction, UI_BUTTON_B, TrW(STR_STOP));
-        Sleep(16);
+        PaceFrame();
     }
     EndProgressDialog();
     if (InterlockedCompareExchange(&g_finished, 0, 0))

@@ -76,6 +76,23 @@ void LogFlush()
 	g_logPendingLen = 0;
 	LeaveCriticalSection(&g_logLock.cs);
 	AppendLogFile(writing, len);
+
+	// The debug channel, a line at a time, as printf sent them before.
+	size_t at = 0;
+	while (at < len)
+	{
+		char line[1024];
+		size_t n = 0;
+		while (at < len && n < sizeof(line) - 1)
+		{
+			const char c = writing[at++];
+			line[n++] = c;
+			if (c == '\n')
+				break;
+		}
+		line[n] = '\0';
+		OutputDebugStringA(line);
+	}
 	LeaveCriticalSection(&g_logWriteLock.cs);
 }
 
@@ -174,7 +191,13 @@ void  __cdecl dprintf(const char* strFormat, ...)
 	// Only ever ONE of these two runs. Display() already forwards to the debug
 	// channel itself (MakeConsole turns on SendOutputToDebugChannel), so doing
 	// both would emit every line twice - which is a bug this file used to have.
-	if (g_consoleQuiet)
+	//
+	// With the writer thread running, it sends the lines to the debug channel
+	// too: with XBDM loaded that took ~17 ms a line, on whichever thread
+	// logged it - the UI's, for the slow-frame lines themselves.
+	if (g_logBuffered)
+		;
+	else if (g_consoleQuiet)
 		printf("%s", buf);
 	else
 		g_console.Display(buf);
@@ -237,7 +260,8 @@ void __cdecl log_printf(const char* strFormat, ...) {
 #endif
 	va_end(pArglist);
 
-	printf("%s", buf);
+	if (!g_logBuffered)
+		printf("%s", buf);
 	LogLineLocked();
 	LeaveCriticalSection(&g_logLock.cs);
 }

@@ -1785,7 +1785,7 @@ static bool FollowJobInDialog(const char *heading, int jobId)
             PlayUiSound(UI_SOUND_BACK);
             break; // hidden: it carries on in the Queue, and its popup says how it went
         }
-        Sleep(16);
+        PaceFrame();
     }
     EndProgressDialog();
     return installed;
@@ -1816,7 +1816,7 @@ static int SearchArchiveTitleUpdates(const char *gameName, const char *edition, 
         RenderProgressDialog(Tr(STR_TU_SEARCHING_ARCHIVE), gameName, NULL, -1.0f, UI_BUTTON_B, TrW(STR_BUTTON_BACK));
         if (PollUiInput().pressed & XINPUT_GAMEPAD_B)
             break;
-        Sleep(16);
+        PaceFrame();
     }
     EndProgressDialog();
     return found;
@@ -2171,7 +2171,7 @@ static int SearchArchiveDlc(const char *gameName, const char *edition, DlcRarMat
         RenderProgressDialog(Tr(STR_TU_SEARCHING_ARCHIVE), gameName, NULL, -1.0f, UI_BUTTON_B, TrW(STR_BUTTON_BACK));
         if (PollUiInput().pressed & XINPUT_GAMEPAD_B)
             break;
-        Sleep(16);
+        PaceFrame();
     }
     EndProgressDialog();
     return found;
@@ -2467,8 +2467,8 @@ static bool PickDlcMembers(DlcRarMatch &pack, const char *packName, unsigned lon
             break;
         }
 
-        // Paced as the main loop is: input's repeat counts frames.
-        Sleep(16);
+        // Paced as the main loop is.
+        PaceFrame();
     }
 
     SetStoragePartArt(NULL, NULL, 0);
@@ -3760,7 +3760,7 @@ static void PairPcHelperInDialog()
                 cancelled = true;
                 break;
             }
-            Sleep(16);
+            PaceFrame();
         }
         if (cancelled)
         {
@@ -4948,7 +4948,7 @@ static void RunWallpaperPicker()
                 PollUiInput();
                 RenderProgressDialog(Tr(STR_WALLPAPER), Tr(STR_WP_DOWNLOADING), names[selected], -1.0f, UI_BUTTON_B,
                                      NULL);
-                Sleep(16);
+                PaceFrame();
             }
             EndProgressDialog();
             const bool ok = WallpaperPickStatus() == WALLPAPER_PICK_DONE;
@@ -4997,8 +4997,8 @@ static void RunWallpaperPicker()
             RenderWallpaperFrame(view, gridHints, 3);
         scroll = view.scroll;
 
-        // Paced as the main loop is: input's repeat counts frames.
-        Sleep(16);
+        // Paced as the main loop is.
+        PaceFrame();
     }
     ResyncUiInput();
 }
@@ -13069,7 +13069,7 @@ int main()
             }
         }
 
-        Sleep(16);
+        PaceFrame();
     }
     if (loader != NULL)
         CloseHandle(loader); // it may still be reading the drive; load and fresh outlive it
@@ -13212,7 +13212,9 @@ int main()
 
         // Finished downloads first, since they can make the rest stale.
         HandleFinishedDownloads(shell, haveAuth);
+        const double dlUpdate = ImageTimerMs();
         PollUpdateCheck(shell);
+        const double dlRescan = ImageTimerMs();
 
         if (shell.rescanLibrary)
         {
@@ -13224,8 +13226,11 @@ int main()
             }
         }
         PollLibraryRescan(shell, lib, gamesPath);
+        const double dlStorage = ImageTimerMs();
         PollStorageScan(lib);
+        const double dlFolders = ImageTimerMs();
         NoteStorageFolders(lib, gamesPath);
+        const double dlRest = ImageTimerMs();
         if (!shell.sidebarFocused)
             shell.sidebarOnStorage = false;
         if (shell.rescanShelves)
@@ -13311,6 +13316,11 @@ int main()
         }
 
         const double partDisc = ImageTimerMs();
+        if (partDisc - partStart > 10.0)
+            dprintf("[timing] downloads/update/rescan: finished downloads %.1f, update check %.1f, rescan %.1f, "
+                    "storage scan %.1f, storage folders %.1f, shelves + fresh library %.1f ms\n",
+                    dlUpdate - partStart, dlRescan - dlUpdate, dlStorage - dlRescan, dlFolders - dlStorage,
+                    dlRest - dlFolders, partDisc - dlRest);
         UpdateDisc(shell, lib, gamesPath);
 
         const double partRefresh = ImageTimerMs();
@@ -14807,7 +14817,7 @@ int main()
         // Device is created with D3DPRESENT_INTERVAL_IMMEDIATE (no vsync), so
         // pace the loop by hand instead of hammering Present() as fast as the
         // CPU can spin. Not a real vsync wait - just ~60fps.
-        Sleep(16);
+        PaceFrame();
     }
 
     // Stop the worker before anything it uses goes away. A transfer stops at

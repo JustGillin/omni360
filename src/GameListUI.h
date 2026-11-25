@@ -213,6 +213,10 @@ struct UiInput
 // Call once per frame.
 UiInput PollUiInput();
 
+// The wait at the end of a frame: what's left of a 60th of a second after
+// its work, at least 1 ms. Every UI loop ends its frame with this.
+void PaceFrame();
+
 // Call after anything that took over the screen for a while - a keyboard, a
 // download, a message. Whatever is held at that moment is treated as already
 // handled, so the A that answered a message can't also act on the page

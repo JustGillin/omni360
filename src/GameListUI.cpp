@@ -60,6 +60,9 @@ animation is viable.
 // drawing. Anything at or over IMAGE_TIMING_LOG_MS is logged with "[timing]".
 #define IMAGE_TIMING_LOG_MS 4.0
 
+// An easing step scaled to the frame just gone - see PaceFrame.
+static float EaseStep(float perFrameAt60);
+
 static double TimerMs()
 {
     static double msPerTick = 0.0;
@@ -4683,7 +4686,7 @@ static float FocusGrowFor(int index, bool focused)
     }
     else
     {
-        g_grow += (FOCUS_GROW - g_grow) * 0.3f;
+        g_grow += (FOCUS_GROW - g_grow) * EaseStep(0.3f);
     }
     return g_grow;
 }
@@ -5329,15 +5332,16 @@ static WORD CurrentButtons()
 #define NAV_DIRECTIONS (XINPUT_GAMEPAD_DPAD_UP | XINPUT_GAMEPAD_DPAD_DOWN | \
                         XINPUT_GAMEPAD_DPAD_LEFT | XINPUT_GAMEPAD_DPAD_RIGHT)
 
-// Auto-repeat, in frames: the loop is hand-paced at ~16ms, so frames are the
-// clock. A long first delay keeps single taps precise; the faster rate after
-// it is what makes a 27-game library quick to get through.
-#define NAV_REPEAT_DELAY_FRAMES 24 // ~400ms
-#define NAV_REPEAT_RATE_FRAMES  5  // ~85ms
+// Auto-repeat, by the clock - it was by frames, which made it as slow as
+// the frame rate on a busy screen. A long first delay keeps single taps
+// precise; the faster rate after it is what makes a big library quick to
+// get through.
+#define NAV_REPEAT_DELAY_MS 400.0
+#define NAV_REPEAT_RATE_MS  85.0
 
 static WORD g_inputPrev = 0;
 static WORD g_inputHeldDirection = 0;
-static int g_inputRepeatCountdown = 0;
+static double g_inputRepeatAt = 0.0; // TimerMs of the next repeat
 static BYTE g_triggersPrev = 0;
 
 // The triggers pulled past halfway, as UI_TRIGGER_*. Any controller's, as
@@ -5388,12 +5392,14 @@ UiInput PollUiInput()
     else if (direction != g_inputHeldDirection)
     {
         g_inputHeldDirection = direction;
-        g_inputRepeatCountdown = NAV_REPEAT_DELAY_FRAMES;
+        g_inputRepeatAt = TimerMs() + NAV_REPEAT_DELAY_MS;
         input.nav = direction;
     }
-    else if (--g_inputRepeatCountdown <= 0)
+    else if (TimerMs() >= g_inputRepeatAt)
     {
-        g_inputRepeatCountdown = NAV_REPEAT_RATE_FRAMES;
+        // One step a poll, however long the frame: a slow frame doesn't
+        // jump several rows.
+        g_inputRepeatAt = TimerMs() + NAV_REPEAT_RATE_MS;
         input.nav = direction;
     }
 
@@ -5408,7 +5414,47 @@ void ResyncUiInput()
     // A direction still held from before counts as already moved, and waits
     // out the full delay before repeating - it was pressed for something else.
     g_inputHeldDirection = SingleDirection(g_inputPrev);
-    g_inputRepeatCountdown = NAV_REPEAT_DELAY_FRAMES;
+    g_inputRepeatAt = TimerMs() + NAV_REPEAT_DELAY_MS;
+}
+
+// Frames at ~60 a second: the wait is what's left of the frame's 16.7 ms
+// after its work, rather than a fixed 16 ms on top of it - which held Home,
+// whose drawing takes ~18 ms, to about 30 a second. At least 1 ms all the
+// same, so a thread waiting on this core gets its turn.
+#define FRAME_MS 16.7
+
+static double g_paceLast = 0.0;
+static float g_frameMs = (float)FRAME_MS;
+
+void PaceFrame()
+{
+    const double now = TimerMs();
+    double wait = (g_paceLast > 0.0) ? FRAME_MS - (now - g_paceLast) : FRAME_MS;
+    if (wait < 1.0)
+        wait = 1.0;
+    if (wait > FRAME_MS)
+        wait = FRAME_MS;
+    Sleep((DWORD)(wait + 0.5));
+    const double after = TimerMs();
+    if (g_paceLast > 0.0)
+    {
+        float ms = (float)(after - g_paceLast);
+        // A frame that waited on something else - a dialog's own loop -
+        // isn't one to ease by: the move would be done in one step.
+        if (ms > 100.0f)
+            ms = 100.0f;
+        g_frameMs = ms;
+    }
+    g_paceLast = after;
+}
+
+// An easing step that was tuned as "fraction of the way each frame at 60 a
+// second", for the frame just gone - so the move takes as long at 30 a
+// second as at 60.
+static float EaseStep(float perFrameAt60)
+{
+    const float frames = g_frameMs / (float)FRAME_MS;
+    return 1.0f - powf(1.0f - perFrameAt60, frames);
 }
 
 // ---------------------------------------------------------------------------
@@ -5557,7 +5603,7 @@ void ShowMessageUI(const char *heading, const char *message, const char *detailL
         hints[0].label = TrW(STR_BUTTON_OK);
 
         RenderStatusFrameInternal(heading, message, detailLine, hints, 1);
-        Sleep(16);
+        PaceFrame();
     }
 }
 
@@ -5636,7 +5682,7 @@ bool ShowNotesUI(const char *heading, const char *title, const char *body, const
         hints[hintCount].sprite = BUTTON_SPRITE_B;
         hints[hintCount++].label = TrW(STR_BUTTON_BACK);
         RenderNotesFrame(heading, title, body, footLine, hints, hintCount);
-        Sleep(16);
+        PaceFrame();
     }
 }
 
@@ -6161,7 +6207,7 @@ static int RunAlert(const char *heading, const char *message, const char *detail
         TextEnd();
 
         EndFrame();
-        Sleep(16);
+        PaceFrame();
     }
 
     if (backdrop != NULL && ownBackdrop)
@@ -6391,7 +6437,7 @@ int ShowChoiceUI(const char *heading, const char *subheading, const char **label
         }
 
         RenderListFrame(view, hints, 2);
-        Sleep(16);
+        PaceFrame();
     }
 }
 
@@ -7424,7 +7470,7 @@ void RenderLaunchFrame(const char *heading, const char *name, unsigned long titl
                 RenderLaunchArtFrame(NULL);
             waited = true;
             PumpStoreArt();
-            Sleep(16);
+            PaceFrame();
         }
     }
 
@@ -7442,7 +7488,7 @@ void RenderLaunchFrame(const char *heading, const char *name, unsigned long titl
     while (ArtFade(art->texture) < 1.0f || TimerMs() - shownAt < LAUNCH_ART_HOLD_MS)
     {
         RenderLaunchArtFrame(art);
-        Sleep(16);
+        PaceFrame();
     }
     RenderLaunchArtFrame(art);
 }
@@ -8367,7 +8413,7 @@ static bool g_storeShownPlaced = false;
 
 static float Glide(float &shown, int scroll)
 {
-    shown += ((float)scroll - shown) * 0.3f;
+    shown += ((float)scroll - shown) * EaseStep(0.3f);
     if (fabsf((float)scroll - shown) < 0.01f)
         shown = (float)scroll;
     return shown;
@@ -8676,7 +8722,7 @@ void RenderStoreFrame(StorePageView &view, const UiHint *hints, int hintCount)
         if (row.scroll < 0)
             row.scroll = 0;
     }
-    view.scroll += (target - view.scroll) * 0.3f;
+    view.scroll += (target - view.scroll) * EaseStep(0.3f);
     if (fabsf(target - view.scroll) < 0.5f)
         view.scroll = target;
     const float sy = -view.scroll;
@@ -9137,7 +9183,7 @@ void RenderStoreRowsFrame(StoreRowsView &view, const UiHint *hints, int hintCoun
         if (row.scroll < 0)
             row.scroll = 0;
     }
-    view.scroll += (target - view.scroll) * 0.3f;
+    view.scroll += (target - view.scroll) * EaseStep(0.3f);
     if (fabsf(target - view.scroll) < 0.5f)
         view.scroll = target;
     const float sy = -view.scroll;
@@ -10117,7 +10163,7 @@ void RenderStoreGameFrame(StoreGameView &view, const UiHint *hints, int hintCoun
     // ScrollStoreGameLayout moves the layout's own Y values.
     float scrollMost = L.similarY + L.similarTile - (clipBottom - S(9.0f));
     if (scrollMost < 0.0f) scrollMost = 0.0f;
-    view.scroll += (target - view.scroll) * 0.3f;
+    view.scroll += (target - view.scroll) * EaseStep(0.3f);
     if (fabsf(target - view.scroll) < 0.5f)
         view.scroll = target;
     ScrollStoreGameLayout(L, view.scroll);
