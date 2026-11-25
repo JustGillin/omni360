@@ -278,3 +278,137 @@ void LaunchXboxDashboard()
     XLaunchNewImage("\\SystemRoot\\dash.xex", 0);
     dprintf("[launch] the loader refused the Xbox Dashboard\n");
 }
+
+// ---------------------------------------------------------------------------
+// Where DashLaunch goes when Omni360 ends
+// ---------------------------------------------------------------------------
+
+#define OMNI360_TITLE_ID 0xFFFF0360UL // XboxTLS2.vcxproj's TitleID
+
+// DashLaunch's names for drives - and the kernel's - as the drives main.cpp
+// mounts. Its "Usb:" is the first port.
+static const char *const kDashLaunchDrives[][2] = {
+    { "Hdd:", "Hdd1:" },
+    { "Hdd1:", "Hdd1:" },
+    { "Usb:", "Usb0:" },
+    { "Usb0:", "Usb0:" },
+    { "Usb1:", "Usb1:" },
+    { "Usb2:", "Usb2:" },
+    { "\\Device\\Harddisk0\\Partition1", "Hdd1:" },
+    { "\\Device\\Mass0", "Usb0:" },
+    { "\\Device\\Mass1", "Usb1:" },
+    { "\\Device\\Mass2", "Usb2:" },
+};
+
+static unsigned long ReadBigEndian32(const unsigned char *p)
+{
+    return ((unsigned long)p[0] << 24) | ((unsigned long)p[1] << 16) | ((unsigned long)p[2] << 8) | p[3];
+}
+
+// The title ID in an XEX's execution info (optional header 0x00040006); 0
+// if it can't be read.
+static unsigned long XexFileTitleId(const char *path)
+{
+    FILE *f = NULL;
+    if (fopen_s(&f, path, "rb") != 0 || f == NULL)
+        return 0;
+    unsigned long titleId = 0;
+    unsigned char head[24];
+    if (fread(head, 1, sizeof(head), f) == sizeof(head) && memcmp(head, "XEX2", 4) == 0)
+    {
+        const unsigned long fieldCount = ReadBigEndian32(head + 20);
+        for (unsigned long i = 0; i < fieldCount && i < 0x400; ++i)
+        {
+            unsigned char field[8];
+            if (fread(field, 1, sizeof(field), f) != sizeof(field))
+                break;
+            if (ReadBigEndian32(field) != 0x00040006UL)
+                continue;
+            unsigned char info[16];
+            if (fseek(f, (long)ReadBigEndian32(field + 4), SEEK_SET) == 0 &&
+                fread(info, 1, sizeof(info), f) == sizeof(info))
+                titleId = ReadBigEndian32(info + 12);
+            break;
+        }
+    }
+    fclose(f);
+    return titleId;
+}
+
+// launch.ini's Default=, from the first launch.ini DashLaunch would find -
+// the USB ports' roots, then the hard drive's. Empty if there's none.
+static void ReadDashLaunchDefault(char *out, size_t outSize)
+{
+    out[0] = '\0';
+    static const char *const kIniPaths[] = { "Usb0:\\launch.ini", "Usb1:\\launch.ini", "Usb2:\\launch.ini",
+                                             "Hdd1:\\launch.ini" };
+    for (int i = 0; i < sizeof(kIniPaths) / sizeof(kIniPaths[0]); ++i)
+    {
+        FILE *f = NULL;
+        if (fopen_s(&f, kIniPaths[i], "r") != 0 || f == NULL)
+            continue;
+        char line[512];
+        bool inPaths = false;
+        while (fgets(line, sizeof(line), f) != NULL)
+        {
+            char *s = line;
+            while (*s == ' ' || *s == '\t')
+                ++s;
+            char *end = s + strlen(s);
+            while (end > s && (end[-1] == '\r' || end[-1] == '\n' || end[-1] == ' ' || end[-1] == '\t'))
+                *--end = '\0';
+            if (*s == '[')
+            {
+                inPaths = _strnicmp(s, "[Paths]", 7) == 0;
+                continue;
+            }
+            if (!inPaths || _strnicmp(s, "Default", 7) != 0)
+                continue;
+            char *value = s + 7;
+            while (*value == ' ' || *value == '\t')
+                ++value;
+            if (*value != '=')
+                continue;
+            ++value;
+            while (*value == ' ' || *value == '\t')
+                ++value;
+            _snprintf(out, outSize, "%s", value);
+            out[outSize - 1] = '\0';
+            break;
+        }
+        fclose(f);
+        dprintf("[launch] %s: Default = \"%s\"\n", kIniPaths[i], out);
+        return; // DashLaunch uses the first one it finds
+    }
+}
+
+bool DefaultDashboardIsOmni360()
+{
+    // Only DashLaunch reads launch.ini. Without it - a console on another
+    // exploit - nothing redirects the end of a title, so there's no
+    // default to find.
+    HANDLE dashLaunch = NULL;
+    if (XexGetModuleHandle("launch.xex", &dashLaunch) < 0 || dashLaunch == NULL)
+    {
+        dprintf("[launch] DashLaunch isn't loaded: Exit stays\n");
+        return false;
+    }
+
+    char value[512];
+    ReadDashLaunchDefault(value, sizeof(value));
+    if (value[0] == '\0')
+        return false;
+    for (int i = 0; i < sizeof(kDashLaunchDrives) / sizeof(kDashLaunchDrives[0]); ++i)
+    {
+        const size_t len = strlen(kDashLaunchDrives[i][0]);
+        if (_strnicmp(value, kDashLaunchDrives[i][0], len) != 0)
+            continue;
+        char path[600];
+        _snprintf(path, sizeof(path), "%s%s", kDashLaunchDrives[i][1], value + len);
+        path[sizeof(path) - 1] = '\0';
+        const unsigned long titleId = XexFileTitleId(path);
+        dprintf("[launch] the default, %s, is title %08lX\n", path, titleId);
+        return titleId == OMNI360_TITLE_ID;
+    }
+    return false;
+}

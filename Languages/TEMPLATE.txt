@@ -432,6 +432,7 @@ COULDNT_START_THIS_GAME = Couldn't start this game
 THE_CONSOLES_LOADER_REFUSED_IT = The console's loader refused it - see the log.
 EXIT_OMNI360 = Leave Omni360
 EXIT = Exit
+EXIT_XBOX_DASHBOARD = Xbox Dashboard
 EXIT_RESTART = Restart
 EXIT_TURN_OFF = Turn off
 EXIT_WHERE_TO = Go back to the Xbox dashboard, restart the console or turn it off.

@@ -7811,6 +7811,7 @@ enum ExitAction
 {
     EXIT_NONE,
     EXIT_TO_DASHBOARD,
+    EXIT_TO_XBOX_DASHBOARD,
     EXIT_RESTART,
     EXIT_TURN_OFF
 };
@@ -7820,25 +7821,34 @@ static bool ExitMenu()
 {
     const int pending = PendingDownloadCount() + PendingDiscJobCount() + PendingGameJobCount() + PendingFileJobCount();
 
-    char message[96];
+    // The rows say where each goes; a message only when leaving stops something.
+    char message[96] = "";
     if (pending > 0)
         TrCount(message, sizeof(message), STR_JOBS_PENDING_ONE, STR_JOBS_PENDING, pending);
-    else
-        TrFormat(message, sizeof(message), STR_EXIT_WHERE_TO);
     message[sizeof(message) - 1] = '\0';
 
-    // Opens on Cancel, leftmost: two of the others power the console off.
-    const char *buttons[4] = { Tr(STR_EXIT), Tr(STR_EXIT_RESTART), Tr(STR_EXIT_TURN_OFF), Tr(STR_BUTTON_CANCEL) };
-    const int answer = ShowAlertButtonsUI(Tr(STR_EXIT_OMNI360), message,
-                                          pending > 0 ? Tr(STR_LEAVING_STOPS_THEM_FILES_THAT) : NULL,
-                                          buttons, 4, 5, 3);
-    switch (answer)
+    // A list rather than a row of buttons - B cancels. Exit goes wherever
+    // DashLaunch's Default= says (Omni360 again, when it's the default), so
+    // the stock dashboard has a row of its own - and Exit none, when that
+    // default is Omni360 and leaving would only open it again.
+    const char *rows[4];
+    ExitAction actions[4];
+    int count = 0;
+    if (!DefaultDashboardIsOmni360())
     {
-    case 0: g_exitAction = EXIT_TO_DASHBOARD; break;
-    case 1: g_exitAction = EXIT_RESTART; break;
-    case 2: g_exitAction = EXIT_TURN_OFF; break;
-    default: g_exitAction = EXIT_NONE; break;
+        rows[count] = Tr(STR_EXIT);
+        actions[count++] = EXIT_TO_DASHBOARD;
     }
+    rows[count] = Tr(STR_EXIT_XBOX_DASHBOARD);
+    actions[count++] = EXIT_TO_XBOX_DASHBOARD;
+    rows[count] = Tr(STR_EXIT_RESTART);
+    actions[count++] = EXIT_RESTART;
+    rows[count] = Tr(STR_EXIT_TURN_OFF);
+    actions[count++] = EXIT_TURN_OFF;
+
+    const int answer = ShowAlertListExUI(Tr(STR_EXIT_OMNI360), message, rows, NULL, count, 0, NULL, NULL, false,
+                                         pending > 0 ? Tr(STR_LEAVING_STOPS_THEM_FILES_THAT) : NULL);
+    g_exitAction = (answer >= 0 && answer < count) ? actions[answer] : EXIT_NONE;
     return g_exitAction != EXIT_NONE;
 }
 
@@ -14692,6 +14702,12 @@ int main()
         RestartConsole();
     else if (g_exitAction == EXIT_TURN_OFF)
         PowerOffConsole();
+
+    // The stock dashboard by its path, past DashLaunch's default - as a game
+    // is started, with the UI still up. Doesn't return when it works; if
+    // it's refused, ending is the old Exit.
+    if (g_exitAction == EXIT_TO_XBOX_DASHBOARD)
+        LaunchXboxDashboard();
 
     dprintf("Done.\n");
 

@@ -29,4 +29,10 @@ void LaunchDisc(bool original);
 // whatever it's set to start.
 void LaunchXboxDashboard();
 
+// Whether DashLaunch's launch.ini starts Omni360 itself - its Default= an XEX
+// with Omni360's title ID, wherever that copy is - so ending the app would
+// only open it again. False when there's no launch.ini, no Default, or the
+// file can't be read.
+bool DefaultDashboardIsOmni360();
+
 #endif
