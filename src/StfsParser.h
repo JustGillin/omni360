@@ -44,6 +44,10 @@ struct StfsTitleInfo
 // STFS package or uses the (unsupported here) Version 2 metadata layout.
 bool StfsReadTitleInfo(const char *packagePath, StfsTitleInfo *outInfo);
 
+// The same, from a package's first bytes already in memory (up to 0x971A of
+// them): a DLC's, unpacked just that far out of its RAR, say.
+bool StfsParseTitleInfo(const unsigned char *header, unsigned long length, StfsTitleInfo *outInfo);
+
 // Frees outInfo->titleThumbnail if set.
 void StfsFreeTitleInfo(StfsTitleInfo *info);
 

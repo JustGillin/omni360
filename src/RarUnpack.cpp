@@ -159,8 +159,54 @@ static bool SamePath(const char *a, const char *b)
     }
 }
 
+// RarUnpackFrom, with the size of the chunks handed to out - and so how much
+// is decoded before the first one arrives - and whether running out of data
+// is worth a line in the log (not for a peek, which expects to).
+static RarUnpackResult UnpackWith(RarUnpackInput *in, const char *memberName, RarUnpackOutput *out,
+                                  RarUnpackProgressFn progressFn, void printFunction(const char *_format, ...),
+                                  size_t chunkSize, bool quiet);
+
 RarUnpackResult RarUnpackFrom(RarUnpackInput *in, const char *memberName, RarUnpackOutput *out,
                               RarUnpackProgressFn progressFn, void printFunction(const char *_format, ...))
+{
+    // Big writes suit FATX; the same 4MB the HTTPS downloads use.
+    return UnpackWith(in, memberName, out, progressFn, printFunction, 4 * 1024 * 1024, false);
+}
+
+// Collects the first `want` bytes, then says stop.
+class PeekOutput : public RarUnpackOutput
+{
+public:
+    PeekOutput(unsigned char *out, unsigned long want) : m_out(out), m_want(want), m_have(0) {}
+    virtual bool Write(const void *data, unsigned long len)
+    {
+        const unsigned long take = (len < m_want - m_have) ? len : m_want - m_have;
+        memcpy(m_out + m_have, data, take);
+        m_have += take;
+        return m_have < m_want;
+    }
+    unsigned long Have() const { return m_have; }
+
+private:
+    unsigned char *m_out;
+    unsigned long m_want;
+    unsigned long m_have;
+};
+
+unsigned long RarUnpackPeek(RarUnpackInput *in, const char *memberName, unsigned char *out, unsigned long want,
+                            void printFunction(const char *_format, ...))
+{
+    if (want == 0)
+        return 0;
+    PeekOutput peek(out, want);
+    // Small chunks, so what decodes before the data runs out is handed over.
+    UnpackWith(in, memberName, &peek, NULL, printFunction, 8 * 1024, true);
+    return peek.Have();
+}
+
+static RarUnpackResult UnpackWith(RarUnpackInput *in, const char *memberName, RarUnpackOutput *out,
+                                  RarUnpackProgressFn progressFn, void printFunction(const char *_format, ...),
+                                  size_t chunkSize, bool quiet)
 {
     InputStream stream;
     stream.in = in;
@@ -218,8 +264,7 @@ RarUnpackResult RarUnpackFrom(RarUnpackInput *in, const char *memberName, RarUnp
         return RAR_UNPACK_UNSUPPORTED;
     }
 
-    // Big writes suit FATX; the same 4MB the HTTPS downloads use.
-    const size_t CHUNK = 4 * 1024 * 1024;
+    const size_t CHUNK = chunkSize;
     void *chunk = malloc(CHUNK);
     if (chunk == NULL)
     {
@@ -250,7 +295,7 @@ RarUnpackResult RarUnpackFrom(RarUnpackInput *in, const char *memberName, RarUnp
     else if (r != DMC_UNRAR_OK || sink.written != sink.total)
         result = RAR_UNPACK_BAD_DATA;
 
-    if (result != RAR_UNPACK_OK && result != RAR_UNPACK_CANCELLED)
+    if (result != RAR_UNPACK_OK && result != RAR_UNPACK_CANCELLED && !quiet)
         printFunction("ERROR: unpacking %s stopped at %I64u of %I64u bytes: %s\n", memberName, sink.written,
                       sink.total, sink.writeFailed ? "couldn't write the file" : dmc_unrar_strerror(r));
 

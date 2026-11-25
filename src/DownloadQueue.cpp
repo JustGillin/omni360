@@ -24,7 +24,6 @@ DESCRIPTION : the download queue - DLC packs and title updates, installed one
 
 // Enough for the largest pack seen so far with room to spare; ListDlcMembers
 // stops at this many.
-#define MAX_DLC_MEMBERS 128
 
 // Free space kept in hand beyond a pack's own size, so a pack that only just
 // fits doesn't leave the drive at zero.
@@ -178,6 +177,10 @@ static void SaveQueueStateLocked()
                                  "job=dlc\ngame=%s\ntitleid=%08lX\nitem=%s\nonly=%s\nfile=%s\nsize=%I64u\nscore=%d\n",
                                  job.view.gameName, job.view.titleId, job.pack.item, job.pack.only,
                                  job.pack.filename, job.pack.size, job.pack.score);
+            if (job.pack.pickOf > 0)
+                AppendQueueStateText(text, QUEUE_STATE_MAX, &at, "pickof=%d\npicks=%08lX,%08lX,%08lX,%08lX\n",
+                                     job.pack.pickOf, job.pack.picks[0], job.pack.picks[1], job.pack.picks[2],
+                                     job.pack.picks[3]);
         }
         else if (job.kind == QUEUE_JOB_TITLE_UPDATE)
         {
@@ -483,6 +486,26 @@ static void RunDlcPack(const QueueJob &job, JobResult &result)
         if (kept == 0)
             dprintf("%s doesn't hold %s\n", pack.filename, pack.only);
         memberCount = kept;
+    }
+
+    // Just the members picked from the list - unless the list isn't the one
+    // they were picked from, when the whole pack is safer than the wrong part.
+    if (pack.pickOf > 0 && memberCount > 0)
+    {
+        if (memberCount != pack.pickOf)
+            dprintf("%s lists %d files now, not the %d picked from - installing all of them\n", pack.filename,
+                    memberCount, pack.pickOf);
+        else
+        {
+            int kept = 0;
+            for (int f = 0; f < memberCount; ++f)
+            {
+                if (DlcPackPicked(pack, f))
+                    g_members[kept++] = g_members[f];
+            }
+            dprintf("%s: %d of %d files picked\n", pack.filename, kept, memberCount);
+            memberCount = kept;
+        }
     }
 
     if (memberCount <= 0)
@@ -1489,6 +1512,20 @@ void RestoreDownloadQueue(const char *authHeader)
                 job.pack.size = _strtoui64(value, NULL, 10);
             else if (strcmp(key, "score") == 0)
                 job.pack.score = atoi(value);
+            else if (strcmp(key, "pickof") == 0)
+                job.pack.pickOf = atoi(value);
+            else if (strcmp(key, "picks") == 0)
+            {
+                const char *p = value;
+                for (int w = 0; w < MAX_DLC_MEMBERS / 32 && *p != '\0'; ++w)
+                {
+                    char *end = NULL;
+                    job.pack.picks[w] = strtoul(p, &end, 16);
+                    p = (end != NULL && *end == ',') ? end + 1 : (end != NULL ? end : p);
+                    if (end == NULL || *end == '\0')
+                        break;
+                }
+            }
         }
         else if (job.kind == QUEUE_JOB_TITLE_UPDATE)
         {

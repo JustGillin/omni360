@@ -147,6 +147,9 @@ struct DlcMember
 #define MAX_DLC_RAR_MATCHES 16
 #define DLC_RAR_FILENAME_LEN 256
 
+// The most members of one pack listed - and so the most that can be picked.
+#define MAX_DLC_MEMBERS 128
+
 struct DlcRarMatch
 {
     char item[32];                        // the archive.org item it's in; empty for the DLC collection
@@ -154,7 +157,20 @@ struct DlcRarMatch
     char filename[DLC_RAR_FILENAME_LEN]; // e.g. "007.Legends.DLC.RF.X360-ZTM.rar"
     unsigned long long size;              // whole-archive size in bytes, from the metadata listing
     int score;                            // 0-100 name-match confidence; results come back sorted by this, best first
+
+    // Which members to install, picked from the list ListDlcMembers gave:
+    // bit i of picks is its member i. pickOf is how many it listed then, so a
+    // list that comes back different installs the whole pack rather than the
+    // wrong ones. pickOf 0: the whole pack.
+    unsigned long picks[MAX_DLC_MEMBERS / 32];
+    int pickOf;
 };
+
+inline bool DlcPackPicked(const DlcRarMatch &pack, int member)
+{
+    return pack.pickOf == 0 ||
+           (member >= 0 && member < MAX_DLC_MEMBERS && (pack.picks[member / 32] & (1UL << (member % 32))) != 0);
+}
 
 // Soft-matches gameName against the msx360gcdlc item's file listing (via the
 // public /metadata/ endpoint - no login required for this part). A game can
@@ -241,6 +257,37 @@ unsigned long long DlcMemberDownloadSize(const DlcMember &member);
 // leaves a short file behind and treating that as installed would skip it
 // permanently while the content stayed broken.
 bool DlcMemberIsInstalled(const DlcMember &member, const std::string &contentBasePath);
+
+// What a member is, from its own package: its name and picture, as the
+// dashboard shows them. Members are named by a hash in the RAR, so this is
+// read from the package itself - its first few KB, unpacked from a Range of
+// the RAR just past the member's header, without downloading the rest.
+struct DlcMemberPeek
+{
+    char name[128];         // the package's display name, UTF-8; empty if it couldn't be read
+    unsigned char *png;     // its own picture (the game's, failing that), malloc'd; NULL for none
+    unsigned long pngSize;
+};
+
+// Called before each member is read (done of total); false stops - the
+// members not reached are left unnamed.
+typedef bool (*PeekMembersProgressFn)(int done, int total);
+
+// Fills out[0..count) for members[0..count), from ListDlcMembers. A member of
+// a solid archive can't be read on its own - only after every one before it
+// - so only the first of those is named. Returns how many were named. Free
+// with FreeDlcMemberPeeks.
+//
+// Threading: like ListDlcMembers it records refused keys for
+// ArchiveOrgKeysRejected - see that note. The picker calls the two from the
+// UI thread, while the worker may be downloading; the flag is read straight
+// after each call, so the window for one thread to clear the other's is a
+// few instructions wide, and wrong keys would show on both anyway.
+int PeekDlcMembers(const DlcRarMatch &pack, const DlcMember *members, int count, const char *authHeader,
+                   DlcMemberPeek *out, void printFunction(const char *_format, ...),
+                   PeekMembersProgressFn progressFn);
+
+void FreeDlcMemberPeeks(DlcMemberPeek *peeks, int count);
 
 // ---------------------------------------------------------------------------
 // Title updates (a SEPARATE archive.org item from the DLC collection)

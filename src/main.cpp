@@ -2151,6 +2151,251 @@ static void DlcPackDisplayName(const char *fileName, char *out, size_t outSize)
     out[outSize - 1] = '\0';
 }
 
+// Defined with the pages below.
+static void StorageBytes(unsigned long long bytes, char *out, size_t outSize);
+static void StepSelection(WORD nav, int count, int &selected);
+static int AddHint(UiHint *hints, int count, UiButton button, const WCHAR *label, const WCHAR *shortLabel);
+#ifndef STORE_MIDDOT
+#define STORE_MIDDOT "  \xC2\xB7  "
+#endif
+
+// ---------------------------------------------------------------------------
+// Picking from a DLC pack: what's in it, by name, before any of it downloads
+// ---------------------------------------------------------------------------
+//
+// The pack's file list is read (one small request a member), then each
+// member's own name and picture from its first few KB (PeekDlcMembers), and
+// the list is shown with a checkbox a row - the Storage list's layout. What's
+// ticked goes in the pack's picks; the worker installs just those.
+
+static DlcMember g_pickMembers[MAX_DLC_MEMBERS];
+static DlcMemberPeek g_pickPeeks[MAX_DLC_MEMBERS];
+static const char *g_pickHeading = NULL;
+static bool g_pickCancelled = false;
+
+// A frame of the reading dialog, and B to cancel - from the list and peek
+// callbacks, which run between requests on this thread.
+static bool PickReadingFrame(const char *line, float fraction)
+{
+    RenderProgressDialog(g_pickHeading, line, NULL, fraction, UI_BUTTON_B, TrW(STR_BUTTON_CANCEL));
+    const UiInput input = PollUiInput();
+    if (input.pressed & XINPUT_GAMEPAD_B)
+    {
+        PlayUiSound(UI_SOUND_BACK);
+        g_pickCancelled = true;
+    }
+    return !g_pickCancelled;
+}
+
+static bool PickListProgress(unsigned long long scanned, unsigned long long size, int files, int avatars)
+{
+    (void)files;
+    (void)avatars;
+    return PickReadingFrame(Tr(STR_DLC_READING_PACK), size > 0 ? (float)((double)scanned / (double)size) : -1.0f);
+}
+
+static bool PickPeekProgress(int done, int total)
+{
+    char n1[16], n2[16], line[96];
+    _snprintf(n1, sizeof(n1), "%d", done + 1);
+    n1[sizeof(n1) - 1] = '\0';
+    _snprintf(n2, sizeof(n2), "%d", total);
+    n2[sizeof(n2) - 1] = '\0';
+    TrFormat(line, sizeof(line), STR_DLC_READING_NAMES, n1, n2);
+    return PickReadingFrame(line, total > 0 ? (float)done / (float)total : -1.0f);
+}
+
+// What kind of content a member is, from its folder: TitleID\ContentType\ID.
+static StringId PickedKind(const DlcMember &member)
+{
+    const char *slash = strchr(member.contentPath, '\\');
+    const unsigned long type = (slash != NULL) ? strtoul(slash + 1, NULL, 16) : 0;
+    if (type == 0x000B0000)
+        return STR_STORAGE_KIND_UPDATE;
+    if (type == 0x000D0000 || type == 0x00080000)
+        return STR_STORAGE_KIND_GAME;
+    return STR_STORAGE_KIND_DLC;
+}
+
+// Lists what's in pack and lets them tick what they want, setting its picks.
+// False if they backed out. A pack of one file, or one whose list couldn't
+// be read, is left whole - the queue then installs it, or says why it can't,
+// as it always has.
+static bool PickDlcMembers(DlcRarMatch &pack, const char *packName, unsigned long titleId, const char *authHeader)
+{
+    pack.pickOf = 0;
+    memset(pack.picks, 0, sizeof(pack.picks));
+
+    g_pickHeading = packName;
+    g_pickCancelled = false;
+    BeginProgressDialog();
+    PickReadingFrame(Tr(STR_DLC_READING_PACK), -1.0f);
+    const int count = ListDlcMembers(pack, g_pickMembers, MAX_DLC_MEMBERS, authHeader, dprintf, PickListProgress);
+    if (g_pickCancelled)
+    {
+        EndProgressDialog();
+        return false;
+    }
+    if (count <= 1)
+    {
+        EndProgressDialog();
+        return true;
+    }
+
+    PeekDlcMembers(pack, g_pickMembers, count, authHeader, g_pickPeeks, dprintf, PickPeekProgress);
+    EndProgressDialog();
+    if (g_pickCancelled)
+    {
+        FreeDlcMemberPeeks(g_pickPeeks, count);
+        return false;
+    }
+
+    static StorageListRowView rows[MAX_DLC_MEMBERS];
+    static char names[MAX_DLC_MEMBERS][128];
+    static char sizes[MAX_DLC_MEMBERS][32];
+    static bool installed[MAX_DLC_MEMBERS];
+    static bool checked[MAX_DLC_MEMBERS];
+    static const unsigned char *pngs[MAX_DLC_MEMBERS];
+    static unsigned long pngSizes[MAX_DLC_MEMBERS];
+
+    const std::string contentBase(g_contentBase);
+    unsigned long long total = 0;
+    bool unnamed = false;
+    for (int i = 0; i < count; ++i)
+    {
+        if (g_pickPeeks[i].name[0] != '\0')
+            _snprintf(names[i], sizeof(names[i]), "%s", g_pickPeeks[i].name);
+        else
+        {
+            char n[16];
+            _snprintf(n, sizeof(n), "%d", i + 1);
+            n[sizeof(n) - 1] = '\0';
+            TrFormat(names[i], sizeof(names[i]), STR_DLC_ITEM_N, n);
+            unnamed = true;
+        }
+        names[i][sizeof(names[i]) - 1] = '\0';
+        StorageBytes(g_pickMembers[i].unpSize, sizes[i], sizeof(sizes[i]));
+        installed[i] = DlcMemberIsInstalled(g_pickMembers[i], contentBase);
+        checked[i] = !installed[i];
+        pngs[i] = g_pickPeeks[i].png;
+        pngSizes[i] = g_pickPeeks[i].pngSize;
+        total += g_pickMembers[i].unpSize;
+    }
+    SetStoragePartArt(pngs, pngSizes, count);
+
+    char subtitle[96], itemCount[32], totalText[32];
+    TrCount(itemCount, sizeof(itemCount), STR_DLC_ITEMS_ONE, STR_DLC_ITEMS, count);
+    StorageBytes(total, totalText, sizeof(totalText));
+    _snprintf(subtitle, sizeof(subtitle), "%s" STORE_MIDDOT "%s", itemCount, totalText);
+    subtitle[sizeof(subtitle) - 1] = '\0';
+
+    int selected = 0, scroll = 0;
+    bool chosen = false;
+    for (;;)
+    {
+        int picked = 0, open = 0;
+        unsigned long long pickedBytes = 0;
+        bool all = true;
+        for (int i = 0; i < count; ++i)
+        {
+            StorageListRowView &v = rows[i];
+            v.name = names[i];
+            v.size = sizes[i];
+            v.detail = installed[i] ? Tr(STR_INSTALLED) : Tr(PickedKind(g_pickMembers[i]));
+            v.checked = checked[i];
+            v.leftover = false;
+            v.libraryIndex = -1;
+            v.titleId = titleId;
+            v.artIndex = pngs[i] != NULL ? i : -1;
+            if (!installed[i])
+            {
+                open++;
+                all = all && checked[i];
+            }
+            if (checked[i])
+            {
+                picked++;
+                pickedBytes += g_pickMembers[i].unpSize;
+            }
+        }
+
+        static char pickedCount[48], pickedSize[32];
+        TrCount(pickedCount, sizeof(pickedCount), STR_STORAGE_SELECTED_ONE, STR_STORAGE_SELECTED, picked);
+        StorageBytes(pickedBytes, pickedSize, sizeof(pickedSize));
+
+        StorageListView view;
+        memset(&view, 0, sizeof(view));
+        view.title = packName;
+        view.subtitle = subtitle;
+        view.rows = rows;
+        view.count = count;
+        view.selected = selected;
+        view.scroll = scroll;
+        view.pickedCount = pickedCount;
+        view.pickedSize = pickedSize;
+        view.note = unnamed ? Tr(STR_DLC_SOME_UNNAMED) : Tr(STR_DLC_PICK_NOTE);
+
+        UiHint hints[5];
+        int hintCount = 0;
+        if (!installed[selected])
+            hintCount = AddHint(hints, hintCount, UI_BUTTON_A,
+                                checked[selected] ? TrW(STR_STORAGE_DESELECT) : TrW(STR_SELECT), NULL);
+        if (picked > 0)
+            hintCount = AddHint(hints, hintCount, UI_BUTTON_X, TrW(STR_DLC_DOWNLOAD_PICKED), NULL);
+        if (open > 0)
+            hintCount = AddHint(hints, hintCount, UI_BUTTON_Y,
+                                all ? TrW(STR_STORAGE_CLEAR_SELECTION) : TrW(STR_STORAGE_SELECT_ALL), NULL);
+        hintCount = AddHint(hints, hintCount, UI_BUTTON_B, TrW(STR_BUTTON_BACK), NULL);
+
+        RenderStorageListFrame(view, hints, hintCount);
+        selected = view.selected;
+        scroll = view.scroll;
+
+        const UiInput input = PollUiInput();
+        if (input.pressed & XINPUT_GAMEPAD_B)
+        {
+            PlayUiSound(UI_SOUND_BACK);
+            break;
+        }
+        StepSelection(input.nav, count, selected);
+        if ((input.pressed & XINPUT_GAMEPAD_A) && !installed[selected])
+        {
+            checked[selected] = !checked[selected];
+            PlayUiSound(UI_SOUND_SELECT);
+        }
+        else if ((input.pressed & XINPUT_GAMEPAD_Y) && open > 0)
+        {
+            for (int i = 0; i < count; ++i)
+                checked[i] = !installed[i] && !all;
+            PlayUiSound(UI_SOUND_SELECT);
+        }
+        else if ((input.pressed & XINPUT_GAMEPAD_X) && picked > 0)
+        {
+            PlayUiSound(UI_SOUND_SELECT);
+            // Every one that isn't installed: the whole pack, as before -
+            // the installed ones are skipped either way.
+            if (picked < open)
+            {
+                pack.pickOf = count;
+                for (int i = 0; i < count; ++i)
+                {
+                    if (checked[i])
+                        pack.picks[i / 32] |= 1UL << (i % 32);
+                }
+            }
+            chosen = true;
+            break;
+        }
+
+        // Paced as the main loop is: input's repeat counts frames.
+        Sleep(16);
+    }
+
+    SetStoragePartArt(NULL, NULL, 0);
+    FreeDlcMemberPeeks(g_pickPeeks, count);
+    return chosen;
+}
+
 // The packs on archive.org: one picked is queued and followed. True if
 // something was queued, so the installed list is read again.
 static bool ShowOnlineDlc(unsigned long titleId, const char *gameName, const char *edition, TitleUpdateAuth &auth)
@@ -2197,14 +2442,23 @@ static bool ShowOnlineDlc(unsigned long titleId, const char *gameName, const cha
         rowNotes[i] = notes[i];
     }
 
-    const int picked =
-        ShowAlertListExUI(gameName, Tr(STR_DLC_FROM_ARCHIVE), labels, rowNotes, count, 0, NULL, NULL, true);
-    if (picked < 0)
-        return false;
-    if (!EnsureAuthHeader(*auth.haveAuth, auth.header, auth.headerSize))
-        return false;
+    // A pack, then what's in it; backing out of that comes back here.
+    DlcRarMatch pack;
+    int focus = 0;
+    for (;;)
+    {
+        const int picked =
+            ShowAlertListExUI(gameName, Tr(STR_DLC_FROM_ARCHIVE), labels, rowNotes, count, focus, NULL, NULL, true);
+        if (picked < 0)
+            return false;
+        if (!EnsureAuthHeader(*auth.haveAuth, auth.header, auth.headerSize))
+            return false;
+        focus = picked;
+        pack = packs[picked];
+        if (PickDlcMembers(pack, labels[picked], titleId, auth.header))
+            break;
+    }
 
-    const DlcRarMatch &pack = packs[picked];
     const EnqueueResult queued = EnqueueDlcPack(pack, gameName, titleId, auth.header);
     const int jobId = FindDlcPackJob(pack.filename);
     if ((queued != ENQUEUE_ADDED && queued != ENQUEUE_ALREADY_QUEUED) || jobId == 0)

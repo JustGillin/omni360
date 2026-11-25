@@ -251,45 +251,15 @@ static bool ImageMagicLooksDecodable(const unsigned char *data)
     return false;
 }
 
-bool StfsReadTitleInfo(const char *packagePath, StfsTitleInfo *outInfo)
+// The same, from the start of a package already in memory - up to 0x971A
+// bytes of it; fewer gives fewer of its parts. outInfo is cleared first.
+bool StfsParseTitleInfo(const unsigned char *header, unsigned long length, StfsTitleInfo *outInfo)
 {
     memset(outInfo, 0, sizeof(StfsTitleInfo));
-
-    FILE *f = fopen(packagePath, "rb");
-    if (f == NULL)
+    if (length < 4 || (memcmp(header, "CON ", 4) != 0 && memcmp(header, "LIVE", 4) != 0 &&
+                        memcmp(header, "PIRS", 4) != 0))
         return false;
-
-    unsigned char magic[4];
-    if (fread(magic, 1, 4, f) != 4)
-    {
-        fclose(f);
-        return false;
-    }
-
-    bool validMagic = (memcmp(magic, "CON ", 4) == 0) ||
-                      (memcmp(magic, "LIVE", 4) == 0) ||
-                      (memcmp(magic, "PIRS", 4) == 0);
-
-    if (!validMagic)
-    {
-        fclose(f);
-        return false;
-    }
-
-    // Everything we care about (Version 1 metadata + the title thumbnail)
-    // lives within the first 0x971A bytes regardless of the package's real,
-    // potentially multi-GB, total size.
-    const long READ_SIZE = 0x971A;
-    unsigned char *header = (unsigned char *)malloc(READ_SIZE);
-    if (header == NULL)
-    {
-        fclose(f);
-        return false;
-    }
-
-    fseek(f, 0, SEEK_SET);
-    long actuallyRead = (long)fread(header, 1, READ_SIZE, f);
-    fclose(f);
+    const long actuallyRead = (long)length;
 
     // Only require enough bytes for what's actually needed to identify the
     // title (through Display Name, ending at 0x491) - NOT through the
@@ -299,10 +269,7 @@ bool StfsReadTitleInfo(const char *packagePath, StfsTitleInfo *outInfo)
     // Thumbnail Image Size field too, which silently rejected otherwise
     // perfectly valid, smaller headers as "not a real package."
     if (actuallyRead < 0x0491)
-    {
-        free(header);
         return false;
-    }
 
     unsigned long metadataVersion = ReadBE32(header + 0x0348);
 
@@ -377,8 +344,52 @@ bool StfsReadTitleInfo(const char *packagePath, StfsTitleInfo *outInfo)
         }
     }
 
-    free(header);
     return true;
+}
+
+bool StfsReadTitleInfo(const char *packagePath, StfsTitleInfo *outInfo)
+{
+    memset(outInfo, 0, sizeof(StfsTitleInfo));
+
+    FILE *f = fopen(packagePath, "rb");
+    if (f == NULL)
+        return false;
+
+    unsigned char magic[4];
+    if (fread(magic, 1, 4, f) != 4)
+    {
+        fclose(f);
+        return false;
+    }
+
+    bool validMagic = (memcmp(magic, "CON ", 4) == 0) ||
+                      (memcmp(magic, "LIVE", 4) == 0) ||
+                      (memcmp(magic, "PIRS", 4) == 0);
+
+    if (!validMagic)
+    {
+        fclose(f);
+        return false;
+    }
+
+    // Everything we care about (Version 1 metadata + the title thumbnail)
+    // lives within the first 0x971A bytes regardless of the package's real,
+    // potentially multi-GB, total size.
+    const long READ_SIZE = 0x971A;
+    unsigned char *header = (unsigned char *)malloc(READ_SIZE);
+    if (header == NULL)
+    {
+        fclose(f);
+        return false;
+    }
+
+    fseek(f, 0, SEEK_SET);
+    long actuallyRead = (long)fread(header, 1, READ_SIZE, f);
+    fclose(f);
+
+    const bool parsed = StfsParseTitleInfo(header, (unsigned long)actuallyRead, outInfo);
+    free(header);
+    return parsed;
 }
 
 void StfsFreeTitleInfo(StfsTitleInfo *info)

@@ -11195,6 +11195,9 @@ void RenderStorageListFrame(StorageListView &view, const UiHint *hints, int hint
     // --- Pass 2: text ---
     g_UiFont.Begin();
 
+    // The sidebar, when the page behind has one up - the DLC picker opens
+    // over a game's page, with the library's.
+    DrawSidebarText(g_sidebar.focused);
     DrawHeaderText(view.title, view.subtitle, showToast);
     DrawButtonHintText(footer, footerCount, g_M.footerY);
 

@@ -26,6 +26,7 @@ rather than a scraped browser login session.
 #include "cJSON.h"
 #include "RarHeaders.h"
 #include "RarUnpack.h"
+#include "StfsParser.h" // a peeked member's name and picture
 #include "settings.h"
 #include "zlib/zlib.h" // inflate, to unpack a title update's zip here
 
@@ -2901,4 +2902,222 @@ bool DownloadTitleUpdate(const TitleUpdateMatch &update, unsigned long titleId,
     }
 
     return true;
+}
+
+// ---------------------------------------------------------------------------
+// What a pack's members are: each one's name and picture, from its own start
+// ---------------------------------------------------------------------------
+//
+// A member is named in the RAR by its content ID, a hash. What it is lives in
+// its own package's header - the display name at 0x411, its picture at
+// 0x171A - and that header is the first 0x571A bytes of the member. So each
+// member's header and the first few KB of its compressed data are fetched in
+// one Range request, laid behind the RAR's own head as if they were the whole
+// archive, and unpacked just that far (RarUnpackPeek). The rest of the member
+// is never fetched.
+//
+// Surveyed on 150 of the collection's 866 packs (2026-11-25): none stores its
+// members uncompressed, 92% are compressed but not solid - every member
+// readable this way - and 8% are solid, where only the first is.
+
+// The package header up to the end of its own picture: name at 0x411,
+// picture size at 0x1712, picture at 0x171A, up to 0x4000 bytes of it.
+#define PEEK_HEADER_BYTES 0x571A
+
+// How much of a member's compressed data is fetched to unpack that far. The
+// header is mostly zeros around its signature and a PNG that doesn't
+// compress, so this is about the picture's size and some to spare.
+#define PEEK_PACKED_BYTES (48 * 1024)
+
+// The RAR as dmc_unrar sees it for a peek: the archive's head, then one
+// member's header and the start of its data - and nothing after, though
+// Size() says the member's data runs to its end. Reads past what's here come
+// back short, and the unpacking stops there.
+class PeekInput : public RarUnpackInput
+{
+public:
+    PeekInput(const unsigned char *head, unsigned long headLen, const unsigned char *part, unsigned long partLen,
+              unsigned long long partFullLen)
+        : m_head(head), m_headLen(headLen), m_part(part), m_partLen(partLen), m_partFullLen(partFullLen)
+    {
+    }
+
+    virtual unsigned long long Size()
+    {
+        return m_headLen + m_partFullLen;
+    }
+
+    virtual unsigned long Read(unsigned long long offset, void *buffer, unsigned long len)
+    {
+        unsigned char *out = (unsigned char *)buffer;
+        unsigned long done = 0;
+        while (done < len)
+        {
+            const unsigned long long at = offset + done;
+            const unsigned char *from;
+            unsigned long long left;
+            if (at < m_headLen)
+            {
+                from = m_head + at;
+                left = m_headLen - at;
+            }
+            else if (at - m_headLen < m_partLen)
+            {
+                from = m_part + (at - m_headLen);
+                left = m_partLen - (at - m_headLen);
+            }
+            else
+                break; // not fetched
+            unsigned long take = (unsigned long)((left < (unsigned long long)(len - done)) ? left : (len - done));
+            memcpy(out + done, from, take);
+            done += take;
+        }
+        return done;
+    }
+
+private:
+    const unsigned char *m_head;
+    unsigned long m_headLen;
+    const unsigned char *m_part;
+    unsigned long m_partLen;
+    unsigned long long m_partFullLen;
+};
+
+// Quiet: a peek that runs out of data is expected, and the unpacker's own
+// complaints about it would fill the log a line a member.
+static void PeekLog(const char *, ...)
+{
+}
+
+int PeekDlcMembers(const DlcRarMatch &pack, const DlcMember *members, int count, const char *authHeader,
+                   DlcMemberPeek *out, void printFunction(const char *_format, ...),
+                   PeekMembersProgressFn progressFn)
+{
+    g_keysRejected = false;
+    for (int i = 0; i < count; ++i)
+    {
+        out[i].name[0] = '\0';
+        out[i].png = NULL;
+        out[i].pngSize = 0;
+    }
+    if (count <= 0)
+        return 0;
+
+    const std::string url = PackUrl(pack);
+    std::string cachedDatanodeUrl;
+    struct SessionGuard
+    {
+        HttpsSession *session;
+        ~SessionGuard() { HttpsSessionClose(session); }
+    } guard = { HttpsSessionOpen(printFunction) };
+
+    // The archive's head - signature and main header - is the same for every
+    // member: fetched once.
+    const unsigned long headLen = members[0].headLen;
+    if (headLen == 0 || headLen > MAX_HEAD_LEN)
+        return 0;
+    // The buffers also take a redirect's Location, which is far longer than
+    // the head itself - so they're never smaller than a URL.
+    const unsigned long headCap = (headLen > 4096) ? headLen : 4096;
+    unsigned char *head = (unsigned char *)malloc(headCap + 1);
+    const unsigned long partCap = 1024 + PEEK_PACKED_BYTES; // a member's header is well under 1 KB
+    unsigned char *part = (unsigned char *)malloc(partCap + 1);
+    unsigned char *header = (unsigned char *)malloc(PEEK_HEADER_BYTES);
+    if (head == NULL || part == NULL || header == NULL)
+    {
+        free(head);
+        free(part);
+        free(header);
+        return 0;
+    }
+
+    char range[96];
+    unsigned long long got = headCap;
+    _snprintf(range, sizeof(range), "Range: bytes=0-%lu\r\n", headLen - 1);
+    range[sizeof(range) - 1] = '\0';
+    int status = HttpGetFollowRedirect(url, (char *)head, &got, range, authHeader, printFunction, &cachedDatanodeUrl,
+                                       guard.session);
+    int named = 0;
+    if ((status != 206 && status != 200) || got != headLen)
+    {
+        printFunction("Peek: couldn't read the start of %s (status %d)\n", pack.filename, status);
+        count = 0; // nothing named
+    }
+
+    for (int i = 0; i < count; ++i)
+    {
+        if (progressFn != NULL && !progressFn(i, count))
+            break;
+
+        const DlcMember &m = members[i];
+        // A solid member decodes only after every one before it - unless
+        // there are none before it.
+        if (!m.canUnpack || (m.solid && m.headerStart != headLen))
+            continue;
+        if (m.dataStart <= m.headerStart || m.dataStart - m.headerStart > 1024 || m.dataEnd < m.dataStart)
+            continue;
+
+        const unsigned long headerLen = (unsigned long)(m.dataStart - m.headerStart);
+        unsigned long long packed = m.dataEnd - m.dataStart;
+        if (packed > PEEK_PACKED_BYTES)
+            packed = PEEK_PACKED_BYTES;
+        const unsigned long want = headerLen + (unsigned long)packed;
+
+        got = partCap;
+        _snprintf(range, sizeof(range), "Range: bytes=%I64u-%I64u\r\n", m.headerStart,
+                  m.headerStart + want - 1);
+        range[sizeof(range) - 1] = '\0';
+        status = HttpGetFollowRedirect(url, (char *)part, &got, range, authHeader, printFunction,
+                                       &cachedDatanodeUrl, guard.session);
+        if (status != 206 && status != 200)
+        {
+            printFunction("Peek: member %d of %s -> status %d\n", i + 1, pack.filename, status);
+            if (ArchiveOrgKeysRejected())
+                break; // the rest would be refused the same way
+            continue;
+        }
+
+        PeekInput input(head, headLen, part, (unsigned long)got, m.dataEnd - m.headerStart);
+        const unsigned long have = RarUnpackPeek(&input, m.internalPath, header, PEEK_HEADER_BYTES, PeekLog);
+
+        StfsTitleInfo info;
+        if (have > 0 && StfsParseTitleInfo(header, have, &info))
+        {
+            _snprintf(out[i].name, sizeof(out[i].name), "%s", info.displayName);
+            out[i].name[sizeof(out[i].name) - 1] = '\0';
+            // Its own picture, or the game's when it has none.
+            if (info.contentThumbnail != NULL)
+            {
+                out[i].png = info.contentThumbnail;
+                out[i].pngSize = info.contentThumbnailSize;
+                info.contentThumbnail = NULL;
+            }
+            else if (info.titleThumbnail != NULL)
+            {
+                out[i].png = info.titleThumbnail;
+                out[i].pngSize = info.titleThumbnailSize;
+                info.titleThumbnail = NULL;
+            }
+            StfsFreeTitleInfo(&info);
+            if (out[i].name[0] != '\0')
+                named++;
+        }
+        printFunction("Peek: member %d of %s: %lu bytes unpacked from %I64u -> \"%s\"%s\n", i + 1, pack.filename,
+                      have, got, out[i].name, out[i].png != NULL ? " + picture" : "");
+    }
+
+    free(head);
+    free(part);
+    free(header);
+    return named;
+}
+
+void FreeDlcMemberPeeks(DlcMemberPeek *peeks, int count)
+{
+    for (int i = 0; i < count; ++i)
+    {
+        free(peeks[i].png);
+        peeks[i].png = NULL;
+        peeks[i].pngSize = 0;
+    }
 }

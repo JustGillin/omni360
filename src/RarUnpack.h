@@ -55,6 +55,13 @@ public:
 RarUnpackResult RarUnpackFrom(RarUnpackInput *in, const char *memberName, RarUnpackOutput *out,
                               RarUnpackProgressFn progressFn, void printFunction(const char *_format, ...));
 
+// Just the start of memberName: its first `want` bytes into out, or as many
+// as decode before in runs short - in may hold only the member's first few
+// KB, with Size() still the whole of it. For reading a package's own header
+// out of a RAR without downloading the rest. Returns how many were written.
+unsigned long RarUnpackPeek(RarUnpackInput *in, const char *memberName, unsigned char *out, unsigned long want,
+                            void printFunction(const char *_format, ...));
+
 // ---------------------------------------------------------------------------
 // Folder games: every file in the RAR, into a folder
 // ---------------------------------------------------------------------------
