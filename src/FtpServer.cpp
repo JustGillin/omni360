@@ -910,6 +910,9 @@ static DWORD WINAPI ListenThread(LPVOID)
             const unsigned char *ip = (const unsigned char *)&from.sin_addr.s_addr;
             _snprintf(session->clientName, sizeof(session->clientName), "%u.%u.%u.%u", ip[0], ip[1], ip[2], ip[3]);
             session->thread = CreateThread(NULL, 64 * 1024, SessionThread, session, CREATE_SUSPENDED, NULL);
+            // Transfers, clear of the UI's core 0.
+            if (session->thread != NULL)
+                XSetThreadProcessor(session->thread, 3);
             if (session->thread == NULL)
             {
                 session->used = false;
@@ -967,6 +970,9 @@ bool StartFtpServer(const char *user, const char *password)
     g_ftpListen = s;
     LeaveCriticalSection(&g_ftpLock);
     g_ftpThread = CreateThread(NULL, 32 * 1024, ListenThread, NULL, 0, NULL);
+    // The housekeeping core, clear of the UI's core 0.
+    if (g_ftpThread != NULL)
+        XSetThreadProcessor(g_ftpThread, 5);
     if (g_ftpThread == NULL)
     {
         EnterCriticalSection(&g_ftpLock);

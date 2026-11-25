@@ -281,6 +281,9 @@ static DWORD WINAPI NetworkStatusEntry(LPVOID)
 void LogNetworkStatus()
 {
     HANDLE thread = CreateThread(NULL, 64 * 1024, NetworkStatusEntry, NULL, 0, NULL);
+    // The housekeeping core, clear of the UI's core 0.
+    if (thread != NULL)
+        XSetThreadProcessor(thread, 5);
     if (thread != NULL)
         CloseHandle(thread);
     else

@@ -81,6 +81,7 @@ static void LaunchExecutable(const char *path)
     if (!DevicePath(path, device, sizeof(device)))
         return;
     dprintf("[launch] %s\n", device);
+    LogFlush();
     XLaunchNewImage(device, 0);
     dprintf("[launch] the loader refused %s\n", device);
 }
@@ -97,6 +98,7 @@ static void LaunchPackage(const char *path, const char *xexName)
         return;
     }
     dprintf("[launch] %s, its %s\n", device, xexName);
+    LogFlush();
     const DWORD result = launch(device, xexName);
     dprintf("[launch] the loader refused %s: %08lX\n", device, result);
 }
@@ -115,6 +117,7 @@ static void LaunchByDriveName(const char *path)
         {
             mount(kDrives[i][0], (char *)kDrives[i][1]);
             dprintf("[launch] %s\n", path);
+            LogFlush();
             XLaunchNewImage(path, 0);
             dprintf("[launch] the loader refused %s\n", path);
             return;
@@ -172,6 +175,7 @@ static void LaunchIndieGame(const InstalledGame &game)
         return;
     }
     dprintf("[launch] indie game %s, through the XNA launcher\n", data.fileName);
+    LogFlush();
     launchTitle(XNA_LAUNCHER_PATH, XNA_LAUNCHER_FOLDER, NULL, 0);
     dprintf("[launch] the loader refused the XNA launcher\n");
 }
@@ -254,6 +258,7 @@ void LaunchDisc(bool original)
             dprintf("[launch] the disc, through XamLoaderLaunchTitleEx\n");
             // "game:\default.xex" here got "The game couldn't start" - looked
             // for in Omni360's own folder, it seems - so by the device.
+            LogFlush();
             launchTitle("\\Device\\Cdrom0\\default.xex", "\\Device\\Cdrom0", NULL, 0);
             dprintf("[launch] XamLoaderLaunchTitleEx returned - trying dvd:\\default.xex\n");
         }
@@ -268,6 +273,7 @@ void LaunchDisc(bool original)
     mount("Dvd:", "\\Device\\Cdrom0");
     const char *exe = original ? "dvd:\\default.xbe" : "dvd:\\default.xex";
     dprintf("[launch] %s\n", exe);
+    LogFlush();
     XLaunchNewImage(exe, 0);
     dprintf("[launch] the loader refused %s\n", exe);
 }
@@ -275,6 +281,7 @@ void LaunchDisc(bool original)
 void LaunchXboxDashboard()
 {
     dprintf("[launch] the Xbox Dashboard\n");
+    LogFlush();
     XLaunchNewImage("\\SystemRoot\\dash.xex", 0);
     dprintf("[launch] the loader refused the Xbox Dashboard\n");
 }

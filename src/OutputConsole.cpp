@@ -9,6 +9,8 @@ DESCRIPTION : Writes text to the screen. Also writes to debug file
 #include "AtgUtil.h"
 #include "OutputConsole.h"
 #include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
 
 #define TEXTBUFFER_SIZE (1024 * 10) // 2KB buffer
 
@@ -29,16 +31,127 @@ struct LogLock
 };
 static LogLock g_logLock;
 
-void SetConsoleQuiet(int quiet)
+// Once the drawn UI is up, lines go into memory and a thread on core 5
+// writes them out every quarter second. Opening, appending and closing the
+// file for each line, under the lock above, held the UI thread behind the
+// hard drive whenever something else had it busy - a library scan at
+// startup - and a slow frame's own "slow frame" line slowed the next. Before
+// the UI (and if the thread can't start) each line is written as it comes,
+// so a crash during startup still leaves its last line in the file. LogFlush
+// writes what's waiting now: before the app ends or starts something else.
+#define LOG_PENDING_SIZE (64 * 1024)
+static char g_logPending[LOG_PENDING_SIZE];
+static size_t g_logPendingLen = 0;
+static bool g_logBuffered = false;
+
+// Only one writer at a time, so lines reach the file in order. Taken before
+// g_logLock, never while holding it.
+struct LogWriteLock
 {
-	g_consoleQuiet = (quiet != 0);
+	CRITICAL_SECTION cs;
+	LogWriteLock() { InitializeCriticalSection(&cs); }
+};
+static LogWriteLock g_logWriteLock;
+
+static void AppendLogFile(const char *text, size_t len)
+{
+	if (len == 0)
+		return;
+	FILE* fp = NULL;
+	fopen_s(&fp, LOG_FILE_PATH, "ab");
+	if (fp)
+	{
+		fwrite(text, 1, len, fp);
+		fclose(fp);
+	}
+}
+
+void LogFlush()
+{
+	static char writing[LOG_PENDING_SIZE];
+	EnterCriticalSection(&g_logWriteLock.cs);
+	EnterCriticalSection(&g_logLock.cs);
+	const size_t len = g_logPendingLen;
+	memcpy(writing, g_logPending, len);
+	g_logPendingLen = 0;
+	LeaveCriticalSection(&g_logLock.cs);
+	AppendLogFile(writing, len);
+	LeaveCriticalSection(&g_logWriteLock.cs);
+}
+
+static DWORD WINAPI LogWriterEntry(LPVOID)
+{
+	for (;;)
+	{
+		Sleep(250);
+		LogFlush();
+	}
+}
+
+static void StartLogWriter()
+{
+	if (g_logBuffered)
+		return;
+	HANDLE thread = CreateThread(NULL, 32 * 1024, LogWriterEntry, NULL, CREATE_SUSPENDED, NULL);
+	if (thread == NULL)
+		return; // each line written as it comes, as before
+	XSetThreadProcessor(thread, 5);
+	ResumeThread(thread);
+	CloseHandle(thread);
+	g_logBuffered = true;
 }
 
 #ifdef USE_UNICODE
 WCHAR buf[TEXTBUFFER_SIZE]; // Text buffer
-void  __cdecl dprintf(const wchar_t* strFormat, ...)
 #else
 char buf[TEXTBUFFER_SIZE]; // Text buffer
+#endif
+
+// buf, just formatted, to the file or the pending lines. Called holding
+// g_logLock, which it may let go of and take again: when the pending lines
+// are full - a burst faster than the writer - they're written out first,
+// by LogFlush so as to stay in order, with this line kept aside meanwhile.
+static void LogLineLocked()
+{
+#ifndef USE_UNICODE
+	const size_t len = strlen(buf);
+	if (!g_logBuffered)
+	{
+		AppendLogFile(buf, len);
+		return;
+	}
+	if (g_logPendingLen + len > LOG_PENDING_SIZE)
+	{
+		char *line = (char *)malloc(len + 1);
+		if (line == NULL)
+			return;
+		memcpy(line, buf, len + 1);
+		LeaveCriticalSection(&g_logLock.cs);
+		LogFlush();
+		EnterCriticalSection(&g_logLock.cs);
+		if (g_logPendingLen + len <= LOG_PENDING_SIZE)
+		{
+			memcpy(g_logPending + g_logPendingLen, line, len);
+			g_logPendingLen += len;
+		}
+		free(line);
+		return;
+	}
+	memcpy(g_logPending + g_logPendingLen, buf, len);
+	g_logPendingLen += len;
+#endif
+}
+
+void SetConsoleQuiet(int quiet)
+{
+	g_consoleQuiet = (quiet != 0);
+	if (g_consoleQuiet)
+		StartLogWriter();
+}
+
+#ifdef USE_UNICODE
+void  __cdecl dprintf(const wchar_t* strFormat, ...)
+#else
 void  __cdecl dprintf(const char* strFormat, ...)
 #endif
 {
@@ -96,14 +209,7 @@ void  __cdecl dprintf(const char* strFormat, ...)
 	// Note this does NOT apply to log_printf below, which has no Display call
 	// at all: its printf is that function's only console output and must stay.
 
-	FILE* fp = NULL;
-    errno_t err = fopen_s(&fp, LOG_FILE_PATH, "a+");
-    if(fp) {
-        fprintf(fp, "%s", buf);
-        fclose(fp);
-    } else {
-		printf("Failed to open log file\n");
-	}
+	LogLineLocked();
 
 #endif
 	LeaveCriticalSection(&g_logLock.cs);
@@ -132,13 +238,6 @@ void __cdecl log_printf(const char* strFormat, ...) {
 	va_end(pArglist);
 
 	printf("%s", buf);
-	
-	FILE* fp = NULL;
-    errno_t err = fopen_s(&fp, LOG_FILE_PATH, "a+");
-    if(fp) {
-        fprintf(fp, "%s", buf);
-        fclose(fp);
-    }
-
+	LogLineLocked();
 	LeaveCriticalSection(&g_logLock.cs);
 }

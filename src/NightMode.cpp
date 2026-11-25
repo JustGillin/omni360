@@ -150,6 +150,7 @@ static void SmcPower(unsigned char command, unsigned char arg, const char *what)
 void PowerOffConsole()
 {
     dprintf("[power] asking the kernel to turn the console off\n");
+    LogFlush();
     HalReturnToFirmware(FIRMWARE_POWER_DOWN);
 
     // The shutdown takes a moment once it's under way, so give it one
@@ -162,6 +163,7 @@ void PowerOffConsole()
 void RestartConsole()
 {
     dprintf("[power] asking the kernel to restart the console\n");
+    LogFlush();
     HalReturnToFirmware(FIRMWARE_REBOOT);
 
     Sleep(3000);

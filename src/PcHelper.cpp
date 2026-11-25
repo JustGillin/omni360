@@ -452,9 +452,15 @@ void StartPcHelperListener()
 {
     EnsureLock();
     HANDLE h = CreateThread(NULL, 0, ListenEntry, NULL, 0, NULL);
+    // The housekeeping core, clear of the UI's core 0.
+    if (h != NULL)
+        XSetThreadProcessor(h, 5);
     if (h != NULL)
         CloseHandle(h);
     h = CreateThread(NULL, 0, CheckInEntry, NULL, 0, NULL);
+    // The housekeeping core, clear of the UI's core 0.
+    if (h != NULL)
+        XSetThreadProcessor(h, 5);
     if (h != NULL)
         CloseHandle(h);
 }
@@ -746,6 +752,9 @@ void PcHelperForget(const char *item, const char *file)
     job->name[sizeof(job->name) - 1] = '\0';
 
     HANDLE h = CreateThread(NULL, 0, ForgetEntry, job, 0, NULL);
+    // The housekeeping core, clear of the UI's core 0.
+    if (h != NULL)
+        XSetThreadProcessor(h, 5);
     if (h == NULL)
         free(job);
     else
@@ -843,6 +852,9 @@ bool PcHelperAheadPercent(const char *item, const char *file, int *percent)
     if (start)
     {
         HANDLE h = CreateThread(NULL, 0, AheadEntryThread, NULL, 0, NULL);
+        // The housekeeping core, clear of the UI's core 0.
+        if (h != NULL)
+            XSetThreadProcessor(h, 5);
         if (h != NULL)
             CloseHandle(h);
     }

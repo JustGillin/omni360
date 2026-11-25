@@ -250,6 +250,83 @@ static void CanonicalDriveCase(char *path)
         path[3] = 'X';
 }
 
+// settings.txt, read once and kept: some settings are asked for every frame
+// (the PC helper's, for one), and reading the file each time held the UI
+// behind the hard drive whenever something else had it busy - 20 to 400 ms
+// a frame on Home while wallpapers and the library were being read. Read
+// again after SetSettingsValue or WriteSettingsLines rewrites it. A lock, as
+// a worker could ask too.
+struct SettingsCache
+{
+    CRITICAL_SECTION lock;
+    bool read;
+    bool exists;
+    std::string text;
+    SettingsCache() : read(false), exists(false) { InitializeCriticalSection(&lock); }
+};
+static SettingsCache g_settingsCache;
+
+static void ForgetSettingsCache()
+{
+    EnterCriticalSection(&g_settingsCache.lock);
+    g_settingsCache.read = false;
+    g_settingsCache.exists = false;
+    g_settingsCache.text.clear();
+    LeaveCriticalSection(&g_settingsCache.lock);
+}
+
+// A copy of settings.txt to read lines from, as fopen and fgets would.
+struct SettingsIn
+{
+    std::string text;
+    size_t at;
+};
+
+// False, as fopen's NULL, when there's no settings.txt.
+static bool OpenSettings(SettingsIn &in)
+{
+    EnterCriticalSection(&g_settingsCache.lock);
+    if (!g_settingsCache.read)
+    {
+        g_settingsCache.read = true;
+        g_settingsCache.exists = false;
+        g_settingsCache.text.clear();
+        FILE *fd = fopen(SETTINGS_FILE, "r");
+        if (fd != NULL)
+        {
+            g_settingsCache.exists = true;
+            char chunk[1024];
+            size_t got;
+            while ((got = fread(chunk, 1, sizeof(chunk), fd)) > 0)
+                g_settingsCache.text.append(chunk, got);
+            fclose(fd);
+        }
+    }
+    const bool exists = g_settingsCache.exists;
+    in.text = g_settingsCache.text;
+    in.at = 0;
+    LeaveCriticalSection(&g_settingsCache.lock);
+    return exists;
+}
+
+// fgets on that copy: the next line, its newline kept, cut to size - 1 - and
+// the rest of a long line is the next "line", as fgets has it.
+static bool SettingsGets(char *line, int size, SettingsIn *in)
+{
+    if (in == NULL || size < 2 || in->at >= in->text.size())
+        return false;
+    int n = 0;
+    while (n < size - 1 && in->at < in->text.size())
+    {
+        const char c = in->text[in->at++];
+        line[n++] = c;
+        if (c == '\n')
+            break;
+    }
+    line[n] = '\0';
+    return true;
+}
+
 // Returns whether settings.txt actually had the key - the caller can then
 // tell a value someone set from the default it would have got anyway.
 static bool GetSettingsPath(const char *key, const char *defaultValue, char *outPath, size_t outPathSize)
@@ -257,7 +334,8 @@ static bool GetSettingsPath(const char *key, const char *defaultValue, char *out
     strncpy(outPath, defaultValue, outPathSize - 1);
     outPath[outPathSize - 1] = '\0';
 
-    FILE *fd = fopen(SETTINGS_FILE, "r");
+    SettingsIn fdCopy;
+    SettingsIn *fd = OpenSettings(fdCopy) ? &fdCopy : NULL;
     if (fd == NULL)
         return false;
 
@@ -265,7 +343,7 @@ static bool GetSettingsPath(const char *key, const char *defaultValue, char *out
     size_t keyLen = strlen(key);
     bool found = false;
 
-    while (fgets(line, sizeof(line), fd) != NULL)
+    while (SettingsGets(line, sizeof(line), fd) != NULL)
     {
         if (line[0] == '#')
             continue;
@@ -285,8 +363,6 @@ static bool GetSettingsPath(const char *key, const char *defaultValue, char *out
             break;
         }
     }
-
-    fclose(fd);
     return found;
 }
 
@@ -349,14 +425,15 @@ static int g_moreGamesPathCount = 0;
 static void ReadMoreGamesPaths()
 {
     g_moreGamesPathCount = 0;
-    FILE *fd = fopen(SETTINGS_FILE, "r");
+    SettingsIn fdCopy;
+    SettingsIn *fd = OpenSettings(fdCopy) ? &fdCopy : NULL;
     if (fd == NULL)
         return;
 
     char line[512];
     const size_t keyLen = strlen(GAMES_PATH_KEY);
     bool first = true;
-    while (fgets(line, sizeof(line), fd) != NULL && g_moreGamesPathCount < MAX_MORE_GAMES_PATHS)
+    while (SettingsGets(line, sizeof(line), fd) != NULL && g_moreGamesPathCount < MAX_MORE_GAMES_PATHS)
     {
         if (line[0] == '#' || strncmp(line, GAMES_PATH_KEY, keyLen) != 0)
             continue;
@@ -373,7 +450,6 @@ static void ReadMoreGamesPaths()
         g_moreGamesPaths[g_moreGamesPathCount][MAX_TEXT_LENGTH - 1] = '\0';
         g_moreGamesPathCount++;
     }
-    fclose(fd);
 }
 
 // Whether the interface makes sounds. On unless turned off.
@@ -533,11 +609,12 @@ static bool SetSettingsValue(const char *key, const char *value)
     bool replaced = false;
     const size_t keyLen = strlen(key);
 
-    FILE *in = fopen(SETTINGS_FILE, "r");
+    SettingsIn inCopy;
+    SettingsIn *in = OpenSettings(inCopy) ? &inCopy : NULL;
     if (in != NULL)
     {
         char line[512];
-        while (fgets(line, sizeof(line), in) != NULL)
+        while (SettingsGets(line, sizeof(line), in) != NULL)
         {
             // Same matching rule as GetSettingsPath, so the line replaced here
             // is the line that would have been read.
@@ -551,7 +628,6 @@ static bool SetSettingsValue(const char *key, const char *value)
             }
             contents += line;
         }
-        fclose(in);
 
         if (!contents.empty() && contents[contents.size() - 1] != '\n')
             contents += "\n";
@@ -578,7 +654,9 @@ static bool SetSettingsValue(const char *key, const char *value)
     }
 
     remove(SETTINGS_FILE); // rename won't replace an existing file
-    return rename(SETTINGS_TEMP_FILE, SETTINGS_FILE) == 0;
+    const bool renamed = rename(SETTINGS_TEMP_FILE, SETTINGS_FILE) == 0;
+    ForgetSettingsCache(); // read again, whatever it now holds
+    return renamed;
 }
 
 // Tidies a typed folder path into the form the library scan expects: no
@@ -647,11 +725,12 @@ static bool WriteSettingsLines(const char *key, const char *const *values, int c
     std::string contents;
     bool placed = false;
     const size_t keyLen = strlen(key);
-    FILE *in = fopen(SETTINGS_FILE, "r");
+    SettingsIn inCopy;
+    SettingsIn *in = OpenSettings(inCopy) ? &inCopy : NULL;
     if (in != NULL)
     {
         char line[512];
-        while (fgets(line, sizeof(line), in) != NULL)
+        while (SettingsGets(line, sizeof(line), in) != NULL)
         {
             if (line[0] != '#' && strncmp(line, key, keyLen) == 0)
             {
@@ -662,7 +741,6 @@ static bool WriteSettingsLines(const char *key, const char *const *values, int c
             }
             contents += line;
         }
-        fclose(in);
         if (!contents.empty() && contents[contents.size() - 1] != '\n')
             contents += "\n";
     }
@@ -680,7 +758,9 @@ static bool WriteSettingsLines(const char *key, const char *const *values, int c
         return false;
     }
     remove(SETTINGS_FILE); // rename won't replace an existing file
-    return rename(SETTINGS_TEMP_FILE, SETTINGS_FILE) == 0;
+    const bool renamed = rename(SETTINGS_TEMP_FILE, SETTINGS_FILE) == 0;
+    ForgetSettingsCache(); // read again, whatever it now holds
+    return renamed;
 }
 
 // ---------------------------------------------------------------------------
@@ -753,13 +833,14 @@ static void ReadShelfPaths(Shelf &shelf, const char *key)
     shelf.pathList[0] = '\0';
     shelf.selected = 0;
     shelf.scroll = -1;
-    FILE *fd = fopen(SETTINGS_FILE, "r");
+    SettingsIn fdCopy;
+    SettingsIn *fd = OpenSettings(fdCopy) ? &fdCopy : NULL;
     if (fd == NULL)
         return;
 
     char line[512];
     const size_t keyLen = strlen(key);
-    while (fgets(line, sizeof(line), fd) != NULL && shelf.pathCount < MAX_SHELF_PATHS)
+    while (SettingsGets(line, sizeof(line), fd) != NULL && shelf.pathCount < MAX_SHELF_PATHS)
     {
         if (line[0] == '#' || strncmp(line, key, keyLen) != 0)
             continue;
@@ -781,7 +862,6 @@ static void ReadShelfPaths(Shelf &shelf, const char *key)
         shelf.pathList[sizeof(shelf.pathList) - 1] = '\0';
         shelf.pathCount++;
     }
-    fclose(fd);
 }
 
 static int CompareGamesByName(const void *a, const void *b);
@@ -2766,6 +2846,18 @@ static int KeepNewTitles(Library &lib, int from, int found)
     return kept - from;
 }
 
+// Whether two folder paths name the same folder: case aside, and a
+// trailing backslash.
+static bool SameFolder(const char *a, const char *b)
+{
+    size_t la = strlen(a), lb = strlen(b);
+    while (la > 0 && a[la - 1] == '\\')
+        la--;
+    while (lb > 0 && b[lb - 1] == '\\')
+        lb--;
+    return la == lb && _strnicmp(a, b, la) == 0;
+}
+
 // One library folder's games into the list: its packages - a Content
 // folder's - then its extracted games' folders. How many it added.
 static int ScanLibraryFolder(Library &lib, const char *path)
@@ -2803,6 +2895,17 @@ static void ReadLibrary(Library &lib, const char *gamesPath, const char (*morePa
     // say - is listed once, from the first.
     for (int p = 0; p < moreCount && lib.count < MAX_INSTALLED_GAMES; ++p)
     {
+        // A folder already read - the games folder again, or a more folder
+        // listed twice - would add nothing, after reading every package in
+        // it again (six seconds for a full Content folder).
+        bool already = SameFolder(morePaths[p], gamesPath);
+        for (int q = 0; q < p && !already; ++q)
+            already = SameFolder(morePaths[p], morePaths[q]);
+        if (already)
+        {
+            dprintf("%s is already read - not scanning it twice\n", morePaths[p]);
+            continue;
+        }
         lib.folderFound[1 + p] = ScanLibraryFolder(lib, morePaths[p]);
         if (lib.folderFound[1 + p] == 0)
             dprintf("No installed games found under %s\n", morePaths[p]);
@@ -3390,6 +3493,7 @@ static void ShowUpdate()
     ShowMessageUI(Tr(STR_UPDATED), message, Tr(STR_IT_STARTS_WHEN_YOU_CONTINUE));
 
     dprintf("Restarting into %s\n", xexPath);
+    LogFlush();
     XLaunchNewImage(xexPath, 0);
 }
 
@@ -3399,12 +3503,13 @@ static int DiscSpeedSetting()
     // Read here rather than by GetSettingsPath, which takes a value of three
     // characters or more - a path's - and so would never see "3".
     int speed = DISC_SPEED_FULL;
-    FILE *fd = fopen(SETTINGS_FILE, "r");
+    SettingsIn fdCopy;
+    SettingsIn *fd = OpenSettings(fdCopy) ? &fdCopy : NULL;
     if (fd != NULL)
     {
         char line[128];
         const size_t keyLen = strlen(DISC_SPEED_KEY);
-        while (fgets(line, sizeof(line), fd) != NULL)
+        while (SettingsGets(line, sizeof(line), fd) != NULL)
         {
             if (line[0] != '#' && strncmp(line, DISC_SPEED_KEY, keyLen) == 0)
             {
@@ -3412,7 +3517,6 @@ static int DiscSpeedSetting()
                 break;
             }
         }
-        fclose(fd);
     }
     if (speed < DISC_SPEED_SLOWEST || speed > DISC_SPEED_FULL)
         speed = DISC_SPEED_FULL;
@@ -3453,12 +3557,13 @@ static void LanguageSetting(char *out, size_t outSize)
     _snprintf(out, outSize, "%s", ConsoleLanguageCode());
     out[outSize - 1] = '\0';
 
-    FILE *fd = fopen(SETTINGS_FILE, "r");
+    SettingsIn fdCopy;
+    SettingsIn *fd = OpenSettings(fdCopy) ? &fdCopy : NULL;
     if (fd == NULL)
         return;
     char line[128];
     const size_t keyLen = strlen(LANGUAGE_KEY);
-    while (fgets(line, sizeof(line), fd) != NULL)
+    while (SettingsGets(line, sizeof(line), fd) != NULL)
     {
         if (line[0] != '#' && strncmp(line, LANGUAGE_KEY, keyLen) == 0)
         {
@@ -3472,7 +3577,6 @@ static void LanguageSetting(char *out, size_t outSize)
             break;
         }
     }
-    fclose(fd);
 }
 
 // A on a language's row: that one, in use at once and saved. Text already
@@ -3483,12 +3587,13 @@ static void LanguageSetting(char *out, size_t outSize)
 static ClockStyle ClockSetting()
 {
     ClockStyle style = CLOCK_FOLLOW_LANGUAGE;
-    FILE *fd = fopen(SETTINGS_FILE, "r");
+    SettingsIn fdCopy;
+    SettingsIn *fd = OpenSettings(fdCopy) ? &fdCopy : NULL;
     if (fd == NULL)
         return style;
     char line[64];
     const size_t keyLen = strlen(CLOCK_KEY);
-    while (fgets(line, sizeof(line), fd) != NULL)
+    while (SettingsGets(line, sizeof(line), fd) != NULL)
     {
         if (line[0] != '#' && strncmp(line, CLOCK_KEY, keyLen) == 0)
         {
@@ -3497,7 +3602,6 @@ static ClockStyle ClockSetting()
             break;
         }
     }
-    fclose(fd);
     return style;
 }
 
@@ -3635,6 +3739,9 @@ static void PairPcHelperInDialog()
         g_pairWait.requestId[sizeof(g_pairWait.requestId) - 1] = '\0';
         g_pairWait.done = 0;
         g_pairWait.thread = CreateThread(NULL, 256 * 1024, PairWaitEntry, NULL, 0, NULL);
+        // The housekeeping core, clear of the UI's core 0.
+        if (g_pairWait.thread != NULL)
+            XSetThreadProcessor(g_pairWait.thread, 5);
         if (g_pairWait.thread == NULL)
         {
             result = PcHelperWaitPair(requestId, token, sizeof(token), id, sizeof(id), message, sizeof(message));
@@ -3759,6 +3866,9 @@ static void PumpHelperAutoScan()
     lastScan = now;
     InterlockedExchange(&g_helperAutoScanRunning, 1);
     HANDLE thread = CreateThread(NULL, 0, HelperAutoScanEntry, NULL, 0, NULL);
+    // The housekeeping core, clear of the UI's core 0.
+    if (thread != NULL)
+        XSetThreadProcessor(thread, 5);
     if (thread == NULL)
         InterlockedExchange(&g_helperAutoScanRunning, 0);
     else
@@ -12554,6 +12664,9 @@ static void StartIconSync(const InstalledGame *games, int count)
     g_iconSync.count    = need;
     InterlockedExchange(&g_iconSync.done, 0);
     g_iconSync.thread = CreateThread(NULL, 64 * 1024, IconSyncEntry, &g_iconSync, 0, NULL);
+    // With the startup loader: reading packages, clear of the UI's core 0.
+    if (g_iconSync.thread != NULL)
+        XSetThreadProcessor(g_iconSync.thread, 2);
     if (g_iconSync.thread == NULL)
     {
         free(paths); free(ids);
@@ -12624,6 +12737,9 @@ static bool StartLibraryRescan(const char *gamesPath)
     g_rescan.generation = g_libraryGeneration;
     InterlockedExchange(&g_rescan.done, 0);
     g_rescan.thread = CreateThread(NULL, 0, LibraryRescanEntry, &g_rescan, 0, NULL);
+    // With the startup loader: reading packages, clear of the UI's core 0.
+    if (g_rescan.thread != NULL)
+        XSetThreadProcessor(g_rescan.thread, 2);
     if (g_rescan.thread == NULL)
     {
         dprintf("[library] no thread to read the drive on; reading it here instead\n");
@@ -13058,20 +13174,41 @@ int main()
     // that wait on the user - a confirmation, the keyboard - show up here too,
     // as one long frame; those can be ignored.
     const DWORD slowFrameMs = 50;
-    DWORD lastFrame = 0;
+
+    // Where the last frame's time went, logged with it at the start of the
+    // next - so "between frames", the Sleep and whatever held this thread
+    // past it, is counted too.
+    enum FramePart
+    {
+        PART_DOWNLOADS, PART_DISC, PART_REFRESH, PART_QUEUE, PART_FILTERS, PART_COVERS, PART_STORE_ART,
+        PART_HELPER_SCAN, PART_DRAW, PART_COUNT
+    };
+    double lastParts[PART_COUNT];
+    double lastStart = 0.0, lastEnd = 0.0;
+    int lastPage = 0;
 
     for (;;)
     {
-        const DWORD frameStart = GetTickCount();
+        const double partStart = ImageTimerMs();
 
         // Night mode paces itself at Sleep(100) deliberately, so every pass
         // of it is a slow frame by this threshold. A night of downloads
         // would be thousands of lines saying so, with whatever actually
         // went wrong buried somewhere in the middle of them.
-        if (lastFrame != 0 && frameStart - lastFrame > slowFrameMs && !NightModeOn())
-            dprintf("[timing] slow frame: %lu ms (page %d)\n", (unsigned long)(frameStart - lastFrame), (int)shell.page);
-        lastFrame = frameStart;
-        const double partStart = ImageTimerMs();
+        if (lastStart > 0.0 && partStart - lastStart > slowFrameMs && !NightModeOn() && lastEnd < 0.0)
+            dprintf("[timing] slow frame: %.0f ms (page %d) - ended early, so no parts\n", partStart - lastStart,
+                    lastPage);
+        else if (lastStart > 0.0 && partStart - lastStart > slowFrameMs && !NightModeOn())
+            dprintf("[timing] slow frame: %.0f ms (page %d) - downloads/update/rescan %.1f, disc %.1f, refresh %.1f, "
+                    "queue %.1f, filters %.1f, covers %.1f, store art %.1f, helper scan %.1f, input + draw %.1f, "
+                    "between frames %.1f ms\n",
+                    partStart - lastStart, lastPage, lastParts[PART_DOWNLOADS], lastParts[PART_DISC],
+                    lastParts[PART_REFRESH], lastParts[PART_QUEUE], lastParts[PART_FILTERS], lastParts[PART_COVERS],
+                    lastParts[PART_STORE_ART], lastParts[PART_HELPER_SCAN], lastParts[PART_DRAW],
+                    partStart - lastEnd);
+        lastStart = partStart;
+        lastPage = (int)shell.page;
+        lastEnd = -1.0; // until this frame gets to the end
 
         // Finished downloads first, since they can make the rest stale.
         HandleFinishedDownloads(shell, haveAuth);
@@ -13189,9 +13326,13 @@ int main()
         const double partPumps = ImageTimerMs();
 
         SnapshotQueue(shell, lib);
+        const double partFilters = ImageTimerMs();
         UpdateLibraryFilters(shell, lib);
+        const double partCovers = ImageTimerMs();
         PumpCoverArt();
+        const double partStoreArt = ImageTimerMs();
         PumpStoreArt();
+        const double partHelperScan = ImageTimerMs();
         PumpHelperAutoScan();
         const double partRest = ImageTimerMs();
 
@@ -14649,12 +14790,19 @@ int main()
             firstFrameLogged = true;
         }
 
-        // Which part of a slow frame took the time. Screens that wait on the
-        // user land in "input + draw".
+        // Which part of a slow frame took the time, for the next frame to
+        // log. Screens that wait on the user land in "input + draw".
         const double partEnd = ImageTimerMs();
-        if (partEnd - partStart > slowFrameMs)
-            dprintf("[timing] frame parts: downloads/update/rescan %.1f, disc %.1f, refresh %.1f, art pumps %.1f, input + draw %.1f ms\n",
-                    partDisc - partStart, partRefresh - partDisc, partPumps - partRefresh, partRest - partPumps, partEnd - partRest);
+        lastParts[PART_DOWNLOADS] = partDisc - partStart;
+        lastParts[PART_DISC] = partRefresh - partDisc;
+        lastParts[PART_REFRESH] = partPumps - partRefresh;
+        lastParts[PART_QUEUE] = partFilters - partPumps;
+        lastParts[PART_FILTERS] = partCovers - partFilters;
+        lastParts[PART_COVERS] = partStoreArt - partCovers;
+        lastParts[PART_STORE_ART] = partHelperScan - partStoreArt;
+        lastParts[PART_HELPER_SCAN] = partRest - partHelperScan;
+        lastParts[PART_DRAW] = partEnd - partRest;
+        lastEnd = partEnd;
 
         // Device is created with D3DPRESENT_INTERVAL_IMMEDIATE (no vsync), so
         // pace the loop by hand instead of hammering Present() as fast as the
@@ -14713,5 +14861,6 @@ int main()
 
     ShutdownGameListUI();
 
+    LogFlush();
     return EXIT_SUCCESS;
 }

@@ -161,6 +161,9 @@ static DWORD WINAPI ClockSyncThread(LPVOID)
 void StartClockSync()
 {
     HANDLE thread = CreateThread(NULL, 0, ClockSyncThread, NULL, 0, NULL);
+    // The housekeeping core, clear of the UI's core 0.
+    if (thread != NULL)
+        XSetThreadProcessor(thread, 5);
     if (thread != NULL)
         CloseHandle(thread);
     else

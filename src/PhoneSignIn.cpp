@@ -449,6 +449,9 @@ bool StartPhoneSignIn(char *url, unsigned int urlSize)
     InterlockedExchange(&g_stop, 0);
     // The page is built in strings and a sign-in runs TLS on this thread.
     g_thread = CreateThread(NULL, 128 * 1024, ListenThread, NULL, 0, NULL);
+    // The housekeeping core, clear of the UI's core 0.
+    if (g_thread != NULL)
+        XSetThreadProcessor(g_thread, 5);
     if (g_thread == NULL)
     {
         EnterCriticalSection(&g_lock);

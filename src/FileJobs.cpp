@@ -687,6 +687,9 @@ bool StartFileJobs()
         return false;
     InterlockedExchange(&g_stop, 0);
     g_thread = CreateThread(NULL, 64 * 1024, WorkerThread, NULL, 0, NULL);
+    // Copies and moves, clear of the UI's core 0.
+    if (g_thread != NULL)
+        XSetThreadProcessor(g_thread, 3);
     return g_thread != NULL;
 }
 

@@ -419,6 +419,9 @@ bool StartStorageScan(const StorageScanRequest &request)
 
     g_request = request;
     HANDLE thread = CreateThread(NULL, 256 * 1024, StorageScanEntry, NULL, 0, NULL);
+    // Reading every drive's folders, clear of the UI's core 0.
+    if (thread != NULL)
+        XSetThreadProcessor(thread, 2);
     if (thread == NULL)
     {
         dprintf("[storage] CreateThread failed (%lu)\n", GetLastError());

@@ -68,4 +68,9 @@ void ClearConsole();
 // compiles .c as C89 - where `bool` is not a type.
 void SetConsoleQuiet(int quiet);
 
+// Quiet mode also hands the log file to a writer thread, which writes the
+// lines waiting every quarter second. This writes them now - before the app
+// ends, or starts a game or another app in its place.
+void LogFlush();
+
 // #include "Language.h"
