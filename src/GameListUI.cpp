@@ -379,6 +379,48 @@ static const char g_strAmbientShader[] =
 static D3DVertexShader *g_pAmbientVertexShader = NULL;
 static D3DPixelShader *g_pAmbientPixelShader = NULL;
 
+// The Original Xbox theme's wallpaper, drawn rather than shipped: the first
+// dashboard's green - dark in the middle, brighter toward the edges - with a
+// square grid bowed as if seen from inside a sphere, and a fainter mesh of
+// hexagons in its cells. The lines take the accent, so they are lime unless
+// another one is picked. Shares the ambient shader's vertex shader.
+//
+// The hexagons are the usual two offset grids: a point is nearer the centre
+// of one or the other, and its distance from that centre in hex terms says
+// how close it is to an edge.
+static const char g_strOgWallShader[] =
+    "struct VS_OUT\n"
+    "{\n"
+    "    float4 Position : POSITION;\n"
+    "    float2 Pixel : TEXCOORD0;\n"
+    "};\n"
+    "uniform float4 AmbFrame : register(c1);\n" // y: 1/width, z: 1/height, w: width/height
+    "uniform float4 OgLine : register(c2);\n"   // the lines' colour: the accent
+    "float4 OgPixelShader( VS_OUT In ) : COLOR0\n"
+    "{\n"
+    "    float2 uv = In.Pixel * AmbFrame.yz;\n"
+    "    float2 p = float2( ( uv.x - 0.5 ) * AmbFrame.w, uv.y - 0.5 );\n"
+    "    float r2 = dot( p, p );\n"
+    "    float2 w = p / ( 1.0 + 0.3 * r2 );\n"
+    "    float2 fg = abs( frac( w * 16.0 ) - 0.5 );\n"
+    "    float grid = saturate( ( max( fg.x, fg.y ) - 0.465 ) * 28.0 );\n"
+    "    float2 q = w * 40.0;\n"
+    "    float2 r = float2( 1.0, 1.7320508 );\n"
+    "    float2 a = frac( q / r ) * r - r * 0.5;\n"
+    "    float2 b = frac( ( q - r * 0.5 ) / r ) * r - r * 0.5;\n"
+    "    float2 g = ( dot( a, a ) < dot( b, b ) ) ? a : b;\n"
+    "    float2 ag = abs( g );\n"
+    "    float d = max( dot( ag, float2( 0.5, 0.8660254 ) ), ag.x );\n"
+    "    float mesh = saturate( ( d - 0.45 ) * 20.0 );\n"
+    "    float edge = saturate( sqrt( r2 ) * 1.25 );\n"
+    "    float3 col = float3( 0.02, 0.2, 0.03 ) * ( 0.6 + 0.55 * edge );\n"
+    "    col += OgLine.rgb * ( grid * ( 0.08 + 0.32 * edge ) + mesh * ( 0.04 + 0.1 * edge ) );\n"
+    "    col += ( frac( dot( In.Pixel, float2( 0.0637, 0.1051 ) ) ) - 0.5 ) * 0.005;\n"
+    "    return float4( col, 1.0 );\n"
+    "}\n";
+
+static D3DPixelShader *g_pOgWallPixelShader = NULL; // NULL: the Original Xbox wallpaper is a plain gradient
+
 // False if it didn't compile - Home then draws a plain two-stop gradient
 // instead of the bands (see DrawAmbientBackground), which is still a page
 // rather than a black screen.
@@ -442,6 +484,15 @@ static void CreateAmbientShader()
         return;
 
     g_ambientReady = true;
+
+    // The Original Xbox wallpaper, on the same vertex shader. Without it
+    // that theme's Home is a plain dark green gradient.
+    if (CompileShader(g_strOgWallShader, sizeof(g_strOgWallShader) - 1, "OgPixelShader", "ps.2.0", &code))
+    {
+        if (FAILED(g_pd3dDevice->CreatePixelShader((DWORD *)code->GetBufferPointer(), &g_pOgWallPixelShader)))
+            g_pOgWallPixelShader = NULL;
+        code->Release();
+    }
 }
 
 static bool CreateQuadResources()
@@ -1105,7 +1156,7 @@ static void ResolveTheme(int theme, int accent)
 // screen - keep white text on a dark scrim on every theme, as the dashboards
 // do: on a light theme they take Series' colours, with its accent, for the
 // frame. Declare one at the top of such a Render call.
-static bool g_homeWallpaper = true; // UiSetHomeWallpaper
+static int g_homeBackground = UI_HOME_BG_GAME; // UiSetHomeBackground
 
 struct DarkThemeScope
 {
@@ -1132,10 +1183,11 @@ void UiSetTheme(int theme, int accent)
     UiSetButtonStyle(g_theme.p.buttonStyle);
 }
 
-void UiSetHomeWallpaper(bool on)
+void UiSetHomeBackground(int mode)
 {
-    g_homeWallpaper = on;
+    g_homeBackground = (mode >= 0 && mode < UI_HOME_BG_COUNT) ? mode : UI_HOME_BG_GAME;
 }
+
 
 int UiThemeDefaultAccent(int theme)
 {
@@ -1398,6 +1450,8 @@ static void FillRoundGradient(float x, float y, float w, float h, float radius,
 // and it is taken in seconds as a float, which stays exact enough for the
 // wave arithmetic for a session far longer than anyone leaves a dashboard
 // sitting on an empty page.
+static void DrawFullScreenShader(D3DPixelShader *pixelShader);
+
 static void DrawAmbientBackground()
 {
     if (!g_ambientReady)
@@ -1423,10 +1477,17 @@ static void DrawAmbientBackground()
     g_pd3dDevice->SetPixelShaderConstantF(4, glowA, 1);
     g_pd3dDevice->SetPixelShaderConstantF(5, glowB, 1);
 
+    DrawFullScreenShader(g_pAmbientPixelShader);
+}
+
+// The whole screen through one of the full-screen pixel shaders, on the
+// ambient vertex shader; its constants are the caller's to set first.
+static void DrawFullScreenShader(D3DPixelShader *pixelShader)
+{
     g_pd3dDevice->SetTexture(0, NULL);
     g_pd3dDevice->SetVertexDeclaration(g_pQuadVertexDecl);
     g_pd3dDevice->SetVertexShader(g_pAmbientVertexShader);
-    g_pd3dDevice->SetPixelShader(g_pAmbientPixelShader);
+    g_pd3dDevice->SetPixelShader(pixelShader);
 
     // The same full state setup every other draw here does - each one sets
     // the device's state in full rather than trusting what was left behind.
@@ -3071,6 +3132,7 @@ void ShutdownGameListUI()
     if (g_pFlags != NULL) { g_pFlags->Release(); g_pFlags = NULL; }
     if (g_pPublisherLogos != NULL) { g_pPublisherLogos->Release(); g_pPublisherLogos = NULL; }
     if (g_pAmbientPixelShader != NULL) { g_pAmbientPixelShader->Release(); g_pAmbientPixelShader = NULL; }
+    if (g_pOgWallPixelShader != NULL) { g_pOgWallPixelShader->Release(); g_pOgWallPixelShader = NULL; }
     if (g_pAmbientVertexShader != NULL) { g_pAmbientVertexShader->Release(); g_pAmbientVertexShader = NULL; }
     if (g_pShapePixelShader != NULL) { g_pShapePixelShader->Release(); g_pShapePixelShader = NULL; }
     if (g_pShapeVertexShader != NULL) { g_pShapeVertexShader->Release(); g_pShapeVertexShader = NULL; }
@@ -7560,6 +7622,44 @@ static void DrawHomeWallpaper(const HomeWallpapers &art)
     DrawWallpaperLayer(art.to, art.t);
 }
 
+
+// The theme's own wallpaper, behind Home when it's picked over the games':
+// Series plain black, Light plain white, the 360's silver gradient with a
+// soft light from above, and the Original Xbox's green grid.
+static void DrawThemeWallpaper()
+{
+    const float w = g_M.screenW, h = g_M.screenH;
+    switch (g_theme.id)
+    {
+    case UI_THEME_XBOX360:
+        FillRoundGradient(0.0f, 0.0f, w, h, 0.0f, 0xFFF3F4F5, 0xFFA9AFB5, true);
+        ShadowRound(w * 0.18f, -h * 0.35f, w * 0.64f, h * 0.62f, h * 0.31f, S(260.0f), 0x99FFFFFF);
+        break;
+    case UI_THEME_ORIGINAL:
+        if (g_pOgWallPixelShader != NULL && g_ambientReady)
+        {
+            static double startedAt = 0.0;
+            if (startedAt == 0.0)
+                startedAt = TimerMs();
+            float frame[4] = {(float)((TimerMs() - startedAt) * 0.001), 1.0f / w, 1.0f / h, w / h};
+            float lines[4];
+            ColorToFloat4(g_theme.accent, lines);
+            g_pd3dDevice->SetPixelShaderConstantF(1, frame, 1);
+            g_pd3dDevice->SetPixelShaderConstantF(2, lines, 1);
+            DrawFullScreenShader(g_pOgWallPixelShader);
+        }
+        else
+            FillRoundGradient(0.0f, 0.0f, w, h, 0.0f, 0xFF0A300C, 0xFF06220A, true);
+        break;
+    case UI_THEME_LIGHT:
+        DrawRect(0.0f, 0.0f, w, h, 0xFFF4F4F4);
+        break;
+    default:
+        DrawRect(0.0f, 0.0f, w, h, 0xFF000000);
+        break;
+    }
+}
+
 // One tile in the recents row: the disc's own face when there's no box art
 // for what's in the drive, a cover otherwise.
 static void DrawHomeTileArt(const HomeRecentView &tile, float x, float y, float s)
@@ -7593,8 +7693,9 @@ void RenderHomeFrame(HomePageView &view, const UiHint *hints, int hintCount)
     // Over the wallpaper, white text on any theme. With the wallpaper turned
     // off, Home is the theme's own, light or dark, and on a light one the
     // shades and text shadows that were there for the art are left out.
-    DarkThemeScope darkScope(g_homeWallpaper);
-    const bool plainLight = !g_homeWallpaper && g_theme.p.light;
+    const bool themeBackground = g_homeBackground != UI_HOME_BG_GAME;
+    DarkThemeScope darkScope(!themeBackground);
+    const bool plainLight = themeBackground && g_theme.p.light;
     if (!g_Initialized)
         return;
 
@@ -7653,10 +7754,10 @@ void RenderHomeFrame(HomePageView &view, const UiHint *hints, int hintCount)
 
     // --- Pass 1: quads ---
 
-    if (g_homeWallpaper)
-        DrawHomeWallpaper(HomeWallpaper(view, focusTile));
+    if (themeBackground)
+        DrawThemeWallpaper();
     else
-        DrawAmbientBackground();
+        DrawHomeWallpaper(HomeWallpaper(view, focusTile));
 
     // Enough shade for white text at the top and over the row, and none in
     // the middle, where the wallpaper is the point.

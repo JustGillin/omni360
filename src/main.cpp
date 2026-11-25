@@ -85,7 +85,8 @@ extern "C" NTSTATUS XexGetModuleHandle(PSZ moduleName, PHANDLE outHandle);
 #define GAMES_PATH_KEY "games-path: "
 #define UPDATE_CHECK_KEY "check-updates: " // "off" stops the check at start
 #define SOUNDS_KEY "nav-sounds: "         // "off" silences the interface
-#define HOME_WALLPAPER_KEY "home-wallpaper: " // "off" shows Home without the games' wallpapers
+#define HOME_BACKGROUND_KEY "home-background: " // game (unset), theme or custom
+#define HOME_WALLPAPER_KEY "home-wallpaper: "   // before home-background: "off" meant the theme's
 #define THEME_KEY "theme: "                // series (unset), xbox360, original or light
 #define ACCENT_KEY "accent: "              // an accent name, or unset for the theme's own
 #define INSTALL_TYPE_KEY "install-type: "   // "folder" copies a game's files out rather than making a GOD package - Store and disc installs
@@ -418,12 +419,19 @@ static int AccentSetting()
     return UiThemeDefaultAccent(ThemeSetting());
 }
 
-// Whether Home shows the focused game's wallpaper. On unless turned off.
-static bool HomeWallpaperSetting()
+// What's behind Home, as UI_HOME_BG_*. The game's wallpaper unless set -
+// or, from before there were three, unless the wallpaper was turned off.
+static const char *const kHomeBackgroundNames[UI_HOME_BG_COUNT] = { "game", "theme", "custom" };
+
+static int HomeBackgroundSetting()
 {
     char value[16];
+    GetSettingsPath(HOME_BACKGROUND_KEY, "", value, sizeof(value));
+    for (int i = 0; i < UI_HOME_BG_COUNT; ++i)
+        if (_stricmp(value, kHomeBackgroundNames[i]) == 0)
+            return i;
     GetSettingsPath(HOME_WALLPAPER_KEY, "yes", value, sizeof(value));
-    return _stricmp(value, "off") != 0;
+    return _stricmp(value, "off") == 0 ? UI_HOME_BG_THEME : UI_HOME_BG_GAME;
 }
 
 // The PC helper's pairing, from settings.txt into PcHelper.
@@ -2649,7 +2657,7 @@ enum SettingsRow
     SETTINGS_ROW_INSTALL_TYPE, // Games on Demand or folder games, for Store installs
     SETTINGS_ROW_THEME,        // the theme: left and right change it
     SETTINGS_ROW_ACCENT,       // its accent: left and right change it
-    SETTINGS_ROW_HOME_WALLPAPER, // the game's wallpaper behind Home, or not
+    SETTINGS_ROW_HOME_BACKGROUND, // what's behind Home: left and right change it
     SETTINGS_ROW_RESYNC_LIBRARY, // re-read the library from disk and re-fetch missing icons
     SETTINGS_ROW_LANGUAGE,     // a language's row: A picks it (arg is its index)
     SETTINGS_ROW_LANGUAGE_REFRESH, // looks again for language files beside Omni360
@@ -3574,12 +3582,18 @@ static void ToggleEjectAfterInstall()
     SetEjectAfterInstall(on);
 }
 
-static void ToggleHomeWallpaper()
+// Left and right on Home's background row. Your own wallpaper isn't one of
+// the steps yet - it comes with picking one.
+#define HOME_BACKGROUND_STEPS 2
+
+static void StepHomeBackground(int step)
 {
-    const bool on = !HomeWallpaperSetting();
-    if (!SetSettingsValue(HOME_WALLPAPER_KEY, on ? "yes" : "off"))
+    const int mode = HomeBackgroundSetting() + step;
+    if (mode < 0 || mode >= HOME_BACKGROUND_STEPS)
+        return;
+    if (!SetSettingsValue(HOME_BACKGROUND_KEY, kHomeBackgroundNames[mode]))
         ShowMessageUI(Tr(STR_NOT_SAVED), Tr(STR_SETTINGS_TXT_COULD_NOT_BE), NULL);
-    UiSetHomeWallpaper(on);
+    UiSetHomeBackground(mode);
 }
 
 static void ToggleUiSounds()
@@ -4075,10 +4089,17 @@ static void BuildSettingsPage(SettingsPage &page, const Library &lib, const char
             }
         }
 
-        AddSettingsRow(page, SETTINGS_VIEW_LINE, Tr(STR_HOME_WALLPAPER));
-        AddSettingsControl(page, SETTINGS_CONTROL_CHECK, NULL, SETTINGS_ROW_HOME_WALLPAPER,
-                           Tr(STR_HOME_WALLPAPER_HELP));
-        page.rows[page.count - 1].controls[0].on = HomeWallpaperSetting();
+        {
+            const int mode = HomeBackgroundSetting();
+            const int shown = mode < HOME_BACKGROUND_STEPS ? mode : UI_HOME_BG_GAME;
+            AddSettingsRow(page, SETTINGS_VIEW_LINE, Tr(STR_HOME_BACKGROUND));
+            AddSettingsControl(page, SETTINGS_CONTROL_VALUE, Tr(shown == UI_HOME_BG_THEME ? STR_HOME_BG_THEME : STR_HOME_BG_GAME),
+                               SETTINGS_ROW_HOME_BACKGROUND,
+                               Tr(shown == UI_HOME_BG_THEME ? STR_HOME_BG_THEME_HELP : STR_HOME_BG_GAME_HELP));
+            SettingsControlView &c = page.rows[page.count - 1].controls[0];
+            c.valueIndex = shown;
+            c.valueCount = HOME_BACKGROUND_STEPS;
+        }
 
         AddSettingsRow(page, SETTINGS_VIEW_LINE, Tr(STR_NAVIGATION_SOUNDS));
         AddSettingsControl(page, SETTINGS_CONTROL_CHECK, NULL, SETTINGS_ROW_SOUNDS,
@@ -4430,7 +4451,6 @@ static SettingsOutcome RunSettingsRow(SettingsRow row, int arg, Library &lib, ch
     case SETTINGS_ROW_LIBRARY_FOLDER: ToggleLibraryFolder(arg, lib, gamesPath, outcome); break;
     case SETTINGS_ROW_ADD_FOLDER:   AddLibraryFolder(lib, gamesPath, outcome); break;
     case SETTINGS_ROW_SOUNDS:       ToggleUiSounds(); break;
-    case SETTINGS_ROW_HOME_WALLPAPER: ToggleHomeWallpaper(); break;
     case SETTINGS_ROW_INSTALL_TYPE: ToggleInstallType(); break;
     case SETTINGS_ROW_EJECT:        ToggleEjectAfterInstall(); break;
     case SETTINGS_ROW_CLOCK_SYNC_NOW: SetClockNow(); break;
@@ -12242,7 +12262,7 @@ int main()
     StartupStep("language");
 
     UiSetTheme(ThemeSetting(), AccentSetting());
-    UiSetHomeWallpaper(HomeWallpaperSetting());
+    UiSetHomeBackground(HomeBackgroundSetting());
     if (!InitGameListUI())
     {
         SetConsoleQuiet(false);
@@ -13538,6 +13558,11 @@ int main()
                 else if (onValue && settings.actions[settings.focusRow][settings.focusCol] == SETTINGS_ROW_THEME)
                 {
                     StepTheme(right ? 1 : -1);
+                    shell.stale = true;
+                }
+                else if (onValue && settings.actions[settings.focusRow][settings.focusCol] == SETTINGS_ROW_HOME_BACKGROUND)
+                {
+                    StepHomeBackground(right ? 1 : -1);
                     shell.stale = true;
                 }
                 else if (onValue && settings.actions[settings.focusRow][settings.focusCol] == SETTINGS_ROW_ACCENT)
