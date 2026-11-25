@@ -112,13 +112,15 @@ static float g_selawikCapMid = 0.0f;
 // turn if the type comes out uniformly too small or too large.
 #define UITEXT_SIZE_TRIM      1.18f
 
-// Distinct sizes in play are few - a dozen scale factors, some in both
-// weights, and one resolution per session - so a small fixed cache covers it
-// without ever evicting.
-#define UITEXT_MAX_FONTS      64 // two faces' worth: the theme's and Selawik's
+// Distinct sizes in play are a few dozen - scale factors in both weights,
+// and the sizes text passes through as it grows with focus - so the cache is
+// sized for that, and when it does fill, the font least recently drawn goes.
+// A face's fonts go when the theme leaves it.
+#define UITEXT_MAX_FONTS      96
 
-// The size every face is measured at, to match one to another.
-#define UITEXT_REFERENCE_POINTS 20.0f
+// The size every face is measured at, to match one to another. Large, since
+// XUI reports its metrics in whole pixels: at 20pt that rounding alone was 5%.
+#define UITEXT_REFERENCE_POINTS 200.0f
 
 struct CachedFont
 {
@@ -126,10 +128,21 @@ struct CachedFont
     bool     bold;
     int      face;
     HXUIFONT font;
+    DWORD    usedFrame; // the Begin it was last drawn or measured in
 };
 
 static CachedFont g_fonts[UITEXT_MAX_FONTS];
 static int        g_fontCount = 0;
+static DWORD      g_frame = 1; // counts Begins
+
+// Releases one cached font and closes the gap.
+static void DropCachedFont(int i)
+{
+    if (g_fonts[i].font != NULL)
+        XuiReleaseFont(g_fonts[i].font);
+    g_fonts[i] = g_fonts[g_fontCount - 1];
+    g_fontCount--;
+}
 
 static HXUIDC g_hDC = NULL;
 
@@ -200,16 +213,36 @@ void *UiFont::FontForPixelSize(float pixels, bool bold)
     for (int i = 0; i < g_fontCount; ++i)
     {
         if (g_fonts[i].pixels == key && g_fonts[i].bold == bold && g_fonts[i].face == face)
+        {
+            g_fonts[i].usedFrame = g_frame;
             return g_fonts[i].font;
+        }
     }
 
     if (g_fontCount >= UITEXT_MAX_FONTS)
     {
-        // Falling back to an existing font keeps text on screen at slightly
-        // the wrong size, which is far better than drawing nothing.
-        dprintf("[UiText] font cache full at %d entries, reusing %.0fpx for %.0fpx\n",
-                UITEXT_MAX_FONTS, g_fonts[0].pixels, key);
-        return g_fontCount > 0 ? g_fonts[0].font : NULL;
+        // The font drawn longest ago goes - never one already drawn this
+        // frame, which XUI may still be holding.
+        int oldest = -1;
+        for (int i = 0; i < g_fontCount; ++i)
+        {
+            if (g_fonts[i].usedFrame != g_frame &&
+                (oldest < 0 || g_fonts[i].usedFrame < g_fonts[oldest].usedFrame))
+                oldest = i;
+        }
+        if (oldest < 0)
+        {
+            // Every one is in this frame: the nearest size is far better than
+            // drawing nothing, and far better than any other size.
+            int nearest = 0;
+            for (int i = 1; i < g_fontCount; ++i)
+                if (fabsf(g_fonts[i].pixels - key) < fabsf(g_fonts[nearest].pixels - key))
+                    nearest = i;
+            dprintf("[UiText] font cache full at %d entries, reusing %.0fpx for %.0fpx\n",
+                    UITEXT_MAX_FONTS, g_fonts[nearest].pixels, key);
+            return g_fonts[nearest].font;
+        }
+        DropCachedFont(oldest);
     }
 
     float points = (key / g_pixelsPerPoint) * UITEXT_SIZE_TRIM * g_faceState[face].scale;
@@ -229,6 +262,7 @@ void *UiFont::FontForPixelSize(float pixels, bool bold)
     g_fonts[g_fontCount].bold = bold;
     g_fonts[g_fontCount].face = face;
     g_fonts[g_fontCount].font = font;
+    g_fonts[g_fontCount].usedFrame = g_frame;
     g_fontCount++;
 
     return font;
@@ -365,8 +399,17 @@ void UiFont::SetFace(int face)
     if (face < 0 || face >= UI_FACE_COUNT)
         face = UI_FACE_SELAWIK;
     m_face = face;
-    if (m_ready)
-        LoadFace(face);
+    if (!m_ready)
+        return;
+    LoadFace(face);
+
+    // The fonts of the faces left behind: the theme won't draw them again
+    // until it changes back. Selawik's stay - it stands in for any face that
+    // fails. Never mid-frame: the theme changes between frames.
+    const int drawn = GetFace();
+    for (int i = g_fontCount - 1; i >= 0; --i)
+        if (g_fonts[i].face != drawn && g_fonts[i].face != UI_FACE_SELAWIK)
+            DropCachedFont(i);
 }
 
 HRESULT UiFont::Create(const char * /*ignoredLegacyPath*/)
@@ -520,6 +563,8 @@ void UiFont::Begin()
 {
     if (!m_ready)
         return;
+
+    g_frame++;
 
     // Transparent clear: confirmed on hardware to leave the frame's existing
     // quads and any other drawing intact.
