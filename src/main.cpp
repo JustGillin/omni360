@@ -266,8 +266,11 @@ struct SettingsCache
 };
 static SettingsCache g_settingsCache;
 
+static void ForgetFoldersSeen(); // a folder may have been added
+
 static void ForgetSettingsCache()
 {
+    ForgetFoldersSeen();
     EnterCriticalSection(&g_settingsCache.lock);
     g_settingsCache.read = false;
     g_settingsCache.exists = false;
@@ -712,6 +715,49 @@ static bool FolderExists(const char *path)
     return attributes != (DWORD)-1 && (attributes & FILE_ATTRIBUTE_DIRECTORY) != 0;
 }
 
+// FolderExists for Settings' folder list, which is built again on every
+// refresh - a finished download, a dialog closed - and looked up every
+// usual place on every drive each time: tens of milliseconds while the
+// hard drive was busy. An answer is kept for ten seconds, so a USB drive
+// plugged in shows its folders a moment later. Anything checking a path
+// typed in uses FolderExists itself.
+#define FOLDER_SEEN_MS    10000
+#define FOLDER_SEEN_SLOTS 96
+
+struct FolderSeen
+{
+    char path[MAX_TEXT_LENGTH];
+    bool exists;
+    DWORD at;
+};
+static FolderSeen g_foldersSeen[FOLDER_SEEN_SLOTS];
+static int g_folderSeenNext = 0;
+
+static void ForgetFoldersSeen()
+{
+    for (int i = 0; i < FOLDER_SEEN_SLOTS; ++i)
+        g_foldersSeen[i].path[0] = '\0';
+}
+
+static bool FolderExistsRecently(const char *path)
+{
+    const DWORD now = GetTickCount();
+    for (int i = 0; i < FOLDER_SEEN_SLOTS; ++i)
+    {
+        FolderSeen &f = g_foldersSeen[i];
+        if (f.path[0] != '\0' && now - f.at < FOLDER_SEEN_MS && _stricmp(f.path, path) == 0)
+            return f.exists;
+    }
+    const bool exists = FolderExists(path);
+    FolderSeen &f = g_foldersSeen[g_folderSeenNext];
+    g_folderSeenNext = (g_folderSeenNext + 1) % FOLDER_SEEN_SLOTS;
+    _snprintf(f.path, sizeof(f.path), "%s", path);
+    f.path[sizeof(f.path) - 1] = '\0';
+    f.exists = exists;
+    f.at = now;
+    return exists;
+}
+
 // Rewrites every key line in settings.txt as values, one line each - in
 // place of every one there was, where the first of them was, or at the end;
 // none removes them all. Every other line stays as it was. Written to a
@@ -1027,7 +1073,7 @@ static void AddScannedFolderRow(const char *path, FolderKind kind, int found, co
     row.kind = kind;
     row.scanned = true;
     row.suggested = IsSuggestedFolder(row.path);
-    row.exists = FolderExists(row.path);
+    row.exists = FolderExistsRecently(row.path);
     row.games = found;
 }
 
@@ -1051,7 +1097,7 @@ static void FindLibraryFolders(const char *gamesPath, const int *moreFound)
             char path[MAX_TEXT_LENGTH];
             _snprintf(path, sizeof(path), "%s%s", kFolderDrives[d], kFolderPlaces[f].place);
             path[sizeof(path) - 1] = '\0';
-            if (FolderListed(path, gamesPath) || !FolderExists(path))
+            if (FolderListed(path, gamesPath) || !FolderExistsRecently(path))
                 continue;
             LibraryFolderRow &row = g_folderRows[g_folderRowCount++];
             memcpy(row.path, path, strlen(path) + 1);
@@ -1188,7 +1234,24 @@ static int CompareGamesByName(const void *a, const void *b)
 // not something to do if others have access to it.
 // ---------------------------------------------------------------------------
 
-static bool LoadSavedKeys(std::string &accessKey, std::string &secretKey)
+// The file, read once and kept: every refresh of the shell asked, and
+// reading it each time was 20-60 ms while the hard drive was busy. Read
+// again after the keys are saved or removed here, and after archive.org
+// refuses them - which is how keys replaced over FTP have always been
+// picked up.
+static bool g_keysRead = false;
+static bool g_keysFound = false;
+static std::string g_keysAccess, g_keysSecret;
+
+static void ForgetSavedKeys()
+{
+    g_keysRead = false;
+    g_keysFound = false;
+    g_keysAccess.clear();
+    g_keysSecret.clear();
+}
+
+static bool ReadKeysFile(std::string &accessKey, std::string &secretKey)
 {
     FILE *f = fopen(CREDENTIALS_FILE, "rb");
     if (f == NULL)
@@ -1213,8 +1276,23 @@ static bool LoadSavedKeys(std::string &accessKey, std::string &secretKey)
     return true;
 }
 
+static bool LoadSavedKeys(std::string &accessKey, std::string &secretKey)
+{
+    if (!g_keysRead)
+    {
+        g_keysFound = ReadKeysFile(g_keysAccess, g_keysSecret);
+        g_keysRead = true;
+    }
+    if (!g_keysFound)
+        return false;
+    accessKey = g_keysAccess;
+    secretKey = g_keysSecret;
+    return true;
+}
+
 static bool SaveKeys(const std::string &accessKey, const std::string &secretKey)
 {
+    ForgetSavedKeys();
     FILE *f = fopen(CREDENTIALS_FILE, "wb");
     if (f == NULL)
         return false;
@@ -4133,6 +4211,7 @@ static void RemoveKeys(SettingsOutcome &outcome)
     if (!ShowConfirmUI(Tr(STR_SIGN_OUT_QUESTION), Tr(STR_SIGN_OUT_HELP), NULL, Tr(STR_SIGN_OUT)))
         return;
 
+    ForgetSavedKeys();
     if (remove(CREDENTIALS_FILE) != 0)
     {
         ShowMessageUI(Tr(STR_COULD_NOT_REMOVE), Tr(STR_ARCHIVEORGKEYS_TXT_COULD_NOT_BE_2), NULL);
@@ -8724,9 +8803,29 @@ static void RefreshShell(Shell &shell, Library &lib, const char *contentBasePath
     ReadStorageStatus(contentBasePath, &shell.storage);
     const double storageDone = ImageTimerMs();
 
-    // An install, or a new games folder, can change whether the disc is in it.
+    // An install, or a new games folder, can change whether the disc is in it
+    // - either of which reads the library again. So the drive is asked once
+    // for each disc and library, not on every refresh (~20 ms when it's busy).
     if (shell.hasDisc && shell.disc.state == DISC_READY)
-        shell.discInstalled = IsDiscInstalled(gamesPath, shell.disc.titleId, shell.disc.mediaId);
+    {
+        static unsigned long checkedTitle = 0, checkedMedia = 0;
+        static int checkedGeneration = -1, checkedRemovals = -1;
+        static char checkedPath[MAX_TEXT_LENGTH] = "";
+        static bool checkedInstalled = false;
+        if (checkedTitle != shell.disc.titleId || checkedMedia != shell.disc.mediaId ||
+            checkedGeneration != g_libraryGeneration || checkedRemovals != g_storageRemovals ||
+            _stricmp(checkedPath, gamesPath) != 0)
+        {
+            checkedInstalled = IsDiscInstalled(gamesPath, shell.disc.titleId, shell.disc.mediaId);
+            checkedTitle = shell.disc.titleId;
+            checkedMedia = shell.disc.mediaId;
+            checkedGeneration = g_libraryGeneration;
+            checkedRemovals = g_storageRemovals;
+            _snprintf(checkedPath, sizeof(checkedPath), "%s", gamesPath);
+            checkedPath[sizeof(checkedPath) - 1] = '\0';
+        }
+        shell.discInstalled = checkedInstalled;
+    }
 
     const double discDone = ImageTimerMs();
     BuildSettingsPage(shell.settings, lib, gamesPath);
@@ -10877,7 +10976,10 @@ static void HandleFinishedDownloads(Shell &shell, bool &haveAuth)
         // fixed outside Settings - by replacing ArchiveOrgKeys.txt over FTP -
         // are picked up without restarting the app.
         if (job.outcome == QUEUE_OUTCOME_KEYS_REJECTED)
+        {
             haveAuth = false;
+            ForgetSavedKeys();
+        }
 
         // An arcade or indie game, by its RAR. An arcade game is new in the
         // library; an indie game isn't one the library lists.
