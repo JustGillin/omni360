@@ -2292,6 +2292,16 @@ void SetShellBusy(const char *label)
 // Three dots that fill and empty, so it reads as working rather than stuck.
 #define BUSY_DOT_MS 420.0
 
+static bool ToastVisibleThisFrame();
+
+// Hidden while a toast is up: the toast sits over it, and every page draws
+// its text after all of its boxes, so the label's words came out on top of
+// the toast's box. It's back as soon as the toast goes.
+static bool BusyShown()
+{
+    return g_busyLabel[0] != '\0' && !ToastVisibleThisFrame();
+}
+
 static float BusyWidth()
 {
     if (g_busyLabel[0] == '\0')
@@ -2312,7 +2322,7 @@ static float BusyCenterY()
 
 static void DrawBusyShapes()
 {
-    if (g_busyLabel[0] == '\0')
+    if (!BusyShown())
         return;
 
     const float w = BusyWidth();
@@ -2347,7 +2357,7 @@ static void DrawButtonHintText(const ButtonHint *hints, int count, float centerY
                           COL_TEXT2, hints[i].label);
     }
 
-    if (g_busyLabel[0] != '\0')
+    if (BusyShown())
         TextMid(BusyRight() - BusyWidth() + S(34.0f), BusyCenterY(), 0.7f, COL_TEXT2, g_busyLabel);
 }
 
