@@ -5939,12 +5939,20 @@ static void DrawDialogHintText(const ButtonHint *hints, int count, float a)
 static D3DTexture *g_heldBackdrop = NULL;
 static int g_heldBackdropDepth = 0;
 
+// Whether a dialog has been up during this hold. The next one appears in
+// place rather than opening again: the page fading back in and dimming
+// again between each, as every level of the folder picker did, flashed.
+static bool g_heldBackdropShown = false;
+
 void HoldDialogBackdrop()
 {
     if (!g_Initialized)
         return;
     if (g_heldBackdropDepth++ == 0)
+    {
         g_heldBackdrop = SnapshotFrontBuffer();
+        g_heldBackdropShown = false;
+    }
 }
 
 void ReleaseDialogBackdrop()
@@ -6103,7 +6111,12 @@ static int RunAlert(const char *heading, const char *message, const char *detail
     if (list && focus >= rowsShown)
         scroll = focus - rowsShown + 1;
     int result = -1;
-    const DWORD opened = GetTickCount();
+    // One that follows another over the same held backdrop starts open: the
+    // page is dimmed already, and fading it in again flashed.
+    const bool followsAnother = g_heldBackdrop != NULL && g_heldBackdropShown;
+    const DWORD opened = GetTickCount() - (followsAnother ? (DWORD)ALERT_OPEN_MS + 1 : 0);
+    if (g_heldBackdrop != NULL)
+        g_heldBackdropShown = true;
 
     // As every screen here, so the press that opened it can't also answer it.
     ResyncUiInput();
