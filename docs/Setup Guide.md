@@ -42,7 +42,7 @@ The app works with no settings file. Two keys override its defaults, and they ar
 
 If you keep your GOD games in a folder of their own instead — `Hdd1:\Games\{TitleID}\00007000\{ContentID}` is a common choice — point `games-path:` there.
 
-**Games on more than one drive?** In **Settings**, under the games folder, each likely folder on the hard drive and any USB drive is listed — a `Content\0000000000000000` and a `Games` folder — and **A** adds it to your library or takes it out. **Add another library folder** takes any other path. Or add a `games-path:` line for each folder yourself: the first is where games install, and the others are looked in for your library too. A USB drive formatted FAT32 is `Usb0:` or `Usb1:`, as in Aurora:
+**Games on more than one drive?** In **Settings → Storage**, under **Folders**, **Add folder** adds any folder on the hard drive or a USB drive to your library. Only folders you've added are listed. **A** on one opens its options: its **Scan depth**, or **Remove**. Or add a `games-path:` line for each folder yourself: the first is where games install, and the others are looked in for your library too. A USB drive formatted FAT32 is `Usb0:` or `Usb1:`, as in Aurora:
 
 ```
 games-path: Hdd1:\Content\0000000000000000
@@ -50,11 +50,17 @@ games-path: Hdd1:\Games
 games-path: Usb0:\Content\0000000000000000
 ```
 
-Each folder needs the `{TitleID}\{ContentType}\...` layout — Games on Demand, arcade games, installed packages. Extracted XEX games (a folder with a `default.xex`) aren't found yet. A drive the dashboard formatted as Xbox storage keeps its files in a container Omni360 can't reach.
+Each folder is scanned for Games on Demand, arcade games and installed packages (the `{TitleID}\{ContentType}\...` layout, even when it's kept under folders of its own like `Games\Xbox 360\Halo 3\...`), and for extracted games (a folder with a `default.xex`).
+
+**Scan depth** is how many folders down from a path games are looked for: 0 means the folder is a game itself, 1 means games are in folders right inside it, and so on up to 6. It's 3 unless you change it. Settings writes it after the path, like `games-path: Usb0:\Games|5`.
+
+**AutoScan**, beside **Scan now**, reads your folders again each time Omni360 starts. Turn it off and Omni360 starts with the list from last time, which is quicker for big libraries. **Scan now** finds anything new. It writes `library-autoscan: off`.
+
+A drive the dashboard formatted as Xbox storage keeps its files in a container Omni360 can't reach.
 
 **Leaving.** **B** goes back to Home from any page; **B** on Home asks whether to exit, and leaving takes the console wherever it normally starts — whatever DashLaunch is set to. To reach another dashboard or a file manager instead, put its folder on the **Apps** page below and start it from there.
 
-**Apps, Homebrew and Emulators.** These three pages show what's in your apps, homebrew and emulator folders as tiles, like the library does, and **A** starts one. Each page is in the **Games + Apps** sidebar only once it has a folder. Each folder in **Settings** has a value on its right, **Games**, **Homebrew**, **Apps** or **Emulators**, that says which page it feeds. Left and right change it, the same way they change Disc read speed. **Add folder** asks what's in a new folder once you've typed its path. `Homebrew`, `Apps` and `Emulators` folders on each drive are suggested too. Settings writes `homebrew-path:` (homebrew games), `apps-path:` (dashboards, file managers, tools) and `emulators-path:` lines for you, and you can also add them by hand, more than once each:
+**Apps, Homebrew and Emulators.** These three pages show what's in your apps, homebrew and emulator folders as tiles, like the library does, and **A** starts one. Each page is in the **Games + Apps** sidebar only once it has a folder. Each folder in **Settings** has a value on its right, **Games**, **Homebrew**, **Apps** or **Emulators**, that says which page it feeds. Left and right change it, the same way they change Disc read speed. **Add folder** asks what's in a new folder once you've typed its path. Settings writes `homebrew-path:` (homebrew games), `apps-path:` (dashboards, file managers, tools) and `emulators-path:` lines for you, and you can also add them by hand, more than once each:
 
 ```
 apps-path: Hdd1:\Apps

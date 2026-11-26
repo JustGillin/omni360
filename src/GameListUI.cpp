@@ -7030,7 +7030,6 @@ void RenderSettingsFrame(SettingsPageView &view, const UiHint *hints, int hintCo
         const float cy = L.y[i] + rowH * 0.5f;
         if (row.kind == SETTINGS_VIEW_FOLDER)
         {
-            DrawCheckQuads(x0 + S(16.0f), cy, row.checked, row.locked || row.missing);
             DrawSettingsControlsQuads(row, cy, w, 0, rowFocused);
         }
         else
@@ -7075,7 +7074,7 @@ void RenderSettingsFrame(SettingsPageView &view, const UiHint *hints, int hintCo
         if (row.kind == SETTINGS_VIEW_FOLDER)
         {
             // The path, then its status, then what it holds at the right.
-            const float pathX = x0 + S(16.0f) + SettingsCheck() + S(14.0f);
+            const float pathX = x0 + S(18.0f);
             const float statusRight = row.controlCount > 0 ? SettingsControlsX(row, w) - S(14.0f)
                                                            : x0 + w - S(18.0f);
             const float statusW = row.status != NULL ? TextWidth(row.status, 0.76f) : 0.0f;

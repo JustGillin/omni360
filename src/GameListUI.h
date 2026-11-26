@@ -524,8 +524,8 @@ struct SettingsControlView
 enum SettingsRowKind
 {
     SETTINGS_VIEW_HEADING, // label, and any controls on the right
-    SETTINGS_VIEW_FOLDER,  // a checkbox (checked, locked), label the path, status on the right - then
-                           // its one value control, if it has one, which left and right change
+    SETTINGS_VIEW_FOLDER,  // label the path, status on the right - then its one control, if it has
+                           // one: a value left and right change, or a button
     SETTINGS_VIEW_LINE     // label, status beside it, controls on the right
 };
 

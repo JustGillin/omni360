@@ -21,13 +21,16 @@
 // "Disc 2", DVD1 - is one game, its folder the one they're in. Its DLC and
 // title updates are in the Content folder like any game's.
 
-// Walks root and the folders under it, FOLDER_GAME_DEPTH deep, for games,
+// Walks root and the folders under it, maxDepth deep, for games,
 // into outGames (caller-allocated, up to maxGames). Each is marked folder,
 // its packagePath the game's folder and its name the folder's - or an
 // Original Xbox game's own, from default.xbe. A game's own folders aren't
 // looked in, nor a Content folder's title folders.
-#define FOLDER_GAME_DEPTH 3
-int EnumerateFolderGames(const char *root, InstalledGame *outGames, int maxGames,
+// maxDepth is how many folders down from root a game can be: 0 is root
+// itself, 1 a folder in it, and so on. Settings' Scan depth, a path's own.
+#define FOLDER_GAME_DEPTH 3      // a path's, until it's set
+#define FOLDER_GAME_DEPTH_MAX 6
+int EnumerateFolderGames(const char *root, InstalledGame *outGames, int maxGames, int maxDepth,
                          void printFunction(const char *_format, ...));
 
 // Apps and homebrew, for the Apps and Homebrew pages: the same walk, but a
@@ -36,7 +39,7 @@ int EnumerateFolderGames(const char *root, InstalledGame *outGames, int maxGames
 // marked folder, its packagePath the executable - LaunchApp starts it - and
 // its name the folder's, or an Original Xbox one's own. One whose header
 // can't be read is still listed, with title ID 0.
-int EnumerateFolderApps(const char *root, InstalledGame *outApps, int maxApps,
+int EnumerateFolderApps(const char *root, InstalledGame *outApps, int maxApps, int maxDepth,
                         void printFunction(const char *_format, ...));
 
 // Deletes a folder game's folder and everything in it - once it's checked the

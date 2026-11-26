@@ -89,6 +89,7 @@ struct FolderScan
     int unreadable;
     int packageFolders; // named folders read as Content trees - see Visit
     int packageGames;
+    int maxDepth;
     void (*print)(const char *_format, ...);
 };
 
@@ -182,7 +183,7 @@ static void Visit(FolderScan &scan, const char *dir, int depth)
         return;
     }
 
-    if (depth >= FOLDER_GAME_DEPTH)
+    if (depth >= scan.maxDepth)
         return;
 
     char pattern[600];
@@ -247,7 +248,7 @@ static void Visit(FolderScan &scan, const char *dir, int depth)
     }
 }
 
-int EnumerateFolderGames(const char *root, InstalledGame *outGames, int maxGames,
+int EnumerateFolderGames(const char *root, InstalledGame *outGames, int maxGames, int maxDepth,
                          void printFunction(const char *_format, ...))
 {
     const DWORD startedAt = GetTickCount();
@@ -256,6 +257,7 @@ int EnumerateFolderGames(const char *root, InstalledGame *outGames, int maxGames
     scan.out = outGames;
     scan.max = maxGames;
     scan.print = printFunction;
+    scan.maxDepth = maxDepth;
 
     Visit(scan, root, 0);
 
@@ -366,7 +368,7 @@ static void VisitApps(FolderScan &scan, const char *dir, int depth)
         return;
     }
 
-    if (depth >= FOLDER_GAME_DEPTH)
+    if (depth >= scan.maxDepth)
         return;
 
     h = FindFirstFileA(pattern, &found);
@@ -384,7 +386,7 @@ static void VisitApps(FolderScan &scan, const char *dir, int depth)
     FindClose(h);
 }
 
-int EnumerateFolderApps(const char *root, InstalledGame *outApps, int maxApps,
+int EnumerateFolderApps(const char *root, InstalledGame *outApps, int maxApps, int maxDepth,
                         void printFunction(const char *_format, ...))
 {
     const DWORD startedAt = GetTickCount();
@@ -393,6 +395,7 @@ int EnumerateFolderApps(const char *root, InstalledGame *outApps, int maxApps,
     scan.out = outApps;
     scan.max = maxApps;
     scan.print = printFunction;
+    scan.maxDepth = maxDepth;
 
     VisitApps(scan, root, 0);
 
@@ -456,7 +459,7 @@ int RemoveFolderGame(const InstalledGame &game)
     if (!game.folder || LastPart(path)[0] == '\0')
         return 0;
     InstalledGame check;
-    if (EnumerateFolderGames(path, &check, 1, IgnoreLog) != 1 || check.titleId != game.titleId ||
+    if (EnumerateFolderGames(path, &check, 1, 0, IgnoreLog) != 1 || check.titleId != game.titleId ||
         _stricmp(check.packagePath, path) != 0)
     {
         dprintf("[library] not removing %s: it doesn't hold %08lX any more\n", path, game.titleId);
