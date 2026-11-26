@@ -11256,7 +11256,7 @@ static bool DiscTileAction(Shell &shell, const Library &lib, const char *gamesPa
             RenderLaunchFrame(Tr(STR_STARTING), shell.discName, disc.titleId);
             // Nothing may be reading the drive as the game starts from it.
             StopDiscWorker(3000);
-            LaunchDisc(disc.original);
+            LaunchDisc(disc.original, IsCompilationDisc(disc.titleId));
             ShowMessageUI(Tr(STR_COULDNT_START_THIS_DISC), shell.discName, Tr(STR_THE_CONSOLES_LOADER_REFUSED_IT));
         }
         return true;

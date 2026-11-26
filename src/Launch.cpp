@@ -244,13 +244,15 @@ static XamLoaderLaunchTitleFn FindLoaderLaunchTitle()
     return (XamLoaderLaunchTitleFn)address;
 }
 
-void LaunchDisc(bool original)
+void LaunchDisc(bool original, bool asDisc)
 {
-    // A 360 disc, booted as the dashboard boots one. XLaunchNewImage below
-    // starts its default.xex, but as an executable run by path: the Arcade
-    // compilation discs' menus came up that way and crashed starting any of
-    // their games, where Aurora launching the same disc worked (issue #11).
-    if (!original)
+    // A compilation disc, booted as the dashboard boots one. XLaunchNewImage
+    // below starts its default.xex, but as an executable run by path: the
+    // Arcade compilation discs' menus came up that way and crashed starting
+    // any of their games, where Aurora launching the same disc worked (issue
+    // #11). Only for those: on a disc the console won't boot itself, this call
+    // never returns and the screen stays black (Darksiders, 2026-11-26).
+    if (!original && asDisc)
     {
         const XamLoaderLaunchTitleFn launchTitle = FindLoaderLaunchTitle();
         if (launchTitle != NULL)

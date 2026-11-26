@@ -22,7 +22,12 @@ void LaunchApp(const char *path);
 
 // The game disc in the drive - default.xex, or an Original Xbox disc's
 // default.xbe - as the dashboard starts one.
-void LaunchDisc(bool original);
+// asDisc boots it through the console's loader, as the dashboard does - which
+// an Arcade compilation disc's menu needs (issue #11), but a disc the console
+// itself won't boot (a backup: "Unrecognized Disc" from the stock Guide) never
+// comes back from, leaving a black screen. Everything else starts its
+// default.xex directly, as Omni360 did before.
+void LaunchDisc(bool original, bool asDisc);
 
 // The Xbox Dashboard itself, past DashLaunch's default - by its path rather
 // than XLaunchNewImage's dashboard keyword, which DashLaunch sends to
