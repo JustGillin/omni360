@@ -107,7 +107,8 @@ extern "C" NTSTATUS XexGetModuleHandle(PSZ moduleName, PHANDLE outHandle);
 #define FTP_USER_KEY "ftp-user: "           // its username; xboxftp, as Aurora's, unless set
 #define FTP_PASSWORD_KEY "ftp-password: "   // and password; xboxftp unless set
 #define SIGN_IN_KEY "sign-in-at-start: "    // a profile's offline XUID in hex, signed in at start when nobody is; "off" or absent for none
-#define AUTOSCAN_KEY "library-autoscan: " // "off": start with the library kept from last time, read again only on Scan now
+#define AUTOSCAN_KEY "library-autoscan: "
+#define GUIDE_HOME_KEY "guide-home: "     // "yes": the Guide's Xbox Home becomes Omni360 Home (GuidePlugin/) // "off": start with the library kept from last time, read again only on Scan now
 #define HOMEBREW_MIRROR_KEY "homebrew-mirror: " // for testing: homebrew from "http://PC:8000", a folder of the repo's .7z files
 #define CREDENTIALS_FILE "game:\\ArchiveOrgKeys.txt"
 #define CONTENT_PATH_KEY "xbla-path: "   // X-Store's name for it, kept so an old settings.txt still works
@@ -592,6 +593,16 @@ static bool EjectAfterInstallSetting()
 {
     char value[16];
     GetSettingsPath(EJECT_KEY, "off", value, sizeof(value));
+    return _stricmp(value, "yes") == 0;
+}
+
+// Whether Omni360 puts its plugin in the Guide, so its Xbox Home button opens
+// Omni360. Off unless turned on: it's a plugin in the system, until the
+// console is turned off.
+static bool GuideHomeOn()
+{
+    char value[16];
+    GetSettingsPath(GUIDE_HOME_KEY, "off", value, sizeof(value));
     return _stricmp(value, "yes") == 0;
 }
 
@@ -3424,6 +3435,7 @@ enum SettingsRow
     SETTINGS_ROW_ADDONS_DRIVE, // which drive's Content folder arcade games, DLC and updates go to
     SETTINGS_ROW_KIND_INSTALL, // where the Homebrew store installs a kind (arg is the FolderKind)
     SETTINGS_ROW_AUTOSCAN,     // whether the library is read again at start, on or off
+    SETTINGS_ROW_GUIDE_HOME,   // Omni360 Home in the Xbox Guide, on or off
     SETTINGS_ROW_SOUNDS,       // the interface's sounds, on or off
     SETTINGS_ROW_SPEED_TEST,   // where a download's speed goes - SpeedTest.h
     SETTINGS_ROW_EJECT,        // opening the tray after a disc install, on or off
@@ -4727,6 +4739,39 @@ static void TogglePcHelperUse()
     ApplyPcHelperSettings();
 }
 
+// On loads the plugin now, and says whether it's there; off can't take it
+// out of the system again, so it says it goes when the console restarts.
+static void ToggleGuideHome()
+{
+    const bool on = !GuideHomeOn();
+    if (!SetSettingsValue(GUIDE_HOME_KEY, on ? "yes" : "off"))
+    {
+        ShowMessageUI(Tr(STR_NOT_SAVED), Tr(STR_SETTINGS_TXT_COULD_NOT_BE), NULL);
+        return;
+    }
+    if (!on)
+    {
+        ShowShellToast(Tr(STR_GUIDE_HOME_OFF), Tr(STR_GUIDE_HOME_OFF_DETAIL), UI_TOAST_INFO);
+        return;
+    }
+    switch (LoadGuidePlugin())
+    {
+    case GUIDE_PLUGIN_LOADED:
+    case GUIDE_PLUGIN_ALREADY:
+        ShowShellToast(Tr(STR_GUIDE_HOME_ON), Tr(STR_GUIDE_HOME_ON_DETAIL), UI_TOAST_SUCCESS);
+        break;
+    case GUIDE_PLUGIN_NOVA:
+        ShowAlertUI(Tr(STR_GUIDE_HOME), Tr(STR_GUIDE_HOME_NOVA), NULL, NULL, NULL);
+        break;
+    case GUIDE_PLUGIN_NO_DASHLAUNCH:
+        ShowAlertUI(Tr(STR_GUIDE_HOME), Tr(STR_GUIDE_HOME_NO_DASHLAUNCH), NULL, NULL, NULL);
+        break;
+    default:
+        ShowAlertUI(Tr(STR_GUIDE_HOME), Tr(STR_GUIDE_HOME_FAILED), NULL, NULL, NULL);
+        break;
+    }
+}
+
 static void ToggleAutoScan()
 {
     if (!SetSettingsValue(AUTOSCAN_KEY, AutoScanOn() ? "off" : "yes"))
@@ -5578,6 +5623,12 @@ static void BuildSettingsPage(SettingsPage &page, const Library &lib, const char
         AddSettingsRow(page, SETTINGS_VIEW_LINE, Tr(STR_SPEED_TEST));
         AddSettingsControl(page, SETTINGS_CONTROL_BUTTON, Tr(STR_RUN_TEST), SETTINGS_ROW_SPEED_TEST,
                            Tr(STR_CHECKS_HOW_FAST_YOUR_INTERNET));
+
+        // The Xbox Guide's Xbox Home, as Omni360 Home.
+        AddSettingsRow(page, SETTINGS_VIEW_HEADING, Tr(STR_HEADING_XBOX_GUIDE));
+        AddSettingsRow(page, SETTINGS_VIEW_LINE, Tr(STR_GUIDE_HOME));
+        AddSettingsControl(page, SETTINGS_CONTROL_CHECK, NULL, SETTINGS_ROW_GUIDE_HOME, Tr(STR_GUIDE_HOME_HELP));
+        page.rows[page.count - 1].controls[0].on = GuideHomeOn();
     }
 
     if (page.section == SETTINGS_SECTION_ASSETS)
@@ -5970,6 +6021,7 @@ static SettingsOutcome RunSettingsRow(SettingsRow row, int arg, Library &lib, ch
         RescanFolders(lib, gamesPath, outcome);
         break;
     case SETTINGS_ROW_AUTOSCAN:     ToggleAutoScan(); break;
+    case SETTINGS_ROW_GUIDE_HOME:   ToggleGuideHome(); break;
     case SETTINGS_ROW_KEYS:         ChangeKeys(outcome); break;
     case SETTINGS_ROW_REMOVE_KEYS:  RemoveKeys(outcome); break;
     case SETTINGS_ROW_UPDATES:      ShowUpdate(); break;
@@ -14047,7 +14099,8 @@ int main()
     CleanUpInterruptedInstall();
     StartupStep("paths + interrupted-install cleanup");
 
-    LoadGuidePlugin();
+    if (GuideHomeOn())
+        LoadGuidePlugin();
 
 
     // From here on the screen belongs to the UI rather than the debug console.

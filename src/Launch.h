@@ -40,10 +40,19 @@ void LaunchXboxDashboard();
 // file can't be read.
 bool DefaultDashboardIsOmni360();
 
-// The Guide plugin (GuidePlugin/), loaded into the system as Aurora loads its
-// own, so it outlives Omni360 until the console is turned off. Proof of
-// concept, step 1: only if game:\Omni360Guide.xex is there, and not loaded
-// already. Says how it went in the log.
-void LoadGuidePlugin();
+// The Guide plugin (GuidePlugin/), carried inside Omni360's XEX, written to
+// Hdd1:\Omni360 and loaded into the system through DashLaunch - as Aurora
+// loads its own - so it outlives Omni360 until the console is turned off.
+// It turns the Guide's Xbox Home into Omni360 Home. Settings' switch decides
+// whether it's loaded at start. Says how it went in the log, and returns it.
+enum GuidePluginResult
+{
+    GUIDE_PLUGIN_LOADED,      // loaded now
+    GUIDE_PLUGIN_ALREADY,     // loaded earlier this boot
+    GUIDE_PLUGIN_NOVA,        // Aurora's Nova has the Guide: ours stays out
+    GUIDE_PLUGIN_NO_DASHLAUNCH,
+    GUIDE_PLUGIN_FAILED
+};
+GuidePluginResult LoadGuidePlugin();
 
 #endif

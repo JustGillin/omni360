@@ -2,6 +2,11 @@
 Microsoft Visual Studio Solution File, Format Version 11.00
 # Visual Studio 2010
 Project("{8BC9CEB8-8B4A-11D0-8D11-00A0C91BC942}") = "XboxTLS", "XboxTLS2.vcxproj", "{8B766FB7-FB91-4B48-88F0-0ABEDA014DD5}"
+	ProjectSection(ProjectDependencies) = postProject
+		{6F2C1E4A-3B7D-4C59-9A1E-0D3604E1C360} = {6F2C1E4A-3B7D-4C59-9A1E-0D3604E1C360}
+	EndProjectSection
+EndProject
+Project("{8BC9CEB8-8B4A-11D0-8D11-00A0C91BC942}") = "Omni360Guide", "GuidePlugin\Omni360Guide.vcxproj", "{6F2C1E4A-3B7D-4C59-9A1E-0D3604E1C360}"
 EndProject
 Project("{8BC9CEB8-8B4A-11D0-8D11-00A0C91BC942}") = "AtgFramework", "Common\AtgFramework2010.vcxproj", "{91D208A6-9936-47FD-9659-67205C3EB0AB}"
 EndProject
@@ -39,6 +44,18 @@ Global
 		{91D208A6-9936-47FD-9659-67205C3EB0AB}.Release_LTCG|Xbox 360.Build.0 = Release_LTCG|Xbox 360
 		{91D208A6-9936-47FD-9659-67205C3EB0AB}.Release|Xbox 360.ActiveCfg = Release|Xbox 360
 		{91D208A6-9936-47FD-9659-67205C3EB0AB}.Release|Xbox 360.Build.0 = Release|Xbox 360
+		{6F2C1E4A-3B7D-4C59-9A1E-0D3604E1C360}.CodeAnalysis|Xbox 360.ActiveCfg = Release Retail|Xbox 360
+		{6F2C1E4A-3B7D-4C59-9A1E-0D3604E1C360}.CodeAnalysis|Xbox 360.Build.0 = Release Retail|Xbox 360
+		{6F2C1E4A-3B7D-4C59-9A1E-0D3604E1C360}.Debug|Xbox 360.ActiveCfg = Release Retail|Xbox 360
+		{6F2C1E4A-3B7D-4C59-9A1E-0D3604E1C360}.Debug|Xbox 360.Build.0 = Release Retail|Xbox 360
+		{6F2C1E4A-3B7D-4C59-9A1E-0D3604E1C360}.Profile_FastCap|Xbox 360.ActiveCfg = Release Retail|Xbox 360
+		{6F2C1E4A-3B7D-4C59-9A1E-0D3604E1C360}.Profile_FastCap|Xbox 360.Build.0 = Release Retail|Xbox 360
+		{6F2C1E4A-3B7D-4C59-9A1E-0D3604E1C360}.Profile|Xbox 360.ActiveCfg = Release Retail|Xbox 360
+		{6F2C1E4A-3B7D-4C59-9A1E-0D3604E1C360}.Profile|Xbox 360.Build.0 = Release Retail|Xbox 360
+		{6F2C1E4A-3B7D-4C59-9A1E-0D3604E1C360}.Release_LTCG|Xbox 360.ActiveCfg = Release Retail|Xbox 360
+		{6F2C1E4A-3B7D-4C59-9A1E-0D3604E1C360}.Release_LTCG|Xbox 360.Build.0 = Release Retail|Xbox 360
+		{6F2C1E4A-3B7D-4C59-9A1E-0D3604E1C360}.Release|Xbox 360.ActiveCfg = Release Retail|Xbox 360
+		{6F2C1E4A-3B7D-4C59-9A1E-0D3604E1C360}.Release|Xbox 360.Build.0 = Release Retail|Xbox 360
 	EndGlobalSection
 	GlobalSection(SolutionProperties) = preSolution
 		HideSolutionNode = FALSE

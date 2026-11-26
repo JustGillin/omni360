@@ -55,3 +55,5 @@ __pycache__/
 
 # Pseudo language for layout testing - tools/make_languages.py --pseudo
 Languages/pseudo/
+GuidePlugin/Build/
+GuidePlugin/Release Retail/

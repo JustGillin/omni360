@@ -25,6 +25,8 @@
   <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Release Retail|Xbox 360'">
     <IncludePath>..\InputBridgePlugin\xkelib;$(IncludePath)</IncludePath>
     <LinkIncremental>false</LinkIncremental>
+    <OutDir>$(ProjectDir)Build\</OutDir>
+    <IntDir>$(ProjectDir)Build\obj\</IntDir>
     <PostBuildEventUseInBuild>false</PostBuildEventUseInBuild>
     <ImageXexOutput>$(OutDir)Omni360Guide.xex</ImageXexOutput>
     <OutputFile>$(OutDir)Omni360Guide$(TargetExt)</OutputFile>

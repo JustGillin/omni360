@@ -239,8 +239,13 @@
                      and licence travel with every copy - this is them
                      travelling with it.
 
-           Section names are capped at 8 characters. -->
-      <AdditionalSections>font=$(OutDir)Media\Fonts\font.xpr;selawk=$(ProjectDir)Media\Fonts\selawk.ttf;ofl=$(ProjectDir)Media\Fonts\OFL.txt</AdditionalSections>
+           Section names are capped at 8 characters.
+
+           guide is the Guide plugin (GuidePlugin/, built first - the
+           solution makes this project depend on it). Omni360 writes it out
+           to Hdd1:\Omni360 and has DashLaunch load it, when Settings says
+           to; see LoadGuidePlugin in Launch.cpp. -->
+      <AdditionalSections>font=$(OutDir)Media\Fonts\font.xpr;selawk=$(ProjectDir)Media\Fonts\selawk.ttf;ofl=$(ProjectDir)Media\Fonts\OFL.txt;guide=$(ProjectDir)GuidePlugin\Build\Omni360Guide.xex</AdditionalSections>
       <!-- Omni360's own TitleID, moved off X-Store's so the two can coexist on
            one console. A shared TitleID means a shared save and content
            namespace, which is a real conflict now this is a separate app

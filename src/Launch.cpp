@@ -441,7 +441,7 @@ bool DefaultDashboardIsOmni360()
 typedef DWORD (*DLaunchStartSysModuleFn)(char *modulePath);
 #define DL_ORDINAL_START_SYS_MODULE 2
 
-#define GUIDE_PLUGIN_SOURCE "game:\\Omni360Guide.xex"
+#define GUIDE_PLUGIN_SECTION "guide" // the plugin, inside Omni360's own XEX (XboxTLS2.vcxproj)
 #define GUIDE_PLUGIN_NAME   "Omni360Guide.xex"
 #define GUIDE_PLUGIN_COPY   "Hdd1:\\Omni360\\Omni360Guide.xex"
 #define GUIDE_PLUGIN_DEVICE "\\Device\\Harddisk0\\Partition1\\Omni360\\Omni360Guide.xex"
@@ -465,43 +465,66 @@ static DWORD WINAPI GuidePluginLoadEntry(LPVOID parameter)
     return 0;
 }
 
-// The plugin from beside Omni360 to GUIDE_PLUGIN_COPY, unless that's the
-// same file already.
-static bool CopyGuidePlugin()
+// The plugin, from inside Omni360's XEX, to GUIDE_PLUGIN_COPY - unless the
+// one there is the same already, so it isn't rewritten every start.
+static bool WriteGuidePlugin()
 {
-    FILE *in = NULL;
-    if (fopen_s(&in, GUIDE_PLUGIN_SOURCE, "rb") != 0 || in == NULL)
+    PVOID data = NULL;
+    ULONG size = 0;
+    if (!XGetModuleSection(GetModuleHandle(NULL), GUIDE_PLUGIN_SECTION, &data, &size) || data == NULL || size == 0)
+    {
+        dprintf("[guide] this build has no plugin inside it\n");
         return false;
+    }
+
+    FILE *in = NULL;
+    if (fopen_s(&in, GUIDE_PLUGIN_COPY, "rb") == 0 && in != NULL)
+    {
+        // The same bytes? Then it's this version, written before.
+        bool same = true;
+        unsigned char buffer[16 * 1024];
+        ULONG at = 0;
+        size_t got;
+        while (same && (got = fread(buffer, 1, sizeof(buffer), in)) > 0)
+        {
+            same = at + got <= size && memcmp(buffer, (const unsigned char *)data + at, got) == 0;
+            at += (ULONG)got;
+        }
+        fclose(in);
+        if (same && at == size)
+            return true;
+    }
+
     CreateDirectoryA("Hdd1:\\Omni360", NULL);
     FILE *out = NULL;
     if (fopen_s(&out, GUIDE_PLUGIN_COPY, "wb") != 0 || out == NULL)
     {
-        fclose(in);
         dprintf("[guide] couldn't write %s\n", GUIDE_PLUGIN_COPY);
         return false;
     }
-    char buffer[16 * 1024];
-    size_t got;
-    bool ok = true;
-    while ((got = fread(buffer, 1, sizeof(buffer), in)) > 0)
-        ok = fwrite(buffer, 1, got, out) == got && ok;
-    fclose(in);
-    ok = (fclose(out) == 0) && ok;
+    const bool ok = fwrite(data, 1, size, out) == size && fclose(out) == 0;
     if (!ok)
-        dprintf("[guide] couldn't copy the plugin to %s\n", GUIDE_PLUGIN_COPY);
+        dprintf("[guide] couldn't write the plugin to %s\n", GUIDE_PLUGIN_COPY);
+    else
+        dprintf("[guide] wrote the plugin to %s (%lu bytes)\n", GUIDE_PLUGIN_COPY, (unsigned long)size);
     return ok;
 }
 
-void LoadGuidePlugin()
+GuidePluginResult LoadGuidePlugin()
 {
     HANDLE loaded = NULL;
     if (XexGetModuleHandle((PSZ)GUIDE_PLUGIN_NAME, &loaded) >= 0 && loaded != NULL)
     {
         dprintf("[guide] the plugin is loaded already (%p)\n", loaded);
-        return;
+        return GUIDE_PLUGIN_ALREADY;
     }
-    if (GetFileAttributesA(GUIDE_PLUGIN_SOURCE) == (DWORD)-1)
-        return; // not there: nothing to try
+    // Aurora's own Guide plugin already has the Guide's Home tab: leave it be.
+    HANDLE nova = NULL;
+    if (XexGetModuleHandle("Nova.xex", &nova) >= 0 && nova != NULL)
+    {
+        dprintf("[guide] Aurora's Nova is loaded - not adding ours\n");
+        return GUIDE_PLUGIN_NOVA;
+    }
 
     HANDLE dashLaunch = NULL;
     PVOID address = NULL;
@@ -509,10 +532,10 @@ void LoadGuidePlugin()
         XexGetProcedureAddress(dashLaunch, DL_ORDINAL_START_SYS_MODULE, &address) < 0 || address == NULL)
     {
         dprintf("[guide] DashLaunch isn't loaded, or has no export %d: no plugin\n", DL_ORDINAL_START_SYS_MODULE);
-        return;
+        return GUIDE_PLUGIN_NO_DASHLAUNCH;
     }
-    if (!CopyGuidePlugin())
-        return;
+    if (!WriteGuidePlugin())
+        return GUIDE_PLUGIN_FAILED;
 
     static GuidePluginLoad job; // the thread may outlive a timed-out wait
     job.start = (DLaunchStartSysModuleFn)address;
@@ -525,7 +548,7 @@ void LoadGuidePlugin()
     if (thread == NULL)
     {
         dprintf("[guide] couldn't start a thread to load the plugin\n");
-        return;
+        return GUIDE_PLUGIN_FAILED;
     }
     const DWORD started = GetTickCount();
     while (job.done == 0 && GetTickCount() - started < 5000)
@@ -534,10 +557,11 @@ void LoadGuidePlugin()
     if (job.done == 0)
     {
         dprintf("[guide] DashLaunch didn't answer within 5 s\n");
-        return;
+        return GUIDE_PLUGIN_FAILED;
     }
     loaded = NULL;
     XexGetModuleHandle((PSZ)GUIDE_PLUGIN_NAME, &loaded);
     dprintf("[guide] DashLaunch loading %s: status %08lX, now loaded: %s (%p)\n", job.path,
             (unsigned long)job.status, loaded != NULL ? "yes" : "no", loaded);
+    return loaded != NULL ? GUIDE_PLUGIN_LOADED : GUIDE_PLUGIN_FAILED;
 }
