@@ -1160,6 +1160,8 @@ struct FolderEdit
     int addDepth;
     const char *redepth;
     int newDepth;
+    const char *with; // remove's place taken by this path, at its depth, rather than remove dropped
+    const char *first; // moved to the front of its kind's lines: where the homebrew store installs that kind
 };
 
 // Writes kind's folders back to settings.txt as they are now, with edit made,
@@ -1176,7 +1178,11 @@ static bool WriteFolderKind(FolderKind kind, const char *gamesPath, const Folder
                         char (*lines)[MAX_TEXT_LENGTH + 8])
         {
             if (edit.remove != NULL && _stricmp(path, edit.remove) == 0)
-                return;
+            {
+                if (edit.with == NULL)
+                    return;
+                path = edit.with;
+            }
             if (edit.redepth != NULL && _stricmp(path, edit.redepth) == 0)
                 depth = edit.newDepth;
             FormatScanDepth(path, depth, lines[n], MAX_TEXT_LENGTH + 8);
@@ -1198,8 +1204,14 @@ static bool WriteFolderKind(FolderKind kind, const char *gamesPath, const Folder
     {
         static Shelf current; // only its paths are filled in
         ReadShelfPaths(current, kFolderKindKeys[kind]);
-        for (int p = 0; p < current.pathCount; ++p)
-            Local::Put(current.paths[p], current.depths[p], edit, n, values, lines);
+        // edit.first, then the rest in their order.
+        for (int pass = 0; pass < 2; ++pass)
+            for (int p = 0; p < current.pathCount; ++p)
+            {
+                const bool isFirst = edit.first != NULL && _stricmp(current.paths[p], edit.first) == 0;
+                if (isFirst == (pass == 0))
+                    Local::Put(current.paths[p], current.depths[p], edit, n, values, lines);
+            }
     }
     if (edit.add != NULL)
     {
@@ -3315,33 +3327,48 @@ static void SetFolderDepth(FolderKind kind, const char *path, int current, Libra
     RescanKind(kind, lib, gamesPath, outcome);
 }
 
-// A on a folder's row: what can be done with it - its scan depth, or taking
-// it off the list. What's in it stays where it is.
-static void FolderRowMenu(int index, Library &lib, const char *gamesPath, SettingsOutcome &outcome)
+static void SavePendingFolderKind(bool now, const char *gamesPath, SettingsOutcome &outcome);
+static FolderKind ShownFolderKind(const LibraryFolderRow &row);
+
+// Whether the homebrew store installs row's kind into it: the first folder of
+// that kind (HomebrewKindFolder). Games install where the downloads folder says.
+static bool IsInstallFolder(const LibraryFolderRow &row)
+{
+    if (row.kind == FOLDER_GAMES)
+        return false;
+    const Shelf &shelf = ShelfFor(row.kind);
+    return shelf.pathCount > 0 && _stricmp(shelf.paths[0], row.path) == 0;
+}
+
+// Install here, in a folder's menu: first of its kind, so the homebrew store
+// puts that kind there.
+static void MakeInstallFolder(int index, const char *gamesPath, SettingsOutcome &outcome);
+
+// The folder's row as it is now: a step left or right not yet saved is
+// saved first, so what's done to it is done under the key it's really in.
+static bool CurrentFolderRow(int index, const char *gamesPath, SettingsOutcome &outcome, LibraryFolderRow *out)
 {
     if (index < 0 || index >= g_folderRowCount)
-        return;
-    const LibraryFolderRow row = g_folderRows[index]; // a copy - the rescan rebuilds the list
+        return false;
+    *out = g_folderRows[index]; // a copy - the rescan rebuilds the list
+    out->kind = ShownFolderKind(*out);
+    SavePendingFolderKind(true, gamesPath, outcome);
+    return true;
+}
 
-    char depthLabel[64];
-    TrFormat(depthLabel, sizeof(depthLabel), STR_SCAN_DEPTH_VALUE, TrNum(row.depth));
-    depthLabel[sizeof(depthLabel) - 1] = '\0';
-    const char *labels[2] = { depthLabel, Tr(STR_REMOVE) };
-    const int picked = ShowAlertListExUI(row.path, NULL, labels, NULL, 2, 0, NULL, NULL, false);
-    if (picked == 0)
-    {
-        SetFolderDepth(row.kind, row.path, row.depth, lib, gamesPath, outcome);
+// X on a folder's row, or Remove in its menu: off the list, once asked.
+// What's in it stays where it is (issue #23).
+static void RemoveFolderRow(int index, Library &lib, const char *gamesPath, SettingsOutcome &outcome)
+{
+    LibraryFolderRow row;
+    if (!CurrentFolderRow(index, gamesPath, outcome, &row))
         return;
-    }
-    if (picked != 1)
-        return;
-
     char message[MAX_TEXT_LENGTH + 64];
     TrFormat(message, sizeof(message), STR_STOP_LOOKING_IN, row.path);
     message[sizeof(message) - 1] = '\0';
     if (!ShowConfirmUI(Tr(STR_FOLDER), message, Tr(STR_WHATS_IN_IT_STAYS_WHERE), Tr(STR_REMOVE)))
         return;
-    const FolderEdit edit = { row.path, NULL, 0, NULL, 0 };
+    FolderEdit edit = { row.path, NULL, 0, NULL, 0, NULL };
     if (!WriteFolderKind(row.kind, gamesPath, edit))
     {
         ShowMessageUI(Tr(STR_NOT_SAVED), Tr(STR_SETTINGS_TXT_COULD_NOT_BE), row.path);
@@ -3349,6 +3376,57 @@ static void FolderRowMenu(int index, Library &lib, const char *gamesPath, Settin
     }
     dprintf("%s folder %s removed\n", kFolderKindNames[row.kind], row.path);
     RescanKind(row.kind, lib, gamesPath, outcome);
+}
+
+// Change folder in its menu - below, after the folder picker.
+static void ReplaceFolderRow(int index, Library &lib, const char *gamesPath, SettingsOutcome &outcome);
+
+// A on a folder's row: what can be done with it - its scan depth, another
+// folder in its place, or taking it off the list.
+static void FolderRowMenu(int index, Library &lib, const char *gamesPath, SettingsOutcome &outcome)
+{
+    if (index < 0 || index >= g_folderRowCount)
+        return;
+    const LibraryFolderRow &row = g_folderRows[index];
+
+    char depthLabel[64];
+    TrFormat(depthLabel, sizeof(depthLabel), STR_SCAN_DEPTH_VALUE, TrNum(row.depth));
+    depthLabel[sizeof(depthLabel) - 1] = '\0';
+    // Install here only where it would change something: an apps, homebrew
+    // or emulators folder that isn't already where that kind installs.
+    enum { MENU_DEPTH, MENU_INSTALL_HERE, MENU_CHANGE, MENU_REMOVE };
+    const char *labels[4];
+    int actions[4];
+    int count = 0;
+    labels[count] = depthLabel;
+    actions[count++] = MENU_DEPTH;
+    if (ShownFolderKind(row) == row.kind && row.kind != FOLDER_GAMES && !IsInstallFolder(row))
+    {
+        labels[count] = Tr(STR_INSTALL_HERE);
+        actions[count++] = MENU_INSTALL_HERE;
+    }
+    labels[count] = Tr(STR_CHANGE_FOLDER);
+    actions[count++] = MENU_CHANGE;
+    labels[count] = Tr(STR_REMOVE);
+    actions[count++] = MENU_REMOVE;
+
+    // Whatever it opens next is drawn over the page, not over this menu.
+    HoldDialogBackdrop();
+    const int picked = ShowAlertListExUI(row.path, NULL, labels, NULL, count, 0, NULL, NULL, false);
+    const int action = (picked >= 0 && picked < count) ? actions[picked] : -1;
+    if (action == MENU_DEPTH)
+    {
+        LibraryFolderRow current;
+        if (CurrentFolderRow(index, gamesPath, outcome, &current))
+            SetFolderDepth(current.kind, current.path, current.depth, lib, gamesPath, outcome);
+    }
+    else if (action == MENU_INSTALL_HERE)
+        MakeInstallFolder(index, gamesPath, outcome);
+    else if (action == MENU_CHANGE)
+        ReplaceFolderRow(index, lib, gamesPath, outcome);
+    else if (action == MENU_REMOVE)
+        RemoveFolderRow(index, lib, gamesPath, outcome);
+    ReleaseDialogBackdrop();
 }
 
 // Left and right on a folder's row: what it holds. Stepping only changes
@@ -3431,6 +3509,21 @@ static void SavePendingFolderKind(bool now, const char *gamesPath, SettingsOutco
         outcome.rescanLibrary = true;
     if (row.kind != FOLDER_GAMES || kind != FOLDER_GAMES)
         outcome.rescanShelves = true;
+}
+
+static void MakeInstallFolder(int index, const char *gamesPath, SettingsOutcome &outcome)
+{
+    LibraryFolderRow row;
+    if (!CurrentFolderRow(index, gamesPath, outcome, &row) || row.kind == FOLDER_GAMES)
+        return;
+    FolderEdit edit = { NULL, NULL, 0, NULL, 0, NULL, row.path };
+    if (!WriteFolderKind(row.kind, gamesPath, edit))
+    {
+        ShowMessageUI(Tr(STR_NOT_SAVED), Tr(STR_SETTINGS_TXT_COULD_NOT_BE), row.path);
+        return;
+    }
+    dprintf("%s installs to %s now\n", kFolderKindNames[row.kind], row.path);
+    outcome.rescanShelves = true; // the pages' folders, read again in their new order
 }
 
 // "Add folder": one typed, for a folder somewhere the list doesn't look -
@@ -3643,6 +3736,46 @@ static void AddLibraryFolder(Library &lib, const char *gamesPath, SettingsOutcom
     }
     dprintf("%s folder %s added\n", kFolderKindNames[kind], newPath);
     RescanKind(kind, lib, gamesPath, outcome);
+}
+
+// Change folder in its menu: another path in its place, holding the same and
+// at the same depth.
+static void ReplaceFolderRow(int index, Library &lib, const char *gamesPath, SettingsOutcome &outcome)
+{
+    LibraryFolderRow row;
+    if (!CurrentFolderRow(index, gamesPath, outcome, &row))
+        return;
+    char picked[MAX_TEXT_LENGTH];
+    if (PickFolder(Tr(STR_CHANGE_FOLDER), row.path, STR_A_FOLDER_OF_GAMES_HOMEBREW, picked, sizeof(picked)) ==
+        FOLDER_CANCELLED)
+        return;
+    const std::string typed = picked;
+    char newPath[MAX_TEXT_LENGTH];
+    if (!NormaliseGamesPath(typed, newPath, sizeof(newPath)))
+    {
+        ShowMessageUI(Tr(STR_NOT_A_FOLDER_PATH), Tr(STR_INCLUDE_THE_DRIVE_LIKE_HDD1), typed.c_str());
+        return;
+    }
+    if (_stricmp(newPath, row.path) == 0)
+        return; // the same one
+    if (!FolderExists(newPath))
+    {
+        ShowMessageUI(Tr(STR_FOLDER_NOT_FOUND), Tr(STR_THERE_IS_NO_FOLDER_AT), newPath);
+        return;
+    }
+    if (FolderScannedAsAnything(newPath, gamesPath))
+    {
+        ShowMessageUI(Tr(STR_ALREADY_ADDED), Tr(STR_THAT_FOLDER_IS_LOOKED_IN), newPath);
+        return;
+    }
+    FolderEdit edit = { row.path, NULL, 0, NULL, 0, newPath };
+    if (!WriteFolderKind(row.kind, gamesPath, edit))
+    {
+        ShowMessageUI(Tr(STR_NOT_SAVED), Tr(STR_SETTINGS_TXT_COULD_NOT_BE), newPath);
+        return;
+    }
+    dprintf("%s folder %s is now %s\n", kFolderKindNames[row.kind], row.path, newPath);
+    RescanKind(row.kind, lib, gamesPath, outcome);
 }
 
 static void ChangeGamesFolder(Library &lib, char *gamesPath, size_t gamesPathSize, SettingsOutcome &outcome)
@@ -4776,6 +4909,17 @@ static void BuildSettingsPage(SettingsPage &page, const Library &lib, const char
                     TrCount(status, statusSize, STR_COUNT_APP, STR_COUNT_APPS, folder.games);
                 TrFormat(help, helpSize, STR_FOLDER_SHOWN_HELP, Tr(kFolderKindPages[folder.kind]));
             }
+            if (IsInstallFolder(folder) && ShownFolderKind(folder) == folder.kind)
+            {
+                // Where the homebrew store puts this kind, first, as the
+                // downloads folder says it's where games go.
+                char counts[96];
+                _snprintf(counts, sizeof(counts), "%s", status);
+                counts[sizeof(counts) - 1] = '\0';
+                _snprintf(status, statusSize, "%s" SETTINGS_MIDDOT "%s", Tr(STR_INSTALLS_GO_HERE), counts);
+                row.statusGreen = true;
+                TrFormat(help, helpSize, STR_INSTALL_FOLDER_HELP, Tr(kFolderKindPages[folder.kind]));
+            }
             {
                 // Its depth after the count, as Aurora's rows have it.
                 char depth[32];
@@ -5395,11 +5539,13 @@ static SettingsOutcome RunSettingsRow(SettingsRow row, int arg, Library &lib, ch
         TrFormat(depthLabel, sizeof(depthLabel), STR_SCAN_DEPTH_VALUE, TrNum(g_libraryDepths[0]));
         depthLabel[sizeof(depthLabel) - 1] = '\0';
         const char *labels[2] = { Tr(STR_CHANGE_FOLDER), depthLabel };
+        HoldDialogBackdrop(); // what it opens next is drawn over the page, not this menu
         const int picked = ShowAlertListExUI(gamesPath, NULL, labels, NULL, 2, 0, NULL, NULL, false);
         if (picked == 0)
             ChangeGamesFolder(lib, gamesPath, gamesPathSize, outcome);
         else if (picked == 1)
             SetFolderDepth(FOLDER_GAMES, gamesPath, g_libraryDepths[0], lib, gamesPath, outcome);
+        ReleaseDialogBackdrop();
         break;
     }
     case SETTINGS_ROW_SCAN_NOW:
@@ -14804,6 +14950,19 @@ int main()
             {
                 FocusSidebar(shell);
             }
+            else if ((pressed & XINPUT_GAMEPAD_X) && row->kind == SETTINGS_VIEW_FOLDER &&
+                     settings.actions[settings.focusRow][0] == SETTINGS_ROW_LIBRARY_FOLDER)
+            {
+                // Remove, straight from the row (issue #23).
+                SettingsOutcome changed = { false, false };
+                RemoveFolderRow(settings.args[settings.focusRow], lib, gamesPath, changed);
+                if (changed.rescanLibrary)
+                    RequestAnnouncedRescan(shell);
+                if (changed.rescanShelves)
+                    shell.rescanShelves = true;
+                shell.settingsStale = true;
+                acted = true;
+            }
             else if (input.nav == XINPUT_GAMEPAD_DPAD_UP || input.nav == XINPUT_GAMEPAD_DPAD_DOWN)
             {
                 StepSettingsRow(settings, input.nav == XINPUT_GAMEPAD_DPAD_UP ? -1 : 1);
@@ -15408,6 +15567,8 @@ int main()
                 if (action == SETTINGS_ROW_LIBRARY_FOLDER || action == SETTINGS_ROW_GAMES_FOLDER)
                 {
                     hintCount = AddHint(hints, hintCount, UI_BUTTON_A, TrW(STR_OPTIONS));
+                    if (action == SETTINGS_ROW_LIBRARY_FOLDER)
+                        hintCount = AddHint(hints, hintCount, UI_BUTTON_X, TrW(STR_REMOVE));
                     if (row.controlCount > 0 && row.controls[0].kind == SETTINGS_CONTROL_VALUE)
                         hintCount = AddHint(hints, hintCount, UI_BUTTON_DPAD_LR, TrW(STR_CHANGE));
                 }
