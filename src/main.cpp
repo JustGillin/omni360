@@ -905,6 +905,13 @@ static bool WriteSettingsLines(const char *key, const char *const *values, int c
 #define APPS_PATH_KEY "apps-path: "
 #define HOMEBREW_PATH_KEY "homebrew-path: "
 #define EMULATORS_PATH_KEY "emulators-path: "
+// Where the Homebrew store installs each kind - Settings' "Where new things
+// go". Its own key, apart from the folders looked in: it's looked in for its
+// kind whether or not they list it. Without one, the kind's first folder
+// (as before these keys), or Hdd1:\Apps and the like.
+#define APPS_INSTALL_KEY "apps-install: "
+#define HOMEBREW_INSTALL_KEY "homebrew-install: "
+#define EMULATORS_INSTALL_KEY "emulators-install: "
 #define MAX_SHELF_PATHS 8
 #define MAX_SHELF_ITEMS 64
 
@@ -923,6 +930,7 @@ struct Shelf
     char paths[MAX_SHELF_PATHS][MAX_TEXT_LENGTH];
     int found[MAX_SHELF_PATHS]; // each folder's, at the last scan
     int depths[MAX_SHELF_PATHS]; // each folder's scan depth
+    int installIndex; // of paths, the one its kind installs to, looked in whether or not it's listed; -1 for none
     unsigned long coverKeys[MAX_SHELF_ITEMS]; // each item's cover, by its name - CoverArt.h's HomebrewCoverKey
     int pathCount;
     char pathList[MAX_TEXT_LENGTH]; // the folders, for an empty page: "Hdd1:\Apps, Usb0:\Apps"
@@ -958,6 +966,7 @@ static volatile LONG g_shelvesRead = 0;
 static void ReadShelfPaths(Shelf &shelf, const char *key)
 {
     shelf.pathCount = 0;
+    shelf.installIndex = -1;
     shelf.pathList[0] = '\0';
     shelf.selected = 0;
     shelf.scroll = -1;
@@ -1037,6 +1046,12 @@ static const char *const kFolderKindNames[FOLDER_KIND_COUNT] = { "Games", "Homeb
 static const char *const kFolderKindKeys[FOLDER_KIND_COUNT] = { GAMES_PATH_KEY, HOMEBREW_PATH_KEY, APPS_PATH_KEY,
                                                                 EMULATORS_PATH_KEY };
 static const StringId kFolderKindPages[FOLDER_KIND_COUNT] = { STR_NAV_GAMES, STR_NAV_HOMEBREW, STR_NAV_APPS, STR_NAV_EMULATORS };
+static const char *const kKindInstallKeys[FOLDER_KIND_COUNT] = { NULL, HOMEBREW_INSTALL_KEY, APPS_INSTALL_KEY,
+                                                                 EMULATORS_INSTALL_KEY };
+static const char *const kKindDefaultFolders[FOLDER_KIND_COUNT] = { NULL, "Hdd1:\\Homebrew", "Hdd1:\\Apps",
+                                                                     "Hdd1:\\Emulators" };
+// Each shelf's kind, in ShelfKind's order.
+static const FolderKind kShelfFolderKinds[SHELF_COUNT] = { FOLDER_APPS, FOLDER_HOMEBREW, FOLDER_EMULATORS };
 
 // The pages' folders, read into these on the library read's worker and
 // copied over g_shelves on the UI thread once it's done. From when that read
@@ -1058,46 +1073,125 @@ static Shelf &ShelfFor(FolderKind kind)
     }
 }
 
-// The folders Settings lists, after the one games install to: every one
-// added - games, homebrew, apps and emulators - and nothing else. Which
-// folders are looked in is up to whoever set the console up.
+// The folders the library is read from, in order: where games install, then
+// every drive's Content folder - the console keeps arcade games, DLC and
+// title updates there, so they're always looked in - then the folders added
+// in Settings. Each once, with its scan depth. Built on the UI thread
+// (BuildLibraryFolders) and copied to whichever thread reads them.
+#define MAX_CONTENT_DRIVES 5
+#define MAX_LIBRARY_FOLDERS (1 + MAX_CONTENT_DRIVES + MAX_MORE_GAMES_PATHS)
+
+enum LibraryFolderSource
+{
+    LIBRARY_FOLDER_INSTALL, // where games install
+    LIBRARY_FOLDER_CONTENT, // a drive's Content folder
+    LIBRARY_FOLDER_ADDED    // added in Settings
+};
+
+struct LibraryFolders
+{
+    int count;
+    char paths[MAX_LIBRARY_FOLDERS][MAX_TEXT_LENGTH];
+    int depths[MAX_LIBRARY_FOLDERS];
+    LibraryFolderSource sources[MAX_LIBRARY_FOLDERS];
+};
+
+struct Library
+{
+    InstalledGame *games; // MAX_INSTALLED_GAMES entries, allocated once
+    int count;
+
+    // The folders it was read from, and how many games each added.
+    LibraryFolders folders;
+    int folderFound[MAX_LIBRARY_FOLDERS];
+
+    // Changed since Library.cache was written - kept again at the next refresh.
+    bool cacheDirty;
+};
+
+// Whether two folder paths name the same folder: case aside, and a
+// trailing backslash.
+static bool SameFolder(const char *a, const char *b)
+{
+    size_t la = strlen(a), lb = strlen(b);
+    while (la > 0 && a[la - 1] == '\\')
+        la--;
+    while (lb > 0 && b[lb - 1] == '\\')
+        lb--;
+    return la == lb && _strnicmp(a, b, la) == 0;
+}
+
+static LibraryFolders g_libraryFolders;
+
+// Settings' "Where Omni360 looks": every folder the library and the Apps,
+// Homebrew and Emulators pages are read from, each once. Some are looked in
+// whatever you do - where each kind installs, and every drive's Content
+// folder - and say "Always looked in"; the rest you added, and can remove,
+// change, or step what they hold.
+enum FolderRole
+{
+    FOLDER_ROLE_ADDED,  // added in Settings
+    FOLDER_ROLE_ALWAYS  // where a kind installs, or a Content folder
+};
+
+#define FOLDER_COUNT_NONE (-2) // not looked in for that kind
+
 struct LibraryFolderRow
 {
     char path[MAX_TEXT_LENGTH];
-    FolderKind kind;
+    FolderKind kind;     // what it holds, for a folder you added: its value on the row
+    FolderRole role;
+    bool content;        // a Content folder
+    unsigned installs;   // bit per FolderKind: the kinds that install here
     bool exists;
-    int games;      // found there at the last scan; -1 while the first scan is still going
-    int depth;      // its scan depth
+    int counts[FOLDER_KIND_COUNT]; // found there at the last scan, per kind; -1 still going; FOLDER_COUNT_NONE
+    int depth;           // its scan depth
 };
 
-#define MAX_FOLDER_ROWS (MAX_MORE_GAMES_PATHS + SHELF_COUNT * MAX_SHELF_PATHS)
+#define MAX_FOLDER_ROWS (MAX_LIBRARY_FOLDERS + SHELF_COUNT * MAX_SHELF_PATHS)
 static LibraryFolderRow g_folderRows[MAX_FOLDER_ROWS];
 static int g_folderRowCount = 0;
 
-static bool FolderListed(const char *path, const char *gamesPath)
+// "Hdd1:\Content\0000000000000000", "Usb0:\Content\0000000000000000\".
+static bool IsContentFolderPath(const char *path)
 {
-    if (_stricmp(path, gamesPath) == 0)
-        return true;
-    for (int i = 0; i < g_folderRowCount; ++i)
-    {
-        if (_stricmp(g_folderRows[i].path, path) == 0)
-            return true;
-    }
-    return false;
+    const size_t suffix = strlen(CONTENT_BASE_SUFFIX);
+    size_t len = strlen(path);
+    while (len > 0 && path[len - 1] == '\\')
+        len--;
+    return len > suffix && _strnicmp(path + len - suffix, CONTENT_BASE_SUFFIX, suffix) == 0;
 }
 
-static void AddFolderRow(const char *path, FolderKind kind, int found, int depth, const char *gamesPath)
+// A folder looked in for kind. One already listed - looked in for another
+// kind too, say - is the same row, with this kind's count added.
+static void AddFolderRow(const char *path, FolderKind kind, bool always, bool installs, int found, int depth)
 {
-    if (g_folderRowCount >= MAX_FOLDER_ROWS || FolderListed(path, gamesPath))
-        return;
-    LibraryFolderRow &row = g_folderRows[g_folderRowCount++];
-    _snprintf(row.path, sizeof(row.path), "%s", path);
-    row.path[sizeof(row.path) - 1] = '\0';
-    CanonicalDriveCase(row.path);
-    row.kind = kind;
-    row.exists = FolderExistsRecently(row.path);
-    row.games = found;
-    row.depth = depth;
+    int i = 0;
+    while (i < g_folderRowCount && !SameFolder(g_folderRows[i].path, path))
+        ++i;
+    if (i == g_folderRowCount)
+    {
+        if (g_folderRowCount >= MAX_FOLDER_ROWS)
+            return;
+        LibraryFolderRow &row = g_folderRows[g_folderRowCount++];
+        memset(&row, 0, sizeof(row));
+        _snprintf(row.path, sizeof(row.path), "%s", path);
+        row.path[sizeof(row.path) - 1] = '\0';
+        CanonicalDriveCase(row.path);
+        row.kind = kind;
+        row.role = FOLDER_ROLE_ADDED;
+        row.content = IsContentFolderPath(row.path);
+        row.exists = FolderExistsRecently(row.path);
+        for (int k = 0; k < FOLDER_KIND_COUNT; ++k)
+            row.counts[k] = FOLDER_COUNT_NONE;
+        row.depth = depth;
+    }
+    LibraryFolderRow &row = g_folderRows[i];
+    if (always || row.content)
+        row.role = FOLDER_ROLE_ALWAYS;
+    if (installs)
+        row.installs |= 1u << kind;
+    row.counts[kind] = found;
 }
 
 static int CompareFolderRows(const void *a, const void *b)
@@ -1105,43 +1199,47 @@ static int CompareFolderRows(const void *a, const void *b)
     return _stricmp(((const LibraryFolderRow *)a)->path, ((const LibraryFolderRow *)b)->path);
 }
 
-// moreFound: how many games each of g_moreGamesPaths added at the last scan.
-// Sorted by path rather than grouped by what they hold, so changing that
-// leaves a folder where it is.
-static void FindLibraryFolders(const char *gamesPath, const int *moreFound)
+static int LibraryFolderFound(const Library &lib, const char *path);
+
+// The rows, from g_libraryFolders (BuildLibraryFolders) and the pages'
+// folders. Sorted by path rather than grouped by what they hold, so changing
+// that leaves a folder where it is.
+static void FindLibraryFolders(const Library &lib)
 {
     g_folderRowCount = 0;
-    for (int p = 0; p < g_moreGamesPathCount; ++p)
-        AddFolderRow(g_moreGamesPaths[p], FOLDER_GAMES, moreFound[p], g_libraryDepths[1 + p], gamesPath);
-    for (int k = FOLDER_HOMEBREW; k < FOLDER_KIND_COUNT; ++k)
+    for (int i = 0; i < g_libraryFolders.count; ++i)
     {
-        const Shelf &shelf = ShelfFor((FolderKind)k);
+        const LibraryFolderSource source = g_libraryFolders.sources[i];
+        AddFolderRow(g_libraryFolders.paths[i], FOLDER_GAMES, source != LIBRARY_FOLDER_ADDED,
+                     source == LIBRARY_FOLDER_INSTALL, LibraryFolderFound(lib, g_libraryFolders.paths[i]),
+                     g_libraryFolders.depths[i]);
+    }
+    for (int s = 0; s < SHELF_COUNT; ++s)
+    {
+        const FolderKind kind = kShelfFolderKinds[s];
+        const Shelf &shelf = ShelfFor(kind);
         for (int p = 0; p < shelf.pathCount; ++p)
-            AddFolderRow(shelf.paths[p], (FolderKind)k, g_shelvesRead && !g_shelfPathsNewer ? shelf.found[p] : -1,
-                         shelf.depths[p], gamesPath);
+            AddFolderRow(shelf.paths[p], kind, p == shelf.installIndex, p == shelf.installIndex,
+                         g_shelvesRead && !g_shelfPathsNewer ? shelf.found[p] : -1, shelf.depths[p]);
     }
     if (g_folderRowCount > 1)
         qsort(g_folderRows, g_folderRowCount, sizeof(LibraryFolderRow), CompareFolderRows);
 }
 
-// Whether path is under any kind's key already - where games install
-// included.
-static bool FolderScannedAsAnything(const char *path, const char *gamesPath)
+// The kind a row's A changes the depth of: games where they install or the
+// console keeps them, else the first kind that installs there.
+static FolderKind RowDepthKind(const LibraryFolderRow &row)
 {
-    if (_stricmp(path, gamesPath) == 0)
-        return true;
-    for (int p = 0; p < g_moreGamesPathCount; ++p)
-        if (_stricmp(g_moreGamesPaths[p], path) == 0)
-            return true;
+    if (row.role == FOLDER_ROLE_ADDED)
+        return row.kind;
+    if (row.installs & 1u)
+        return FOLDER_GAMES;
     for (int k = FOLDER_HOMEBREW; k < FOLDER_KIND_COUNT; ++k)
-    {
-        const Shelf &shelf = ShelfFor((FolderKind)k);
-        for (int p = 0; p < shelf.pathCount; ++p)
-            if (_stricmp(shelf.paths[p], path) == 0)
-                return true;
-    }
-    return false;
+        if (row.installs & (1u << k))
+            return (FolderKind)k;
+    return FOLDER_GAMES;
 }
+
 
 // How many more folders kind's key can take.
 static int FolderKindRoom(FolderKind kind)
@@ -1195,15 +1293,30 @@ static bool WriteFolderKind(FolderKind kind, const char *gamesPath, const Folder
     // otherwise write the second over the first.
     if (kind == FOLDER_GAMES)
     {
+        // The first line is where games install, as given - edit can change
+        // its depth, but not take it away.
         ReadMoreGamesPaths();
-        Local::Put(gamesPath, g_libraryDepths[0], edit, n, values, lines);
+        int depth = g_libraryDepths[0];
+        if (edit.redepth != NULL && _stricmp(gamesPath, edit.redepth) == 0)
+            depth = edit.newDepth;
+        FormatScanDepth(gamesPath, depth, lines[n], MAX_TEXT_LENGTH + 8);
+        values[n] = lines[n];
+        n++;
         for (int p = 0; p < g_moreGamesPathCount; ++p)
-            Local::Put(g_moreGamesPaths[p], g_libraryDepths[1 + p], edit, n, values, lines);
+            if (!SameFolder(g_moreGamesPaths[p], gamesPath))
+                Local::Put(g_moreGamesPaths[p], g_libraryDepths[1 + p], edit, n, values, lines);
     }
     else
     {
         static Shelf current; // only its paths are filled in
         ReadShelfPaths(current, kFolderKindKeys[kind]);
+        // A folder added as where its kind installs goes before the rest.
+        if (edit.add != NULL && edit.first != NULL && _stricmp(edit.add, edit.first) == 0)
+        {
+            FormatScanDepth(edit.add, edit.addDepth, lines[n], MAX_TEXT_LENGTH + 8);
+            values[n] = lines[n];
+            n++;
+        }
         // edit.first, then the rest in their order.
         for (int pass = 0; pass < 2; ++pass)
             for (int p = 0; p < current.pathCount; ++p)
@@ -1213,13 +1326,87 @@ static bool WriteFolderKind(FolderKind kind, const char *gamesPath, const Folder
                     Local::Put(current.paths[p], current.depths[p], edit, n, values, lines);
             }
     }
-    if (edit.add != NULL)
+    if (edit.add != NULL && !(kind != FOLDER_GAMES && edit.first != NULL && _stricmp(edit.add, edit.first) == 0))
     {
         FormatScanDepth(edit.add, edit.addDepth, lines[n], MAX_TEXT_LENGTH + 8);
         values[n] = lines[n];
         n++;
     }
     return WriteSettingsLines(kFolderKindKeys[kind], values, n);
+}
+
+// Where the Homebrew store installs kind, and that folder's scan depth.
+// *isSet: from settings.txt - its install key, or its first folder as
+// before there was one - rather than the usual folder.
+static void KindInstallFolder(FolderKind kind, char *out, size_t outSize, int *depth, bool *isSet)
+{
+    *depth = FOLDER_GAME_DEPTH;
+    *isSet = GetSettingsPath(kKindInstallKeys[kind], "", out, outSize);
+    if (*isSet)
+    {
+        *depth = SplitScanDepth(out);
+        return;
+    }
+    static Shelf raw; // only its paths are filled in
+    ReadShelfPaths(raw, kFolderKindKeys[kind]);
+    if (raw.pathCount > 0)
+    {
+        *isSet = true;
+        _snprintf(out, outSize, "%s", raw.paths[0]);
+        *depth = raw.depths[0];
+    }
+    else
+        _snprintf(out, outSize, "%s", kKindDefaultFolders[kind]);
+    out[outSize - 1] = '\0';
+}
+
+// A shelf's folders as they're looked in: the ones settings.txt lists for it,
+// and the folder its kind installs to - once it's there - if they don't.
+static void ReadShelfFolders(Shelf &shelf, int s)
+{
+    const FolderKind kind = kShelfFolderKinds[s];
+    ReadShelfPaths(shelf, kShelfKeys[s]);
+    char install[MAX_TEXT_LENGTH];
+    int depth;
+    bool isSet;
+    KindInstallFolder(kind, install, sizeof(install), &depth, &isSet);
+    for (int p = 0; p < shelf.pathCount; ++p)
+    {
+        if (SameFolder(shelf.paths[p], install))
+        {
+            shelf.installIndex = p;
+            return;
+        }
+    }
+    if (shelf.pathCount >= MAX_SHELF_PATHS || !FolderExists(install))
+        return;
+    shelf.installIndex = shelf.pathCount;
+    _snprintf(shelf.paths[shelf.pathCount], MAX_TEXT_LENGTH, "%s", install);
+    shelf.paths[shelf.pathCount][MAX_TEXT_LENGTH - 1] = '\0';
+    shelf.found[shelf.pathCount] = 0;
+    shelf.depths[shelf.pathCount] = depth;
+    const size_t used = strlen(shelf.pathList);
+    _snprintf(shelf.pathList + used, sizeof(shelf.pathList) - used, "%s%s", used > 0 ? ", " : "", install);
+    shelf.pathList[sizeof(shelf.pathList) - 1] = '\0';
+    shelf.pathCount++;
+}
+
+// Whether path is looked in for kind already: one of the library's folders
+// for games, one of the shelf's for the rest.
+static bool FolderScannedFor(const char *path, FolderKind kind)
+{
+    if (kind == FOLDER_GAMES)
+    {
+        for (int i = 0; i < g_libraryFolders.count; ++i)
+            if (SameFolder(g_libraryFolders.paths[i], path))
+                return true;
+        return IsContentFolderPath(path);
+    }
+    const Shelf &shelf = ShelfFor(kind);
+    for (int p = 0; p < shelf.pathCount; ++p)
+        if (SameFolder(shelf.paths[p], path))
+            return true;
+    return false;
 }
 
 // ---------------------------------------------------------------------------
@@ -2788,18 +2975,6 @@ static void ManageDlc(unsigned long titleId, const char *gameName, const char *e
 // ---------------------------------------------------------------------------
 
 // The scanned library, replaced whenever the games folder changes.
-struct Library
-{
-    InstalledGame *games; // MAX_INSTALLED_GAMES entries, allocated once
-    int count;
-
-    // How many games each folder added at the scan: the install folder's,
-    // then each more folder's, as g_moreGamesPaths lists them.
-    int folderFound[1 + MAX_MORE_GAMES_PATHS];
-
-    // Changed since Library.cache was written - kept again at the next refresh.
-    bool cacheDirty;
-};
 
 // Goes up with every scan on the UI thread, so a scan startup left running
 // behind the library can tell it's been overtaken.
@@ -3025,17 +3200,6 @@ static int KeepNewTitles(Library &lib, int from, int found)
     return kept - from;
 }
 
-// Whether two folder paths name the same folder: case aside, and a
-// trailing backslash.
-static bool SameFolder(const char *a, const char *b)
-{
-    size_t la = strlen(a), lb = strlen(b);
-    while (la > 0 && a[la - 1] == '\\')
-        la--;
-    while (lb > 0 && b[lb - 1] == '\\')
-        lb--;
-    return la == lb && _strnicmp(a, b, la) == 0;
-}
 
 // One library folder's games into the list: its packages - a Content
 // folder's - then its extracted games' folders. How many it added.
@@ -3064,41 +3228,23 @@ static int ScanLibraryFolder(Library &lib, const char *path, int depth)
 // and nothing asked of the UI, so startup runs it on a thread of its own
 // while the loading screen animates, or behind the library kept from last
 // time; the icons made from the old list must already be released.
-// morePaths are the more folders from settings.txt, a copy of them for a
-// scan on another thread, as Settings can change g_moreGamesPaths meanwhile;
-// depths each folder's scan depth, gamesPath's first (g_libraryDepths).
-static void ReadLibrary(Library &lib, const char *gamesPath, const char (*morePaths)[MAX_TEXT_LENGTH], int moreCount,
-                        const int *depths)
+// folders is a copy, for a read on another thread: Settings can change the
+// list meanwhile.
+static void ReadLibrary(Library &lib, const LibraryFolders &folders)
 {
     FreeInstalledGames(lib.games, lib.count);
     lib.count = 0;
     memset(lib.folderFound, 0, sizeof(lib.folderFound));
+    memcpy(&lib.folders, &folders, sizeof(lib.folders));
 
-    ScanProgressBegin(1 + moreCount);
-    ScanProgressFolder(0, gamesPath, 0);
-    lib.folderFound[0] = ScanLibraryFolder(lib, gamesPath, depths[0]);
-
-    // Then each more folder. A game in two of them - copied to a USB drive,
-    // say - is listed once, from the first.
-    for (int p = 0; p < moreCount && lib.count < MAX_INSTALLED_GAMES; ++p)
+    // Each folder in turn. A game in two of them - copied to a USB drive,
+    // say - is listed once, from the first. The list has each folder once.
+    ScanProgressBegin(folders.count);
+    for (int p = 0; p < folders.count && lib.count < MAX_INSTALLED_GAMES; ++p)
     {
-        // A folder already read - the games folder again, or a more folder
-        // listed twice - would add nothing, after reading every package in
-        // it again (six seconds for a full Content folder).
-        bool already = SameFolder(morePaths[p], gamesPath);
-        for (int q = 0; q < p && !already; ++q)
-            already = SameFolder(morePaths[p], morePaths[q]);
-        if (already)
-        {
-            dprintf("%s is already read - not scanning it twice\n", morePaths[p]);
-            continue;
-        }
-        ScanProgressFolder(1 + p, morePaths[p], lib.count);
-        lib.folderFound[1 + p] = ScanLibraryFolder(lib, morePaths[p], depths[1 + p]);
-        if (lib.folderFound[1 + p] == 0)
-            dprintf("No installed games found under %s\n", morePaths[p]);
-        else
-            dprintf("Found %d more installed games under %s\n", lib.folderFound[1 + p], morePaths[p]);
+        ScanProgressFolder(p, folders.paths[p], lib.count);
+        lib.folderFound[p] = ScanLibraryFolder(lib, folders.paths[p], folders.depths[p]);
+        dprintf("Found %d installed games under %s\n", lib.folderFound[p], folders.paths[p]);
     }
 
     // A folder game is named for its folder, which may be anything - the
@@ -3128,37 +3274,91 @@ static void ReadLibrary(Library &lib, const char *gamesPath, const char (*morePa
     if (lib.count > 1)
         qsort(lib.games, lib.count, sizeof(InstalledGame), CompareGamesByName);
 
-    if (lib.count > 0)
-        dprintf("Found %d installed games under %s\n", lib.count, gamesPath);
-    else
-        dprintf("No installed games found under %s\n", gamesPath);
+    dprintf("Found %d installed games in %d folder(s)\n", lib.count, folders.count);
     dprintf("[timing] scan: names + sort %.1f ms\n", ImageTimerMs() - namingStart);
     ScanProgressEnd();
 }
 
-// The folders a library is read from, as one string - Library.cache keeps
-// the one it was read with, and is only used for the same.
-static void LibraryFoldersKey(const char *gamesPath, char *out, size_t outSize)
+// The folders a library is read from, now: where games install, each
+// drive's Content folder that's there (and the one add-ons install to,
+// wherever it is), then the folders added in Settings - each once. Reads
+// settings.txt and looks at the drives, so on the UI thread.
+
+static void AddLibraryFolderPath(LibraryFolders &list, const char *path, int depth, LibraryFolderSource source)
 {
-    // Each with its depth when it isn't the usual one: a Library.cache from
-    // before depths still fits a settings.txt without them.
-    FormatScanDepth(gamesPath, g_libraryDepths[0], out, outSize);
+    if (list.count >= MAX_LIBRARY_FOLDERS || path[0] == '\0')
+        return;
+    for (int i = 0; i < list.count; ++i)
+        if (SameFolder(list.paths[i], path))
+            return;
+    _snprintf(list.paths[list.count], MAX_TEXT_LENGTH, "%s", path);
+    list.paths[list.count][MAX_TEXT_LENGTH - 1] = '\0';
+    CanonicalDriveCase(list.paths[list.count]);
+    list.depths[list.count] = depth;
+    list.sources[list.count] = source;
+    list.count++;
+}
+
+static void BuildLibraryFolders(const char *gamesPath)
+{
+    ReadMoreGamesPaths();
+    LibraryFolders &list = g_libraryFolders;
+    list.count = 0;
+    AddLibraryFolderPath(list, gamesPath, g_libraryDepths[0], LIBRARY_FOLDER_INSTALL);
+
+    // The Content folder add-ons install to, whether or not anything's in it
+    // yet, then every other drive's that's there.
+    AddLibraryFolderPath(list, g_contentBase, FOLDER_GAME_DEPTH, LIBRARY_FOLDER_CONTENT);
+    FolderEntry drives[16];
+    const int driveCount = ListDrives(drives, 16);
+    for (int d = 0; d < driveCount; ++d)
+    {
+        if (IsDiscPath(drives[d].name))
+            continue;
+        char content[MAX_TEXT_LENGTH];
+        _snprintf(content, sizeof(content), "%s" CONTENT_BASE_SUFFIX, drives[d].name);
+        content[sizeof(content) - 1] = '\0';
+        if (FolderExistsRecently(content))
+            AddLibraryFolderPath(list, content, FOLDER_GAME_DEPTH, LIBRARY_FOLDER_CONTENT);
+    }
+
     for (int p = 0; p < g_moreGamesPathCount; ++p)
+        AddLibraryFolderPath(list, g_moreGamesPaths[p], g_libraryDepths[1 + p], LIBRARY_FOLDER_ADDED);
+}
+
+// The folders as one string - Library.cache keeps the one it was read with,
+// and is only used for the same. Each with its depth when it isn't the usual
+// one, so a cache from before depths still fits.
+static void LibraryFoldersKey(const LibraryFolders &list, char *out, size_t outSize)
+{
+    out[0] = '\0';
+    for (int p = 0; p < list.count; ++p)
     {
         char folder[MAX_TEXT_LENGTH + 8];
-        FormatScanDepth(g_moreGamesPaths[p], g_libraryDepths[1 + p], folder, sizeof(folder));
+        FormatScanDepth(list.paths[p], list.depths[p], folder, sizeof(folder));
         const size_t len = strlen(out);
-        _snprintf(out + len, outSize - len, "|%s", folder);
+        _snprintf(out + len, outSize - len, "%s%s", p > 0 ? "|" : "", folder);
         out[outSize - 1] = '\0';
     }
 }
 
 static void SaveLibrary(Library &lib, const char *gamesPath)
 {
-    char folders[2048];
-    LibraryFoldersKey(gamesPath, folders, sizeof(folders));
-    SaveLibraryCache(folders, lib.games, lib.count, lib.folderFound, 1 + g_moreGamesPathCount);
+    (void)gamesPath;
+    char folders[4096];
+    LibraryFoldersKey(lib.folders, folders, sizeof(folders));
+    SaveLibraryCache(folders, lib.games, lib.count, lib.folderFound, lib.folders.count);
     lib.cacheDirty = false;
+}
+
+// How many games the library's last read found in path; -1 if it wasn't
+// one of the folders read.
+static int LibraryFolderFound(const Library &lib, const char *path)
+{
+    for (int i = 0; i < lib.folders.count; ++i)
+        if (SameFolder(lib.folders.paths[i], path))
+            return lib.folderFound[i];
+    return -1;
 }
 
 static void ScanLibrary(Library &lib, const char *gamesPath)
@@ -3167,8 +3367,8 @@ static void ScanLibrary(Library &lib, const char *gamesPath)
 
     // The cover cache was built from the old scan's images - drop both.
     ReleaseGameListIcons();
-    ReadMoreGamesPaths();
-    ReadLibrary(lib, gamesPath, g_moreGamesPaths, g_moreGamesPathCount, g_libraryDepths);
+    BuildLibraryFolders(gamesPath);
+    ReadLibrary(lib, g_libraryFolders);
     g_libraryGeneration++;
     lib.cacheDirty = true;
 
@@ -3200,6 +3400,8 @@ enum SettingsRow
     SETTINGS_ROW_LIBRARY_FOLDER, // one of g_folderRows: A opens its menu (depth, remove)
     SETTINGS_ROW_ADD_FOLDER,   // another library folder, typed
     SETTINGS_ROW_SCAN_NOW,     // every folder read again
+    SETTINGS_ROW_ADDONS_DRIVE, // which drive's Content folder arcade games, DLC and updates go to
+    SETTINGS_ROW_KIND_INSTALL, // where the Homebrew store installs a kind (arg is the FolderKind)
     SETTINGS_ROW_AUTOSCAN,     // whether the library is read again at start, on or off
     SETTINGS_ROW_SOUNDS,       // the interface's sounds, on or off
     SETTINGS_ROW_SPEED_TEST,   // where a download's speed goes - SpeedTest.h
@@ -3243,7 +3445,7 @@ static void RescanShelves(const Library &lib)
         Sleep(20);
     for (int s = 0; s < SHELF_COUNT; ++s)
     {
-        ReadShelfPaths(g_shelves[s], kShelfKeys[s]);
+        ReadShelfFolders(g_shelves[s], s);
         ScanShelf(g_shelves[s]);
     }
     g_shelfPathsNewer = false; // a read that couldn't start may have set it
@@ -3315,6 +3517,28 @@ static void SetFolderDepth(FolderKind kind, const char *path, int current, Libra
     const int depth = PickScanDepth(path, current);
     if (depth < 0 || depth == current)
         return;
+
+    // A kind's install folder that its key doesn't list: the depth goes on
+    // its install key instead.
+    bool listed = kind == FOLDER_GAMES;
+    if (!listed)
+    {
+        static Shelf raw; // only its paths are filled in
+        ReadShelfPaths(raw, kFolderKindKeys[kind]);
+        for (int p = 0; p < raw.pathCount; ++p)
+            listed = listed || SameFolder(raw.paths[p], path);
+    }
+    if (!listed)
+    {
+        char line[MAX_TEXT_LENGTH + 8];
+        FormatScanDepth(path, depth, line, sizeof(line));
+        if (!SetSettingsValue(kKindInstallKeys[kind], line))
+            ShowMessageUI(Tr(STR_NOT_SAVED), Tr(STR_SETTINGS_TXT_COULD_NOT_BE), path);
+        else
+            RescanKind(kind, lib, gamesPath, outcome);
+        return;
+    }
+
     const FolderEdit edit = { NULL, NULL, 0, path, depth };
     if (!WriteFolderKind(kind, gamesPath, edit))
     {
@@ -3330,22 +3554,21 @@ static void SetFolderDepth(FolderKind kind, const char *path, int current, Libra
 static void SavePendingFolderKind(bool now, const char *gamesPath, SettingsOutcome &outcome);
 static FolderKind ShownFolderKind(const LibraryFolderRow &row);
 
-// Whether the homebrew store installs row's kind into it: the first folder of
-// that kind (HomebrewKindFolder). Games install where the downloads folder says.
-static bool IsInstallFolder(const LibraryFolderRow &row)
-{
-    if (row.kind == FOLDER_GAMES)
-        return false;
-    const Shelf &shelf = ShelfFor(row.kind);
-    return shelf.pathCount > 0 && _stricmp(shelf.paths[0], row.path) == 0;
-}
-
-// Install here, in a folder's menu: first of its kind, so the homebrew store
-// puts that kind there.
-static void MakeInstallFolder(int index, const char *gamesPath, SettingsOutcome &outcome);
 
 // The folder's row as it is now: a step left or right not yet saved is
 // saved first, so what's done to it is done under the key it's really in.
+// X on a folder that's there whatever you do: why it can't go.
+static void ExplainLockedFolder(const LibraryFolderRow &row)
+{
+    char message[256];
+    if (row.installs != 0)
+        TrFormat(message, sizeof(message), STR_FOLDER_INSTALL_LOCKED, Tr(kFolderKindPages[RowDepthKind(row)]));
+    else
+        TrFormat(message, sizeof(message), STR_FOLDER_CONTENT_LOCKED);
+    message[sizeof(message) - 1] = '\0';
+    ShowAlertUI(row.path, message, NULL, NULL, NULL); // a modal over the page
+}
+
 static bool CurrentFolderRow(int index, const char *gamesPath, SettingsOutcome &outcome, LibraryFolderRow *out)
 {
     if (index < 0 || index >= g_folderRowCount)
@@ -3363,6 +3586,11 @@ static void RemoveFolderRow(int index, Library &lib, const char *gamesPath, Sett
     LibraryFolderRow row;
     if (!CurrentFolderRow(index, gamesPath, outcome, &row))
         return;
+    if (row.role != FOLDER_ROLE_ADDED)
+    {
+        ExplainLockedFolder(row);
+        return;
+    }
     char message[MAX_TEXT_LENGTH + 64];
     TrFormat(message, sizeof(message), STR_STOP_LOOKING_IN, row.path);
     message[sizeof(message) - 1] = '\0';
@@ -3388,23 +3616,24 @@ static void FolderRowMenu(int index, Library &lib, const char *gamesPath, Settin
     if (index < 0 || index >= g_folderRowCount)
         return;
     const LibraryFolderRow &row = g_folderRows[index];
+    if (row.role == FOLDER_ROLE_ALWAYS)
+    {
+        // Only a kind's install folder's depth: where it is is changed under
+        // "Where new things go", and a Content folder is the console's.
+        if (row.installs != 0)
+            SetFolderDepth(RowDepthKind(row), row.path, row.depth, lib, gamesPath, outcome);
+        return;
+    }
 
     char depthLabel[64];
     TrFormat(depthLabel, sizeof(depthLabel), STR_SCAN_DEPTH_VALUE, TrNum(row.depth));
     depthLabel[sizeof(depthLabel) - 1] = '\0';
-    // Install here only where it would change something: an apps, homebrew
-    // or emulators folder that isn't already where that kind installs.
-    enum { MENU_DEPTH, MENU_INSTALL_HERE, MENU_CHANGE, MENU_REMOVE };
-    const char *labels[4];
-    int actions[4];
+    enum { MENU_DEPTH, MENU_CHANGE, MENU_REMOVE };
+    const char *labels[3];
+    int actions[3];
     int count = 0;
     labels[count] = depthLabel;
     actions[count++] = MENU_DEPTH;
-    if (ShownFolderKind(row) == row.kind && row.kind != FOLDER_GAMES && !IsInstallFolder(row))
-    {
-        labels[count] = Tr(STR_INSTALL_HERE);
-        actions[count++] = MENU_INSTALL_HERE;
-    }
     labels[count] = Tr(STR_CHANGE_FOLDER);
     actions[count++] = MENU_CHANGE;
     labels[count] = Tr(STR_REMOVE);
@@ -3420,8 +3649,6 @@ static void FolderRowMenu(int index, Library &lib, const char *gamesPath, Settin
         if (CurrentFolderRow(index, gamesPath, outcome, &current))
             SetFolderDepth(current.kind, current.path, current.depth, lib, gamesPath, outcome);
     }
-    else if (action == MENU_INSTALL_HERE)
-        MakeInstallFolder(index, gamesPath, outcome);
     else if (action == MENU_CHANGE)
         ReplaceFolderRow(index, lib, gamesPath, outcome);
     else if (action == MENU_REMOVE)
@@ -3511,20 +3738,6 @@ static void SavePendingFolderKind(bool now, const char *gamesPath, SettingsOutco
         outcome.rescanShelves = true;
 }
 
-static void MakeInstallFolder(int index, const char *gamesPath, SettingsOutcome &outcome)
-{
-    LibraryFolderRow row;
-    if (!CurrentFolderRow(index, gamesPath, outcome, &row) || row.kind == FOLDER_GAMES)
-        return;
-    FolderEdit edit = { NULL, NULL, 0, NULL, 0, NULL, row.path };
-    if (!WriteFolderKind(row.kind, gamesPath, edit))
-    {
-        ShowMessageUI(Tr(STR_NOT_SAVED), Tr(STR_SETTINGS_TXT_COULD_NOT_BE), row.path);
-        return;
-    }
-    dprintf("%s installs to %s now\n", kFolderKindNames[row.kind], row.path);
-    outcome.rescanShelves = true; // the pages' folders, read again in their new order
-}
 
 // "Add folder": one typed, for a folder somewhere the list doesn't look -
 // then what's in it, as Aurora asks.
@@ -3700,12 +3913,6 @@ static void AddLibraryFolder(Library &lib, const char *gamesPath, SettingsOutcom
         ShowMessageUI(Tr(STR_FOLDER_NOT_FOUND), Tr(STR_THERE_IS_NO_FOLDER_AT), newPath);
         return;
     }
-    if (FolderScannedAsAnything(newPath, gamesPath))
-    {
-        ShowMessageUI(Tr(STR_ALREADY_ADDED), Tr(STR_THAT_FOLDER_IS_LOOKED_IN),
-                      newPath);
-        return;
-    }
 
     const char *labels[FOLDER_KIND_COUNT] = { Tr(STR_NAV_GAMES), Tr(STR_NAV_HOMEBREW), Tr(STR_NAV_APPS),
                                               Tr(STR_NAV_EMULATORS) };
@@ -3722,6 +3929,12 @@ static void AddLibraryFolder(Library &lib, const char *gamesPath, SettingsOutcom
     if (chosen < 0)
         return;
     const FolderKind kind = (FolderKind)chosen;
+    if (FolderScannedFor(newPath, kind))
+    {
+        // Looked in for that already - but it can be for another kind too.
+        ShowAlertUI(Tr(STR_ALREADY_ADDED), Tr(STR_THAT_FOLDER_IS_LOOKED_IN), newPath, NULL, NULL);
+        return;
+    }
     if (FolderKindRoom(kind) <= 0)
     {
         TooManyFolders(kind);
@@ -3763,7 +3976,7 @@ static void ReplaceFolderRow(int index, Library &lib, const char *gamesPath, Set
         ShowMessageUI(Tr(STR_FOLDER_NOT_FOUND), Tr(STR_THERE_IS_NO_FOLDER_AT), newPath);
         return;
     }
-    if (FolderScannedAsAnything(newPath, gamesPath))
+    if (FolderScannedFor(newPath, row.kind))
     {
         ShowMessageUI(Tr(STR_ALREADY_ADDED), Tr(STR_THAT_FOLDER_IS_LOOKED_IN), newPath);
         return;
@@ -3776,6 +3989,98 @@ static void ReplaceFolderRow(int index, Library &lib, const char *gamesPath, Set
     }
     dprintf("%s folder %s is now %s\n", kFolderKindNames[row.kind], row.path, newPath);
     RescanKind(row.kind, lib, gamesPath, outcome);
+}
+
+// Apps, Homebrew or Emulators, under "Where new things go": the folder the
+// Homebrew store installs that kind to - the first of the kind's folders.
+// One picked that isn't listed yet is added, first; one listed for this
+// kind moves first; the one it was stays, as a folder you added.
+static void ChangeKindInstallFolder(FolderKind kind, const char *gamesPath, SettingsOutcome &outcome)
+{
+    (void)gamesPath;
+    char now[MAX_TEXT_LENGTH];
+    int depth;
+    bool isSet;
+    KindInstallFolder(kind, now, sizeof(now), &depth, &isSet);
+    char picked[MAX_TEXT_LENGTH];
+    if (PickFolder(Tr(kFolderKindPages[kind]), now, STR_A_FOLDER_OF_GAMES_HOMEBREW, picked, sizeof(picked)) ==
+        FOLDER_CANCELLED)
+        return;
+    const std::string typed = picked;
+    char newPath[MAX_TEXT_LENGTH];
+    if (!NormaliseGamesPath(typed, newPath, sizeof(newPath)))
+    {
+        ShowMessageUI(Tr(STR_NOT_A_FOLDER_PATH), Tr(STR_INCLUDE_THE_DRIVE_LIKE_HDD1), typed.c_str());
+        return;
+    }
+    if (isSet && SameFolder(newPath, now))
+        return; // where it is already
+    if (!FolderExists(newPath))
+    {
+        ShowMessageUI(Tr(STR_FOLDER_NOT_FOUND), Tr(STR_THERE_IS_NO_FOLDER_AT), newPath);
+        return;
+    }
+    // Any folder: it's looked in for this kind from now on, whatever else
+    // it's looked in for. The one it was stays looked in only if it's listed.
+    if (!SetSettingsValue(kKindInstallKeys[kind], newPath))
+    {
+        ShowMessageUI(Tr(STR_NOT_SAVED), Tr(STR_SETTINGS_TXT_COULD_NOT_BE), newPath);
+        return;
+    }
+    dprintf("%s install to %s now\n", kFolderKindNames[kind], newPath);
+    outcome.rescanShelves = true;
+}
+
+// Arcade, DLC & updates, under "Where new things go": which drive's Content
+// folder. The console only finds them in one, so it's a drive that's picked,
+// not a folder.
+static void ChangeAddOnsDrive(Library &lib, const char *gamesPath, SettingsOutcome &outcome)
+{
+    FolderEntry drives[16];
+    const int found = ListDrives(drives, 16);
+    static char names[16][16];
+    static char paths[16][MAX_TEXT_LENGTH];
+    const char *labels[16];
+    const char *notes[16];
+    int count = 0, current = 0;
+    for (int d = 0; d < found && count < 16; ++d)
+    {
+        if (IsDiscPath(drives[d].name))
+            continue;
+        _snprintf(names[count], sizeof(names[count]), "%s", drives[d].name);
+        names[count][sizeof(names[count]) - 1] = '\0';
+        _snprintf(paths[count], sizeof(paths[count]), "%s" CONTENT_BASE_SUFFIX, drives[d].name);
+        paths[count][sizeof(paths[count]) - 1] = '\0';
+        if (SameFolder(paths[count], g_contentBase))
+            current = count;
+        labels[count] = names[count];
+        notes[count] = paths[count];
+        count++;
+    }
+    if (count == 0)
+        return;
+    const int picked =
+        ShowAlertListExUI(Tr(STR_PLACE_ADDONS), Tr(STR_PLACE_ADDONS_HELP), labels, notes, count, current, NULL, NULL, true);
+    if (picked < 0 || picked >= count || SameFolder(paths[picked], g_contentBase))
+        return;
+
+    // Made if it isn't there yet, so it can be looked in straight away.
+    char contentDir[64];
+    _snprintf(contentDir, sizeof(contentDir), "%s\\Content", names[picked]);
+    contentDir[sizeof(contentDir) - 1] = '\0';
+    CreateDirectoryA(contentDir, NULL);
+    CreateDirectoryA(paths[picked], NULL);
+
+    if (!SetSettingsValue(CONTENT_PATH_KEY, paths[picked]))
+    {
+        ShowMessageUI(Tr(STR_NOT_SAVED), Tr(STR_SETTINGS_TXT_COULD_NOT_BE), paths[picked]);
+        return;
+    }
+    _snprintf(g_contentBase, sizeof(g_contentBase), "%s", paths[picked]);
+    g_contentBase[sizeof(g_contentBase) - 1] = '\0';
+    SetDownloadQueueContentPath(g_contentBase);
+    dprintf("Arcade, DLC and updates install to %s now\n", g_contentBase);
+    RescanFolders(lib, gamesPath, outcome);
 }
 
 static void ChangeGamesFolder(Library &lib, char *gamesPath, size_t gamesPathSize, SettingsOutcome &outcome)
@@ -3807,9 +4112,13 @@ static void ChangeGamesFolder(Library &lib, char *gamesPath, size_t gamesPathSiz
         return;
     }
 
-    char line[MAX_TEXT_LENGTH + 8];
-    FormatScanDepth(newPath, g_libraryDepths[0], line, sizeof(line)); // its depth stays
-    bool saved = SetSettingsValue(GAMES_PATH_KEY, line);
+    // The games key's lines again: the new folder first, at the depth the
+    // old one had; the old one kept as a folder you added, so the games in
+    // it don't disappear - unless it's a Content folder, which is looked in
+    // anyway.
+    FolderEdit edit = { newPath, IsContentFolderPath(gamesPath) ? NULL : gamesPath, g_libraryDepths[0], NULL, 0,
+                        NULL, NULL };
+    bool saved = WriteFolderKind(FOLDER_GAMES, newPath, edit);
     dprintf("Games path changed to %s (%s)\n", newPath, saved ? "saved" : "NOT saved");
 
     // Used for this session either way - the user asked for it and the folder
@@ -4613,7 +4922,7 @@ static void RemoveKeys(SettingsOutcome &outcome)
 // folders under a heading with Add folder and Change install folder, then
 // one line a setting. Rebuilt whenever something may have changed it, rather
 // than every frame - each rebuild reads the keys file.
-#define MAX_SETTINGS_ROWS (8 + MAX_FOLDER_ROWS)
+#define MAX_SETTINGS_ROWS (12 + MAX_FOLDER_ROWS)
 #define SETTINGS_MIDDOT "  \xC2\xB7  "
 
 struct SettingsPage
@@ -4623,8 +4932,7 @@ struct SettingsPage
     SettingsRow actions[MAX_SETTINGS_ROWS][SETTINGS_MAX_CONTROLS]; // what A on each control does
     int args[MAX_SETTINGS_ROWS]; // a library folder row's index into g_folderRows
 
-    char installHelp[MAX_TEXT_LENGTH + 64];
-    char installStatus[112];
+    char placeStatus[5][MAX_TEXT_LENGTH + 64]; // "Where new things go": each kind's folder
     char folderStatus[MAX_FOLDER_ROWS][96];
     char folderHelp[MAX_FOLDER_ROWS][128];
     char keysStatus[64];
@@ -4816,7 +5124,8 @@ static void BuildSettingsPage(SettingsPage &page, const Library &lib, const char
 
     // On every rebuild, as before the sections: the folder list stays current
     // whichever section is showing.
-    FindLibraryFolders(gamesPath, lib.folderFound + 1);
+    BuildLibraryFolders(gamesPath);
+    FindLibraryFolders(lib);
 
     if (page.section == SETTINGS_SECTION_STORAGE)
     {
@@ -4830,19 +5139,48 @@ static void BuildSettingsPage(SettingsPage &page, const Library &lib, const char
     // Library: the folders it's read from, then Refresh below.
     if (page.section == SETTINGS_SECTION_ASSETS)
     {
-        // --- Manage paths ---
-        // Names the content folder as well when it isn't the games folder
-        // itself, so it's clear where DLC, updates and arcade games land - they
-        // follow this drive, but always in its Content folder.
-        if (_stricmp(g_contentBase, gamesPath) == 0)
-            TrFormat(page.installHelp, sizeof(page.installHelp), STR_INSTALL_PATH_HELP);
-        else
-            TrFormat(page.installHelp, sizeof(page.installHelp), STR_INSTALL_PATH_HELP_CONTENT, g_contentBase);
-        page.installHelp[sizeof(page.installHelp) - 1] = '\0';
+        // --- Where new things go ---
+        // One row a kind, always all of them: where the Store, disc installs
+        // and the Homebrew store put what they bring. A is Change.
+        AddSettingsRow(page, SETTINGS_VIEW_HEADING, Tr(STR_WHERE_NEW_THINGS_GO));
+        {
+            _snprintf(page.placeStatus[0], sizeof(page.placeStatus[0]), "%s", gamesPath);
+            AddSettingsRow(page, SETTINGS_VIEW_LINE, Tr(STR_NAV_GAMES)).status = page.placeStatus[0];
+            AddSettingsControl(page, SETTINGS_CONTROL_BUTTON, Tr(STR_CHANGE), SETTINGS_ROW_GAMES_FOLDER,
+                               Tr(STR_PLACE_GAMES_HELP));
+
+            _snprintf(page.placeStatus[1], sizeof(page.placeStatus[1]), "%s", g_contentBase);
+            AddSettingsRow(page, SETTINGS_VIEW_LINE, Tr(STR_PLACE_ADDONS)).status = page.placeStatus[1];
+            AddSettingsControl(page, SETTINGS_CONTROL_BUTTON, Tr(STR_CHANGE), SETTINGS_ROW_ADDONS_DRIVE,
+                               Tr(STR_PLACE_ADDONS_HELP));
+
+            static const FolderKind kinds[3] = { FOLDER_APPS, FOLDER_HOMEBREW, FOLDER_EMULATORS };
+            for (int k = 0; k < 3; ++k)
+            {
+                char *status = page.placeStatus[2 + k];
+                char install[MAX_TEXT_LENGTH];
+                int depth;
+                bool isSet;
+                KindInstallFolder(kinds[k], install, sizeof(install), &depth, &isSet);
+                if (FolderExistsRecently(install))
+                    _snprintf(status, sizeof(page.placeStatus[0]), "%s", install);
+                else
+                    TrFormat(status, sizeof(page.placeStatus[0]), STR_MADE_ON_FIRST_INSTALL, install);
+                status[sizeof(page.placeStatus[0]) - 1] = '\0';
+                AddSettingsRow(page, SETTINGS_VIEW_LINE, Tr(kFolderKindPages[kinds[k]])).status = status;
+                AddSettingsControl(page, SETTINGS_CONTROL_BUTTON, Tr(STR_CHANGE), SETTINGS_ROW_KIND_INSTALL,
+                                   Tr(STR_PLACE_KIND_HELP));
+                page.args[page.count - 1] = kinds[k];
+            }
+        }
+        for (int i = 0; i < 5; ++i)
+            page.placeStatus[i][sizeof(page.placeStatus[i]) - 1] = '\0';
+
+        // --- Where Omni360 looks ---
         // As Aurora's Manage Paths: adding one, reading them all again, and
-        // whether that happens at start. A path's own things - where downloads
-        // go, its scan depth, removing it - are A on its row.
-        AddSettingsRow(page, SETTINGS_VIEW_HEADING, Tr(STR_MANAGE_PATHS));
+        // whether that happens at start. A folder's own things - its scan
+        // depth, another in its place, removing it - are A on its row.
+        AddSettingsRow(page, SETTINGS_VIEW_HEADING, Tr(STR_WHERE_OMNI360_LOOKS));
         AddSettingsControl(page, SETTINGS_CONTROL_BUTTON, Tr(STR_ADD_PATH), SETTINGS_ROW_ADD_FOLDER,
                            Tr(STR_PICK_ANOTHER_FOLDER_OF_GAMES));
         AddSettingsControl(page, SETTINGS_CONTROL_BUTTON, Tr(STR_SCAN_NOW), SETTINGS_ROW_SCAN_NOW,
@@ -4851,32 +5189,12 @@ static void BuildSettingsPage(SettingsPage &page, const Library &lib, const char
                            Tr(STR_AUTOSCAN_HELP));
         page.rows[page.count - 1].controls[2].on = AutoScanOn();
 
-        // Where downloads and disc installs go: always scanned, always first.
         ScanProgressSnapshot progress;
         ScanProgressGet(&progress);
-        {
-            char count[64], depth[32];
-            TrCount(count, sizeof(count), STR_DOWNLOADS_GO_HERE_ONE, STR_DOWNLOADS_GO_HERE, lib.folderFound[0]);
-            if (progress.running && !progress.apps)
-                ScanningRowStatus(progress, gamesPath, count, sizeof(count));
-            count[sizeof(count) - 1] = '\0';
-            TrFormat(depth, sizeof(depth), STR_DEPTH_N, TrNum(g_libraryDepths[0]));
-            depth[sizeof(depth) - 1] = '\0';
-            _snprintf(page.installStatus, sizeof(page.installStatus), "%s" SETTINGS_MIDDOT "%s", count, depth);
-            page.installStatus[sizeof(page.installStatus) - 1] = '\0';
-        }
-        {
-            SettingsRowView &row = AddSettingsRow(page, SETTINGS_VIEW_FOLDER, gamesPath);
-            row.status = page.installStatus;
-            row.statusGreen = true;
-            row.help = page.installHelp;
-            // A is its menu, as every folder's: moving it, or its scan
-            // depth - it can't be removed, as games install here.
-            page.actions[page.count - 1][0] = SETTINGS_ROW_GAMES_FOLDER;
-        }
 
-        // The other paths looked in - games, homebrew, apps and emulators.
-        // Each says what it holds on its right, which left and right change.
+        // Every folder looked in. The ones that are there whatever you do -
+        // where a kind installs, a drive's Content folder - say why, in blue,
+        // and can't be removed or changed here.
         for (int i = 0; i < g_folderRowCount; ++i)
         {
             const LibraryFolderRow &folder = g_folderRows[i];
@@ -4888,40 +5206,64 @@ static void BuildSettingsPage(SettingsPage &page, const Library &lib, const char
             const char *kindName = Tr(kFolderKindPages[shownKind]);
             SettingsRowView &row = AddSettingsRow(page, SETTINGS_VIEW_FOLDER, folder.path);
             page.args[page.count - 1] = i;
-            page.actions[page.count - 1][0] = SETTINGS_ROW_LIBRARY_FOLDER;
+            if (folder.role == FOLDER_ROLE_ADDED || folder.installs != 0)
+                page.actions[page.count - 1][0] = SETTINGS_ROW_LIBRARY_FOLDER;
+
+            // Its counts, a kind at a time - a folder can be looked in for
+            // games and apps both.
+            status[0] = '\0';
+            bool scanning = false;
+            for (int k = 0; k < FOLDER_KIND_COUNT; ++k)
+            {
+                const int found = folder.counts[k];
+                if (found == FOLDER_COUNT_NONE)
+                    continue;
+                if (found < 0 || (progress.running && (k == FOLDER_GAMES) != progress.apps))
+                {
+                    scanning = true;
+                    continue;
+                }
+                char part[48];
+                if (k == FOLDER_GAMES)
+                    TrCount(part, sizeof(part), STR_COUNT_GAME, STR_COUNT_GAMES, found);
+                else if (k == FOLDER_EMULATORS)
+                    TrCount(part, sizeof(part), STR_COUNT_EMULATOR, STR_COUNT_EMULATORS, found);
+                else // apps and homebrew: apps, as their pages show them
+                    TrCount(part, sizeof(part), STR_COUNT_APP, STR_COUNT_APPS, found);
+                part[sizeof(part) - 1] = '\0';
+                const size_t used = strlen(status);
+                _snprintf(status + used, statusSize - used, "%s%s", used > 0 ? SETTINGS_MIDDOT : "", part);
+            }
+            if (scanning)
+                ScanningRowStatus(progress, folder.path, status, statusSize);
+            TrFormat(help, helpSize, STR_FOLDER_SHOWN_HELP, Tr(kFolderKindPages[folder.kind]));
+
             if (!folder.exists)
             {
                 TrFormat(status, statusSize, STR_NOT_FOUND);
                 row.missing = true;
                 TrFormat(help, helpSize, STR_FOLDER_GONE_HELP);
             }
-            else
+            else if (folder.role == FOLDER_ROLE_ALWAYS)
             {
-                if (folder.games < 0 || (progress.running && (folder.kind == FOLDER_GAMES) != progress.apps))
-                    ScanningRowStatus(progress, folder.path, status, statusSize);
-                else if (folder.kind == FOLDER_GAMES)
-                    TrCount(status, statusSize, STR_COUNT_GAME, STR_COUNT_GAMES, folder.games);
-                else if (folder.kind == FOLDER_APPS)
-                    TrCount(status, statusSize, STR_COUNT_APP, STR_COUNT_APPS, folder.games);
-                else if (folder.kind == FOLDER_EMULATORS)
-                    TrCount(status, statusSize, STR_COUNT_EMULATOR, STR_COUNT_EMULATORS, folder.games);
-                else // homebrew: apps, as its page shows them
-                    TrCount(status, statusSize, STR_COUNT_APP, STR_COUNT_APPS, folder.games);
-                TrFormat(help, helpSize, STR_FOLDER_SHOWN_HELP, Tr(kFolderKindPages[folder.kind]));
-            }
-            if (IsInstallFolder(folder) && ShownFolderKind(folder) == folder.kind)
-            {
-                // Where the homebrew store puts this kind, first, as the
-                // downloads folder says it's where games go.
+                // Looked in whatever you do: it says so, and the help line
+                // says why - a kind installs there, or it's the console's.
                 char counts[96];
                 _snprintf(counts, sizeof(counts), "%s", status);
                 counts[sizeof(counts) - 1] = '\0';
-                _snprintf(status, statusSize, "%s" SETTINGS_MIDDOT "%s", Tr(STR_INSTALLS_GO_HERE), counts);
+                _snprintf(status, statusSize, "%s%s%s", Tr(STR_ALWAYS_LOOKED_IN), counts[0] ? SETTINGS_MIDDOT : "",
+                          counts);
                 row.statusGreen = true;
-                TrFormat(help, helpSize, STR_INSTALL_FOLDER_HELP, Tr(kFolderKindPages[folder.kind]));
+                if (folder.installs & 1u)
+                    TrFormat(help, helpSize, STR_GAMES_FOLDER_LOCKED_HELP);
+                else if (folder.installs != 0)
+                    TrFormat(help, helpSize, STR_KIND_FOLDER_LOCKED_HELP, Tr(kFolderKindPages[RowDepthKind(folder)]));
+                else
+                    TrFormat(help, helpSize, STR_CONTENT_FOLDER_HELP);
             }
+            if (folder.depth != FOLDER_GAME_DEPTH && !folder.content)
             {
-                // Its depth after the count, as Aurora's rows have it.
+                // Its depth after the count, when it isn't the usual one.
                 char depth[32];
                 TrFormat(depth, sizeof(depth), STR_DEPTH_N, TrNum(folder.depth));
                 depth[sizeof(depth) - 1] = '\0';
@@ -4933,7 +5275,10 @@ static void BuildSettingsPage(SettingsPage &page, const Library &lib, const char
             row.status = status;
             row.help = help;
 
-            // What it holds, beside it, as Disc read speed's value is.
+            // What it holds, beside it, as Disc read speed's value is - only
+            // on a folder you added; the rest hold what they're there for.
+            if (folder.role != FOLDER_ROLE_ADDED)
+                continue;
             SettingsControlView &c = row.controls[0];
             memset(&c, 0, sizeof(c));
             c.kind = SETTINGS_CONTROL_VALUE;
@@ -5532,22 +5877,12 @@ static SettingsOutcome RunSettingsRow(SettingsRow row, int arg, Library &lib, ch
 
     switch (row)
     {
-    case SETTINGS_ROW_GAMES_FOLDER:
-    {
-        // Where games install: moving it, or its scan depth.
-        char depthLabel[64];
-        TrFormat(depthLabel, sizeof(depthLabel), STR_SCAN_DEPTH_VALUE, TrNum(g_libraryDepths[0]));
-        depthLabel[sizeof(depthLabel) - 1] = '\0';
-        const char *labels[2] = { Tr(STR_CHANGE_FOLDER), depthLabel };
-        HoldDialogBackdrop(); // what it opens next is drawn over the page, not this menu
-        const int picked = ShowAlertListExUI(gamesPath, NULL, labels, NULL, 2, 0, NULL, NULL, false);
-        if (picked == 0)
-            ChangeGamesFolder(lib, gamesPath, gamesPathSize, outcome);
-        else if (picked == 1)
-            SetFolderDepth(FOLDER_GAMES, gamesPath, g_libraryDepths[0], lib, gamesPath, outcome);
-        ReleaseDialogBackdrop();
+    case SETTINGS_ROW_GAMES_FOLDER: ChangeGamesFolder(lib, gamesPath, gamesPathSize, outcome); break;
+    case SETTINGS_ROW_ADDONS_DRIVE: ChangeAddOnsDrive(lib, gamesPath, outcome); break;
+    case SETTINGS_ROW_KIND_INSTALL:
+        if (arg > FOLDER_GAMES && arg < FOLDER_KIND_COUNT)
+            ChangeKindInstallFolder((FolderKind)arg, gamesPath, outcome);
         break;
-    }
     case SETTINGS_ROW_SCAN_NOW:
         // Every folder read again, behind the page.
         outcome.rescanShelves = true;
@@ -8949,9 +9284,10 @@ static int g_homebrewRowStart[HOMEBREW_KIND_COUNT + 1];
 // the usual one.
 static const char *HomebrewKindFolder(int kind, bool *isSet)
 {
-    const Shelf &shelf = ShelfFor(kHomebrewFolderKinds[kind]);
-    *isSet = shelf.pathCount > 0;
-    return *isSet ? shelf.paths[0] : kHomebrewDefaultFolders[kind];
+    static char folders[HOMEBREW_KIND_COUNT][MAX_TEXT_LENGTH];
+    int depth;
+    KindInstallFolder(kHomebrewFolderKinds[kind], folders[kind], MAX_TEXT_LENGTH, &depth, isSet);
+    return folders[kind];
 }
 
 // The test mirror from settings.txt, without a trailing '/'; empty for none.
@@ -9142,18 +9478,11 @@ static void ShowHomebrewItem(Shell &shell, int index)
                        Tr(STR_FILES_IT_BRINGS_ARE_REPLACED), Tr(STR_INSTALL)))
         return;
 
-    // The first of its kind: the usual folder becomes its kind's, so its
-    // page turns up in the sidebar once it's in.
+    // The first of its kind: its install folder is looked in once it's
+    // there, so the pages are read again and its page turns up in the
+    // sidebar. Nothing is written - the folder is its kind's either way.
     if (!set)
-    {
-        FolderEdit edit = { NULL, kindFolder, FOLDER_GAME_DEPTH, NULL, 0 };
-        if (!WriteFolderKind(kHomebrewFolderKinds[item.kind], "", edit))
-        {
-            ShowMessageUI(Tr(STR_NOT_SAVED), Tr(STR_SETTINGS_TXT_COULD_NOT_BE), kindFolder);
-            return;
-        }
         shell.rescanShelves = true;
-    }
 
     HomebrewJobSpec spec;
     memset(&spec, 0, sizeof(spec));
@@ -11398,7 +11727,7 @@ static void EnsureFolderGamesScanned()
     GetGamesPath(gamesPath, sizeof(gamesPath));
     char root[64];
     FolderGamesRoot(gamesPath, root, sizeof(root));
-    if (!FolderExists(root) || FolderScannedAsAnything(root, gamesPath) ||
+    if (!FolderExists(root) || FolderScannedFor(root, FOLDER_GAMES) ||
         g_moreGamesPathCount >= MAX_MORE_GAMES_PATHS)
         return;
     const FolderEdit edit = { NULL, root, FOLDER_GAME_DEPTH, NULL, 0 };
@@ -13033,9 +13362,7 @@ struct StartupLoad
     Library *fresh;   // NULL with no cache
     bool keepCache;   // AutoScan off and a cache: the drive isn't read at all
     const char *gamesPath;
-    char morePaths[MAX_MORE_GAMES_PATHS][MAX_TEXT_LENGTH];
-    int moreCount;
-    int depths[1 + MAX_MORE_GAMES_PATHS];
+    LibraryFolders folders;
     volatile LONG ready;     // the loading screen can end
     volatile LONG freshRead; // fresh is read, and lib can be compared with it
 };
@@ -13054,7 +13381,7 @@ static DWORD WINAPI StartupLoadEntry(LPVOID param)
     }
     const double rows = ImageTimerMs();
     if (!load.keepCache)
-        ReadLibrary(lib, load.gamesPath, load.morePaths, load.moreCount, load.depths);
+        ReadLibrary(lib, load.folders);
     const double read = ImageTimerMs();
     if (!cached)
     {
@@ -13106,7 +13433,7 @@ static bool SameLibrary(const Library &a, const Library &b, int folderCount)
 // to agree with what's already on screen.
 static void AdoptLibrary(Shell &shell, Library &lib, Library &fresh, const char *gamesPath)
 {
-    if (SameLibrary(lib, fresh, 1 + g_moreGamesPathCount))
+    if (lib.folders.count == fresh.folders.count && SameLibrary(lib, fresh, fresh.folders.count))
     {
         dprintf("[library cache] the drive agrees with it\n");
         FreeInstalledGames(fresh.games, fresh.count);
@@ -13125,6 +13452,7 @@ static void AdoptLibrary(Shell &shell, Library &lib, Library &fresh, const char 
     lib.games = fresh.games;
     lib.count = fresh.count;
     memcpy(lib.folderFound, fresh.folderFound, sizeof(lib.folderFound));
+    memcpy(&lib.folders, &fresh.folders, sizeof(lib.folders));
     fresh.games = spare;
     fresh.count = 0;
 
@@ -13284,10 +13612,7 @@ static void StartIconSync(const InstalledGame *games, int count)
 struct LibraryRescan
 {
     Library fresh;
-    char gamesPath[MAX_TEXT_LENGTH];
-    char morePaths[MAX_MORE_GAMES_PATHS][MAX_TEXT_LENGTH];
-    int moreCount;
-    int depths[1 + MAX_MORE_GAMES_PATHS];
+    LibraryFolders folders;
     volatile LONG done;
     HANDLE thread;
     bool running;
@@ -13307,7 +13632,7 @@ static DWORD WINAPI LibraryRescanEntry(LPVOID param)
 {
     LibraryRescan &r = *(LibraryRescan *)param;
     if (r.library)
-        ReadLibrary(r.fresh, r.gamesPath, r.morePaths, r.moreCount, r.depths);
+        ReadLibrary(r.fresh, r.folders);
     if (r.shelves)
     {
         int folders = 0;
@@ -13338,9 +13663,9 @@ static bool StartLibraryRescan(const char *gamesPath, bool library = true, bool 
 
     // settings.txt is read here, on the UI thread, and the paths handed over:
     // the worker must not touch anything this thread may be reading.
-    ReadMoreGamesPaths();
+    BuildLibraryFolders(gamesPath);
     for (int s = 0; shelves && s < SHELF_COUNT; ++s)
-        ReadShelfPaths(g_shelfFresh[s], kShelfKeys[s]);
+        ReadShelfFolders(g_shelfFresh[s], s);
     if (shelves)
         g_shelfPathsNewer = true;
     g_rescan.library = library;
@@ -13352,11 +13677,7 @@ static bool StartLibraryRescan(const char *gamesPath, bool library = true, bool 
         return false;
     g_rescan.fresh.count = 0;
 
-    _snprintf(g_rescan.gamesPath, sizeof(g_rescan.gamesPath), "%s", gamesPath);
-    g_rescan.gamesPath[sizeof(g_rescan.gamesPath) - 1] = '\0';
-    memcpy(g_rescan.morePaths, g_moreGamesPaths, sizeof(g_rescan.morePaths));
-    g_rescan.moreCount = g_moreGamesPathCount;
-    memcpy(g_rescan.depths, g_libraryDepths, sizeof(g_rescan.depths));
+    memcpy(&g_rescan.folders, &g_libraryFolders, sizeof(g_rescan.folders));
 
     g_rescan.generation = g_libraryGeneration;
     InterlockedExchange(&g_rescan.done, 0);
@@ -13647,8 +13968,9 @@ int main()
     // anything that goes wrong gets diagnosed - but every phase the user
     // actually waits on now draws a real frame instead of leaving whatever
     // was last on screen.
-    Library lib;
+    static Library lib; // static: with its folder list it's too big for main's stack
     lib.count = 0;
+    lib.folders.count = 0;
     memset(lib.folderFound, 0, sizeof(lib.folderFound));
     lib.cacheDirty = false;
     lib.games = (InstalledGame *)malloc(sizeof(InstalledGame) * MAX_INSTALLED_GAMES);
@@ -13706,19 +14028,22 @@ int main()
     //
     // With the library kept from last time, the bouncing waits only for the
     // Store's rows, and the drive is read behind the library instead.
-    ReadMoreGamesPaths();
+    BuildLibraryFolders(gamesPath);
     for (int s = 0; s < SHELF_COUNT; ++s)
-        ReadShelfPaths(g_shelves[s], kShelfKeys[s]);
-    Library fresh;
+        ReadShelfFolders(g_shelves[s], s);
+    static Library fresh;
     fresh.count = 0;
+    fresh.folders.count = 0;
     fresh.games = NULL;
     bool keepCache = false;
     {
-        char folders[2048];
-        LibraryFoldersKey(gamesPath, folders, sizeof(folders));
+        char folders[4096];
+        LibraryFoldersKey(g_libraryFolders, folders, sizeof(folders));
         const double start = ImageTimerMs();
         const int cached =
-            LoadLibraryCache(folders, lib.games, MAX_INSTALLED_GAMES, lib.folderFound, 1 + g_moreGamesPathCount);
+            LoadLibraryCache(folders, lib.games, MAX_INSTALLED_GAMES, lib.folderFound, g_libraryFolders.count);
+        if (cached >= 0)
+            memcpy(&lib.folders, &g_libraryFolders, sizeof(lib.folders));
         if (cached >= 0 && !AutoScanOn())
         {
             // Started from as it is; Settings' Scan now reads the drive.
@@ -13743,14 +14068,12 @@ int main()
         }
     }
 
-    StartupLoad load;
+    static StartupLoad load;
     load.lib = &lib;
     load.fresh = fresh.games != NULL ? &fresh : NULL;
     load.keepCache = keepCache;
     load.gamesPath = gamesPath;
-    memcpy(load.morePaths, g_moreGamesPaths, sizeof(load.morePaths));
-    load.moreCount = g_moreGamesPathCount;
-    memcpy(load.depths, g_libraryDepths, sizeof(load.depths));
+    memcpy(&load.folders, &g_libraryFolders, sizeof(load.folders));
     load.ready = 0;
     load.freshRead = 0;
     HANDLE loader = CreateThread(NULL, 256 * 1024, StartupLoadEntry, &load, CREATE_SUSPENDED, NULL);
@@ -14951,7 +15274,7 @@ int main()
                 FocusSidebar(shell);
             }
             else if ((pressed & XINPUT_GAMEPAD_X) && row->kind == SETTINGS_VIEW_FOLDER &&
-                     settings.actions[settings.focusRow][0] == SETTINGS_ROW_LIBRARY_FOLDER)
+                     settings.args[settings.focusRow] >= 0)
             {
                 // Remove, straight from the row (issue #23).
                 SettingsOutcome changed = { false, false };
@@ -15564,13 +15887,21 @@ int main()
                 // The footer names what A does in the button's own words; a
                 // value is changed with left and right only, so A says nothing.
                 static WCHAR buttonLabel[48];
-                if (action == SETTINGS_ROW_LIBRARY_FOLDER || action == SETTINGS_ROW_GAMES_FOLDER)
+                if (row.kind == SETTINGS_VIEW_FOLDER)
                 {
-                    hintCount = AddHint(hints, hintCount, UI_BUTTON_A, TrW(STR_OPTIONS));
-                    if (action == SETTINGS_ROW_LIBRARY_FOLDER)
+                    // A folder you added: its options, removing it, what it
+                    // holds. Where a kind installs: its depth. A Content
+                    // folder: nothing - the help line says why.
+                    const int index = settings.args[settings.focusRow];
+                    const bool valid = index >= 0 && index < g_folderRowCount;
+                    if (valid && g_folderRows[index].role == FOLDER_ROLE_ADDED)
+                    {
+                        hintCount = AddHint(hints, hintCount, UI_BUTTON_A, TrW(STR_OPTIONS));
                         hintCount = AddHint(hints, hintCount, UI_BUTTON_X, TrW(STR_REMOVE));
-                    if (row.controlCount > 0 && row.controls[0].kind == SETTINGS_CONTROL_VALUE)
                         hintCount = AddHint(hints, hintCount, UI_BUTTON_DPAD_LR, TrW(STR_CHANGE));
+                    }
+                    else if (valid && g_folderRows[index].installs != 0)
+                        hintCount = AddHint(hints, hintCount, UI_BUTTON_A, TrW(STR_SCAN_DEPTH));
                 }
                 else if (control != NULL && control->kind == SETTINGS_CONTROL_VALUE)
                     hintCount = AddHint(hints, hintCount, UI_BUTTON_DPAD_LR, TrW(STR_CHANGE));
