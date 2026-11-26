@@ -6874,7 +6874,8 @@ static SettingsLayout LayOutSettings(SettingsPageView &view)
 {
     SettingsLayout L;
     const int count = view.count < SETTINGS_ROWS_MAX ? view.count : SETTINGS_ROWS_MAX;
-    L.top = g_M.listYTitleOnly;
+    // Below the subtitle when there is one, as the other pages' lists are.
+    L.top = view.subtitle != NULL ? g_M.listY : g_M.listYTitleOnly;
     const float height = g_M.footerY - S(34.0f) - L.top;
 
     float y = 0.0f;
@@ -6948,6 +6949,8 @@ static void DrawRadioQuads(float x, float cy, bool on)
 // The value control's marks: where the value sits among them.
 static void DrawValueQuads(const SettingsControlView &c, float x, float cy)
 {
+    if (c.fixedValue)
+        return;
     const float mid = x + SettingsControlWidth(c) * 0.5f, w = S(14.0f), step = S(18.0f);
     const float left = mid - (c.valueCount * step - (step - w)) * 0.5f;
     for (int d = 0; d < c.valueCount; ++d)
@@ -6998,6 +7001,10 @@ static void DrawSettingsControlsText(const SettingsRowView &row, float cy, float
         {
             if (ctl.label != NULL)
                 TextMid(x + S(10.0f) + SettingsCheck() + S(10.0f), cy, 0.85f, focused ? COL_TEXT : COL_TEXT2, ctl.label);
+        }
+        else if (ctl.fixedValue)
+        {
+            TextMid(x + w * 0.5f, cy, 0.8f, COL_TEXT2, ctl.label, ATGFONT_CENTER_X);
         }
         else
         {
@@ -7069,7 +7076,7 @@ void RenderSettingsFrame(SettingsPageView &view, const UiHint *hints, int hintCo
     // --- Pass 2: all text, one Begin/End ---
     g_UiFont.Begin();
     DrawSidebarText(g_sidebar.focused);
-    DrawHeaderText(Tr(STR_NAV_SETTINGS), NULL, showToast);
+    DrawHeaderText(view.title != NULL ? view.title : Tr(STR_NAV_SETTINGS), view.subtitle, showToast);
     DrawButtonHintText(footer, footerCount, g_M.footerY);
 
     const char *help = NULL;
@@ -7104,7 +7111,7 @@ void RenderSettingsFrame(SettingsPageView &view, const UiHint *hints, int hintCo
             TextMid(pathX, cy, 0.88f, row.missing ? COL_DIM : (rowFocused ? COL_TEXT : COL_TEXT2), row.label,
                     ATGFONT_TRUNCATED, statusRight - S(18.0f) - statusW - pathX);
             if (row.status != NULL)
-                TextMid(statusRight, cy, 0.76f, row.statusGreen ? COL_GREEN_TEXT : COL_DIM, row.status,
+                TextMid(statusRight, cy, 0.76f, row.statusGreen ? COL_GREEN_TEXT : COL_TEXT2, row.status,
                         ATGFONT_RIGHT);
             DrawSettingsControlsText(row, cy, w, 0, rowFocused);
             continue;
@@ -7126,7 +7133,7 @@ void RenderSettingsFrame(SettingsPageView &view, const UiHint *hints, int hintCo
         if (row.status != NULL)
         {
             const float statusX = x0 + S(18.0f) + S(250.0f);
-            TextMid(statusX, cy, 0.76f, COL_DIM, row.status, ATGFONT_TRUNCATED,
+            TextMid(statusX, cy, 0.76f, COL_TEXT2, row.status, ATGFONT_TRUNCATED,
                     SettingsControlsX(row, w) - S(20.0f) - statusX);
         }
         DrawSettingsControlsText(row, cy, w, view.focusCol, rowFocused);
@@ -11051,8 +11058,10 @@ static StorageLayout LayOutStorage(int driveCount, int actionCount)
 {
     StorageLayout l;
     l.top = g_M.listY;
-    l.actionGap = S(12.0f);
-    l.actionRowH = S(84.0f);
+    // Inside Settings, beside its sections, as slim as its rows are; on its
+    // own, the tall buttons it always had.
+    l.actionGap = g_sidebar.shown ? S(8.0f) : S(12.0f);
+    l.actionRowH = g_sidebar.shown ? S(62.0f) : S(84.0f);
     // Shorter rows rather than ones that run into the footer, as more
     // actions join the column.
     if (actionCount > 0)

@@ -1194,6 +1194,27 @@ static void AddFolderRow(const char *path, FolderKind kind, bool always, bool in
     row.counts[kind] = found;
 }
 
+// "Hdd1 · Content folder" for "Hdd1:\Content\0000000000000000"; other
+// folders as they are.
+static void FolderDisplayName(const char *path, char *out, size_t outSize)
+{
+    if (!IsContentFolderPath(path))
+    {
+        _snprintf(out, outSize, "%s", path);
+        out[outSize - 1] = '\0';
+        return;
+    }
+    char drive[16] = "";
+    const char *colon = strchr(path, ':');
+    if (colon != NULL && colon - path < (int)sizeof(drive))
+    {
+        memcpy(drive, path, colon - path);
+        drive[colon - path] = '\0';
+    }
+    TrFormat(out, outSize, STR_CONTENT_FOLDER_NAME, drive);
+    out[outSize - 1] = '\0';
+}
+
 static int CompareFolderRows(const void *a, const void *b)
 {
     return _stricmp(((const LibraryFolderRow *)a)->path, ((const LibraryFolderRow *)b)->path);
@@ -3687,6 +3708,8 @@ static bool StepFolderKind(int index, int step)
     if (index < 0 || index >= g_folderRowCount)
         return false;
     const LibraryFolderRow &row = g_folderRows[index];
+    if (row.role != FOLDER_ROLE_ADDED)
+        return false; // its kinds are fixed: where something installs, or the console's
     const int next = (int)ShownFolderKind(row) + step;
     if (next < 0 || next >= FOLDER_KIND_COUNT)
         return false;
@@ -4774,11 +4797,17 @@ static void ToggleFtp()
         ShowMessageUI(Tr(STR_FTP_DIDNT_START), Tr(STR_PORT_21_MAY_BE_IN_USE), NULL);
 }
 
+static void SetClockNow();
+
+// At start, on or off - and on sets it now too, as there's no Set now beside
+// it any more.
 static void ToggleClockSync()
 {
     const bool on = !ClockSyncAtStart();
     if (!SetSettingsValue(CLOCK_SYNC_KEY, on ? "yes" : "off"))
         ShowMessageUI(Tr(STR_NOT_SAVED), Tr(STR_SETTINGS_TXT_COULD_NOT_BE), NULL);
+    else if (on)
+        SetClockNow();
 }
 
 #define MAX_SIGN_IN_PROFILES 32
@@ -4938,6 +4967,9 @@ struct SettingsPage
     int args[MAX_SETTINGS_ROWS]; // a library folder row's index into g_folderRows
 
     char placeStatus[5][MAX_TEXT_LENGTH + 64]; // "Where new things go": each kind's folder
+    char folderLabel[MAX_FOLDER_ROWS][64];     // a Content folder's row: "Hdd1 · Content folder"
+    char folderKinds[MAX_FOLDER_ROWS][48];     // an automatic folder's kinds, in the column a picker has
+    char subtitle[128];                        // under the section's name, or empty
     char folderStatus[MAX_FOLDER_ROWS][96];
     char folderHelp[MAX_FOLDER_ROWS][128];
     char keysStatus[64];
@@ -5124,6 +5156,7 @@ static void BuildSettingsPage(SettingsPage &page, const Library &lib, const char
     std::string accessKey, secretKey;
     const bool haveKeys = LoadSavedKeys(accessKey, secretKey);
     page.count = 0;
+    page.subtitle[0] = '\0';
     if (page.section < 0 || page.section >= SETTINGS_SECTION_COUNT)
         page.section = SETTINGS_SECTION_GENERAL;
 
@@ -5141,17 +5174,31 @@ static void BuildSettingsPage(SettingsPage &page, const Library &lib, const char
     // Library: the folders it's read from, then Refresh below.
     if (page.section == SETTINGS_SECTION_ASSETS)
     {
+        {
+            int apps = 0;
+            for (int sh = 0; sh < SHELF_COUNT && g_shelvesRead; ++sh)
+                apps += g_shelves[sh].count;
+            char games[48], appsText[48];
+            TrCount(games, sizeof(games), STR_COUNT_GAME, STR_COUNT_GAMES, lib.count);
+            TrCount(appsText, sizeof(appsText), STR_COUNT_APP, STR_COUNT_APPS, apps);
+            games[sizeof(games) - 1] = appsText[sizeof(appsText) - 1] = '\0';
+            _snprintf(page.subtitle, sizeof(page.subtitle), "%s" SETTINGS_MIDDOT "%s", games, appsText);
+            page.subtitle[sizeof(page.subtitle) - 1] = '\0';
+        }
+
         // --- Where new things go ---
         // One row a kind, always all of them: where the Store, disc installs
         // and the Homebrew store put what they bring. A is Change.
         AddSettingsRow(page, SETTINGS_VIEW_HEADING, Tr(STR_WHERE_NEW_THINGS_GO));
         {
-            _snprintf(page.placeStatus[0], sizeof(page.placeStatus[0]), "%s", gamesPath);
+            FolderDisplayName(gamesPath, page.placeStatus[0], sizeof(page.placeStatus[0]));
             AddSettingsRow(page, SETTINGS_VIEW_LINE, Tr(STR_NAV_GAMES)).status = page.placeStatus[0];
             AddSettingsControl(page, SETTINGS_CONTROL_BUTTON, Tr(STR_CHANGE), SETTINGS_ROW_GAMES_FOLDER,
                                Tr(STR_PLACE_GAMES_HELP));
 
-            _snprintf(page.placeStatus[1], sizeof(page.placeStatus[1]), "%s", g_contentBase);
+            // A drive's what's picked, so a drive's what it shows.
+            DriveOfPath(g_contentBase, page.placeStatus[1], sizeof(page.placeStatus[1]));
+            page.placeStatus[1][strcspn(page.placeStatus[1], ":")] = '\0';
             AddSettingsRow(page, SETTINGS_VIEW_LINE, Tr(STR_PLACE_ADDONS)).status = page.placeStatus[1];
             AddSettingsControl(page, SETTINGS_CONTROL_BUTTON, Tr(STR_CHANGE), SETTINGS_ROW_ADDONS_DRIVE,
                                Tr(STR_PLACE_ADDONS_HELP));
@@ -5165,7 +5212,7 @@ static void BuildSettingsPage(SettingsPage &page, const Library &lib, const char
                 bool isSet;
                 KindInstallFolder(kinds[k], install, sizeof(install), &depth, &isSet);
                 if (FolderExistsRecently(install))
-                    _snprintf(status, sizeof(page.placeStatus[0]), "%s", install);
+                    FolderDisplayName(install, status, sizeof(page.placeStatus[0]));
                 else
                     TrFormat(status, sizeof(page.placeStatus[0]), STR_MADE_ON_FIRST_INSTALL, install);
                 status[sizeof(page.placeStatus[0]) - 1] = '\0';
@@ -5206,7 +5253,9 @@ static void BuildSettingsPage(SettingsPage &page, const Library &lib, const char
             const size_t helpSize = sizeof(page.folderHelp[i]);
             const FolderKind shownKind = ShownFolderKind(folder);
             const char *kindName = Tr(kFolderKindPages[shownKind]);
-            SettingsRowView &row = AddSettingsRow(page, SETTINGS_VIEW_FOLDER, folder.path);
+            FolderDisplayName(folder.path, page.folderLabel[i], sizeof(page.folderLabel[i]));
+            SettingsRowView &row = AddSettingsRow(page, SETTINGS_VIEW_FOLDER,
+                                                  folder.content ? page.folderLabel[i] : folder.path);
             page.args[page.count - 1] = i;
             if (folder.role == FOLDER_ROLE_ADDED || folder.installs != 0)
                 page.actions[page.count - 1][0] = SETTINGS_ROW_LIBRARY_FOLDER;
@@ -5253,15 +5302,16 @@ static void BuildSettingsPage(SettingsPage &page, const Library &lib, const char
                 char counts[96];
                 _snprintf(counts, sizeof(counts), "%s", status);
                 counts[sizeof(counts) - 1] = '\0';
+                // Quietly: most rows are this, so it's the ordinary case,
+                // not the one to look at.
                 _snprintf(status, statusSize, "%s%s%s", Tr(STR_ALWAYS_LOOKED_IN), counts[0] ? SETTINGS_MIDDOT : "",
                           counts);
-                row.statusGreen = true;
                 if (folder.installs & 1u)
                     TrFormat(help, helpSize, STR_GAMES_FOLDER_LOCKED_HELP);
                 else if (folder.installs != 0)
                     TrFormat(help, helpSize, STR_KIND_FOLDER_LOCKED_HELP, Tr(kFolderKindPages[RowDepthKind(folder)]));
                 else
-                    TrFormat(help, helpSize, STR_CONTENT_FOLDER_HELP);
+                    TrFormat(help, helpSize, STR_CONTENT_FOLDER_HELP_PATH, folder.path);
             }
             if (folder.depth != FOLDER_GAME_DEPTH && !folder.content)
             {
@@ -5277,10 +5327,31 @@ static void BuildSettingsPage(SettingsPage &page, const Library &lib, const char
             row.status = status;
             row.help = help;
 
-            // What it holds, beside it, as Disc read speed's value is - only
-            // on a folder you added; the rest hold what they're there for.
+            // What it holds, beside it, as Disc read speed's value is. A
+            // folder that's looked in whatever you do shows its kinds there
+            // too, fixed - so every row's counts and kinds line up.
             if (folder.role != FOLDER_ROLE_ADDED)
+            {
+                char *kinds = page.folderKinds[i];
+                kinds[0] = '\0';
+                for (int k = 0; k < FOLDER_KIND_COUNT; ++k)
+                {
+                    if (folder.counts[k] == FOLDER_COUNT_NONE)
+                        continue;
+                    const size_t used = strlen(kinds);
+                    _snprintf(kinds + used, sizeof(page.folderKinds[i]) - used, "%s%s", used > 0 ? " + " : "",
+                              Tr(kFolderKindPages[k]));
+                }
+                kinds[sizeof(page.folderKinds[i]) - 1] = '\0';
+                SettingsControlView &fixed = row.controls[0];
+                memset(&fixed, 0, sizeof(fixed));
+                fixed.kind = SETTINGS_CONTROL_VALUE;
+                fixed.label = kinds;
+                fixed.fixedValue = true;
+                fixed.compact = true;
+                row.controlCount = 1;
                 continue;
+            }
             SettingsControlView &c = row.controls[0];
             memset(&c, 0, sizeof(c));
             c.kind = SETTINGS_CONTROL_VALUE;
@@ -5353,6 +5424,8 @@ static void BuildSettingsPage(SettingsPage &page, const Library &lib, const char
 
     if (page.section == SETTINGS_SECTION_GENERAL)
     {
+        // In three groups, under headings as Library's rows are.
+        AddSettingsRow(page, SETTINGS_VIEW_HEADING, Tr(STR_HEADING_ACCOUNT));
         // Signed in or not - however the keys got there. Neither key is shown.
         TrFormat(page.keysStatus, sizeof(page.keysStatus), haveKeys ? STR_SIGNED_IN_STATUS : STR_NOT_SIGNED_IN_STATUS);
         page.keysStatus[sizeof(page.keysStatus) - 1] = '\0';
@@ -5363,6 +5436,51 @@ static void BuildSettingsPage(SettingsPage &page, const Library &lib, const char
             AddSettingsControl(page, SETTINGS_CONTROL_BUTTON, Tr(STR_SIGN_OUT), SETTINGS_ROW_REMOVE_KEYS,
                                Tr(STR_SIGN_OUT_HELP));
 
+        {
+            static char signInLabel[32];
+            SignInProfileLabel(signInLabel, sizeof(signInLabel));
+            // The profile as the row's status, and a button that says
+            // what it does - not one labelled with the value.
+            AddSettingsRow(page, SETTINGS_VIEW_LINE, Tr(STR_SIGN_IN_AT_START)).status = signInLabel;
+            AddSettingsControl(page, SETTINGS_CONTROL_BUTTON, Tr(STR_CHANGE), SETTINGS_ROW_SIGN_IN,
+                               Tr(STR_SIGNS_THIS_PROFILE_IN_WHEN));
+        }
+
+
+        AddSettingsRow(page, SETTINGS_VIEW_HEADING, Tr(STR_HEADING_DISCS));
+        // How fast a disc install reads: left and right change it.
+        const char *const speedNames[DISC_SPEED_FULL] = { Tr(STR_SPEED_SLOWEST), Tr(STR_SPEED_SLOW), Tr(STR_SPEED_FAST),
+                                                           Tr(STR_SPEED_FULL) };
+        const int speed = DiscSpeedSetting();
+        AddSettingsRow(page, SETTINGS_VIEW_LINE, Tr(STR_DISC_READ_SPEED));
+        AddSettingsControl(page, SETTINGS_CONTROL_VALUE, speedNames[speed - 1], SETTINGS_ROW_NONE,
+                           speed == DISC_SPEED_FULL
+                               ? Tr(STR_THE_FASTEST_IF_A_DISC)
+                               : Tr(STR_SLOWER_AND_GENTLER_ON_A));
+        {
+            SettingsControlView &c = page.rows[page.count - 1].controls[0];
+            c.valueIndex = speed - 1;
+            c.valueCount = DISC_SPEED_FULL;
+        }
+
+        // How a Store game installs: left and right change it.
+        const bool asFolder = InstallAsFolderSetting();
+        AddSettingsRow(page, SETTINGS_VIEW_LINE, Tr(STR_INSTALL_DISC_GAMES_AS));
+        AddSettingsControl(page, SETTINGS_CONTROL_VALUE, asFolder ? Tr(STR_FOLDER_DEFAULT_XEX) : Tr(STR_GAMES_ON_DEMAND),
+                           SETTINGS_ROW_INSTALL_TYPE, Tr(STR_ONLY_AFFECTS_RETAIL_XBOX_360));
+        {
+            SettingsControlView &c = page.rows[page.count - 1].controls[0];
+            c.valueIndex = asFolder ? 1 : 0;
+            c.valueCount = 2;
+        }
+
+        AddSettingsRow(page, SETTINGS_VIEW_LINE, Tr(STR_EJECT_DISC_AFTER_INSTALL));
+        AddSettingsControl(page, SETTINGS_CONTROL_CHECK, NULL, SETTINGS_ROW_EJECT,
+                           Tr(STR_OPENS_THE_TRAY_ONCE_A));
+        page.rows[page.count - 1].controls[0].on = EjectAfterInstallSetting();
+
+
+        AddSettingsRow(page, SETTINGS_VIEW_HEADING, Tr(STR_HEADING_NETWORK));
         // The PC helper: what's running, and pairing with it.
         {
             char pcName[64];
@@ -5423,52 +5541,6 @@ static void BuildSettingsPage(SettingsPage &page, const Library &lib, const char
             }
         }
 
-        // How fast a disc install reads: left and right change it.
-        const char *const speedNames[DISC_SPEED_FULL] = { Tr(STR_SPEED_SLOWEST), Tr(STR_SPEED_SLOW), Tr(STR_SPEED_FAST),
-                                                           Tr(STR_SPEED_FULL) };
-        const int speed = DiscSpeedSetting();
-        AddSettingsRow(page, SETTINGS_VIEW_LINE, Tr(STR_DISC_READ_SPEED));
-        AddSettingsControl(page, SETTINGS_CONTROL_VALUE, speedNames[speed - 1], SETTINGS_ROW_NONE,
-                           speed == DISC_SPEED_FULL
-                               ? Tr(STR_THE_FASTEST_IF_A_DISC)
-                               : Tr(STR_SLOWER_AND_GENTLER_ON_A));
-        {
-            SettingsControlView &c = page.rows[page.count - 1].controls[0];
-            c.valueIndex = speed - 1;
-            c.valueCount = DISC_SPEED_FULL;
-        }
-
-        AddSettingsRow(page, SETTINGS_VIEW_LINE, Tr(STR_EJECT_DISC_AFTER_INSTALL));
-        AddSettingsControl(page, SETTINGS_CONTROL_CHECK, NULL, SETTINGS_ROW_EJECT,
-                           Tr(STR_OPENS_THE_TRAY_ONCE_A));
-        page.rows[page.count - 1].controls[0].on = EjectAfterInstallSetting();
-
-        // How a Store game installs: left and right change it.
-        const bool asFolder = InstallAsFolderSetting();
-        AddSettingsRow(page, SETTINGS_VIEW_LINE, Tr(STR_INSTALL_DISC_GAMES_AS));
-        AddSettingsControl(page, SETTINGS_CONTROL_VALUE, asFolder ? Tr(STR_FOLDER_DEFAULT_XEX) : Tr(STR_GAMES_ON_DEMAND),
-                           SETTINGS_ROW_INSTALL_TYPE, Tr(STR_ONLY_AFFECTS_RETAIL_XBOX_360));
-        {
-            SettingsControlView &c = page.rows[page.count - 1].controls[0];
-            c.valueIndex = asFolder ? 1 : 0;
-            c.valueCount = 2;
-        }
-
-        {
-            static char signInLabel[32];
-            SignInProfileLabel(signInLabel, sizeof(signInLabel));
-            AddSettingsRow(page, SETTINGS_VIEW_LINE, Tr(STR_SIGN_IN_AT_START));
-            AddSettingsControl(page, SETTINGS_CONTROL_BUTTON, signInLabel, SETTINGS_ROW_SIGN_IN,
-                               Tr(STR_SIGNS_THIS_PROFILE_IN_WHEN));
-        }
-
-        AddSettingsRow(page, SETTINGS_VIEW_LINE, Tr(STR_SET_CLOCK_FROM_INTERNET));
-        AddSettingsControl(page, SETTINGS_CONTROL_BUTTON, Tr(STR_SET_NOW), SETTINGS_ROW_CLOCK_SYNC_NOW,
-                           Tr(STR_ASKS_A_TIME_SERVER_FOR));
-        AddSettingsControl(page, SETTINGS_CONTROL_CHECK, Tr(STR_AT_START), SETTINGS_ROW_CLOCK_SYNC,
-                           Tr(STR_SETS_THE_CLOCK_EACH_TIME));
-        page.rows[page.count - 1].controls[1].on = ClockSyncAtStart();
-
         // FTP: where to point a PC, and what to sign in with, while it runs.
         {
             char user[64], password[64];
@@ -5497,10 +5569,20 @@ static void BuildSettingsPage(SettingsPage &page, const Library &lib, const char
             AddSettingsControl(page, SETTINGS_CONTROL_CHECK, NULL, SETTINGS_ROW_FTP, page.ftpHelp);
             page.rows[page.count - 1].controls[0].on = FtpSetting();
         }
+        // One control: at start. Turning it on sets the clock now as well,
+        // so there's no separate Set now beside it.
+        AddSettingsRow(page, SETTINGS_VIEW_LINE, Tr(STR_SET_CLOCK_FROM_INTERNET));
+        AddSettingsControl(page, SETTINGS_CONTROL_CHECK, NULL, SETTINGS_ROW_CLOCK_SYNC, Tr(STR_SETS_THE_CLOCK_EACH_TIME));
+        page.rows[page.count - 1].controls[0].on = ClockSyncAtStart();
+
+        AddSettingsRow(page, SETTINGS_VIEW_LINE, Tr(STR_SPEED_TEST));
+        AddSettingsControl(page, SETTINGS_CONTROL_BUTTON, Tr(STR_RUN_TEST), SETTINGS_ROW_SPEED_TEST,
+                           Tr(STR_CHECKS_HOW_FAST_YOUR_INTERNET));
     }
 
     if (page.section == SETTINGS_SECTION_ASSETS)
     {
+        AddSettingsRow(page, SETTINGS_VIEW_HEADING, Tr(STR_HEADING_GAME_ICONS));
         AddSettingsRow(page, SETTINGS_VIEW_LINE, Tr(STR_MISSING_GAME_ICONS));
         AddSettingsControl(page, SETTINGS_CONTROL_BUTTON, Tr(STR_GET_ICONS), SETTINGS_ROW_RESYNC_LIBRARY,
                            Tr(STR_GET_ICONS_HELP));
@@ -5620,9 +5702,6 @@ static void BuildSettingsPage(SettingsPage &page, const Library &lib, const char
             row.help = Tr(STR_BACK_ON_HOME_SHOWS_MORE);
         }
 
-        AddSettingsRow(page, SETTINGS_VIEW_LINE, Tr(STR_SPEED_TEST));
-        AddSettingsControl(page, SETTINGS_CONTROL_BUTTON, Tr(STR_RUN_TEST), SETTINGS_ROW_SPEED_TEST,
-                           Tr(STR_CHECKS_HOW_FAST_YOUR_INTERNET));
     }
 
     // The focus where it was, on a row that's still there.
@@ -9691,7 +9770,8 @@ static void PublishSidebar(const Shell &shell, const Library &lib)
         sidebar.queueViaPc = job.viaPc;
         break;
     }
-    sidebar.storageUsed = shell.storage.used;
+    sidebar.storageUsed = (shell.page == SHELL_PAGE_SETTINGS && shell.settings.section == SETTINGS_SECTION_STORAGE)
+                              ? -1.0f : shell.storage.used;
     strncpy(sidebar.storageLabel, shell.storage.label, sizeof(sidebar.storageLabel) - 1);
     sidebar.storageLabel[sizeof(sidebar.storageLabel) - 1] = '\0';
     strncpy(sidebar.storageDetail, shell.storage.detail, sizeof(sidebar.storageDetail) - 1);
@@ -9789,8 +9869,11 @@ static StoragePageView MakeStorageView(const Shell &shell)
     StorageViewText &v = g_storageText;
     memset(&v, 0, sizeof(v));
 
+    // The drive new games go to - where Settings' Library says they go.
+    char gamesPath[MAX_TEXT_LENGTH];
+    GetGamesPath(gamesPath, sizeof(gamesPath));
     char contentDrive[16];
-    DriveOfPath(g_contentBase, contentDrive, sizeof(contentDrive));
+    DriveOfPath(gamesPath, contentDrive, sizeof(contentDrive));
     const size_t contentDriveLen = strcspn(contentDrive, ":");
 
     int driveCount = 0;
@@ -9851,7 +9934,7 @@ static StoragePageView MakeStorageView(const Shell &shell)
             view.freeLine = v.freeLine[i];
             view.used = (float)(used / cap);
             view.note = (strlen(drive.name) == contentDriveLen && _strnicmp(drive.name, contentDrive, contentDriveLen) == 0)
-                            ? Tr(STR_STORAGE_DOWNLOADS_HERE) : NULL;
+                            ? Tr(STR_STORAGE_DOWNLOADS_HERE) : NULL; // "New games go here"
         }
 
         // Leftovers by title, counted once however many drives they're on.
@@ -14700,7 +14783,7 @@ int main()
                 else if ((input.nav == XINPUT_GAMEPAD_DPAD_DOWN || (pressed & XINPUT_GAMEPAD_A)) && itemCount > 0)
                     shell.libraryOnFilters = false;
                 else if (toHome)
-                    EnterPage(shell, SHELL_PAGE_HOME, false);
+                    FocusSidebar(shell); // B: to the sidebar, then from there Home
             }
             else if (hasFilters && input.nav == XINPUT_GAMEPAD_DPAD_UP &&
                      shell.librarySelected < LibraryGridColumns())
@@ -14717,7 +14800,9 @@ int main()
             }
             else if (toHome)
             {
-                EnterPage(shell, SHELL_PAGE_HOME, false);
+                // B steps back out: to the sidebar first, and B there goes
+                // Home - so a B pressed out of habit doesn't leave the page.
+                FocusSidebar(shell);
             }
             else if (toSidebar)
             {
@@ -14772,7 +14857,7 @@ int main()
 
             if (pressed & XINPUT_GAMEPAD_B)
             {
-                EnterPage(shell, SHELL_PAGE_HOME, false);
+                FocusSidebar(shell); // B there goes Home
             }
             else if (StepGrid(input, count, LibraryPageVisibleRows(MakeShelfView(shell, kind)), shelf.selected))
             {
@@ -15170,7 +15255,7 @@ int main()
 
             if (pressed & XINPUT_GAMEPAD_B)
             {
-                EnterPage(shell, SHELL_PAGE_HOME, false);
+                FocusSidebar(shell); // B there goes Home
             }
             else if (pressed & XINPUT_GAMEPAD_Y)
             {
@@ -15296,7 +15381,7 @@ int main()
                 // game's parts, the files - takes the screen as before, and
                 // coming back out of it lands here.
                 if (pressed & XINPUT_GAMEPAD_B)
-                    EnterPage(shell, SHELL_PAGE_HOME, false);
+                    FocusSidebar(shell);
                 else if (pressed & (XINPUT_GAMEPAD_LEFT_SHOULDER | XINPUT_GAMEPAD_RIGHT_SHOULDER))
                     StepSettingsSection(settings, (pressed & XINPUT_GAMEPAD_LEFT_SHOULDER) ? -1 : 1, lib, gamesPath);
                 else if (input.nav == XINPUT_GAMEPAD_DPAD_LEFT && shell.storageColumn == 0)
@@ -15316,7 +15401,9 @@ int main()
             }
             else if (pressed & XINPUT_GAMEPAD_B)
             {
-                EnterPage(shell, SHELL_PAGE_HOME, false);
+                // To the sections first - where left would go, if left
+                // weren't changing a value - and B there goes Home.
+                FocusSidebar(shell);
             }
             else if (pressed & (XINPUT_GAMEPAD_LEFT_SHOULDER | XINPUT_GAMEPAD_RIGHT_SHOULDER))
             {
@@ -15624,7 +15711,7 @@ int main()
                         hintCount = AddHint(hints, hintCount, UI_BUTTON_X, TrW(STR_VIEW_GAME), TrW(STR_VIEW));
                         hintCount = AddHint(hints, hintCount, UI_BUTTON_Y, TrW(STR_OPTIONS));
                     }
-                    hintCount = AddHint(hints, hintCount, UI_BUTTON_B, TrW(STR_NAV_HOME));
+                    hintCount = AddHint(hints, hintCount, UI_BUTTON_B, shell.sidebarFocused ? TrW(STR_NAV_HOME) : TrW(STR_BUTTON_BACK));
                     const int pageItems = LibraryPageVisibleRows(view) * LibraryGridColumns();
                     if (itemCount > pageItems)
                         hintCount = AddHint(hints, hintCount, PageHintButton(shell.librarySelected, pageItems, itemCount),
@@ -15653,7 +15740,7 @@ int main()
                     hintCount = AddHint(hints, hintCount, UI_BUTTON_A, TrW(STR_START));
                 if (view.count > 0)
                     hintCount = AddHint(hints, hintCount, UI_BUTTON_Y, TrW(STR_OPTIONS));
-                hintCount = AddHint(hints, hintCount, UI_BUTTON_B, TrW(STR_NAV_HOME));
+                hintCount = AddHint(hints, hintCount, UI_BUTTON_B, shell.sidebarFocused ? TrW(STR_NAV_HOME) : TrW(STR_BUTTON_BACK));
                 const int pageItems = LibraryPageVisibleRows(view) * LibraryGridColumns();
                 if (view.count > pageItems)
                     hintCount = AddHint(hints, hintCount, PageHintButton(shelf.selected, pageItems, view.count),
@@ -15857,7 +15944,7 @@ int main()
                     if (RunningJobCount() > 0)
                         hintCount = AddHint(hints, hintCount, UI_BUTTON_Y, TrW(STR_TURN_OFF_WHEN_DONE), TrW(STR_NIGHT_MODE));
 
-                    hintCount = AddHint(hints, hintCount, UI_BUTTON_B, TrW(STR_NAV_HOME));
+                    hintCount = AddHint(hints, hintCount, UI_BUTTON_B, shell.sidebarFocused ? TrW(STR_NAV_HOME) : TrW(STR_BUTTON_BACK));
                 }
 
                 QueuePageView view;
@@ -15938,7 +16025,7 @@ int main()
                 if (!shell.sidebarFocused &&
                     !(view.column == 0 && view.row == STORAGE_ACTION_RESCAN && StorageScanRunning()))
                     hintCount = AddHint(hints, hintCount, UI_BUTTON_A, TrW(STR_SELECT));
-                hintCount = AddHint(hints, hintCount, UI_BUTTON_B, TrW(STR_NAV_HOME));
+                hintCount = AddHint(hints, hintCount, UI_BUTTON_B, shell.sidebarFocused ? TrW(STR_NAV_HOME) : TrW(STR_BUTTON_BACK));
                 hintCount = AddHint(hints, hintCount, UI_BUTTON_LBRB, TrW(STR_SECTION_HINT));
                 RenderStorageFrame(view, hints, hintCount);
                 shell.storageColumn = view.column;
@@ -15987,11 +16074,13 @@ int main()
                 }
                 else if (action != SETTINGS_ROW_NONE)
                     hintCount = AddHint(hints, hintCount, UI_BUTTON_A, TrW(STR_SELECT));
-                hintCount = AddHint(hints, hintCount, UI_BUTTON_B, TrW(STR_NAV_HOME));
+                hintCount = AddHint(hints, hintCount, UI_BUTTON_B, shell.sidebarFocused ? TrW(STR_NAV_HOME) : TrW(STR_BUTTON_BACK));
                 hintCount = AddHint(hints, hintCount, UI_BUTTON_LBRB, TrW(STR_SECTION_HINT));
             }
 
             SettingsPageView view;
+            view.title = kSettingsSectionNames[settings.section];
+            view.subtitle = settings.subtitle[0] != '\0' ? settings.subtitle : NULL;
             view.rows = settings.rows;
             view.count = settings.count;
             view.focusRow = settings.focusRow;

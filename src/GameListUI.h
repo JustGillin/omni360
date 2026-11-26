@@ -518,6 +518,7 @@ struct SettingsControlView
     int valueCount;
     bool compact;        // a value's: narrower, beside a folder's path
     bool radio;          // a checkbox's: drawn round, as one choice of several
+    bool fixedValue;     // a value's that can't change: its label alone, no arrows or marks
     const char *help;    // for the help line, while it has focus
 };
 
@@ -549,6 +550,8 @@ struct SettingsRowView
 
 struct SettingsPageView
 {
+    const char *title;    // the section's name; NULL for "Settings"
+    const char *subtitle; // a line under it, or NULL
     const SettingsRowView *rows;
     int count;
     int focusRow;
