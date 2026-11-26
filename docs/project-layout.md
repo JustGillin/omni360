@@ -70,7 +70,7 @@ Generated output under `Release/`, `Debug/`, `Profile/`, `ipch/` and `Common/Rel
 
 `game:\ArchiveOrgKeys.txt` holds the archive.org IAS3 access key (line 1) and secret key (line 2), in plain text.
 
-`game:\settings.txt` optionally sets `xbla-path:` (where content installs) and `games-path:` (where the library is scanned), along with `apps-path:`, `homebrew-path:` and `emulators-path:` for the three shelves. The `app:` key is gone: it listed extra places to exit to in a menu that B on the sidebar used to open, and B now goes to Home instead, where it asks whether to leave.
+`game:\settings.txt` optionally sets `games-path:` (the first is where games install, the rest more folders of games), `xbla-path:` (where arcade games, DLC and updates install), `apps-path:`, `homebrew-path:` and `emulators-path:` (the three shelves' folders), `apps-install:`, `homebrew-install:` and `emulators-install:` (where the Homebrew store installs each), and `library-autoscan:`. Every drive's Content folder and every install folder are looked in whether or not they're listed - see BuildLibraryFolders and ReadShelfFolders in main.cpp. The `app:` key is gone: it listed extra places to exit to in a menu that B on the sidebar used to open, and B now goes to Home instead, where it asks whether to leave.
 
 `game:\DebugInfo.txt` is the main log file.
 

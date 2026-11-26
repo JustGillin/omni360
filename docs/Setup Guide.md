@@ -33,44 +33,60 @@ Your password is only sent to Internet Archive, and never saved. What Omni360 ke
 
 **That file is plain text.** That is fine on a console only you use. Delete it if anyone else has physical or FTP access — and never share it, or a build folder with it inside.
 
-## 3. Optional: settings.txt
+## 3. Folders: where things go, and where Omni360 looks
 
-The app works with no settings file. Two keys override its defaults, and they are separate because your game library and your content folder are often on different drives. The games folder can also be changed on the console, in **Settings**, which writes this file for you:
+The app works with no settings file. Everything here is set on the console in **Settings → Library**, which writes `settings.txt` for you. The page has two parts.
 
-- `games-path:` — where games install, and where your library is scanned. Defaults to `Hdd1:\Content\0000000000000000`, which is where the dashboard keeps Games on Demand and arcade titles.
-- `xbla-path:` — where DLC, title updates, arcade games and indie games are written. Leave it out and they go to the `Content\0000000000000000` folder of whichever drive `games-path:` names — change your install folder to `Usb0:\Games` and your downloads land in `Usb0:\Content\0000000000000000`, which is where the dashboard and Aurora look for them on that drive. Set this key only if you want content on a different drive from your games. The name is inherited from X-Store, which used the same key.
+**Where new things go** has one row for each kind of thing Omni360 installs. **A** on a row changes it:
 
-If you keep your GOD games in a folder of their own instead — `Hdd1:\Games\{TitleID}\00007000\{ContentID}` is a common choice — point `games-path:` there.
+| Row | Default | What goes there |
+|---|---|---|
+| **Games** | `Hdd1:\Content\0000000000000000` | Store downloads and disc installs |
+| **Arcade, DLC & updates** | the Content folder of the Games drive | Arcade and indie games, DLC, title updates |
+| **Apps**, **Homebrew**, **Emulators** | `Hdd1:\Apps`, `Hdd1:\Homebrew`, `Hdd1:\Emulators` | Installs from the Store's Homebrew section |
 
-**Games on more than one drive?** In **Settings → Storage**, under **Folders**, **Add folder** adds any folder on the hard drive or a USB drive to your library. Only folders you've added are listed. **A** on one opens its options: its **Scan depth**, or **Remove**. Or add a `games-path:` line for each folder yourself: the first is where games install, and the others are looked in for your library too. A USB drive formatted FAT32 is `Usb0:` or `Usb1:`, as in Aurora:
+**Arcade, DLC & updates** asks for a drive, not a folder: the console only finds them in a drive's `Content\0000000000000000` folder, so that's where they go. A row's folder doesn't have to exist yet. "(made on first install)" means Omni360 creates it the first time something installs there.
+
+**Where Omni360 looks** lists every folder that's read for your games and apps:
+
+- Every drive's **Content** folder, and every folder from **Where new things go**, is always looked in. These say **Always looked in**, and the help line underneath says why. They can't be removed here; change the row above instead.
+- **Add folder** adds any other folder on the hard drive or a USB drive, and asks what's in it: games, homebrew, apps or emulators. **A** on a folder you added opens its options (**Scan depth**, **Change folder**, **Remove**), **X** removes it, and left and right change what it holds. Removing a folder only takes it off the list; nothing on the drive is deleted.
+- One folder can be looked in for more than one kind. Its row counts each, like "48 games · 2 apps".
+
+Folders are scanned for Games on Demand, arcade games and installed packages (the `{TitleID}\{ContentType}\...` layout, even when it's kept under folders of its own like `Games\Xbox 360\Halo 3\...`), and for extracted games (a folder with a `default.xex`). Apps are folders holding `default.xex` or `default.xbe`, or just one other `.xex`, such as Aurora's `Aurora.xex`.
+
+**Scan depth** is how many folders down from a path things are looked for: 0 means the folder is a game itself, 1 means games are in folders right inside it, and so on up to 6. It's 3 unless you change it, and a row only shows it when it isn't.
+
+**AutoScan**, beside **Scan now**, reads your folders again each time Omni360 starts. Turn it off and Omni360 starts with the list from last time, which is quicker for big libraries; **Scan now** finds anything new. While a scan runs, the line under the clock shows how far it's got, and a message says what it found when it's done.
+
+A drive the dashboard formatted as Xbox storage keeps its files in a container Omni360 can't reach. A USB drive formatted FAT32 is `Usb0:` or `Usb1:`, as in Aurora.
+
+<details>
+<summary><b>The settings.txt lines, for editing by hand</b></summary>
+<br>
 
 ```
-games-path: Hdd1:\Content\0000000000000000
-games-path: Hdd1:\Games
-games-path: Usb0:\Content\0000000000000000
-```
-
-Each folder is scanned for Games on Demand, arcade games and installed packages (the `{TitleID}\{ContentType}\...` layout, even when it's kept under folders of its own like `Games\Xbox 360\Halo 3\...`), and for extracted games (a folder with a `default.xex`).
-
-**Scan depth** is how many folders down from a path games are looked for: 0 means the folder is a game itself, 1 means games are in folders right inside it, and so on up to 6. It's 3 unless you change it. Settings writes it after the path, like `games-path: Usb0:\Games|5`.
-
-**AutoScan**, beside **Scan now**, reads your folders again each time Omni360 starts. Turn it off and Omni360 starts with the list from last time, which is quicker for big libraries. **Scan now** finds anything new. It writes `library-autoscan: off`.
-
-A drive the dashboard formatted as Xbox storage keeps its files in a container Omni360 can't reach.
-
-**Leaving.** **B** goes back to Home from any page; **B** on Home asks whether to exit, and leaving takes the console wherever it normally starts — whatever DashLaunch is set to. To reach another dashboard or a file manager instead, put its folder on the **Apps** page below and start it from there.
-
-**Apps, Homebrew and Emulators.** These three pages show what's in your apps, homebrew and emulator folders as tiles, like the library does, and **A** starts one. Each page is in the **Games + Apps** sidebar only once it has a folder. Each folder in **Settings** has a value on its right, **Games**, **Homebrew**, **Apps** or **Emulators**, that says which page it feeds. Left and right change it, the same way they change Disc read speed. **Add folder** asks what's in a new folder once you've typed its path. Settings writes `homebrew-path:` (homebrew games), `apps-path:` (dashboards, file managers, tools) and `emulators-path:` lines for you, and you can also add them by hand, more than once each:
-
-```
-apps-path: Hdd1:\Apps
+games-path: Hdd1:\Games                      # the first is where games install
+games-path: Usb0:\Games|5                    # more folders of games; |5 is a scan depth
+xbla-path: Hdd1:\Content\0000000000000000    # where arcade games, DLC and updates go
+apps-install: Hdd1:\Apps                     # where each kind installs
+homebrew-install: Hdd1:\Homebrew
+emulators-install: Hdd1:\Emulators
+apps-path: Usb0:\Apps                        # more folders of each kind, more than once each
 homebrew-path: Hdd1:\Homebrew
 emulators-path: Hdd1:\Emulators
+library-autoscan: off
 ```
 
-Each app is a folder holding `default.xex` or `default.xbe`, or just one other `.xex`, such as Aurora's `Aurora.xex`. Omni360 looks up to three folders deep, so `Hdd1:\Emulators\Nintendo\FCEUX\default.xex` is found too. The folders are read when Omni360 starts and again whenever Settings changes them.
+Without `xbla-path:`, arcade games, DLC and updates go to the Content folder of the drive `games-path:` names. Without an `-install:` line, a kind installs to the first of its `-path:` folders, or the default.
 
-**Homebrew in the Store.** The Store's **Homebrew** button lists the ConsoleMods repo's apps, homebrew games and emulators, the same list Aurora's Xbox 360 Homebrew Store shows. **A** shows an item's details, and **Install** adds it to the Queue. Each install goes into the first folder of its kind in Settings. If you have none yet, it uses `Hdd1:\Apps`, `Hdd1:\Homebrew` or `Hdd1:\Emulators`, which then becomes that kind's folder. The list is built into Omni360 for now; `tools/make_homebrew.py` explains how to update it.
+</details>
+
+**Leaving.** **B** goes back to Home from any page; **B** on Home asks whether to exit, and leaving takes the console wherever it normally starts — whatever DashLaunch is set to. To reach another dashboard or a file manager instead, put it in your Apps folder and start it from the **Apps** page.
+
+**Apps, Homebrew and Emulators.** These three pages show what's in those folders as tiles, like the library does, and **A** starts one. Each page appears in the **Games + Apps** sidebar once it has something to show.
+
+**Homebrew in the Store.** The Store's **Homebrew** button lists the ConsoleMods repo's apps, homebrew games and emulators, the same list Aurora's Xbox 360 Homebrew Store shows. **A** shows an item's details, and **Install** adds it to the Queue. Each install goes to its kind's folder under **Where new things go**. The list is built into Omni360 for now; `tools/make_homebrew.py` explains how to update it.
 
 ConsoleMods' bot protection used to refuse Omni360 outright. They now let it through by the user agent it sends, agreed with them in November 2026, so downloads work as they are — please don't change that agent. A "Refused by ConsoleMods" message means something has changed at their end; it's worth reporting.
 
@@ -123,7 +139,7 @@ Because DLC matching is deliberately loose — it has to cope with release-group
 
 `game:\DebugInfo.txt` is the log, and it keeps recording even once the drawn UI takes over the screen. Check it first.
 
-- **Empty game list** — the games folder is pointing somewhere without games. The empty list shows which folder it searched; change it in Settings, or see step 3.
+- **Empty game list** — the games folder is pointing somewhere without games. The empty list shows which folder it searched; change it under **Settings → Library → Where new things go**, or add the folder your games are in under **Where Omni360 looks** (step 3).
 - **"Keys not accepted"** — Internet Archive refused your keys. This usually means keys put in `ArchiveOrgKeys.txt` by hand are wrong or in the wrong order (access key line 1, secret key line 2), or were reset at archive.org. Sign in again in **Settings → Internet Archive**.
 - **"Not enough space"** — the drive needs room for the download and the installed game at once, as in Prerequisites. Free some space, or point the games folder at a bigger drive.
 - **A download slows down, or seems to pause** — Internet Archive's servers stall every minute or so; Omni360 drops a stalled connection after 10 seconds and carries on where it stopped, and moves to another server if one keeps failing. The speed on screen is the average, pauses included.

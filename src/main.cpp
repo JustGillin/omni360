@@ -3784,10 +3784,14 @@ static FolderPickResult PickFolderSteps(const char *heading, const char *start, 
     static const char *notes[FOLDER_PICKER_MAX + 1];
     static int icons[FOLDER_PICKER_MAX + 1];
     char path[MAX_TEXT_LENGTH] = "";
+    // Opened at the folder it's set to now - Change - so keeping it is one
+    // press: "Use this folder" has focus there, and only there.
+    bool atStart = false;
     if (start != NULL && start[0] != '\0' && FolderExists(start))
     {
         _snprintf(path, sizeof(path), "%s", start);
         path[sizeof(path) - 1] = '\0';
+        atStart = true;
     }
     // The one just come back up out of, so the highlight lands on it rather
     // than back at the top: going up and down a branch is most of browsing.
@@ -3845,8 +3849,9 @@ static FolderPickResult PickFolderSteps(const char *heading, const char *start, 
         // The first row picks the folder you're in; the rest go further in.
         // Focus starts on the first subfolder, so the A that opened this
         // folder can't also pick it by being pressed twice.
-        if (folders > 0)
+        if (folders > 0 && !atStart)
             focus = 1;
+        atStart = false;
         icons[count] = UI_ICON_CHECK;
         labels[count] = Tr(STR_USE_THIS_FOLDER);
         notes[count++] = NULL;
