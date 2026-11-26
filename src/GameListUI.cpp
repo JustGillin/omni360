@@ -11098,6 +11098,28 @@ static float StorageBarY(const StorageLayout &l, float cardY)
 
 #define STORAGE_BAR_H 10.0f
 
+// How much a card's legend is shrunk to fit beside its ring - 1 when it
+// fits, less in a narrower card (Storage inside Settings, beside its
+// sections). Its text and its spacing shrink together.
+static float StorageLegendFit(const StorageDriveView &drive, float width)
+{
+    float total = 0.0f;
+    int shown = 0;
+    for (int s = 0; s < STORAGE_SHARE_COUNT; ++s)
+    {
+        if (drive.shareLines[s] == NULL)
+            continue;
+        total += S(20.0f) + TextWidth(drive.shareLines[s], 0.68f);
+        shown++;
+    }
+    if (shown > 1)
+        total += S(22.0f) * (shown - 1);
+    if (total <= width || total <= 0.0f)
+        return 1.0f;
+    const float fit = width / total;
+    return fit < 0.6f ? 0.6f : fit;
+}
+
 void RenderStorageFrame(StoragePageView &view, const UiHint *hints, int hintCount)
 {
     if (!g_Initialized)
@@ -11124,7 +11146,9 @@ void RenderStorageFrame(StoragePageView &view, const UiHint *hints, int hintCoun
     const int footerCount = LayoutFooter(hints, hintCount, footer);
 
     // --- Pass 1: quads ---
-    DrawFrameBase(false);
+    // With the sidebar when it's shown - Settings' sections, as Storage is
+    // one of them - and full width when it isn't (opened from the ring).
+    DrawFrameBase(g_sidebar.focused);
 
     for (int i = 0; i < actionCount; ++i)
     {
@@ -11169,13 +11193,14 @@ void RenderStorageFrame(StoragePageView &view, const UiHint *hints, int hintCoun
         {
             float lx = textX;
             const float ly = barY + barH + S(14.0f);
+            const float k = StorageLegendFit(drive, right - textX);
             for (int s = 0; s < STORAGE_SHARE_COUNT; ++s)
             {
                 if (drive.shareLines[s] == NULL)
                     continue;
-                const float dot = S(12.0f);
-                FillRound(lx, ly + (LineHeight(0.68f) * 1.2f - dot) * 0.5f, dot, dot, R(3.0f), kStorageShareColors[s]);
-                lx += S(20.0f) + TextWidth(drive.shareLines[s], 0.68f) + S(22.0f);
+                const float dot = S(12.0f) * k;
+                FillRound(lx, ly + (LineHeight(0.68f * k) * 1.2f - dot) * 0.5f, dot, dot, R(3.0f), kStorageShareColors[s]);
+                lx += (S(20.0f) + TextWidth(drive.shareLines[s], 0.68f) + S(22.0f)) * k;
             }
         }
     }
@@ -11186,6 +11211,8 @@ void RenderStorageFrame(StoragePageView &view, const UiHint *hints, int hintCoun
     // --- Pass 2: text ---
     g_UiFont.Begin();
 
+    if (g_sidebar.shown)
+        DrawSidebarText(g_sidebar.focused);
     DrawHeaderText(Tr(STR_STORAGE_TITLE), view.subtitle, showToast);
     DrawButtonHintText(footer, footerCount, g_M.footerY);
 
@@ -11245,13 +11272,14 @@ void RenderStorageFrame(StoragePageView &view, const UiHint *hints, int hintCoun
         {
             float lx = textX;
             const float ly = barY + barH + S(14.0f);
+            const float k = StorageLegendFit(drive, right - textX);
             for (int s = 0; s < STORAGE_SHARE_COUNT; ++s)
             {
                 if (drive.shareLines[s] == NULL)
                     continue;
-                lx += S(20.0f);
-                Text(lx, ly, 0.68f, COL_TEXT2, drive.shareLines[s]);
-                lx += TextWidth(drive.shareLines[s], 0.68f) + S(22.0f);
+                lx += S(20.0f) * k;
+                Text(lx, ly, 0.68f * k, COL_TEXT2, drive.shareLines[s]);
+                lx += (TextWidth(drive.shareLines[s], 0.68f) + S(22.0f)) * k;
             }
         }
     }

@@ -908,8 +908,6 @@ CLOCK_24_FORMAT = {1}:{2}
 
 # ---- main.cpp: the Storage page
 STORAGE_TITLE = Storage
-STORAGE_MANAGE = Manage storage
-STORAGE_MANAGE_HELP = See what's taking up space on each drive, and free some up.
 STORAGE_DRIVES = Drives
 STORAGE_FREE_IN_ALL = {1} free in all
 STORAGE_MEASURING = Measuring your drives...

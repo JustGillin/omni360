@@ -5134,11 +5134,8 @@ static void BuildSettingsPage(SettingsPage &page, const Library &lib, const char
 
     if (page.section == SETTINGS_SECTION_STORAGE)
     {
-        // The Storage page, on a row of its own rather than as a lone button
-        // under a heading.
-        AddSettingsRow(page, SETTINGS_VIEW_LINE, Tr(STR_STORAGE_MANAGE));
-        AddSettingsControl(page, SETTINGS_CONTROL_BUTTON, Tr(STR_OPEN), SETTINGS_ROW_MANAGE_STORAGE,
-                           Tr(STR_STORAGE_MANAGE_HELP));
+        // No rows: the Storage page itself is drawn in the section's place
+        // (the Settings branch of the draw and input code).
     }
 
     // Library: the folders it's read from, then Refresh below.
@@ -14345,6 +14342,31 @@ int main()
             }
         }
         PollLibraryRescan(shell, lib, gamesPath);
+        {
+            // Settings' Storage section is the Storage page: the drives are
+            // measured again on the way in, as opening the page did.
+            static bool inStorageSection = false;
+            const bool now = shell.page == SHELL_PAGE_SETTINGS && shell.settings.section == SETTINGS_SECTION_STORAGE;
+            if (now && !inStorageSection)
+            {
+                shell.storageColumn = 0;
+                shell.storageRow = 0;
+                shell.storageList = shell.storageParts = shell.filesOpen = false;
+                BeginStorageScan(lib, gamesPath);
+            }
+            inStorageSection = now;
+
+            // Back out of a drive's list, a game's parts or the files, to the
+            // section rather than to the page at full width.
+            if (shell.page == SHELL_PAGE_STORAGE && shell.storageReturn == SHELL_PAGE_SETTINGS &&
+                !shell.storageFromRing && !shell.storageFromGame && !shell.storageList && !shell.storageParts &&
+                !shell.filesOpen)
+            {
+                shell.page = SHELL_PAGE_SETTINGS;
+                shell.settings.section = SETTINGS_SECTION_STORAGE;
+                inStorageSection = true; // already measured
+            }
+        }
         if (g_pendingKind.active)
         {
             const SettingsPage &page = shell.settings;
@@ -15266,7 +15288,33 @@ int main()
                 (row != NULL && settings.focusCol < row->controlCount) ? &row->controls[settings.focusCol] : NULL;
             const bool onValue = (control != NULL && control->kind == SETTINGS_CONTROL_VALUE);
 
-            if (pressed & XINPUT_GAMEPAD_B)
+            if (settings.section == SETTINGS_SECTION_STORAGE)
+            {
+                // The Storage page, in the section's place: B, LB and RB as on
+                // any section, left off its first column to the sections; the
+                // rest is the page's own. What it opens - a drive's list, a
+                // game's parts, the files - takes the screen as before, and
+                // coming back out of it lands here.
+                if (pressed & XINPUT_GAMEPAD_B)
+                    EnterPage(shell, SHELL_PAGE_HOME, false);
+                else if (pressed & (XINPUT_GAMEPAD_LEFT_SHOULDER | XINPUT_GAMEPAD_RIGHT_SHOULDER))
+                    StepSettingsSection(settings, (pressed & XINPUT_GAMEPAD_LEFT_SHOULDER) ? -1 : 1, lib, gamesPath);
+                else if (input.nav == XINPUT_GAMEPAD_DPAD_LEFT && shell.storageColumn == 0)
+                    FocusSidebar(shell);
+                else
+                {
+                    g_filesLibrary = &lib;
+                    acted = StoragePageInput(shell, input, lib, gamesPath);
+                    if (shell.storageList || shell.storageParts || shell.filesOpen)
+                    {
+                        shell.page = SHELL_PAGE_STORAGE;
+                        shell.storageReturn = SHELL_PAGE_SETTINGS;
+                        shell.storageFromRing = false;
+                        shell.storageFromGame = false;
+                    }
+                }
+            }
+            else if (pressed & XINPUT_GAMEPAD_B)
             {
                 EnterPage(shell, SHELL_PAGE_HOME, false);
             }
@@ -15883,6 +15931,20 @@ int main()
         case SHELL_PAGE_SETTINGS:
         {
             SettingsPage &settings = shell.settings;
+            if (settings.section == SETTINGS_SECTION_STORAGE)
+            {
+                StoragePageView view = MakeStorageView(shell);
+                view.focused = !shell.sidebarFocused;
+                if (!shell.sidebarFocused &&
+                    !(view.column == 0 && view.row == STORAGE_ACTION_RESCAN && StorageScanRunning()))
+                    hintCount = AddHint(hints, hintCount, UI_BUTTON_A, TrW(STR_SELECT));
+                hintCount = AddHint(hints, hintCount, UI_BUTTON_B, TrW(STR_NAV_HOME));
+                hintCount = AddHint(hints, hintCount, UI_BUTTON_LBRB, TrW(STR_SECTION_HINT));
+                RenderStorageFrame(view, hints, hintCount);
+                shell.storageColumn = view.column;
+                shell.storageRow = view.row;
+                break;
+            }
             if (!shell.sidebarFocused && settings.count > 0)
             {
                 const SettingsRowView &row = settings.rows[settings.focusRow];

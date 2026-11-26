@@ -923,8 +923,6 @@ STR(CLOCK_24_FORMAT,            "{1}:{2}")
 
 // ---- main.cpp: the Storage page ------------------------------------------
 STR(STORAGE_TITLE, "Storage")
-STR(STORAGE_MANAGE, "Manage storage")
-STR(STORAGE_MANAGE_HELP, "See what's taking up space on each drive, and free some up.")
 STR(STORAGE_DRIVES, "Drives")
 STR(STORAGE_FREE_IN_ALL, "{1} free in all")
 STR(STORAGE_MEASURING, "Measuring your drives...")
