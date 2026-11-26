@@ -7,6 +7,7 @@ DESCRIPTION : Games kept as extracted disc folders. See FolderGames.h.
 #include "FolderGames.h"
 #include "GodConvert.h" // GodReadExecutableFile
 #include "OutputConsole.h" // dprintf
+#include "ScanProgress.h" // a library read's progress, issue #21
 #include "StfsParser.h" // EnumerateInstalledGames, for packages kept under named folders
 
 #include <xtl.h>
@@ -121,6 +122,7 @@ static void AddGame(FolderScan &scan, const char *dir, const char *exe)
     {
         scan.print("  %s -> not readable as a game (%s)\n", exe, GodResultText(result));
         scan.unreadable++;
+        ScanProgressSkipped();
         return;
     }
 
@@ -144,6 +146,7 @@ static void AddGame(FolderScan &scan, const char *dir, const char *exe)
         return;
 
     InstalledGame &game = scan.out[scan.count++];
+    ScanProgressGame();
     memset(&game, 0, sizeof(game));
     game.titleId = info.titleId;
     game.contentType = info.contentType;

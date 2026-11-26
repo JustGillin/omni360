@@ -410,6 +410,7 @@
     <ClInclude Include="src\settings.h" />
     <ClInclude Include="src\StfsParser.h" />
     <ClInclude Include="src\FolderGames.h" />
+    <ClInclude Include="src\ScanProgress.h" />
     <ClInclude Include="src\Launch.h" />
     <ClInclude Include="src\LibraryCache.h" />
     <ClInclude Include="src\Recents.h" />
@@ -515,6 +516,7 @@
     <ClCompile Include="src\parsing.cpp" />
     <ClCompile Include="src\StfsParser.cpp" />
     <ClCompile Include="src\FolderGames.cpp" />
+    <ClCompile Include="src\ScanProgress.cpp" />
     <ClCompile Include="src\Launch.cpp" />
     <ClCompile Include="src\LibraryCache.cpp" />
     <ClCompile Include="src\Recents.cpp" />

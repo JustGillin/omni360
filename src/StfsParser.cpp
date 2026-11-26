@@ -14,6 +14,7 @@ against your own installed games once this builds.
 */
 
 #include "StfsParser.h"
+#include "ScanProgress.h" // a library read's progress, issue #21
 
 #include <xtl.h>
 #include <stdio.h>
@@ -590,12 +591,15 @@ int EnumerateInstalledGames(const char *contentBasePath, InstalledGame *outGames
 
                         count++;
                         foundForThisTitle = !indie;
+                        ScanProgressGame();
                     }
 
                     StfsFreeTitleInfo(&info);
                 }
                 else
                 {
+                    ScanProgressSkipped();
+
                     // StfsReadTitleInfo's failure reasons (bad magic / too
                     // small / v2 metadata) all look identical from the
                     // outside - read the raw file directly here just for

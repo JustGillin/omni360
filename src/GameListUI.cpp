@@ -2267,7 +2267,7 @@ static float DrawButtonSprite(int sprite, float boxX, float centerY)
 // so it turns up on every page without any of them knowing about it, and the
 // clock - the page header's, or Home's top bar's - says where it is with
 // NoteClockBox, a frame behind. Empty when there's nothing going on.
-static char g_busyLabel[48] = "";
+static char g_busyLabel[96] = "";
 static float g_busyRight = -1.0f; // the clock's right edge; < 0 until one is drawn
 static float g_busyCenterY = 0.0f;
 
