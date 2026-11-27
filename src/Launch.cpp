@@ -604,6 +604,50 @@ static bool CopyFileBytes(const char *from, const char *to)
     return fclose(out) == 0 && ok;
 }
 
+// The trainer that's loaded - ours, or one Aurora started - or NULL.
+static HANDLE LoadedTrainer()
+{
+    HANDLE loaded = NULL;
+    if (XexGetModuleHandle((PSZ)TRAINER_MODULE, &loaded) >= 0 && loaded != NULL)
+        return loaded;
+    loaded = NULL;
+    if (XexGetModuleHandle("dll.aurora.trainer", &loaded) >= 0 && loaded != NULL)
+        return loaded;
+    return NULL;
+}
+
+static bool WaitForTrainerToGo(DWORD timeoutMs)
+{
+    const DWORD started = GetTickCount();
+    while (LoadedTrainer() != NULL)
+    {
+        if (GetTickCount() - started >= timeoutMs)
+            return false;
+        Sleep(100);
+    }
+    return true;
+}
+
+// Whether no trainer is loaded - after giving the last one time to go.
+//
+// One stops itself once its game has ended: its title-terminate callback
+// sets its watch going again, a few seconds of another title make it give
+// up, and its own thread calls Stop(0), which unloads it. So it's only still
+// here if its game ended moments ago - and it's waited for.
+//
+// It isn't asked to stop through its exports: Stop(1) (export 3) ends its
+// threads, but then its watching thread unloads it - while the call, which
+// sleeps a second before returning, may still be running in its code.
+static bool TrainerGone()
+{
+    if (LoadedTrainer() == NULL)
+        return true;
+    dprintf("[trainer] the last one is still loaded - waiting for it to stop itself\n");
+    const bool gone = WaitForTrainerToGo(8000);
+    dprintf("[trainer] %s\n", gone ? "it has gone" : "it's still loaded after 8 s");
+    return gone;
+}
+
 static void StartTrainerFor(unsigned long titleId)
 {
     char folder[96];
@@ -635,15 +679,14 @@ static void StartTrainerFor(unsigned long titleId)
         fclose(file);
     }
 
-    // Two can't both be loaded at the one base: one already running - ours
-    // from before, or Aurora's - stays for now.
-    HANDLE loaded = NULL;
-    if ((XexGetModuleHandle((PSZ)TRAINER_MODULE, &loaded) >= 0 && loaded != NULL) ||
-        (XexGetModuleHandle("dll.aurora.trainer", &loaded) >= 0 && loaded != NULL))
+    // Two can't both be loaded at the one base, so the last one - ours, or
+    // Aurora's - has to have gone first.
+    if (!TrainerGone())
     {
-        dprintf("[trainer] one is loaded already (%p) - not starting %s\n", loaded, trainer);
+        dprintf("[trainer] the last one is still loaded - not starting %s\n", trainer);
         return;
     }
+    HANDLE loaded = NULL;
 
     CreateDirectoryA("Hdd1:\\Omni360", NULL);
     if (!CopyFileBytes(trainer, TRAINER_COPY))
