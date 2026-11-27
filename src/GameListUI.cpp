@@ -5997,6 +5997,11 @@ static bool AlertRowFocuses(const int *kinds, int i)   { return kinds == NULL ||
 // Set around a list whose Y leaves it - see ShowAlertListCancelUI.
 static bool g_alertYCancels = false;
 
+// Set around a list of rows each turned on or off - see ShowAlertToggleListUI:
+// A's word for each row, and B's.
+static const WCHAR *const *g_alertRowPickLabels = NULL;
+static const WCHAR *g_alertBackLabel = NULL;
+
 // Set around a button dialog with a cover - see ShowAlertCoverUI.
 static D3DTexture *g_alertCover = NULL;
 #define ALERT_COVER 150.0f
@@ -6106,7 +6111,8 @@ static int RunAlert(const char *heading, const char *message, const char *detail
             hints[hintCount++].label = TrW(STR_BUTTON_CANCEL);
         }
         hints[hintCount].sprite = SpriteForButton(UI_BUTTON_B); // last, as on every page
-        hints[hintCount++].label = list ? TrW(STR_BUTTON_BACK) : TrW(STR_BUTTON_CANCEL);
+        hints[hintCount++].label = list ? (g_alertBackLabel != NULL ? g_alertBackLabel : TrW(STR_BUTTON_BACK))
+                                        : TrW(STR_BUTTON_CANCEL);
     }
     LayoutButtonHintsRight(hints, hintCount);
 
@@ -6123,6 +6129,11 @@ static int RunAlert(const char *heading, const char *message, const char *detail
     int scroll = 0;
     if (list && focus >= rowsShown)
         scroll = focus - rowsShown + 1;
+    if (list && g_alertRowPickLabels != NULL)
+    {
+        hints[0].label = g_alertRowPickLabels[focus];
+        LayoutButtonHintsRight(hints, hintCount);
+    }
     int result = -1;
     // One that follows another over the same held backdrop starts open: the
     // page is dimmed already, and fading it in again flashed.
@@ -6182,6 +6193,11 @@ static int RunAlert(const char *heading, const char *message, const char *detail
         {
             focus = to;
             PlayUiSound(UI_SOUND_MOVE);
+            if (list && g_alertRowPickLabels != NULL)
+            {
+                hints[0].label = g_alertRowPickLabels[focus];
+                LayoutButtonHintsRight(hints, hintCount);
+            }
             if (focus < scroll)
                 scroll = focus;
             else if (focus >= scroll + rowsShown)
@@ -6409,6 +6425,18 @@ int ShowAlertListExUI(const char *heading, const char *message, const char **lab
                       int focus, const int *icons, const int *kinds, bool notesBelow, const char *detailLine)
 {
     return RunAlert(heading, message, detailLine, 5, NULL, 0, labels, notes, count, focus, icons, kinds, notesBelow);
+}
+
+int ShowAlertToggleListUI(const char *heading, const char *message, const char **labels, const char **notes,
+                          int count, int focus, const WCHAR *const *pickLabels, const WCHAR *backLabel,
+                          const char *detailLine)
+{
+    g_alertRowPickLabels = pickLabels;
+    g_alertBackLabel = backLabel;
+    const int result = RunAlert(heading, message, detailLine, 5, NULL, 0, labels, notes, count, focus, NULL);
+    g_alertRowPickLabels = NULL;
+    g_alertBackLabel = NULL;
+    return result;
 }
 
 // The progress dialog's backdrop, from Begin to End - the held one when a

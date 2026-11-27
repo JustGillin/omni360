@@ -55,4 +55,10 @@ enum GuidePluginResult
 };
 GuidePluginResult LoadGuidePlugin();
 
+// Loads a system module - a plugin or a trainer - through DashLaunch's
+// StartSysModule, given its device path (\Device\Harddisk0\...). False
+// if DashLaunch isn't there or didn't answer within 5 s; else its NTSTATUS
+// in *status. tag prefixes the log lines.
+bool StartSystemModule(const char *devicePath, unsigned long *status, const char *tag);
+
 #endif

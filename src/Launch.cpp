@@ -12,6 +12,7 @@ DESCRIPTION : Starting games and other apps. See Launch.h.
 #include <string.h>
 #include <ctype.h>
 #include "driveMount.h" // mount, for the disc's drive
+#include "Trainers.h"   // StartTrainerFor
 
 // NTSTATUSes, which xtl.h doesn't define.
 extern "C" LONG XexGetModuleHandle(PSZ moduleName, PHANDLE outHandle);
@@ -179,8 +180,6 @@ static void LaunchIndieGame(const InstalledGame &game)
     launchTitle(XNA_LAUNCHER_PATH, XNA_LAUNCHER_FOLDER, NULL, 0);
     dprintf("[launch] the loader refused the XNA launcher\n");
 }
-
-static void StartTrainerFor(unsigned long titleId); // the trainer experiment, below
 
 void LaunchInstalledGame(const InstalledGame &game)
 {
@@ -516,7 +515,7 @@ static bool WriteGuidePlugin()
 // DashLaunch's StartSysModule on devicePath, on a thread of this title's, for
 // up to 5 s. False if DashLaunch isn't there or didn't answer; else its
 // NTSTATUS in *status.
-static bool StartSysModule(const char *devicePath, DWORD *status, const char *tag)
+bool StartSystemModule(const char *devicePath, DWORD *status, const char *tag)
 {
     HANDLE dashLaunch = NULL;
     PVOID address = NULL;
@@ -558,158 +557,6 @@ static bool StartSysModule(const char *devicePath, DWORD *status, const char *ta
     return true;
 }
 
-// ---------------------------------------------------------------------------
-// Trainers - an experiment (2026-11-27)
-// ---------------------------------------------------------------------------
-//
-// Aurora's trainers (XYZEngine, by XYZMods) are DLL XEXs that run as system
-// modules at their own base, 0x91020000. Loading one does nothing but
-// describe it; its exports, read off one loaded by Aurora:
-//   2  Start(TRAINER_MAGIC, cheat bits, 0): bit n turns cheat n on; starts
-//      three system threads. Once a second the first compares the running
-//      title with the trainer's (title ID, media ID, base version, disc,
-//      title update) - 4 seconds of another title and it gives up - then the
-//      others apply the cheats.
-//   3  Stop(keepLoaded), 4 unload, 6 its info (the cheats), 8 running?
-// It registers with Aurora's Nova if that's loaded, and carries on without.
-// So, as Aurora does: load it, Start it, and start the game straight after.
-//
-// For the experiment it's Hdd1:\Omni360\Trainers\<title ID>\<any>.xex, with
-// an optional cheats.txt holding the bits in hex (all of them on without).
-
-typedef DWORD (*TrainerStartFn)(DWORD magic, DWORD cheats, DWORD unused);
-#define TRAINER_MAGIC        0x41554F41
-#define TRAINER_ORDINAL_START 2
-#define TRAINER_FOLDER        "Hdd1:\\Omni360\\Trainers"
-#define TRAINER_COPY          "Hdd1:\\Omni360\\Omni360Trainer.xex"
-#define TRAINER_DEVICE        "\\Device\\Harddisk0\\Partition1\\Omni360\\Omni360Trainer.xex"
-#define TRAINER_MODULE        "Omni360Trainer.xex"
-
-static bool CopyFileBytes(const char *from, const char *to)
-{
-    FILE *in = NULL, *out = NULL;
-    if (fopen_s(&in, from, "rb") != 0 || in == NULL)
-        return false;
-    if (fopen_s(&out, to, "wb") != 0 || out == NULL)
-    {
-        fclose(in);
-        return false;
-    }
-    unsigned char buffer[16 * 1024];
-    size_t got;
-    bool ok = true;
-    while (ok && (got = fread(buffer, 1, sizeof(buffer), in)) > 0)
-        ok = fwrite(buffer, 1, got, out) == got;
-    fclose(in);
-    return fclose(out) == 0 && ok;
-}
-
-// The trainer that's loaded - ours, or one Aurora started - or NULL.
-static HANDLE LoadedTrainer()
-{
-    HANDLE loaded = NULL;
-    if (XexGetModuleHandle((PSZ)TRAINER_MODULE, &loaded) >= 0 && loaded != NULL)
-        return loaded;
-    loaded = NULL;
-    if (XexGetModuleHandle("dll.aurora.trainer", &loaded) >= 0 && loaded != NULL)
-        return loaded;
-    return NULL;
-}
-
-static bool WaitForTrainerToGo(DWORD timeoutMs)
-{
-    const DWORD started = GetTickCount();
-    while (LoadedTrainer() != NULL)
-    {
-        if (GetTickCount() - started >= timeoutMs)
-            return false;
-        Sleep(100);
-    }
-    return true;
-}
-
-// Whether no trainer is loaded - after giving the last one time to go.
-//
-// One stops itself once its game has ended: its title-terminate callback
-// sets its watch going again, a few seconds of another title make it give
-// up, and its own thread calls Stop(0), which unloads it. So it's only still
-// here if its game ended moments ago - and it's waited for.
-//
-// It isn't asked to stop through its exports: Stop(1) (export 3) ends its
-// threads, but then its watching thread unloads it - while the call, which
-// sleeps a second before returning, may still be running in its code.
-static bool TrainerGone()
-{
-    if (LoadedTrainer() == NULL)
-        return true;
-    dprintf("[trainer] the last one is still loaded - waiting for it to stop itself\n");
-    const bool gone = WaitForTrainerToGo(8000);
-    dprintf("[trainer] %s\n", gone ? "it has gone" : "it's still loaded after 8 s");
-    return gone;
-}
-
-static void StartTrainerFor(unsigned long titleId)
-{
-    char folder[96];
-    _snprintf(folder, sizeof(folder), "%s\\%08lX", TRAINER_FOLDER, titleId);
-    folder[sizeof(folder) - 1] = '\0';
-
-    char pattern[128];
-    _snprintf(pattern, sizeof(pattern), "%s\\*.xex", folder);
-    pattern[sizeof(pattern) - 1] = '\0';
-    WIN32_FIND_DATAA found;
-    HANDLE find = FindFirstFileA(pattern, &found);
-    if (find == INVALID_HANDLE_VALUE)
-        return; // none for this game - the usual case
-    FindClose(find);
-    char trainer[300];
-    _snprintf(trainer, sizeof(trainer), "%s\\%s", folder, found.cFileName);
-    trainer[sizeof(trainer) - 1] = '\0';
-
-    DWORD cheats = 0xFFFFFFFF;
-    char cheatsPath[128];
-    _snprintf(cheatsPath, sizeof(cheatsPath), "%s\\cheats.txt", folder);
-    cheatsPath[sizeof(cheatsPath) - 1] = '\0';
-    FILE *file = NULL;
-    if (fopen_s(&file, cheatsPath, "r") == 0 && file != NULL)
-    {
-        unsigned long bits = 0;
-        if (fscanf_s(file, "%lx", &bits) == 1)
-            cheats = (DWORD)bits;
-        fclose(file);
-    }
-
-    // Two can't both be loaded at the one base, so the last one - ours, or
-    // Aurora's - has to have gone first.
-    if (!TrainerGone())
-    {
-        dprintf("[trainer] the last one is still loaded - not starting %s\n", trainer);
-        return;
-    }
-    HANDLE loaded = NULL;
-
-    CreateDirectoryA("Hdd1:\\Omni360", NULL);
-    if (!CopyFileBytes(trainer, TRAINER_COPY))
-    {
-        dprintf("[trainer] couldn't copy %s to %s\n", trainer, TRAINER_COPY);
-        return;
-    }
-    DWORD status = 0;
-    if (!StartSysModule(TRAINER_DEVICE, &status, "trainer"))
-        return;
-    loaded = NULL;
-    PVOID start = NULL;
-    if (XexGetModuleHandle((PSZ)TRAINER_MODULE, &loaded) < 0 || loaded == NULL ||
-        XexGetProcedureAddress(loaded, TRAINER_ORDINAL_START, &start) < 0 || start == NULL)
-    {
-        dprintf("[trainer] %s: load status %08lX, module %p, no Start export\n", trainer, (unsigned long)status, loaded);
-        return;
-    }
-    const DWORD started = ((TrainerStartFn)start)(TRAINER_MAGIC, cheats, 0);
-    dprintf("[trainer] %s loaded at %p, Start(cheats %08lX) -> %lu\n", trainer, loaded, (unsigned long)cheats,
-            (unsigned long)started);
-}
-
 GuidePluginResult LoadGuidePlugin()
 {
     HANDLE loaded = NULL;
@@ -736,7 +583,7 @@ GuidePluginResult LoadGuidePlugin()
         return GUIDE_PLUGIN_FAILED;
 
     DWORD status = 0;
-    if (!StartSysModule(GUIDE_PLUGIN_DEVICE, &status, "guide"))
+    if (!StartSystemModule(GUIDE_PLUGIN_DEVICE, &status, "guide"))
         return GUIDE_PLUGIN_FAILED;
     loaded = NULL;
     XexGetModuleHandle((PSZ)GUIDE_PLUGIN_NAME, &loaded);

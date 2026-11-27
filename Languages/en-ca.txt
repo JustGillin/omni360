@@ -80,6 +80,20 @@ ORIGINALLY = Originally {1}
 ONLY_OMNI360_SHOWS_THIS_NAME = Only Omni360 shows this name - the game's files keep theirs. Clear it to go back to the original.
 ONLY_OMNI360_SHOWS_THIS_NAME_APP = Only Omni360 shows this name - its files keep theirs. Clear it to go back to the original.
 GAMEMARKS_TXT_COULD_NOT_BE = GameMarks.txt couldn't be written beside Omni360, buddy.
+TRAINER = Trainer
+TRAINER_BY = {1} by {2}
+TRAINER_WORKS_WITH = Works with {1}.
+TRAINER_NO_UPDATE = the game with no title update
+TRAINER_UPDATE = title update {1}
+TRAINER_ANY_UPDATE = any title update
+TRAINER_NOTE = Cheats turned on here start with the game, every time you play it.
+TRAINER_CHEAT_ON = On
+TRAINER_CHEAT_OFF = Off
+TRAINER_UNREADABLE = Sorry, couldn't read this trainer
+TRAINER_UNREADABLE_DETAIL = It may not be an Aurora trainer, or another trainer is still running. Try again in a few seconds.
+TRAINER_SAVED = Cheats saved
+TRAINER_CHEATS_ON = {1} on
+TRAINER_CHEATS_OFF = All cheats off
 
 # ---- Store
 STORE_FEATURED = Featured

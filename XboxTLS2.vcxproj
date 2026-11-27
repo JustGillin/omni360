@@ -417,6 +417,7 @@
     <ClInclude Include="src\FolderGames.h" />
     <ClInclude Include="src\ScanProgress.h" />
     <ClInclude Include="src\Launch.h" />
+    <ClInclude Include="src\Trainers.h" />
     <ClInclude Include="src\LibraryCache.h" />
     <ClInclude Include="src\Recents.h" />
     <ClInclude Include="src\StorageScan.h" />
@@ -523,6 +524,7 @@
     <ClCompile Include="src\FolderGames.cpp" />
     <ClCompile Include="src\ScanProgress.cpp" />
     <ClCompile Include="src\Launch.cpp" />
+    <ClCompile Include="src\Trainers.cpp" />
     <ClCompile Include="src\LibraryCache.cpp" />
     <ClCompile Include="src\Recents.cpp" />
     <ClCompile Include="src\StorageScan.cpp" />

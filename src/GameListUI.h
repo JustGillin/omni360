@@ -1275,6 +1275,13 @@ enum AlertRowKind
 int ShowAlertListExUI(const char *heading, const char *message, const char **labels, const char **notes, int count,
                       int focus, const int *icons, const int *kinds, bool notesBelow, const char *detailLine = NULL);
 
+// The same, for rows that are each turned on or off: A's word in the footer
+// follows the focused row (pickLabels[row] - "Turn on", "Turn off"), and
+// backLabel is B's ("Done"). Shown again by the caller after each change.
+int ShowAlertToggleListUI(const char *heading, const char *message, const char **labels, const char **notes,
+                          int count, int focus, const WCHAR *const *pickLabels, const WCHAR *backLabel,
+                          const char *detailLine);
+
 // A run of dialogs opened one from another - a list, then what to do with a
 // row, then its progress - each snapshots the screen behind it, which by
 // then is the dialog before, so they'd stack up dimmed. Holding the page

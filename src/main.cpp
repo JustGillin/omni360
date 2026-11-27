@@ -27,6 +27,7 @@ end-to-end on real hardware against a real 27-game library.
 #include "FolderGames.h"
 #include "ScanProgress.h" // a library read's progress, issue #21
 #include "Launch.h"
+#include "Trainers.h" // the cheat picker
 #include "LibraryCache.h"
 #include "Recents.h"
 #include "StorageScan.h" // StartStorageScan, for the Storage page
@@ -10628,7 +10629,116 @@ static void ResortLibrary(Shell &shell, Library &lib, unsigned long titleId, con
     }
 }
 
-// Y on a library game: favourite it or not, and rename it.
+// Which title updates a trainer works with, as words: "title update 1", "the
+// game with no title update", or a list of them.
+static void TrainerUpdatesText(const TrainerInfo &info, char *out, size_t outSize)
+{
+    out[0] = '\0';
+    if (info.tuCount == 0)
+    {
+        _snprintf(out, outSize, "%s", Tr(STR_TRAINER_ANY_UPDATE));
+        out[outSize - 1] = '\0';
+        return;
+    }
+    size_t used = 0;
+    for (int i = 0; i < info.tuCount && used + 1 < outSize; ++i)
+    {
+        char one[64];
+        if (info.tus[i] <= 0)
+            _snprintf(one, sizeof(one), "%s", Tr(STR_TRAINER_NO_UPDATE));
+        else
+        {
+            char number[16];
+            _snprintf(number, sizeof(number), "%ld", info.tus[i]);
+            number[sizeof(number) - 1] = '\0';
+            TrFormat(one, sizeof(one), STR_TRAINER_UPDATE, number);
+        }
+        one[sizeof(one) - 1] = '\0';
+        used += _snprintf(out + used, outSize - used, "%s%s", i > 0 ? ", " : "", one);
+        out[outSize - 1] = '\0';
+    }
+}
+
+// The trainer's cheats, each On or Off: A turns the focused one over, B saves
+// and closes. Nothing is on but what's chosen here - or, before anything is,
+// what the trainer has on by default (Trainers.h).
+static void ChooseTrainerCheats(unsigned long titleId, const char *shownName)
+{
+    char path[300];
+    if (!FindTrainer(titleId, path, sizeof(path)))
+        return;
+    static TrainerInfo info;
+    if (!ReadTrainerInfo(path, &info) || info.cheatCount == 0)
+    {
+        ShowMessageUI(Tr(STR_TRAINER_UNREADABLE), Tr(STR_TRAINER_UNREADABLE_DETAIL), NULL);
+        return;
+    }
+
+    unsigned long bits = 0;
+    if (!LoadTrainerCheats(titleId, &bits))
+    {
+        for (int i = 0; i < info.cheatCount; ++i)
+            if (info.defaults[i])
+                bits |= 1UL << i;
+    }
+    const unsigned long before = bits;
+
+    char by[160], updates[160], works[200], message[400];
+    TrFormat(by, sizeof(by), STR_TRAINER_BY, info.name[0] != '\0' ? info.name : shownName,
+             info.author[0] != '\0' ? info.author : "?");
+    by[sizeof(by) - 1] = '\0';
+    TrainerUpdatesText(info, updates, sizeof(updates));
+    TrFormat(works, sizeof(works), STR_TRAINER_WORKS_WITH, updates);
+    works[sizeof(works) - 1] = '\0';
+    _snprintf(message, sizeof(message), "%s\n%s", by, works);
+    message[sizeof(message) - 1] = '\0';
+
+    const char *labels[MAX_TRAINER_CHEATS];
+    const char *notes[MAX_TRAINER_CHEATS];
+    const WCHAR *actions[MAX_TRAINER_CHEATS]; // A's word for each row
+    int focus = 0;
+    HoldDialogBackdrop(); // the card is shown again after each change, in place
+    for (;;)
+    {
+        for (int i = 0; i < info.cheatCount; ++i)
+        {
+            const bool on = (bits & (1UL << i)) != 0;
+            labels[i] = info.cheats[i];
+            notes[i] = Tr(on ? STR_TRAINER_CHEAT_ON : STR_TRAINER_CHEAT_OFF);
+            actions[i] = TrW(on ? STR_TURN_OFF : STR_TURN_ON);
+        }
+        const int picked = ShowAlertToggleListUI(Tr(STR_TRAINER), message, labels, notes, info.cheatCount, focus,
+                                                 actions, TrW(STR_DONE), Tr(STR_TRAINER_NOTE));
+        if (picked < 0)
+            break;
+        bits ^= 1UL << picked;
+        focus = picked;
+    }
+    ReleaseDialogBackdrop();
+
+    if (bits == before)
+        return;
+    if (!SaveTrainerCheats(titleId, bits))
+    {
+        ShowShellToast(Tr(STR_NOT_SAVED), path, UI_TOAST_ERROR);
+        return;
+    }
+    int on = 0;
+    for (int i = 0; i < info.cheatCount; ++i)
+        if (bits & (1UL << i))
+            on++;
+    char count[16], summary[64];
+    _snprintf(count, sizeof(count), "%d", on);
+    count[sizeof(count) - 1] = '\0';
+    if (on > 0)
+        TrFormat(summary, sizeof(summary), STR_TRAINER_CHEATS_ON, count);
+    else
+        _snprintf(summary, sizeof(summary), "%s", Tr(STR_TRAINER_CHEATS_OFF));
+    summary[sizeof(summary) - 1] = '\0';
+    ShowShellToast(Tr(STR_TRAINER_SAVED), summary, UI_TOAST_SUCCESS);
+}
+
+// Y on a library game: favourite it or not, rename it, its trainer's cheats.
 static void LibraryGameOptions(Shell &shell, Library &lib, int index)
 {
     if (index < 0 || index >= lib.count)
@@ -10645,9 +10755,9 @@ static void LibraryGameOptions(Shell &shell, Library &lib, int index)
     const bool favourite = IsFavourite(titleId, name);
     const bool renamed = RenamedTo(titleId, name) != NULL;
 
-    enum { OPTION_FAVOURITE, OPTION_RENAME, OPTION_ORIGINAL_NAME };
-    const char *labels[3];
-    int options[3];
+    enum { OPTION_FAVOURITE, OPTION_RENAME, OPTION_ORIGINAL_NAME, OPTION_TRAINER };
+    const char *labels[4];
+    int options[4];
     int count = 0;
     labels[count] = Tr(favourite ? STR_REMOVE_FROM_FAVOURITES : STR_ADD_TO_FAVOURITES);
     options[count++] = OPTION_FAVOURITE;
@@ -10658,6 +10768,12 @@ static void LibraryGameOptions(Shell &shell, Library &lib, int index)
         labels[count] = Tr(STR_USE_THE_ORIGINAL_NAME);
         options[count++] = OPTION_ORIGINAL_NAME;
     }
+    char trainerPath[300];
+    if (FindTrainer(titleId, trainerPath, sizeof(trainerPath)))
+    {
+        labels[count] = Tr(STR_TRAINER);
+        options[count++] = OPTION_TRAINER;
+    }
 
     char message[320] = "";
     if (renamed)
@@ -10665,8 +10781,14 @@ static void LibraryGameOptions(Shell &shell, Library &lib, int index)
     message[sizeof(message) - 1] = '\0';
 
     // Opening on Rename while it's a favourite: A, A shouldn't take it off
-    // the list by accident.
+    // the list by accident. The page behind is held for the trainer's card
+    // too: snapshotted after this one closed, it had this one's dimming in
+    // it, and came out darker.
+    HoldDialogBackdrop();
     const int picked = ShowAlertListUI(shown, message, labels, NULL, count, favourite ? 1 : 0);
+    if (picked >= 0 && options[picked] == OPTION_TRAINER)
+        ChooseTrainerCheats(titleId, shown);
+    ReleaseDialogBackdrop();
     if (picked < 0)
         return;
 
@@ -10702,6 +10824,8 @@ static void LibraryGameOptions(Shell &shell, Library &lib, int index)
             ShowShellToast(Tr(STR_NOT_SAVED), Tr(STR_GAMEMARKS_TXT_COULD_NOT_BE), UI_TOAST_ERROR);
         ResortLibrary(shell, lib, titleId, name);
         break;
+    case OPTION_TRAINER:
+        break; // done above, over the held page
     }
 }
 
