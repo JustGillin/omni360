@@ -11733,11 +11733,11 @@ static void SnapshotQueue(Shell &shell, const Library &lib)
             row.stepCount = job.stepCount > 4 ? 4 : job.stepCount;
             row.stepFraction = job.stepFraction;
 
-            // The segments' widths: the download is the long wait, so its
-            // segment is most of the bar. The same as each step's share of
+            // The segments' widths, by how long each step usually takes - a
+            // game's install can take as long as its download. The same as each step's share of
             // the percentage (kGameStepShares, kPackStepShares), so the two
             // agree.
-            static const float kGameWidths[3] = { 0.05f, 0.90f, 0.05f };
+            static const float kGameWidths[3] = { 0.05f, 0.55f, 0.40f };
             static const float kPackWidths[2] = { 0.10f, 0.90f };
             const float *widths = (job.kind == QUEUE_JOB_GAME_INSTALL && row.stepCount == 3) ? kGameWidths
                                   : (row.stepCount == 2)                                  ? kPackWidths

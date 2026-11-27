@@ -1545,7 +1545,8 @@ static void Finish(GameJob *job, QueueOutcome outcome, const char *text, const c
 // A game's three steps, and each one's share of the whole job's percentage -
 // the same as its segment's share of the Queue's bar (SnapshotQueue's
 // kGameWidths), so the number always agrees with how much bar is filled.
-// Downloading is the long wait, so it's most of both.
+// Installing - unpacking the image and writing the package - can take as long
+// as the download on a fast line, so it gets most of the rest.
 enum GameStep
 {
     GAME_STEP_FINDING,
@@ -1553,7 +1554,7 @@ enum GameStep
     GAME_STEP_INSTALLING,
     GAME_STEP_COUNT
 };
-static const float kGameStepShares[GAME_STEP_COUNT] = { 0.05f, 0.90f, 0.05f };
+static const float kGameStepShares[GAME_STEP_COUNT] = { 0.05f, 0.55f, 0.40f };
 
 static void SetPhase(GameJob *job, GameStep step, const char *phase, unsigned long long done,
                      unsigned long long total, unsigned long long bytesPerSec)
