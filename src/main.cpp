@@ -93,6 +93,7 @@ extern "C" NTSTATUS XexGetModuleHandle(PSZ moduleName, PHANDLE outHandle);
 #define HOME_WALLPAPER_KEY "home-wallpaper: "   // before home-background: "off" meant the theme's
 #define THEME_KEY "theme: "                // series (unset), xbox360, original or light
 #define ACCENT_KEY "accent: "              // an accent name, or unset for the theme's own
+#define TEXT_SIZE_KEY "text-size: "        // small (unset), medium or large
 #define INSTALL_TYPE_KEY "install-type: "   // "folder" copies a game's files out rather than making a GOD package - Store and disc installs
 #define HELPER_ID_KEY "helper-id: "       // the paired PC helper (PcHelper.h); empty when not paired
 #define HELPER_TOKEN_KEY "helper-token: " // what it gave this console when it paired
@@ -544,6 +545,19 @@ static int AccentSetting()
         if (_stricmp(value, kAccentNames[i]) == 0)
             return i;
     return UiThemeDefaultAccent(ThemeSetting());
+}
+
+// The text size, as UI_TEXT_* - the names as settings.txt spells them.
+static const char *const kTextSizeNames[UI_TEXT_SIZE_COUNT] = { "small", "medium", "large" };
+
+static int TextSizeSetting()
+{
+    char value[16];
+    GetSettingsPath(TEXT_SIZE_KEY, "small", value, sizeof(value));
+    for (int i = 0; i < UI_TEXT_SIZE_COUNT; ++i)
+        if (_stricmp(value, kTextSizeNames[i]) == 0)
+            return i;
+    return UI_TEXT_SMALL;
 }
 
 // What's behind Home, as UI_HOME_BG_*. The game's wallpaper unless set -
@@ -3447,6 +3461,7 @@ enum SettingsRow
     SETTINGS_ROW_INSTALL_TYPE, // Games on Demand or folder games, for Store installs
     SETTINGS_ROW_THEME,        // the theme: left and right change it
     SETTINGS_ROW_ACCENT,       // its accent: left and right change it
+    SETTINGS_ROW_TEXT_SIZE,    // the text size: left and right change it
     SETTINGS_ROW_HOME_BACKGROUND, // what's behind Home: left and right change it
     SETTINGS_ROW_WALLPAPER,    // opens the wallpaper picker
     SETTINGS_ROW_RESYNC_LIBRARY, // re-read the library from disk and re-fetch missing icons
@@ -4428,6 +4443,18 @@ static void PickLanguage(int index)
     if (!SetSettingsValue(LANGUAGE_KEY, LanguageCode(now)))
         ShowMessageUI(Tr(STR_NOT_SAVED), Tr(STR_SETTINGS_TXT_COULD_NOT_BE), NULL);
     dprintf("Language set to %s (%s)\n", LanguageCode(now), LanguageName(now));
+}
+
+// Left and right on the text size's row: the next size, saved and shown at once.
+static void StepTextSize(int step)
+{
+    const int size = TextSizeSetting() + step;
+    if (size < 0 || size >= UI_TEXT_SIZE_COUNT)
+        return;
+    if (!SetSettingsValue(TEXT_SIZE_KEY, size == UI_TEXT_SMALL ? "" : kTextSizeNames[size]))
+        ShowMessageUI(Tr(STR_NOT_SAVED), Tr(STR_SETTINGS_TXT_COULD_NOT_BE), NULL);
+    UiSetTextSize(size);
+    dprintf("Text size set to %s\n", kTextSizeNames[size]);
 }
 
 // Left and right on the theme's row: the next theme, saved and shown at once.
@@ -5436,6 +5463,18 @@ static void BuildSettingsPage(SettingsPage &page, const Library &lib, const char
                 SettingsControlView &c = page.rows[page.count - 1].controls[0];
                 c.valueIndex = accent;
                 c.valueCount = UI_ACCENT_COUNT;
+            }
+
+            const StringId sizeNames[UI_TEXT_SIZE_COUNT] = { STR_TEXT_SIZE_SMALL, STR_TEXT_SIZE_MEDIUM,
+                                                             STR_TEXT_SIZE_LARGE };
+            const int size = TextSizeSetting();
+            AddSettingsRow(page, SETTINGS_VIEW_LINE, Tr(STR_TEXT_SIZE));
+            AddSettingsControl(page, SETTINGS_CONTROL_VALUE, Tr(sizeNames[size]), SETTINGS_ROW_TEXT_SIZE,
+                               Tr(STR_TEXT_SIZE_HELP));
+            {
+                SettingsControlView &c = page.rows[page.count - 1].controls[0];
+                c.valueIndex = size;
+                c.valueCount = UI_TEXT_SIZE_COUNT;
             }
         }
 
@@ -14511,6 +14550,7 @@ int main()
     StartupStep("language");
 
     UiSetTheme(ThemeSetting(), AccentSetting());
+    UiSetTextSize(TextSizeSetting());
     UiSetHomeBackground(HomeBackgroundSetting());
     if (!InitGameListUI())
     {
@@ -15979,6 +16019,11 @@ int main()
                 else if (onValue && settings.actions[settings.focusRow][settings.focusCol] == SETTINGS_ROW_ACCENT)
                 {
                     StepAccent(right ? 1 : -1);
+                    shell.stale = true;
+                }
+                else if (onValue && settings.actions[settings.focusRow][settings.focusCol] == SETTINGS_ROW_TEXT_SIZE)
+                {
+                    StepTextSize(right ? 1 : -1);
                     shell.stale = true;
                 }
                 else if (onValue && settings.actions[settings.focusRow][settings.focusCol] == SETTINGS_ROW_INSTALL_TYPE)

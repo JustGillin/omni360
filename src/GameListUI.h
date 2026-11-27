@@ -45,6 +45,19 @@ enum UiAccentId
 void UiSetTheme(int theme, int accent);
 int UiThemeDefaultAccent(int theme);
 
+// How big the text is: Small (the default) is roomiest; Medium and Large are
+// for a TV across the room, and grow rows and buttons to fit - tiles,
+// margins and the sidebar keep their sizes. Takes effect at once.
+enum UiTextSize
+{
+    UI_TEXT_SMALL,
+    UI_TEXT_MEDIUM,
+    UI_TEXT_LARGE,
+    UI_TEXT_SIZE_COUNT
+};
+
+void UiSetTextSize(int size);
+
 // What's behind Home: the focused game's wallpaper (the default), the
 // theme's own - drawn, not a picture - or one picked from xbox.com.
 enum UiHomeBackground

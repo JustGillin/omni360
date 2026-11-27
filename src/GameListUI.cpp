@@ -1228,6 +1228,21 @@ void UiSetTheme(int theme, int accent)
                                                                   : NAV_ICON_STYLE_OUTLINE);
 }
 
+// The text size picked in Personalize, as UI_TEXT_*.
+static int g_textSize = UI_TEXT_SMALL;
+
+static void ForgetWrappedText(); // with the wrapping, below
+static bool RecomputeUiMetrics(); // with the metrics, below
+
+void UiSetTextSize(int size)
+{
+    g_textSize = (size >= 0 && size < UI_TEXT_SIZE_COUNT) ? size : UI_TEXT_SMALL;
+    // At once, as a theme is: every size is worked out again, and paragraphs
+    // measured at the old size are measured again.
+    RecomputeUiMetrics();
+    ForgetWrappedText();
+}
+
 void UiSetHomeBackground(int mode)
 {
     g_homeBackground = (mode >= 0 && mode < UI_HOME_BG_COUNT) ? mode : UI_HOME_BG_GAME;
@@ -1261,6 +1276,7 @@ struct UiMetrics
     float screenW, screenH;
     float scale;      // 1.0 at 720p, 1.5 at 1080p, ~0.67 at 480p
     float textScale;  // scale, corrected for the font's design height (see ComputeUiMetrics)
+    float rowScale;   // scale, grown for larger text: rows and buttons, at half the text's rate
     float safeX, safeY;
     float sidebarW;   // the sidebar, from the left edge of the screen
     float navX, navW; // the sidebar's page buttons
@@ -1298,10 +1314,17 @@ static bool ComputeUiMetrics()
     // the correction stays in case the text renderer is ever swapped again.
     float fontHeight = g_UiFont.GetFontHeight();
     g_M.textScale = (fontHeight > 1.0f) ? k * (22.0f / fontHeight) : k;
-    // 80% of that design size: the text was crowding its rows. Valkyrie's
-    // set beside it felt roomier with smaller type in rows of the same
-    // height - so the text came down and the rows, tiles and margins stayed.
-    g_M.textScale *= 0.80f;
+    // Small - the default - is 80% of that design size: at 100% the text
+    // crowded its rows. Valkyrie's beside it felt roomier with smaller type
+    // in rows of the same height, so the text came down and the rows, tiles
+    // and margins stayed. Medium and Large are for a TV further away: their
+    // rows and buttons grow too, at half the text's rate, so the text has
+    // room in them - but tiles, margins and the sidebar keep their sizes,
+    // as growing them would only fit fewer games, not make words readable.
+    static const float kTextSizes[UI_TEXT_SIZE_COUNT] = { 0.80f, 0.90f, 1.00f };
+    const float text = kTextSizes[g_textSize];
+    g_M.textScale *= text;
+    g_M.rowScale = k * (1.0f + 0.5f * (text / kTextSizes[UI_TEXT_SMALL] - 1.0f));
 
     // Title-safe inset, matching AtgConsole's percentages (90% of the screen
     // on HD, 85% on 4:3) - a real TV can and does crop the rest.
@@ -1342,6 +1365,20 @@ static bool ComputeUiMetrics()
 static float S(float px720)
 {
     return px720 * g_M.scale;
+}
+
+// After the text size changes: only once there's a device to read the
+// screen from - before that, the first ComputeUiMetrics picks it up.
+static bool RecomputeUiMetrics()
+{
+    return g_Initialized ? ComputeUiMetrics() : false;
+}
+
+// A row's or button's height, which grows with the text size picked - see
+// ComputeUiMetrics. At Small, as S.
+static float RS(float px720)
+{
+    return px720 * g_M.rowScale;
 }
 
 // Radii for things smaller than a tile, which follow the same switch.
@@ -2016,6 +2053,13 @@ struct WrapLayout
 static WrapLayout g_wrapCache[WRAP_CACHE_SIZE];
 static int g_wrapNext = 0;
 
+// Its breaks were measured at a text size that's gone.
+static void ForgetWrappedText()
+{
+    memset(g_wrapCache, 0, sizeof(g_wrapCache));
+    g_wrapNext = 0;
+}
+
 static unsigned long WrapKey(const char *utf8, float maxW, float mul, bool bold, int maxLines)
 {
     unsigned long h = 2166136261UL;
@@ -2423,7 +2467,7 @@ const char *ShellPageName(ShellPage page)
 
 static float NavItemHeight()
 {
-    return S(56.0f);
+    return RS(56.0f);
 }
 
 static bool NavShown(int page)
@@ -2575,12 +2619,14 @@ struct BetaBadge
 
 static BetaBadge LayOutBetaBadge()
 {
-    // Measured once a face: the sidebar draws this every frame.
+    // Measured once a face and text size: the sidebar draws this every frame.
     static float nameEm = 0.0f, labelEm = 0.0f, nameW = 0.0f, labelW = 0.0f;
     static int measuredFace = -1;
-    if (nameEm == 0.0f || measuredFace != g_UiFont.GetFace())
+    static float measuredScale = 0.0f;
+    if (nameEm == 0.0f || measuredFace != g_UiFont.GetFace() || measuredScale != g_M.textScale)
     {
         measuredFace = g_UiFont.GetFace();
+        measuredScale = g_M.textScale;
         nameEm = BoldEm(1.1f);
         labelEm = BoldEm(BETA_LABEL_SIZE);
         nameW = TextWidth("Omni360", 1.1f, true);
@@ -4427,7 +4473,7 @@ static PopupLayout LayOutPopup(const UiPopupView &p)
     PopupLayout L;
     L.pad = S(28.0f);
     L.headH = S(64.0f);
-    L.rowH = S(64.0f);
+    L.rowH = RS(64.0f);
     L.barH = S(38.0f);
 
     L.w = S(620.0f);
@@ -6068,9 +6114,9 @@ static int RunAlert(const char *heading, const char *message, const char *detail
     const float detailLineH = LineHeight(0.76f) * 1.15f;
     const int messageLines = hasMessage ? TextWrappedLines(message, textW, 0.9f, maxMessageLines) : 0;
     const int detailLines = hasDetail ? TextWrappedLines(detailLine, textW, 0.76f, 4) : 0;
-    const float buttonH = S(ALERT_BUTTON_H);
+    const float buttonH = RS(ALERT_BUTTON_H);
     // Two-line rows are taller, and fewer fit in the same height.
-    const float rowH = notesBelow ? S(ALERT_LIST_ROW_H) * 1.5f : S(ALERT_LIST_ROW_H);
+    const float rowH = notesBelow ? RS(ALERT_LIST_ROW_H) * 1.5f : RS(ALERT_LIST_ROW_H);
     int rowsMax = notesBelow ? (int)(ALERT_LIST_ROWS / 1.5f) : ALERT_LIST_ROWS;
     if (rowsMax < 1)
         rowsMax = 1;
@@ -6647,7 +6693,7 @@ int ShowChoiceUI(const char *heading, const char *subheading, const char **label
 // A card per row: a bold label and a line under it.
 static float ListRowHeight()
 {
-    return S(84.0f);
+    return RS(84.0f);
 }
 
 static float ListRowGap()
@@ -6846,7 +6892,7 @@ void RenderListFrame(ListPageView &view, const UiHint *hints, int hintCount)
 #define COL_GREEN_DIM       (g_theme.accentDim) // a locked box: the accent, faded
 #define COL_VALUE_END       (g_theme.p.valueEnd) // an arrow with nowhere further to go
 
-static float SettingsRowH()     { return S(44.0f); }
+static float SettingsRowH()     { return RS(44.0f); }
 static float SettingsFlagH()    { return S(21.0f); } // a language row's flag; 4:3, so 28 wide
 
 // A flag by its code (Flags.h), its left edge at x and centred on cy, h
@@ -6869,7 +6915,7 @@ static void DrawFlag(const char *code, float x, float cy, float h)
         return;
     }
 }
-static float SettingsHeadH()    { return S(44.0f); }
+static float SettingsHeadH()    { return RS(44.0f); }
 static float SettingsGap()      { return S(4.0f); }
 static float SettingsButtonH()  { return S(32.0f); }
 static float SettingsCheck()    { return S(22.0f); }
@@ -7433,7 +7479,7 @@ static StoreLayout LayOutStore(bool spotlight = false, int cardRows = 1)
     L.sideH = (L.heroH - L.gap) * 0.5f;
 
     L.btnY = L.top + L.heroH + S(24.0f);
-    L.btnH = S(52.0f);
+    L.btnH = RS(52.0f);
     L.btnW = (width - 3.0f * L.gap) / STORE_BUTTON_COUNT;
 
     L.azLabelY = L.btnY + L.btnH + S(30.0f);
@@ -9818,7 +9864,7 @@ static FilterPanelLayout LayOutFilterPanel(const StoreFilterView &panel)
     L.rowW = S(FILTER_PANEL_W);
     L.rowX = g_M.screenW - g_M.safeX - L.rowW;
     L.x = L.rowX - S(28.0f);
-    L.rowH = S(40.0f);
+    L.rowH = RS(40.0f);
     L.titleY = g_M.headerY + S(22.0f);
     float y = g_M.headerY + S(58.0f);
     for (int i = 0; i < panel.count && i < FILTER_PANEL_ROWS_MAX; ++i)
@@ -10214,7 +10260,7 @@ static StoreGameLayout LayOutStoreGame(bool hasShots, int textLines)
     L.titleY = L.top;
     L.metaY = L.top + LineHeight(1.9f) * 1.25f + S(6.0f);
     L.starsY = L.metaY + LineHeight(0.86f) * 1.3f + S(8.0f);
-    L.buttonH = S(52.0f);
+    L.buttonH = RS(52.0f);
     L.buttonsY = L.top + L.boxS - L.buttonH;
 
     // The synopsis needs no heading. Beside it, the screenshots, and it
@@ -10699,7 +10745,7 @@ void RenderStoreGameFrame(StoreGameView &view, const UiHint *hints, int hintCoun
 // from. A 4:3 screen has a deeper title-safe margin and still fits three.
 static float QueueRowHeight()
 {
-    return S(126.0f);
+    return RS(126.0f);
 }
 
 static float QueueRowGap()
@@ -11389,7 +11435,7 @@ void SetStoragePartArt(const unsigned char *const *pngs, const unsigned long *si
 // The list: rows shorter than the Queue's cards - a name, a size and one line
 // of what it's made of - with the cover the row's height, and the checkbox
 // at its right end.
-static float StorageListRowH() { return S(92.0f); }
+static float StorageListRowH() { return RS(92.0f); }
 static float StorageListGap()  { return S(10.0f); }
 
 void RenderStorageListFrame(StorageListView &view, const UiHint *hints, int hintCount)
@@ -11549,7 +11595,7 @@ void RenderStorageListFrame(StorageListView &view, const UiHint *hints, int hint
 // The file manager
 // ---------------------------------------------------------------------------
 
-static float FilesRowH() { return S(46.0f); }
+static float FilesRowH() { return RS(46.0f); }
 static float FilesRowGap() { return S(4.0f); }
 static float FilesPathH() { return S(44.0f); }
 
