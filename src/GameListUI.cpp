@@ -3647,8 +3647,8 @@ int LibraryCoverRoom()
     return MAX_BOX_ART;
 }
 
-// The cover for titleId, noted as used now - or NULL, and asked for.
-static D3DTexture *BoxArtFor(unsigned long titleId)
+// The cover for titleId, noted as used now - or NULL.
+static D3DTexture *CachedBoxArt(unsigned long titleId)
 {
     for (int i = 0; i < g_boxArtCount; ++i)
     {
@@ -3658,8 +3658,16 @@ static D3DTexture *BoxArtFor(unsigned long titleId)
             return g_boxArt[i].texture;
         }
     }
-    WantCover(titleId);
     return NULL;
+}
+
+// The cover for titleId, noted as used now - or NULL, and asked for.
+static D3DTexture *BoxArtFor(unsigned long titleId)
+{
+    D3DTexture *texture = CachedBoxArt(titleId);
+    if (texture == NULL)
+        WantCover(titleId);
+    return texture;
 }
 
 // Whether there's a cover for titleId, without counting it as drawn.
@@ -3724,11 +3732,16 @@ static unsigned long g_storeFrame = 0;
 
 // A game's cover for a Store tile: the library's, if it's an installed game,
 // else the Store's own. Marks it as in use.
+//
+// The library's is only looked up, never asked for: asking queued every Store
+// tile on screen as a library cover, and a moment later each arrived as a
+// second, full-size texture that the tile switched to, fading in over the
+// one it had - the whole page flashing once (2026-11-27).
 static D3DTexture *StoreCoverFor(unsigned long titleId)
 {
     if (titleId == 0)
         return NULL;
-    D3DTexture *library = BoxArtFor(titleId);
+    D3DTexture *library = CachedBoxArt(titleId);
     if (library != NULL)
         return library;
     for (int i = 0; i < g_storeCoverCount; ++i)
