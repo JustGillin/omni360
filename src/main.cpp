@@ -10629,8 +10629,8 @@ static void ResortLibrary(Shell &shell, Library &lib, unsigned long titleId, con
     }
 }
 
-// Which title updates a trainer works with, as words: "title update 1", "the
-// game with no title update", or a list of them.
+// Which title updates a trainer works with, as words: "no title update",
+// "title update 8", or several - "no title update or title update 8".
 static void TrainerUpdatesText(const TrainerInfo &info, char *out, size_t outSize)
 {
     out[0] = '\0';
@@ -10640,8 +10640,7 @@ static void TrainerUpdatesText(const TrainerInfo &info, char *out, size_t outSiz
         out[outSize - 1] = '\0';
         return;
     }
-    size_t used = 0;
-    for (int i = 0; i < info.tuCount && used + 1 < outSize; ++i)
+    for (int i = 0; i < info.tuCount; ++i)
     {
         char one[64];
         if (info.tus[i] <= 0)
@@ -10654,9 +10653,120 @@ static void TrainerUpdatesText(const TrainerInfo &info, char *out, size_t outSiz
             TrFormat(one, sizeof(one), STR_TRAINER_UPDATE, number);
         }
         one[sizeof(one) - 1] = '\0';
-        used += _snprintf(out + used, outSize - used, "%s%s", i > 0 ? ", " : "", one);
+        if (i == 0)
+            _snprintf(out, outSize, "%s", one);
+        else
+        {
+            char sofar[200];
+            _snprintf(sofar, sizeof(sofar), "%s", out);
+            sofar[sizeof(sofar) - 1] = '\0';
+            TrFormat(out, outSize, STR_TRAINER_UPDATES_OR, sofar, one);
+        }
         out[outSize - 1] = '\0';
     }
+}
+
+// An installed update's number: "Title Update 3"'s 3, as XboxUnity gave it,
+// else read off its name ("... Title Update #3"). -1 when neither says.
+static long TitleUpdateNumber(const InstalledTitleUpdate &update)
+{
+    if (update.number != 0)
+        return (long)update.number;
+    for (const char *at = update.name; *at != '\0'; ++at)
+    {
+        if (*at == '#' && at[1] >= '0' && at[1] <= '9')
+            return atol(at + 1);
+    }
+    return -1;
+}
+
+static bool TrainerTakesUpdate(const TrainerInfo &info, long number)
+{
+    for (int i = 0; i < info.tuCount; ++i)
+        if (info.tus[i] == number || (number == 0 && info.tus[i] < 0))
+            return true;
+    return false;
+}
+
+enum TrainerFixKind
+{
+    TRAINER_FIX_NONE,    // a problem with nothing here to fix it - Versions can get another
+    TRAINER_FIX_OFF,     // turn the update that's on off: the trainer is for the game without
+    TRAINER_FIX_ON       // turn on an installed one the trainer works with
+};
+
+struct TrainerUpdateFix
+{
+    bool problem;
+    TrainerFixKind kind;
+    InstalledTitleUpdate update; // the one to turn off or on
+    char label[96];              // the row: "Title update 1 is on"
+    WCHAR action[48];            // A: "Turn it off", "Turn on #8"
+};
+
+// Whether the title update the game would start with is one this trainer
+// works with - and if not, what would make it so. A number that can't be
+// told (an update XboxUnity hasn't named) isn't called a problem.
+static void CheckTrainerUpdate(unsigned long titleId, const TrainerInfo &info, TrainerUpdateFix *fix)
+{
+    memset(fix, 0, sizeof(*fix));
+    if (info.tuCount == 0)
+        return; // any will do
+
+    static InstalledTitleUpdate updates[MAX_TITLE_UPDATES];
+    const int count = ListTitleUpdates(titleId, updates, MAX_TITLE_UPDATES);
+    int on = -1;
+    for (int i = 0; i < count && on < 0; ++i)
+        if (updates[i].on)
+            on = i;
+    const long current = on >= 0 ? TitleUpdateNumber(updates[on]) : 0;
+    if (current < 0 || TrainerTakesUpdate(info, current))
+        return;
+
+    fix->problem = true;
+    if (current > 0)
+    {
+        char number[16];
+        _snprintf(number, sizeof(number), "%ld", current);
+        number[sizeof(number) - 1] = '\0';
+        TrFormat(fix->label, sizeof(fix->label), STR_TRAINER_UPDATE_IS_ON, number);
+    }
+    else
+        _snprintf(fix->label, sizeof(fix->label), "%s", Tr(STR_TRAINER_NO_UPDATE_IS_ON));
+    fix->label[sizeof(fix->label) - 1] = '\0';
+
+    // An installed one it works with, to turn on - else, if it works with
+    // the game as it came, turning this one off.
+    for (int i = 0; i < count; ++i)
+    {
+        const long number = TitleUpdateNumber(updates[i]);
+        if (i == on || number <= 0 || !TrainerTakesUpdate(info, number))
+            continue;
+        fix->kind = TRAINER_FIX_ON;
+        fix->update = updates[i];
+        char text[16], action[48];
+        _snprintf(text, sizeof(text), "%ld", number);
+        text[sizeof(text) - 1] = '\0';
+        TrFormat(action, sizeof(action), STR_TRAINER_TURN_ON_N, text);
+        action[sizeof(action) - 1] = '\0';
+        Utf8ToWideText(action, fix->action, 48);
+        return;
+    }
+    if (on >= 0 && TrainerTakesUpdate(info, 0))
+    {
+        fix->kind = TRAINER_FIX_OFF;
+        fix->update = updates[on];
+        Utf8ToWideText(Tr(STR_TRAINER_TURN_IT_OFF), fix->action, 48);
+    }
+}
+
+static bool ApplyTrainerUpdateFix(unsigned long titleId, const TrainerUpdateFix &fix)
+{
+    if (fix.kind == TRAINER_FIX_OFF)
+        return TurnOffTitleUpdate(titleId, fix.update);
+    if (fix.kind == TRAINER_FIX_ON)
+        return TurnOnTitleUpdate(titleId, fix.update);
+    return true;
 }
 
 // The trainer's cheats, each On or Off: A turns the focused one over, B saves
@@ -10683,35 +10793,59 @@ static void ChooseTrainerCheats(unsigned long titleId, const char *shownName)
     }
     const unsigned long before = bits;
 
-    char by[160], updates[160], works[200], message[400];
+    char by[160], updates[160], works[200];
     TrFormat(by, sizeof(by), STR_TRAINER_BY, info.name[0] != '\0' ? info.name : shownName,
              info.author[0] != '\0' ? info.author : "?");
     by[sizeof(by) - 1] = '\0';
     TrainerUpdatesText(info, updates, sizeof(updates));
     TrFormat(works, sizeof(works), STR_TRAINER_WORKS_WITH, updates);
     works[sizeof(works) - 1] = '\0';
-    _snprintf(message, sizeof(message), "%s\n%s", by, works);
-    message[sizeof(message) - 1] = '\0';
 
-    const char *labels[MAX_TRAINER_CHEATS];
-    const char *notes[MAX_TRAINER_CHEATS];
-    const WCHAR *actions[MAX_TRAINER_CHEATS]; // A's word for each row
+    const char *labels[MAX_TRAINER_CHEATS + 1];
+    const char *notes[MAX_TRAINER_CHEATS + 1];
+    const WCHAR *actions[MAX_TRAINER_CHEATS + 1]; // A's word for each row
     int focus = 0;
     HoldDialogBackdrop(); // the card is shown again after each change, in place
     for (;;)
     {
+        // The title update the game would start with, against the ones the
+        // trainer works with - it stops itself on any other. A row first
+        // says so when it's wrong, with the fix on A where there is one.
+        TrainerUpdateFix fix;
+        CheckTrainerUpdate(titleId, info, &fix);
+        char message[600];
+        if (fix.problem && fix.kind == TRAINER_FIX_NONE)
+            _snprintf(message, sizeof(message), "%s\n%s\n%s", by, works, Tr(STR_TRAINER_NEEDS_OTHER_UPDATE));
+        else
+            _snprintf(message, sizeof(message), "%s\n%s", by, works);
+        message[sizeof(message) - 1] = '\0';
+
+        const int first = (fix.problem && fix.kind != TRAINER_FIX_NONE) ? 1 : 0; // the row before the cheats
+        if (first == 1)
+        {
+            labels[0] = fix.label;
+            notes[0] = Tr(STR_TRAINER_WONT_START);
+            actions[0] = fix.action;
+        }
         for (int i = 0; i < info.cheatCount; ++i)
         {
             const bool on = (bits & (1UL << i)) != 0;
-            labels[i] = info.cheats[i];
-            notes[i] = Tr(on ? STR_TRAINER_CHEAT_ON : STR_TRAINER_CHEAT_OFF);
-            actions[i] = TrW(on ? STR_TURN_OFF : STR_TURN_ON);
+            labels[first + i] = info.cheats[i];
+            notes[first + i] = Tr(on ? STR_TRAINER_CHEAT_ON : STR_TRAINER_CHEAT_OFF);
+            actions[first + i] = TrW(on ? STR_TURN_OFF : STR_TURN_ON);
         }
-        const int picked = ShowAlertToggleListUI(Tr(STR_TRAINER), message, labels, notes, info.cheatCount, focus,
-                                                 actions, TrW(STR_DONE), Tr(STR_TRAINER_NOTE));
+        const int picked = ShowAlertToggleListUI(Tr(STR_TRAINER), message, labels, notes, first + info.cheatCount,
+                                                 focus, actions, TrW(STR_DONE), Tr(STR_TRAINER_NOTE));
         if (picked < 0)
             break;
-        bits ^= 1UL << picked;
+        if (picked < first)
+        {
+            if (!ApplyTrainerUpdateFix(titleId, fix))
+                ShowMessageUI(Tr(STR_NOT_SAVED), Tr(STR_TRAINER_UPDATE_NOT_CHANGED), NULL);
+            focus = 0; // the row goes; the first cheat takes its place
+            continue;
+        }
+        bits ^= 1UL << (picked - first);
         focus = picked;
     }
     ReleaseDialogBackdrop();
@@ -10738,8 +10872,59 @@ static void ChooseTrainerCheats(unsigned long titleId, const char *shownName)
     ShowShellToast(Tr(STR_TRAINER_SAVED), summary, UI_TOAST_SUCCESS);
 }
 
-// Y on a library game: favourite it or not, rename it, its trainer's cheats.
-static void LibraryGameOptions(Shell &shell, Library &lib, int index)
+// A trainer from the community pack (Trainers.h), for this game: one to
+// confirm, or several to pick from; downloaded, then its cheats to choose.
+static void GetPackTrainer(unsigned long titleId, const char *shownName)
+{
+    static PackTrainer trainers[MAX_PACK_TRAINERS];
+    const int count = PackTrainersFor(titleId, trainers, MAX_PACK_TRAINERS);
+    if (count == 0)
+        return;
+
+    int picked = 0;
+    if (count == 1)
+    {
+        char message[400];
+        TrFormat(message, sizeof(message), STR_TRAINER_FROM_PACK, shownName);
+        message[sizeof(message) - 1] = '\0';
+        // Opening on Download: it's a small file, and nothing is lost by it.
+        const char *buttons[2] = { Tr(STR_TRAINER_DOWNLOAD), Tr(STR_BUTTON_CANCEL) };
+        if (ShowAlertButtonsUI(Tr(STR_TRAINER_GET), message, Tr(STR_TRAINER_PACK_CREDIT), buttons, 2, 5, 0) != 0)
+            return;
+    }
+    else
+    {
+        char number[16], message[400];
+        _snprintf(number, sizeof(number), "%d", count);
+        number[sizeof(number) - 1] = '\0';
+        TrFormat(message, sizeof(message), STR_TRAINER_FROM_PACK_SOME, number, shownName);
+        message[sizeof(message) - 1] = '\0';
+        const char *labels[MAX_PACK_TRAINERS];
+        for (int i = 0; i < count; ++i)
+            labels[i] = trainers[i].label;
+        picked = ShowAlertListExUI(Tr(STR_TRAINER_GET), message, labels, NULL, count, 0, NULL, NULL, false,
+                                   Tr(STR_TRAINER_PACK_CREDIT));
+        if (picked < 0)
+            return;
+    }
+
+    ShowWorkingDialog(Tr(STR_TRAINER_DOWNLOADING), trainers[picked].label);
+    char path[300];
+    if (!DownloadPackTrainer(titleId, trainers[picked], path, sizeof(path)))
+    {
+        ShowMessageUI(Tr(STR_TRAINER_DOWNLOAD_FAILED), Tr(STR_TRAINER_DOWNLOAD_FAILED_DETAIL), NULL);
+        return;
+    }
+    ChooseTrainerCheats(titleId, shownName);
+}
+
+static void ManageGameStorage(Shell &shell, const Library &lib, const char *gamesPath, unsigned long titleId,
+                              const char *name); // with Storage, below
+
+// Y on a library game, on Home or the grid: favourite it, rename it, and
+// what its page's buttons do - DLC, title updates, its trainer, Manage - so
+// they're a press away wherever the game is.
+static void LibraryGameOptions(Shell &shell, Library &lib, int index, const char *gamesPath, TitleUpdateAuth &auth)
 {
     if (index < 0 || index >= lib.count)
         return;
@@ -10755,9 +10940,19 @@ static void LibraryGameOptions(Shell &shell, Library &lib, int index)
     const bool favourite = IsFavourite(titleId, name);
     const bool renamed = RenamedTo(titleId, name) != NULL;
 
-    enum { OPTION_FAVOURITE, OPTION_RENAME, OPTION_ORIGINAL_NAME, OPTION_TRAINER };
-    const char *labels[4];
-    int options[4];
+    enum
+    {
+        OPTION_FAVOURITE,
+        OPTION_RENAME,
+        OPTION_ORIGINAL_NAME,
+        OPTION_DLC,
+        OPTION_TITLE_UPDATES,
+        OPTION_TRAINER,
+        OPTION_GET_TRAINER,
+        OPTION_MANAGE
+    };
+    const char *labels[8];
+    int options[8];
     int count = 0;
     labels[count] = Tr(favourite ? STR_REMOVE_FROM_FAVOURITES : STR_ADD_TO_FAVOURITES);
     options[count++] = OPTION_FAVOURITE;
@@ -10768,12 +10963,37 @@ static void LibraryGameOptions(Shell &shell, Library &lib, int index)
         labels[count] = Tr(STR_USE_THE_ORIGINAL_NAME);
         options[count++] = OPTION_ORIGINAL_NAME;
     }
+    // DLC and title updates as the game's page has them: a 360 or Arcade
+    // game's - Original Xbox and indie games had neither.
+    const LibraryFilter kind = FilterOfGame(lib.games[index]);
+    const bool addOns = (kind == LIBRARY_FILTER_360 || kind == LIBRARY_FILTER_ARCADE);
+    if (addOns)
+    {
+        labels[count] = Tr(STR_DLC);
+        options[count++] = OPTION_DLC;
+        labels[count] = Tr(STR_TITLE_UPDATES);
+        options[count++] = OPTION_TITLE_UPDATES;
+    }
+    // Its trainer: the one it has, and the community pack's - to get one, or
+    // a different one when the pack has a few.
     char trainerPath[300];
-    if (FindTrainer(titleId, trainerPath, sizeof(trainerPath)))
+    PackTrainer packTrainers[MAX_PACK_TRAINERS];
+    const bool fits = TrainersFitGame(titleId, name);
+    const bool hasTrainer = fits && FindTrainer(titleId, trainerPath, sizeof(trainerPath));
+    const int packCount = fits ? PackTrainersFor(titleId, packTrainers, MAX_PACK_TRAINERS) : 0;
+    if (hasTrainer)
     {
         labels[count] = Tr(STR_TRAINER);
         options[count++] = OPTION_TRAINER;
     }
+    if (packCount > (hasTrainer ? 1 : 0))
+    {
+        labels[count] = Tr(hasTrainer ? STR_TRAINER_OTHER : STR_TRAINER_GET);
+        options[count++] = OPTION_GET_TRAINER;
+    }
+    // Last, as on the page: its parts on every drive.
+    labels[count] = Tr(STR_STORAGE_MANAGE_SHORT);
+    options[count++] = OPTION_MANAGE;
 
     char message[320] = "";
     if (renamed)
@@ -10786,8 +11006,15 @@ static void LibraryGameOptions(Shell &shell, Library &lib, int index)
     // it, and came out darker.
     HoldDialogBackdrop();
     const int picked = ShowAlertListUI(shown, message, labels, NULL, count, favourite ? 1 : 0);
+    // The ones that are dialogs of their own open over the same held page.
     if (picked >= 0 && options[picked] == OPTION_TRAINER)
         ChooseTrainerCheats(titleId, shown);
+    else if (picked >= 0 && options[picked] == OPTION_GET_TRAINER)
+        GetPackTrainer(titleId, shown);
+    else if (picked >= 0 && options[picked] == OPTION_DLC)
+        ManageDlc(titleId, name, "", auth);
+    else if (picked >= 0 && options[picked] == OPTION_TITLE_UPDATES)
+        ManageTitleUpdates(titleId, name, "", InstalledMediaId(lib, titleId), auth);
     ReleaseDialogBackdrop();
     if (picked < 0)
         return;
@@ -10824,7 +11051,14 @@ static void LibraryGameOptions(Shell &shell, Library &lib, int index)
             ShowShellToast(Tr(STR_NOT_SAVED), Tr(STR_GAMEMARKS_TXT_COULD_NOT_BE), UI_TOAST_ERROR);
         ResortLibrary(shell, lib, titleId, name);
         break;
+    case OPTION_MANAGE:
+        // A page over this one; B comes back to it.
+        ManageGameStorage(shell, lib, gamesPath, titleId, shown);
+        break;
     case OPTION_TRAINER:
+    case OPTION_GET_TRAINER:
+    case OPTION_DLC:
+    case OPTION_TITLE_UPDATES:
         break; // done above, over the held page
     }
 }
@@ -13301,9 +13535,10 @@ static bool StorageTitleInQueue(unsigned long titleId)
     return false;
 }
 
-// Manage on a game page: its parts on every drive, over the page - B comes
-// back to it.
-static void ManageGameStorage(Shell &shell, const Library &lib, const char *gamesPath)
+// Manage on a game page, or in a game's Options: its parts on every drive,
+// over the page - B comes back to it.
+static void ManageGameStorage(Shell &shell, const Library &lib, const char *gamesPath, unsigned long titleId,
+                              const char *name)
 {
     BeginStorageScan(lib, gamesPath); // the overview's numbers, for when Storage is next opened
     shell.storageReturn = shell.page;
@@ -13313,13 +13548,13 @@ static void ManageGameStorage(Shell &shell, const Library &lib, const char *game
     shell.sidebarFocused = false;
     shell.storageList = false;
     shell.storageParts = true;
-    shell.storagePartsTitle = g_storeGame.titleId;
+    shell.storagePartsTitle = titleId;
     shell.storagePartsDrive = -1;
     shell.storagePartsSelected = 0;
     shell.storagePartsScroll = 0;
-    const InstalledGame *game = LibraryGameByTitleId(lib, g_storeGame.titleId);
+    const InstalledGame *game = LibraryGameByTitleId(lib, titleId);
     g_storagePartsLibrary = game != NULL ? (int)(game - lib.games) : -1;
-    _snprintf(g_storagePartsName, sizeof(g_storagePartsName), "%s", g_storeGame.name != NULL ? g_storeGame.name : "");
+    _snprintf(g_storagePartsName, sizeof(g_storagePartsName), "%s", name != NULL ? name : "");
     g_storagePartsName[sizeof(g_storagePartsName) - 1] = '\0';
     ReadStorageParts(shell);
 }
@@ -14374,6 +14609,8 @@ int main()
             // says how it went, and a newer version gets a popup.
             if (UpdateChecksOn())
                 StartUpdateCheck();
+            // The trainer pack's list, if the one kept is a day old.
+            StartTrainerPackRefresh();
         }
         else if (step == 1)
         {
@@ -14881,6 +15118,18 @@ int main()
                     // START is the disc's install, as it is in the grid.
                     acted = HomeTileAction(shell, lib, gamesPath, pressed, home.recents[shell.homeSelected]);
                 }
+                else if ((pressed & XINPUT_GAMEPAD_Y) && !home.recents[shell.homeSelected].favourites &&
+                         !home.recents[shell.homeSelected].disc)
+                {
+                    // The same Options as on the grid: favourite, rename, trainer.
+                    const int index = LibraryIndexForTitle(lib, home.recents[shell.homeSelected].titleId);
+                    if (index >= 0)
+                    {
+                        TitleUpdateAuth auth = { &haveAuth, authHeader, sizeof(authHeader) };
+                        LibraryGameOptions(shell, lib, index, gamesPath, auth);
+                        acted = true;
+                    }
+                }
             }
         }
         else if (shell.sidebarFocused && shell.sidebarOnStorage)
@@ -15010,7 +15259,8 @@ int main()
             else if ((pressed & XINPUT_GAMEPAD_Y) && chosenGame >= 0)
             {
                 // On a game: favourite it, or rename it.
-                LibraryGameOptions(shell, lib, chosenGame);
+                TitleUpdateAuth auth = { &haveAuth, authHeader, sizeof(authHeader) };
+                LibraryGameOptions(shell, lib, chosenGame, gamesPath, auth);
                 acted = true;
             }
             else if ((pressed & XINPUT_GAMEPAD_Y) && !shell.libraryFavourites)
@@ -15201,7 +15451,7 @@ int main()
                 else if (f == STORE_GAME_FOCUS_BUTTONS + 3 && GamePageManages(lib))
                 {
                     // Its parts on every drive, a page over this one.
-                    ManageGameStorage(shell, lib, gamesPath);
+                    ManageGameStorage(shell, lib, gamesPath, g_storeGame.titleId, g_storeGame.name);
                     acted = true;
                 }
             }
@@ -15824,6 +16074,8 @@ int main()
                 {
                     hintCount = AddHint(hints, hintCount, UI_BUTTON_A, TrW(STR_PLAY));
                     hintCount = AddHint(hints, hintCount, UI_BUTTON_X, TrW(STR_VIEW_GAME), TrW(STR_VIEW));
+                    if (!view.recents[view.recentFocus].favourites)
+                        hintCount = AddHint(hints, hintCount, UI_BUTTON_Y, TrW(STR_OPTIONS));
                 }
                 hintCount = AddHint(hints, hintCount, UI_BUTTON_B, TrW(STR_EXIT));
                 if (view.recentCount > HomeRecentsAcross())

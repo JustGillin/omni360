@@ -45,8 +45,36 @@ bool ReadTrainerInfo(const char *path, TrainerInfo *out);
 bool LoadTrainerCheats(unsigned long titleId, unsigned long *bits);
 bool SaveTrainerCheats(unsigned long titleId, unsigned long bits);
 
+// The community trainer pack: github.com/StonedModder/Aurora-JTAG-RGH-Trainer-Pack-Repository,
+// ~550 games. Its file list is fetched once a day, on a thread of its own,
+// and kept as Hdd1:\Omni360\TrainerPack.txt; a trainer is downloaded from it
+// when asked for.
+struct PackTrainer
+{
+    char path[200];  // in the repository
+    char file[96];   // its file name, e.g. Trainer(RETROBYTE).xex
+    char label[96];  // shown: the file name without .xex
+    unsigned long size;
+};
+#define MAX_PACK_TRAINERS 8
+
+void StartTrainerPackRefresh();
+
+// The pack's trainers for this game, from the list as last fetched.
+int PackTrainersFor(unsigned long titleId, PackTrainer *out, int max);
+
+// Downloads one into this game's trainer folder, replacing what's there.
+// Blocks for the download - a second or two. path gets where it went.
+bool DownloadPackTrainer(unsigned long titleId, const PackTrainer &trainer, char *path, size_t pathSize);
+
+// Whether trainers for titleId are for this game. A few title IDs are two
+// games - Grand Theft Auto IV and Episodes from Liberty City are both
+// 545407F2 - and a trainer only checks the title ID, so GTA IV's would start
+// in Episodes and patch the wrong game.
+bool TrainersFitGame(unsigned long titleId, const char *gameName);
+
 // Loads and starts this game's trainer, if it has one and cheats are chosen -
 // just before the game is launched (Launch.cpp).
-void StartTrainerFor(unsigned long titleId);
+void StartTrainerFor(unsigned long titleId, const char *gameName);
 
 #endif

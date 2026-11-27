@@ -8,10 +8,14 @@ DESCRIPTION : Loading Aurora's trainers (XYZEngine) for a game. See Trainers.h.
 #include "Launch.h"        // StartSystemModule
 #include "OutputConsole.h" // dprintf
 #include "cJSON.h"
+#include "downloadFile.h"  // HttpsSession: the trainer pack, on GitHub
 
 #include <xtl.h>
 #include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
+#include <stdarg.h>
+#include <string>
 
 extern "C" LONG XexGetModuleHandle(PSZ moduleName, PHANDLE outHandle);
 extern "C" LONG XexGetProcedureAddress(HANDLE module, DWORD ordinal, PVOID *outAddress);
@@ -410,11 +414,42 @@ bool SaveTrainerCheats(unsigned long titleId, unsigned long bits)
     return fclose(file) == 0 && ok;
 }
 
-void StartTrainerFor(unsigned long titleId)
+// Title IDs shared by two games, and a piece of the name of the one the
+// pack's trainers aren't for.
+struct SharedTitle
+{
+    unsigned long titleId;
+    const char *notFor;
+};
+static const SharedTitle kSharedTitles[] = {
+    { 0x545407F2, "Episodes from Liberty City" }, // the pack's is "GTA 4"
+};
+
+bool TrainersFitGame(unsigned long titleId, const char *gameName)
+{
+    for (size_t i = 0; i < sizeof(kSharedTitles) / sizeof(kSharedTitles[0]); ++i)
+    {
+        if (kSharedTitles[i].titleId != titleId || gameName == NULL)
+            continue;
+        // Case-blind: package names come in every case.
+        const size_t want = strlen(kSharedTitles[i].notFor);
+        for (const char *at = gameName; *at != '\0'; ++at)
+            if (_strnicmp(at, kSharedTitles[i].notFor, want) == 0)
+                return false;
+    }
+    return true;
+}
+
+void StartTrainerFor(unsigned long titleId, const char *gameName)
 {
     char trainer[300];
     if (!FindTrainer(titleId, trainer, sizeof(trainer)))
         return; // none for this game - the usual case
+    if (!TrainersFitGame(titleId, gameName))
+    {
+        dprintf("[trainer] %08lX's trainer isn't for %s - not starting it\n", titleId, gameName);
+        return;
+    }
 
     unsigned long cheats = 0;
     if (!LoadTrainerCheats(titleId, &cheats))
@@ -437,4 +472,272 @@ void StartTrainerFor(unsigned long titleId)
         return;
     dprintf("[trainer] %s loaded at %p\n", trainer, loaded);
     StartTrainer(loaded, cheats);
+}
+
+// ---------------------------------------------------------------------------
+// The community trainer pack, on GitHub
+// ---------------------------------------------------------------------------
+//
+// Its trainers are at Aurora/user/Trainers/<title ID>/<file>.xex. One request
+// for the repository's whole file list (git trees, ~340 KB of JSON) gives
+// every one of them; a trainer comes from the contents API as raw bytes. Both
+// are api.github.com, which the update check already talks to - nothing has
+// to be trusted beyond it. 60 requests an hour are allowed without an
+// account: a list a day and the odd trainer is far inside that.
+
+#define PACK_REPO      "StonedModder/Aurora-JTAG-RGH-Trainer-Pack-Repository"
+#define PACK_LIST_URL  "https://api.github.com/repos/" PACK_REPO "/git/trees/main?recursive=1"
+#define PACK_FILE_URL  "https://api.github.com/repos/" PACK_REPO "/contents/"
+#define PACK_PREFIX    "Aurora/user/Trainers/"
+#define PACK_LIST_FILE "Hdd1:\\Omni360\\TrainerPack.txt"
+#define PACK_LIST_MAX  (1024 * 1024)
+#define PACK_FILE_MAX  (1024 * 1024)
+#define PACK_FRESH_FOR (24ULL * 60 * 60 * 10000000) // a day, in FILETIME units
+
+static void QuietPrint(const char *format, ...)
+{
+    char line[1024];
+    va_list args;
+    va_start(args, format);
+    _vsnprintf(line, sizeof(line), format, args);
+    va_end(args);
+    line[sizeof(line) - 1] = '\0';
+    if (strstr(line, "ERROR") != NULL || strstr(line, "Failed") != NULL || strstr(line, "failed") != NULL)
+        dprintf("%s", line);
+}
+
+static unsigned long long FileTimeValue(const FILETIME &t)
+{
+    return ((unsigned long long)t.dwHighDateTime << 32) | t.dwLowDateTime;
+}
+
+// Whether the kept list is less than a day old.
+static bool PackListFresh()
+{
+    WIN32_FILE_ATTRIBUTE_DATA data;
+    if (!GetFileAttributesExA(PACK_LIST_FILE, GetFileExInfoStandard, &data))
+        return false;
+    FILETIME now;
+    GetSystemTimeAsFileTime(&now);
+    const unsigned long long at = FileTimeValue(data.ftLastWriteTime), today = FileTimeValue(now);
+    return today >= at && today - at < PACK_FRESH_FOR;
+}
+
+// "Aurora/user/Trainers/415608EC/Trainer(RETROBYTE).xex": its title ID and
+// file name, for a trainer directly in a title's folder. False for anything
+// else - other files, and the copies some folders keep a level down.
+static bool ParsePackPath(const char *path, unsigned long *titleId, const char **file)
+{
+    if (_strnicmp(path, PACK_PREFIX, sizeof(PACK_PREFIX) - 1) != 0)
+        return false;
+    const char *id = path + sizeof(PACK_PREFIX) - 1;
+    const char *slash = strchr(id, '/');
+    if (slash == NULL || slash - id != 8 || strchr(slash + 1, '/') != NULL)
+        return false;
+    const size_t len = strlen(slash + 1);
+    if (len < 5 || _stricmp(slash + 1 + len - 4, ".xex") != 0)
+        return false;
+    char hex[9];
+    memcpy(hex, id, 8);
+    hex[8] = '\0';
+    char *end = NULL;
+    *titleId = strtoul(hex, &end, 16);
+    *file = slash + 1;
+    return end != NULL && *end == '\0';
+}
+
+static DWORD WINAPI PackRefreshEntry(LPVOID)
+{
+    char *reply = (char *)malloc(PACK_LIST_MAX + 1);
+    HttpsSession *session = HttpsSessionOpen(QuietPrint);
+    if (reply == NULL || session == NULL)
+    {
+        free(reply);
+        HttpsSessionClose(session);
+        return 0;
+    }
+    unsigned long long len = PACK_LIST_MAX;
+    const int status = HttpsSessionGet(session, PACK_LIST_URL, "Accept: application/vnd.github+json\r\n", reply, &len);
+    HttpsSessionClose(session);
+    if (status != 200 || len > PACK_LIST_MAX)
+    {
+        dprintf("[trainer] the pack's list didn't come: status %d\n", status);
+        free(reply);
+        return 0;
+    }
+    reply[len] = '\0';
+
+    cJSON *root = cJSON_ParseWithLength(reply, (size_t)len);
+    free(reply);
+    const cJSON *tree = root != NULL ? cJSON_GetObjectItem(root, "tree") : NULL;
+    if (tree == NULL)
+    {
+        dprintf("[trainer] the pack's list didn't parse\n");
+        cJSON_Delete(root);
+        return 0;
+    }
+
+    // Written beside, then put in place, so a reader never sees half of it.
+    CreateDirectoryA("Hdd1:\\Omni360", NULL);
+    FILE *out = NULL;
+    if (fopen_s(&out, PACK_LIST_FILE ".new", "w") != 0 || out == NULL)
+    {
+        cJSON_Delete(root);
+        return 0;
+    }
+    int count = 0;
+    const cJSON *entry = NULL;
+    cJSON_ArrayForEach(entry, tree)
+    {
+        const char *path = cJSON_GetStringValue(cJSON_GetObjectItem(entry, "path"));
+        unsigned long titleId = 0;
+        const char *file = NULL;
+        if (path == NULL || !ParsePackPath(path, &titleId, &file))
+            continue;
+        fprintf(out, "%08lX\t%ld\t%s\n", titleId, JsonLong(entry, "size", 0), path);
+        count++;
+    }
+    cJSON_Delete(root);
+    const bool written = fclose(out) == 0;
+    if (written && count > 0)
+    {
+        DeleteFileA(PACK_LIST_FILE);
+        MoveFileA(PACK_LIST_FILE ".new", PACK_LIST_FILE);
+        dprintf("[trainer] the pack lists %d trainers\n", count);
+    }
+    return 0;
+}
+
+void StartTrainerPackRefresh()
+{
+    if (PackListFresh())
+        return;
+    HANDLE thread = CreateThread(NULL, 64 * 1024, PackRefreshEntry, NULL, 0, NULL);
+    if (thread != NULL)
+        CloseHandle(thread);
+}
+
+int PackTrainersFor(unsigned long titleId, PackTrainer *out, int max)
+{
+    FILE *file = NULL;
+    if (fopen_s(&file, PACK_LIST_FILE, "r") != 0 || file == NULL)
+        return 0;
+    int count = 0;
+    char line[400];
+    while (count < max && fgets(line, sizeof(line), file) != NULL)
+    {
+        char *end = NULL;
+        if (strtoul(line, &end, 16) != titleId || end == NULL || *end != '\t')
+            continue;
+        const unsigned long size = strtoul(end + 1, &end, 10);
+        if (end == NULL || *end != '\t')
+            continue;
+        char *path = end + 1;
+        path[strcspn(path, "\r\n")] = '\0';
+        unsigned long id = 0;
+        const char *name = NULL;
+        if (!ParsePackPath(path, &id, &name))
+            continue;
+        PackTrainer &t = out[count++];
+        CopyText(t.path, sizeof(t.path), path);
+        CopyText(t.file, sizeof(t.file), name);
+        CopyText(t.label, sizeof(t.label), name);
+        t.label[strlen(t.label) >= 4 ? strlen(t.label) - 4 : 0] = '\0'; // less ".xex"
+        t.size = size;
+    }
+    fclose(file);
+    return count;
+}
+
+// A path in the repository, for a URL: letters, digits and -_.~/ as they
+// are, the rest (spaces, brackets, &) percent-encoded.
+static void EncodePath(const char *in, char *out, size_t outSize)
+{
+    static const char hex[] = "0123456789ABCDEF";
+    size_t o = 0;
+    for (const unsigned char *c = (const unsigned char *)in; *c != '\0' && o + 4 < outSize; ++c)
+    {
+        if ((*c >= 'A' && *c <= 'Z') || (*c >= 'a' && *c <= 'z') || (*c >= '0' && *c <= '9') ||
+            strchr("-_.~/", *c) != NULL)
+            out[o++] = (char)*c;
+        else
+        {
+            out[o++] = '%';
+            out[o++] = hex[*c >> 4];
+            out[o++] = hex[*c & 15];
+        }
+    }
+    out[o] = '\0';
+}
+
+// Clears out a game's trainer folder - the trainer, what it said about
+// itself, the cheats chosen for it - before another goes in: one trainer's
+// cheat bits mean nothing to another's.
+static void ClearTrainerFolder(const char *folder)
+{
+    char pattern[160];
+    _snprintf(pattern, sizeof(pattern), "%s\\*", folder);
+    pattern[sizeof(pattern) - 1] = '\0';
+    WIN32_FIND_DATAA found;
+    HANDLE find = FindFirstFileA(pattern, &found);
+    if (find == INVALID_HANDLE_VALUE)
+        return;
+    do
+    {
+        if (found.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY)
+            continue;
+        char path[320];
+        _snprintf(path, sizeof(path), "%s\\%s", folder, found.cFileName);
+        path[sizeof(path) - 1] = '\0';
+        DeleteFileA(path);
+    } while (FindNextFileA(find, &found));
+    FindClose(find);
+}
+
+bool DownloadPackTrainer(unsigned long titleId, const PackTrainer &trainer, char *path, size_t pathSize)
+{
+    char encoded[400];
+    EncodePath(trainer.path, encoded, sizeof(encoded));
+    char *data = (char *)malloc(PACK_FILE_MAX + 1);
+    HttpsSession *session = HttpsSessionOpen(QuietPrint);
+    if (data == NULL || session == NULL)
+    {
+        free(data);
+        HttpsSessionClose(session);
+        return false;
+    }
+    unsigned long long len = PACK_FILE_MAX;
+    const int status = HttpsSessionGet(session, std::string(PACK_FILE_URL) + encoded,
+                                       "Accept: application/vnd.github.raw\r\n", data, &len);
+    HttpsSessionClose(session);
+    // A trainer is an XEX - not an error page, nor a file cut short.
+    const bool ok = status == 200 && len >= 4 && len <= PACK_FILE_MAX && memcmp(data, "XEX2", 4) == 0 &&
+                    (trainer.size == 0 || len == trainer.size);
+    if (!ok)
+    {
+        dprintf("[trainer] downloading %s: status %d, %lu bytes\n", trainer.file, status, (unsigned long)len);
+        free(data);
+        return false;
+    }
+
+    char folder[96];
+    _snprintf(folder, sizeof(folder), "%s\\%08lX", TRAINER_FOLDER, titleId);
+    folder[sizeof(folder) - 1] = '\0';
+    CreateDirectoryA("Hdd1:\\Omni360", NULL);
+    CreateDirectoryA(TRAINER_FOLDER, NULL);
+    CreateDirectoryA(folder, NULL);
+    ClearTrainerFolder(folder);
+    _snprintf(path, pathSize, "%s\\%s", folder, trainer.file);
+    path[pathSize - 1] = '\0';
+    FILE *file = NULL;
+    bool written = false;
+    if (fopen_s(&file, path, "wb") == 0 && file != NULL)
+    {
+        written = fwrite(data, 1, (size_t)len, file) == (size_t)len;
+        written = fclose(file) == 0 && written;
+    }
+    free(data);
+    dprintf("[trainer] downloaded %s for %08lX (%lu bytes): %s\n", trainer.file, titleId, (unsigned long)len,
+            written ? "saved" : "NOT SAVED");
+    return written;
 }

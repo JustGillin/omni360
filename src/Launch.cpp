@@ -188,7 +188,7 @@ void LaunchInstalledGame(const InstalledGame &game)
         LaunchIndieGame(game);
         return;
     }
-    StartTrainerFor(game.titleId);
+    StartTrainerFor(game.titleId, game.displayName);
     if (game.folder)
     {
         // Whichever the scan found it by.
