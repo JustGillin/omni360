@@ -843,6 +843,7 @@ struct StoreGameView
     const char *name;
     const char *meta;       // "Bungie Studios  ·  Microsoft  ·  Shooter"; NULL while loading or for none
     const char *players;    // may be NULL
+    const char *trainer;    // "Trainer on", in the accent after the players, while it's set to start; else NULL
     float rating;           // 0..5; 0 hides the stars
     unsigned long ratings;
     const char *description; // NULL: the page explains there's no catalog entry

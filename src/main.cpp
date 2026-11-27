@@ -8904,11 +8904,59 @@ static bool XboxEmulatorReady(unsigned long titleId)
     }
 }
 
+// Before a game whose trainer is set to start: every time, what's on and
+// that a fan-made trainer can take a game down - so a crash after it is
+// never a mystery. Play, Play without it (this once), or Back. False for
+// Back; "without it" goes ahead with the trainer skipped.
+static bool ConfirmTrainerLaunch(const InstalledGame &game)
+{
+    if (!TrainerSetToStart(game.titleId, game.displayName))
+        return true;
+
+    // What's on, by name, from what the trainer said about itself.
+    char on[300] = "";
+    char path[300];
+    static TrainerInfo info;
+    unsigned long bits = 0;
+    if (FindTrainer(game.titleId, path, sizeof(path)) && ReadTrainerInfo(path, &info))
+    {
+        if (!LoadTrainerCheats(game.titleId, &bits))
+            for (int i = 0; i < info.cheatCount; ++i)
+                if (info.defaults[i])
+                    bits |= 1UL << i;
+        size_t used = 0;
+        for (int i = 0; i < info.cheatCount && used + 1 < sizeof(on); ++i)
+        {
+            if (!(bits & (1UL << i)))
+                continue;
+            used += _snprintf(on + used, sizeof(on) - used, "%s%s", used > 0 ? ", " : "", info.cheats[i]);
+            on[sizeof(on) - 1] = '\0';
+        }
+    }
+
+    char message[700];
+    TrFormat(message, sizeof(message), STR_TRAINER_LAUNCH_MESSAGE, ShownName(game), on);
+    message[sizeof(message) - 1] = '\0';
+    const char *buttons[3] = { Tr(STR_PLAY), Tr(STR_TRAINER_PLAY_WITHOUT), Tr(STR_BUTTON_BACK) };
+    switch (ShowAlertButtonsUI(Tr(STR_TRAINER_IS_ON), message, Tr(STR_TRAINER_LAUNCH_DETAIL), buttons, 3, 10, 0))
+    {
+    case 0:
+        return true;
+    case 1:
+        SkipTrainerNextLaunch();
+        return true;
+    default:
+        return false;
+    }
+}
+
 // A on a library game, or Play on its page. Returns only if it didn't start,
 // having said so.
 static void PlayLibraryGame(const InstalledGame &game)
 {
     if (game.contentType == GOD_CONTENT_XBOX_ORIGINAL && !XboxEmulatorReady(game.titleId))
+        return;
+    if (!ConfirmTrainerLaunch(game))
         return;
     if (!ConfirmLeaving())
         return;
@@ -8977,6 +9025,28 @@ static bool ExitMenu()
 // Which of the game page's buttons were greyed out when it was last built.
 static bool g_gameButtonOff[STORE_GAME_BUTTONS];
 
+// Up whenever a game's trainer or what it starts with changes, so the "Trainer
+// on" marks are worked out again rather than read from disk every frame.
+static int g_trainerChoices = 0;
+
+// Whether this library game starts a trainer with something on - for its
+// page and its Options to say so.
+static bool TrainerOnFor(const Library &lib, unsigned long titleId)
+{
+    static unsigned long title = 0;
+    static int choices = -1, generation = -1;
+    static bool on = false;
+    if (title != titleId || choices != g_trainerChoices || generation != g_libraryGeneration)
+    {
+        title = titleId;
+        choices = g_trainerChoices;
+        generation = g_libraryGeneration;
+        const InstalledGame *game = LibraryGameByTitleId(lib, titleId);
+        on = game != NULL && TrainerSetToStart(titleId, game->displayName);
+    }
+    return on;
+}
+
 static StoreGameView MakeStoreGameView(Shell &shell, const Library &lib)
 {
     StoreGameView view;
@@ -8985,6 +9055,7 @@ static StoreGameView MakeStoreGameView(Shell &shell, const Library &lib)
     view.indie = StoreGameIsIndie();
     view.coverKey = view.indie ? IndieCoverKey(g_storeGame.name) : StoreCoverKey(g_storeGame.titleId, g_storeGame.name);
     view.name = g_storeGame.name;
+    view.trainer = TrainerOnFor(lib, g_storeGame.titleId) ? Tr(STR_TRAINER_IS_ON) : NULL;
 
     const StoreDetailsState state = GetStoreDetails(g_storeGame.titleId, &g_storeDetails);
     view.loading = (state == STORE_DETAILS_LOADING);
@@ -10852,6 +10923,7 @@ static void ChooseTrainerCheats(unsigned long titleId, const char *shownName)
 
     if (bits == before)
         return;
+    g_trainerChoices++;
     if (!SaveTrainerCheats(titleId, bits))
     {
         ShowShellToast(Tr(STR_NOT_SAVED), path, UI_TOAST_ERROR);
@@ -10910,7 +10982,9 @@ static void GetPackTrainer(unsigned long titleId, const char *shownName)
 
     ShowWorkingDialog(Tr(STR_TRAINER_DOWNLOADING), trainers[picked].label);
     char path[300];
-    if (!DownloadPackTrainer(titleId, trainers[picked], path, sizeof(path)))
+    const bool downloaded = DownloadPackTrainer(titleId, trainers[picked], path, sizeof(path));
+    g_trainerChoices++; // the folder was cleared for it, whatever came of it
+    if (!downloaded)
     {
         ShowMessageUI(Tr(STR_TRAINER_DOWNLOAD_FAILED), Tr(STR_TRAINER_DOWNLOAD_FAILED_DETAIL), NULL);
         return;
@@ -11005,7 +11079,12 @@ static void LibraryGameOptions(Shell &shell, Library &lib, int index, const char
     // too: snapshotted after this one closed, it had this one's dimming in
     // it, and came out darker.
     HoldDialogBackdrop();
-    const int picked = ShowAlertListUI(shown, message, labels, NULL, count, favourite ? 1 : 0);
+    // The trainer's row says when it's set to start, as the game's page does.
+    const char *notes[8] = { NULL };
+    for (int i = 0; i < count; ++i)
+        if (options[i] == OPTION_TRAINER && TrainerOnFor(lib, titleId))
+            notes[i] = Tr(STR_TRAINER_CHEAT_ON);
+    const int picked = ShowAlertListUI(shown, message, labels, notes, count, favourite ? 1 : 0);
     // The ones that are dialogs of their own open over the same held page.
     if (picked >= 0 && options[picked] == OPTION_TRAINER)
         ChooseTrainerCheats(titleId, shown);

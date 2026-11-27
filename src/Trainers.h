@@ -73,6 +73,15 @@ bool DownloadPackTrainer(unsigned long titleId, const PackTrainer &trainer, char
 // in Episodes and patch the wrong game.
 bool TrainersFitGame(unsigned long titleId, const char *gameName);
 
+// Whether launching this game starts its trainer with something on - what's
+// chosen, or the trainer's own defaults - as StartTrainerFor decides. Reads
+// a file or two, never loads the trainer: cache it, don't ask every frame.
+bool TrainerSetToStart(unsigned long titleId, const char *gameName);
+
+// The next launch goes without the trainer - "Play without it" - leaving
+// what's chosen as it is for the time after.
+void SkipTrainerNextLaunch();
+
 // Loads and starts this game's trainer, if it has one and cheats are chosen -
 // just before the game is launched (Launch.cpp).
 void StartTrainerFor(unsigned long titleId, const char *gameName);

@@ -440,11 +440,44 @@ bool TrainersFitGame(unsigned long titleId, const char *gameName)
     return true;
 }
 
+bool TrainerSetToStart(unsigned long titleId, const char *gameName)
+{
+    char trainer[300];
+    if (!TrainersFitGame(titleId, gameName) || !FindTrainer(titleId, trainer, sizeof(trainer)))
+        return false;
+    unsigned long bits = 0;
+    if (LoadTrainerCheats(titleId, &bits))
+        return bits != 0;
+    // Nothing chosen: its defaults, from what it said about itself when it
+    // was read - one never read has none known, and the picker reads it.
+    TrainerInfo info;
+    if (!ReadKeptInfo(trainer, &info))
+        return false;
+    for (int i = 0; i < info.cheatCount; ++i)
+        if (info.defaults[i])
+            return true;
+    return false;
+}
+
+static bool g_skipNextTrainer = false;
+
+void SkipTrainerNextLaunch()
+{
+    g_skipNextTrainer = true;
+}
+
 void StartTrainerFor(unsigned long titleId, const char *gameName)
 {
+    const bool skip = g_skipNextTrainer;
+    g_skipNextTrainer = false; // one launch only, whichever game it is
     char trainer[300];
     if (!FindTrainer(titleId, trainer, sizeof(trainer)))
         return; // none for this game - the usual case
+    if (skip)
+    {
+        dprintf("[trainer] playing %08lX without its trainer this time\n", titleId);
+        return;
+    }
     if (!TrainersFitGame(titleId, gameName))
     {
         dprintf("[trainer] %08lX's trainer isn't for %s - not starting it\n", titleId, gameName);

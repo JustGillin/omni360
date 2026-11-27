@@ -10600,6 +10600,19 @@ void RenderStoreGameFrame(StoreGameView &view, const UiHint *hints, int hintCoun
         line[sizeof(line) - 1] = '\0';
         const float x = L.textX + (view.rating > 0.0f ? 5 * S(24.0f) + S(8.0f) : 0.0f);
         TextMid(x, L.starsY + S(9.0f), 0.78f, WithAlpha(COL_TEXT2, see), line, ATGFONT_TRUNCATED, L.textX + textW - x);
+
+        // A trainer set to start with it, so it's never a surprise: after the
+        // rest, in the accent.
+        if (view.trainer != NULL)
+        {
+            char shown[96];
+            _snprintf(shown, sizeof(shown), "%s%s", line[0] != '\0' ? MIDDOT : "", view.trainer);
+            shown[sizeof(shown) - 1] = '\0';
+            const float tx = x + (line[0] != '\0' ? TextWidth(line, 0.78f) : 0.0f);
+            if (tx < L.textX + textW)
+                TextMid(tx, L.starsY + S(9.0f), 0.78f, WithAlpha(COL_GREEN_TEXT, see), shown, ATGFONT_TRUNCATED,
+                        L.textX + textW - tx);
+        }
     }
 
     bx = L.textX;
