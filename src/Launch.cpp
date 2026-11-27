@@ -180,6 +180,8 @@ static void LaunchIndieGame(const InstalledGame &game)
     dprintf("[launch] the loader refused the XNA launcher\n");
 }
 
+static void StartTrainerFor(unsigned long titleId); // the trainer experiment, below
+
 void LaunchInstalledGame(const InstalledGame &game)
 {
     if (IsIndieGame(INDIE_GAMES_TITLE_ID, game.contentType) && !game.folder)
@@ -187,6 +189,7 @@ void LaunchInstalledGame(const InstalledGame &game)
         LaunchIndieGame(game);
         return;
     }
+    StartTrainerFor(game.titleId);
     if (game.folder)
     {
         // Whichever the scan found it by.
@@ -510,6 +513,160 @@ static bool WriteGuidePlugin()
     return ok;
 }
 
+// DashLaunch's StartSysModule on devicePath, on a thread of this title's, for
+// up to 5 s. False if DashLaunch isn't there or didn't answer; else its
+// NTSTATUS in *status.
+static bool StartSysModule(const char *devicePath, DWORD *status, const char *tag)
+{
+    HANDLE dashLaunch = NULL;
+    PVOID address = NULL;
+    if (XexGetModuleHandle("launch.xex", &dashLaunch) < 0 || dashLaunch == NULL ||
+        XexGetProcedureAddress(dashLaunch, DL_ORDINAL_START_SYS_MODULE, &address) < 0 || address == NULL)
+    {
+        dprintf("[%s] DashLaunch isn't loaded, or has no export %d\n", tag, DL_ORDINAL_START_SYS_MODULE);
+        return false;
+    }
+
+    static GuidePluginLoad job; // the thread may outlive a timed-out wait
+    if (job.start != NULL && job.done == 0)
+    {
+        dprintf("[%s] an earlier load is still waiting on DashLaunch\n", tag);
+        return false;
+    }
+    job.start = (DLaunchStartSysModuleFn)address;
+    _snprintf(job.path, sizeof(job.path), "%s", devicePath);
+    job.path[sizeof(job.path) - 1] = '\0';
+    job.status = 0;
+    job.done = 0;
+
+    HANDLE thread = CreateThread(NULL, 64 * 1024, GuidePluginLoadEntry, &job, 0, NULL);
+    if (thread == NULL)
+    {
+        dprintf("[%s] couldn't start a thread to load %s\n", tag, devicePath);
+        return false;
+    }
+    const DWORD started = GetTickCount();
+    while (job.done == 0 && GetTickCount() - started < 5000)
+        Sleep(10);
+    CloseHandle(thread);
+    if (job.done == 0)
+    {
+        dprintf("[%s] DashLaunch didn't answer within 5 s\n", tag);
+        return false;
+    }
+    *status = (DWORD)job.status;
+    return true;
+}
+
+// ---------------------------------------------------------------------------
+// Trainers - an experiment (2026-11-27)
+// ---------------------------------------------------------------------------
+//
+// Aurora's trainers (XYZEngine, by XYZMods) are DLL XEXs that run as system
+// modules at their own base, 0x91020000. Loading one does nothing but
+// describe it; its exports, read off one loaded by Aurora:
+//   2  Start(TRAINER_MAGIC, cheat bits, 0): bit n turns cheat n on; starts
+//      three system threads. Once a second the first compares the running
+//      title with the trainer's (title ID, media ID, base version, disc,
+//      title update) - 4 seconds of another title and it gives up - then the
+//      others apply the cheats.
+//   3  Stop(keepLoaded), 4 unload, 6 its info (the cheats), 8 running?
+// It registers with Aurora's Nova if that's loaded, and carries on without.
+// So, as Aurora does: load it, Start it, and start the game straight after.
+//
+// For the experiment it's Hdd1:\Omni360\Trainers\<title ID>\<any>.xex, with
+// an optional cheats.txt holding the bits in hex (all of them on without).
+
+typedef DWORD (*TrainerStartFn)(DWORD magic, DWORD cheats, DWORD unused);
+#define TRAINER_MAGIC        0x41554F41
+#define TRAINER_ORDINAL_START 2
+#define TRAINER_FOLDER        "Hdd1:\\Omni360\\Trainers"
+#define TRAINER_COPY          "Hdd1:\\Omni360\\Omni360Trainer.xex"
+#define TRAINER_DEVICE        "\\Device\\Harddisk0\\Partition1\\Omni360\\Omni360Trainer.xex"
+#define TRAINER_MODULE        "Omni360Trainer.xex"
+
+static bool CopyFileBytes(const char *from, const char *to)
+{
+    FILE *in = NULL, *out = NULL;
+    if (fopen_s(&in, from, "rb") != 0 || in == NULL)
+        return false;
+    if (fopen_s(&out, to, "wb") != 0 || out == NULL)
+    {
+        fclose(in);
+        return false;
+    }
+    unsigned char buffer[16 * 1024];
+    size_t got;
+    bool ok = true;
+    while (ok && (got = fread(buffer, 1, sizeof(buffer), in)) > 0)
+        ok = fwrite(buffer, 1, got, out) == got;
+    fclose(in);
+    return fclose(out) == 0 && ok;
+}
+
+static void StartTrainerFor(unsigned long titleId)
+{
+    char folder[96];
+    _snprintf(folder, sizeof(folder), "%s\\%08lX", TRAINER_FOLDER, titleId);
+    folder[sizeof(folder) - 1] = '\0';
+
+    char pattern[128];
+    _snprintf(pattern, sizeof(pattern), "%s\\*.xex", folder);
+    pattern[sizeof(pattern) - 1] = '\0';
+    WIN32_FIND_DATAA found;
+    HANDLE find = FindFirstFileA(pattern, &found);
+    if (find == INVALID_HANDLE_VALUE)
+        return; // none for this game - the usual case
+    FindClose(find);
+    char trainer[300];
+    _snprintf(trainer, sizeof(trainer), "%s\\%s", folder, found.cFileName);
+    trainer[sizeof(trainer) - 1] = '\0';
+
+    DWORD cheats = 0xFFFFFFFF;
+    char cheatsPath[128];
+    _snprintf(cheatsPath, sizeof(cheatsPath), "%s\\cheats.txt", folder);
+    cheatsPath[sizeof(cheatsPath) - 1] = '\0';
+    FILE *file = NULL;
+    if (fopen_s(&file, cheatsPath, "r") == 0 && file != NULL)
+    {
+        unsigned long bits = 0;
+        if (fscanf_s(file, "%lx", &bits) == 1)
+            cheats = (DWORD)bits;
+        fclose(file);
+    }
+
+    // Two can't both be loaded at the one base: one already running - ours
+    // from before, or Aurora's - stays for now.
+    HANDLE loaded = NULL;
+    if ((XexGetModuleHandle((PSZ)TRAINER_MODULE, &loaded) >= 0 && loaded != NULL) ||
+        (XexGetModuleHandle("dll.aurora.trainer", &loaded) >= 0 && loaded != NULL))
+    {
+        dprintf("[trainer] one is loaded already (%p) - not starting %s\n", loaded, trainer);
+        return;
+    }
+
+    CreateDirectoryA("Hdd1:\\Omni360", NULL);
+    if (!CopyFileBytes(trainer, TRAINER_COPY))
+    {
+        dprintf("[trainer] couldn't copy %s to %s\n", trainer, TRAINER_COPY);
+        return;
+    }
+    DWORD status = 0;
+    if (!StartSysModule(TRAINER_DEVICE, &status, "trainer"))
+        return;
+    loaded = NULL;
+    PVOID start = NULL;
+    if (XexGetModuleHandle((PSZ)TRAINER_MODULE, &loaded) < 0 || loaded == NULL ||
+        XexGetProcedureAddress(loaded, TRAINER_ORDINAL_START, &start) < 0 || start == NULL)
+    {
+        dprintf("[trainer] %s: load status %08lX, module %p, no Start export\n", trainer, (unsigned long)status, loaded);
+        return;
+    }
+    const DWORD started = ((TrainerStartFn)start)(TRAINER_MAGIC, cheats, 0);
+    dprintf("[trainer] %s loaded at %p, Start(cheats %08lX) -> %lu\n", trainer, loaded, (unsigned long)cheats,
+            (unsigned long)started);
+}
+
 GuidePluginResult LoadGuidePlugin()
 {
     HANDLE loaded = NULL;
@@ -527,41 +684,20 @@ GuidePluginResult LoadGuidePlugin()
     }
 
     HANDLE dashLaunch = NULL;
-    PVOID address = NULL;
-    if (XexGetModuleHandle("launch.xex", &dashLaunch) < 0 || dashLaunch == NULL ||
-        XexGetProcedureAddress(dashLaunch, DL_ORDINAL_START_SYS_MODULE, &address) < 0 || address == NULL)
+    if (XexGetModuleHandle("launch.xex", &dashLaunch) < 0 || dashLaunch == NULL)
     {
-        dprintf("[guide] DashLaunch isn't loaded, or has no export %d: no plugin\n", DL_ORDINAL_START_SYS_MODULE);
+        dprintf("[guide] DashLaunch isn't loaded: no plugin\n");
         return GUIDE_PLUGIN_NO_DASHLAUNCH;
     }
     if (!WriteGuidePlugin())
         return GUIDE_PLUGIN_FAILED;
 
-    static GuidePluginLoad job; // the thread may outlive a timed-out wait
-    job.start = (DLaunchStartSysModuleFn)address;
-    _snprintf(job.path, sizeof(job.path), "%s", GUIDE_PLUGIN_DEVICE);
-    job.path[sizeof(job.path) - 1] = '\0';
-    job.status = 0;
-    job.done = 0;
-
-    HANDLE thread = CreateThread(NULL, 64 * 1024, GuidePluginLoadEntry, &job, 0, NULL);
-    if (thread == NULL)
-    {
-        dprintf("[guide] couldn't start a thread to load the plugin\n");
+    DWORD status = 0;
+    if (!StartSysModule(GUIDE_PLUGIN_DEVICE, &status, "guide"))
         return GUIDE_PLUGIN_FAILED;
-    }
-    const DWORD started = GetTickCount();
-    while (job.done == 0 && GetTickCount() - started < 5000)
-        Sleep(10);
-    CloseHandle(thread);
-    if (job.done == 0)
-    {
-        dprintf("[guide] DashLaunch didn't answer within 5 s\n");
-        return GUIDE_PLUGIN_FAILED;
-    }
     loaded = NULL;
     XexGetModuleHandle((PSZ)GUIDE_PLUGIN_NAME, &loaded);
-    dprintf("[guide] DashLaunch loading %s: status %08lX, now loaded: %s (%p)\n", job.path,
-            (unsigned long)job.status, loaded != NULL ? "yes" : "no", loaded);
+    dprintf("[guide] DashLaunch loading %s: status %08lX, now loaded: %s (%p)\n", GUIDE_PLUGIN_DEVICE,
+            (unsigned long)status, loaded != NULL ? "yes" : "no", loaded);
     return loaded != NULL ? GUIDE_PLUGIN_LOADED : GUIDE_PLUGIN_FAILED;
 }
