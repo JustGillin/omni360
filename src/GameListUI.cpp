@@ -1298,6 +1298,10 @@ static bool ComputeUiMetrics()
     // the correction stays in case the text renderer is ever swapped again.
     float fontHeight = g_UiFont.GetFontHeight();
     g_M.textScale = (fontHeight > 1.0f) ? k * (22.0f / fontHeight) : k;
+    // 80% of that design size: the text was crowding its rows. Valkyrie's
+    // set beside it felt roomier with smaller type in rows of the same
+    // height - so the text came down and the rows, tiles and margins stayed.
+    g_M.textScale *= 0.80f;
 
     // Title-safe inset, matching AtgConsole's percentages (90% of the screen
     // on HD, 85% on 4:3) - a real TV can and does crop the rest.
