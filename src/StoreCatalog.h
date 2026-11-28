@@ -71,6 +71,10 @@ int XboxRowGames(int row, StoreGame *out, int maxGames);
 // Database (XboxInfo.h): NULL if it has none.
 const struct XboxInfo *XboxInfoOf(unsigned long titleId);
 
+// An indie game's, by its IndieGameKey (CoverArt.h), from the same database
+// (IndieInfo.h): NULL if it has none.
+const struct IndieInfo *IndieInfoOf(unsigned long key);
+
 // The front page's Collections - a series each, from StoreCollections.h
 // (tools/make_collections.py): its name, the game whose wallpaper is its
 // card, and its games oldest first, as StoreGameByTitleId finds them.

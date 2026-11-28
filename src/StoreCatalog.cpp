@@ -6,11 +6,13 @@
 #define STORE_COLLECTIONS_DATA
 #define CATALOG_TITLES_DATA
 #define XBOX_INFO_DATA
+#define INDIE_INFO_DATA
 #include "StoreCatalog.h"
 #include "Strings.h" // Tr() - every string the UI shows
 #include "StoreRows.h"
 #include "StoreCollections.h"
 #include "XboxInfo.h"       // the Original Xbox games' details, from LaunchBox
+#include "IndieInfo.h"      // the indie games', the same way
 
 #include <stdlib.h>
 #include <string.h>
@@ -775,6 +777,22 @@ const XboxInfo *XboxInfoOf(unsigned long titleId)
     return NULL;
 }
 
+const IndieInfo *IndieInfoOf(unsigned long key)
+{
+    int lo = 0, hi = INDIE_INFO_COUNT - 1;
+    while (key != 0 && lo <= hi)
+    {
+        const int mid = (lo + hi) / 2;
+        if (kIndieInfo[mid].key == key)
+            return &kIndieInfo[mid];
+        if (kIndieInfo[mid].key < key)
+            lo = mid + 1;
+        else
+            hi = mid - 1;
+    }
+    return NULL;
+}
+
 int StoreRowGames(int row, StoreGame *out, int maxGames)
 {
     if (row < 0 || row >= STORE_ROW_COUNT || out == NULL)
@@ -884,6 +902,10 @@ enum InfoKind { INFO_KIND_NONE, INFO_KIND_360, INFO_KIND_XBOX, INFO_KIND_ARCADE 
 
 static int InfoKindOf(unsigned long titleId)
 {
+    // An indie game's name key (IndieGameKey, 0xED......) is no title ID:
+    // not worth two whole lists' search each, for thousands of them.
+    if ((titleId & 0xFF000000UL) == 0xED000000UL)
+        return INFO_KIND_NONE;
     StoreGame game;
     if (StoreGameByTitleId(titleId, &game))
         return game.system == STORE_SYSTEM_XBOX ? INFO_KIND_XBOX : INFO_KIND_360;

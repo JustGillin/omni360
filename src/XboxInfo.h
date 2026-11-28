@@ -10,7 +10,7 @@
 
 struct XboxInfo
 {
-    unsigned long titleId;
+    unsigned long titleId; // the game's
     const char *developer; // UTF-8; may be empty
     const char *publisher;
     unsigned char players; // the most at once; 0 if LaunchBox doesn't say
@@ -22,7 +22,7 @@ struct XboxInfo
 
 #ifdef XBOX_INFO_DATA
 
-// Sorted by title ID.
+// Sorted by titleId.
 static const XboxInfo kXboxInfo[XBOX_INFO_COUNT] =
 {
     // Dave Mirra Freestyle BMX 2

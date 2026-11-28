@@ -43,6 +43,7 @@ end-to-end on real hardware against a real 27-game library.
 #include "StoreArt.h"
 #include "StoreCatalog.h"
 #include "XboxInfo.h"     // XboxInfo: an Original Xbox game's details, from LaunchBox
+#include "IndieInfo.h"    // IndieInfo: an indie game's
 #include "DiscWorker.h"
 #include "PcHelper.h"
 #include "Wallpapers.h"
@@ -7375,10 +7376,10 @@ static bool ClearSessionFilters()
     return true;
 }
 
-// Whether a section's letters can be sorted and filtered by genre and
-// rating: the front page's (-1) and the Arcade's, from Xbox Live's catalog,
-// and the Original Xbox's, from LaunchBox's - not indie games', which have
-// neither.
+// Whether a section's letters can be sorted and filtered by rating: the
+// front page's (-1) and the Arcade's, from Xbox Live's catalog, and the
+// Original Xbox's, from LaunchBox's - not indie games', hardly any of which
+// LaunchBox's users have rated. Every section takes a genre.
 static bool SectionHasInfo(int section)
 {
     return section != SECTION_XBLIG;
@@ -7405,8 +7406,8 @@ static StoreFilter FilterFor(int section)
     StoreFilter f = Filter();
     if (!SectionHasInfo(section))
     {
+        // Indie games: a genre, from LaunchBox, but nothing to rank by.
         f.sort = STORE_SORT_AZ;
-        f.genre = 0;
         f.rating = 0;
     }
     if (!SectionHasRegions(section))
@@ -7564,10 +7565,11 @@ static int FilteredGamesForLetter(char letter, int section)
     return count;
 }
 
-// An Arcade letter's games that the genre and rating let through, in the
-// order chosen - from the same Xbox Live data as the 360's, by title ID.
-// Returns how many are left in games.
-static int FilterArcadeGames(const XblaGame **games, int all, const StoreFilter &f)
+// An Arcade or indie letter's games that the genre and rating let through,
+// in the order chosen - from the same table as the 360's: an Arcade game's
+// by title ID (Xbox Live's), an indie game's by its name's key
+// (LaunchBox's). Returns how many are left in games.
+static int FilterArcadeGames(const XblaGame **games, int all, const StoreFilter &f, bool indie)
 {
     if (!FilterNarrows(f) && f.sort == STORE_SORT_AZ)
         return all;
@@ -7580,7 +7582,8 @@ static int FilterArcadeGames(const XblaGame **games, int all, const StoreFilter 
     for (int i = 0; i < all; ++i)
     {
         StoreGameInfo gi;
-        const bool has = StoreGameInfoOf(games[i]->titleId, &gi);
+        // An indie game by its name's key: they all share one title ID.
+        const bool has = StoreGameInfoOf(indie ? IndieGameKey(games[i]->name) : games[i]->titleId, &gi);
         if (f.genre != 0)
         {
             if (!has)
@@ -7703,8 +7706,7 @@ static void OpenStoreLetter(Shell &shell, char letter, int section)
         // indie banner and their names instead (see IndieTile).
         const bool indie = (section == SECTION_XBLIG);
         shell.storeGameCount = ArcadeGamesForLetter((ArcadeSet)section, letter, g_arcadeGames, MAX_STORE_GAMES);
-        if (SectionHasInfo(section))
-            shell.storeGameCount = FilterArcadeGames(g_arcadeGames, shell.storeGameCount, FilterFor(section));
+        shell.storeGameCount = FilterArcadeGames(g_arcadeGames, shell.storeGameCount, FilterFor(section), indie);
         for (int i = 0; i < shell.storeGameCount; ++i)
         {
             g_storeTiles[i].titleId = indie ? IndieCoverKey(g_arcadeGames[i]->name) : g_arcadeGames[i]->titleId;
@@ -7769,13 +7771,11 @@ static void OpenStoreCollection(Shell &shell, int collection)
 }
 
 // Whether the open grid is a letter's that the Filter and sort panel
-// applies to: not a search's, an indie letter's, or a collection's. An
-// Arcade letter's takes its sort, genre and rating.
+// applies to: not a search's or a collection's. Every section's letters
+// take a genre at least - what else, FilterFor says.
 static bool LetterFilterable(const Shell &shell)
 {
-    if (shell.storeSearch || shell.storeInCollection)
-        return false;
-    return !shell.storeLetterArcade || SectionHasInfo(shell.storeLetterSection);
+    return !shell.storeSearch && !shell.storeInCollection;
 }
 
 // The open letter's games again, after the filters changed - on the same
@@ -7840,8 +7840,7 @@ static bool FilterRowDisabled(const Shell &shell, int row)
     if (!SectionHasRegions(shell.storeLetterSection) &&
         ((row >= FILTER_ROW_REGIONS && row < FILTER_ROW_REGIONS + FILTER_REGION_COUNT) || row == FILTER_ROW_LANGUAGE))
         return true;
-    return !SectionHasInfo(shell.storeLetterSection) &&
-           (row == FILTER_ROW_SORT || row == FILTER_ROW_GENRE || row == FILTER_ROW_RATING);
+    return !SectionHasInfo(shell.storeLetterSection) && (row == FILTER_ROW_SORT || row == FILTER_ROW_RATING);
 }
 
 static const StoreFilterView *MakeFilterPanel(const Shell &shell)
@@ -9402,6 +9401,31 @@ static StoreGameView MakeStoreGameView(Shell &shell, const Library &lib)
         view.buttonDisabled[1] = view.buttonDisabled[2] = true;
         view.loading = false;
         view.description = Tr(STR_INDIE_DESCRIPTION);
+
+        // What LaunchBox has on it (IndieInfo.h), by its name's key, as
+        // they all share one title ID: who made it, its genre, how many
+        // play, and a description in place of the stock one.
+        const unsigned long key = g_storeArcade != NULL ? IndieGameKey(g_storeArcade->name) : 0;
+        const IndieInfo *info = IndieInfoOf(key);
+        if (info != NULL)
+        {
+            StoreGameInfo genre;
+            g_storeMeta[0] = '\0';
+            AppendText(g_storeMeta, sizeof(g_storeMeta), "", info->developer);
+            if (StoreGameInfoOf(key, &genre) && genre.genre != 0)
+                AppendText(g_storeMeta, sizeof(g_storeMeta), STORE_MIDDOT, StoreGenreName(genre.genre));
+            view.meta = g_storeMeta[0] != '\0' ? g_storeMeta : NULL;
+            static char players[32];
+            players[0] = '\0';
+            if (info->players > 1)
+                _snprintf(players, sizeof(players), "1-%d players", info->players);
+            else if (info->players == 1)
+                _snprintf(players, sizeof(players), "1 player");
+            players[sizeof(players) - 1] = '\0';
+            view.players = players[0] != '\0' ? players : NULL;
+            if (info->overview[0] != '\0')
+                view.description = info->overview;
+        }
     }
     else if (StoreGameIsXbox())
     {

@@ -80,6 +80,7 @@ def c_name(raw):
 XBOX_TITLES = os.path.join(ROOT, "src", "XboxTitles.h")
 XBOX_ROW = re.compile(r'^\s*\{ "((?:[^"\\]|\\.)*)", 0x([0-9A-F]{8}), 0x[0-9A-F]+, \d+, \d+, \'.\', STORE_SYSTEM_XBOX \},')
 LAUNCHBOX_XBOX = os.path.join(ROOT, "tools", "cache", "launchbox_xbox.json")
+LAUNCHBOX_INDIE = os.path.join(ROOT, "tools", "cache", "launchbox_indie.json")
 
 
 def xbox_games():
@@ -262,6 +263,17 @@ def main():
         print("no %s - run make_xbox_info.py for the Original Xbox's" % LAUNCHBOX_XBOX)
     xbox_rows, known_xbox = build_rows(xbox, known, [], XBOX_TOP_RATED_MIN)
     print("%d of %d Original Xbox games from LaunchBox" % (known_xbox, len(xbox)))
+
+    # Indie games' genres, for their letters' Genre filter - keyed by
+    # IndieGameKey(name) (0xED......), which no title ID is. No rows: almost
+    # none are rated, so there's nothing to rank them by.
+    if os.path.exists(LAUNCHBOX_INDIE):
+        indie = json.load(open(LAUNCHBOX_INDIE, encoding="utf-8"))
+        for key, info in indie.items():
+            known.setdefault(int(key, 16), info)
+        print("%d indie games from LaunchBox" % len(indie))
+    else:
+        print("no %s - run make_xbox_info.py for the indie games'" % LAUNCHBOX_INDIE)
     print("%d of %d 360 games and %d of %d Arcade games in the catalog"
           % (known360, len(games), known_arcade, len(arcade)))
 
