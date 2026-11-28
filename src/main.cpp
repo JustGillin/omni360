@@ -3474,7 +3474,8 @@ enum SettingsRow
     SETTINGS_ROW_CLOCK_SYNC,   // ...and at start, on or off
     SETTINGS_ROW_SIGN_IN,      // the profile signed in at start: A picks it
     SETTINGS_ROW_FTP,          // the FTP server, on or off
-    SETTINGS_ROW_MANAGE_STORAGE // the Storage page
+    SETTINGS_ROW_MANAGE_STORAGE, // the Storage page
+    SETTINGS_ROW_CREDITS         // where the Store's details and art come from
 };
 
 // Rescans with the library folders now in settings.txt.
@@ -5795,6 +5796,14 @@ static void BuildSettingsPage(SettingsPage &page, const Library &lib, const char
             row.help = Tr(STR_BACK_ON_HOME_SHOWS_MORE);
         }
 
+        // Where the Store's details and art come from - LaunchBox's and
+        // MobCat's are community work, and say so here.
+        {
+            SettingsRowView &row = AddSettingsRow(page, SETTINGS_VIEW_LINE, Tr(STR_GAME_INFO_FROM));
+            row.status = "Xbox Live  \xC2\xB7  LaunchBox  \xC2\xB7  MobCat  \xC2\xB7  XboxUnity";
+            AddSettingsControl(page, SETTINGS_CONTROL_BUTTON, Tr(STR_VIEW), SETTINGS_ROW_CREDITS,
+                               Tr(STR_GAME_INFO_VIEW_HELP));
+        }
     }
 
     // The focus where it was, on a row that's still there.
@@ -6067,6 +6076,12 @@ static SettingsOutcome RunSettingsRow(SettingsRow row, int arg, Library &lib, ch
     case SETTINGS_ROW_KEYS:         ChangeKeys(outcome); break;
     case SETTINGS_ROW_REMOVE_KEYS:  RemoveKeys(outcome); break;
     case SETTINGS_ROW_UPDATES:      ShowUpdate(); break;
+    case SETTINGS_ROW_CREDITS:
+    {
+        const char *ok[1] = { Tr(STR_BUTTON_OK) };
+        ShowAlertButtonsUI(Tr(STR_GAME_INFO_FROM), Tr(STR_GAME_INFO_FROM_HELP), NULL, ok, 1, 10, 0);
+        break;
+    }
     case SETTINGS_ROW_LIBRARY_FOLDER: FolderRowMenu(arg, lib, gamesPath, outcome); break;
     case SETTINGS_ROW_ADD_FOLDER:   AddLibraryFolder(lib, gamesPath, outcome); break;
     case SETTINGS_ROW_SOUNDS:       ToggleUiSounds(); break;
