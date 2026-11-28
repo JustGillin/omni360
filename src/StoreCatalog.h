@@ -56,6 +56,11 @@ const char *StoreRowName(int row);
 // many were written.
 int StoreRowGames(int row, StoreGame *out, int maxGames);
 
+// The Arcade page's rows under its A to Z, the same way.
+int XblaRowCount();
+const char *XblaRowName(int row);
+int XblaRowGames(int row, const struct XblaGame **out, int maxGames);
+
 // The front page's Collections - a series each, from StoreCollections.h
 // (tools/make_collections.py): its name, the game whose wallpaper is its
 // card, and its games oldest first, as StoreGameByTitleId finds them.

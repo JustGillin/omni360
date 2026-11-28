@@ -6435,6 +6435,12 @@ struct Shell
     bool storeInSection;
     int storeSection;      // SECTION_*
     int sectionFocus[SECTION_COUNT];
+    // A section's rows under its letters - the Arcade's: sectionRow -1 while
+    // focus is on the letters, else the row and the place along it.
+    int sectionRow;
+    int sectionPlace;
+    int sectionRowScroll[STORE_ROWS_MAX];
+    float sectionScroll;
 
     // A letter's games, while one is open over the front page - or over a
     // section's page, storeLetterSection; an arcade or indie letter's games
@@ -7369,17 +7375,25 @@ static bool ClearSessionFilters()
 }
 
 // Whether a section's letters can be sorted and filtered by genre and
-// rating: not the Original Xbox's, which the catalog has none of.
+// rating: the front page's (-1) and the Arcade's, which Xbox Live's catalog
+// has - not the Original Xbox's or indie games', which it hasn't.
 static bool SectionHasInfo(int section)
 {
-    return section != SECTION_XBOX;
+    return section != SECTION_XBOX && section != SECTION_XBLIG;
+}
+
+// Whether a section's games come in regions and languages: discs do - the
+// front page's and the Original Xbox's - and Arcade and indie games don't.
+static bool SectionHasRegions(int section)
+{
+    return section == -1 || section == SECTION_XBOX;
 }
 
 // Whether a section's letters can show the games nobody has uploaded:
 // CatalogTitles.h is the 360's retail discs, so only the front page's.
 static bool SectionHasMissing(int section)
 {
-    return section != SECTION_XBOX;
+    return section == -1;
 }
 
 // The filters as they apply to a section's letters: section as
@@ -7392,6 +7406,11 @@ static StoreFilter FilterFor(int section)
         f.sort = STORE_SORT_AZ;
         f.genre = 0;
         f.rating = 0;
+    }
+    if (!SectionHasRegions(section))
+    {
+        f.regions = 0;
+        f.language = 0;
     }
     if (!SectionHasMissing(section))
         f.showMissing = false;
@@ -7543,6 +7562,55 @@ static int FilteredGamesForLetter(char letter, int section)
     return count;
 }
 
+// An Arcade letter's games that the genre and rating let through, in the
+// order chosen - from the same Xbox Live data as the 360's, by title ID.
+// Returns how many are left in games.
+static int FilterArcadeGames(const XblaGame **games, int all, const StoreFilter &f)
+{
+    if (!FilterNarrows(f) && f.sort == STORE_SORT_AZ)
+        return all;
+
+    static StoreGameInfo info[MAX_STORE_GAMES];
+    static bool known[MAX_STORE_GAMES];
+    static int order[MAX_STORE_GAMES];
+    static const XblaGame *sorted[MAX_STORE_GAMES];
+    int count = 0;
+    for (int i = 0; i < all; ++i)
+    {
+        StoreGameInfo gi;
+        const bool has = StoreGameInfoOf(games[i]->titleId, &gi);
+        if (f.genre != 0)
+        {
+            if (!has)
+                continue;
+            if (f.genre == FILTER_GENRE_FAMILY ? !(gi.tags & STORE_TAG_FAMILY)
+                : f.genre == FILTER_GENRE_KINECT ? !(gi.tags & STORE_TAG_KINECT)
+                : gi.genre != f.genre)
+                continue;
+        }
+        if (f.rating != 0 && (!has || gi.stars < (f.rating + 2) * 10))
+            continue;
+        games[count] = games[i];
+        info[count] = gi;
+        known[count] = has;
+        count++;
+    }
+
+    if (f.sort == STORE_SORT_AZ)
+        return count;
+
+    for (int i = 0; i < count; ++i)
+        order[i] = i;
+    g_sortInfo = info;
+    g_sortKnown = known;
+    g_sortBy = f.sort;
+    qsort(order, count, sizeof(order[0]), CompareForSort);
+    for (int i = 0; i < count; ++i)
+        sorted[i] = games[order[i]];
+    memcpy(games, sorted, count * sizeof(sorted[0]));
+    return count;
+}
+
 // What's chosen for a section's letters - "USA, Europe, Shooters, Top
 // rated"; NULL for nothing but A to Z. With full false, for the header: two
 // at most, then how many more.
@@ -7633,6 +7701,8 @@ static void OpenStoreLetter(Shell &shell, char letter, int section)
         // indie banner and their names instead (see IndieTile).
         const bool indie = (section == SECTION_XBLIG);
         shell.storeGameCount = ArcadeGamesForLetter((ArcadeSet)section, letter, g_arcadeGames, MAX_STORE_GAMES);
+        if (SectionHasInfo(section))
+            shell.storeGameCount = FilterArcadeGames(g_arcadeGames, shell.storeGameCount, FilterFor(section));
         for (int i = 0; i < shell.storeGameCount; ++i)
         {
             g_storeTiles[i].titleId = indie ? IndieCoverKey(g_arcadeGames[i]->name) : g_arcadeGames[i]->titleId;
@@ -7697,10 +7767,13 @@ static void OpenStoreCollection(Shell &shell, int collection)
 }
 
 // Whether the open grid is a letter's that the Filter and sort panel
-// applies to: not a search's, an arcade or indie letter's, or a collection's.
+// applies to: not a search's, an indie letter's, or a collection's. An
+// Arcade letter's takes its sort, genre and rating.
 static bool LetterFilterable(const Shell &shell)
 {
-    return !shell.storeSearch && !shell.storeLetterArcade && !shell.storeInCollection;
+    if (shell.storeSearch || shell.storeInCollection)
+        return false;
+    return !shell.storeLetterArcade || SectionHasInfo(shell.storeLetterSection);
 }
 
 // The open letter's games again, after the filters changed - on the same
@@ -7762,6 +7835,9 @@ static bool FilterRowDisabled(const Shell &shell, int row)
 {
     if (row == FILTER_ROW_SHOW_MISSING)
         return !SectionHasMissing(shell.storeLetterSection);
+    if (!SectionHasRegions(shell.storeLetterSection) &&
+        ((row >= FILTER_ROW_REGIONS && row < FILTER_ROW_REGIONS + FILTER_REGION_COUNT) || row == FILTER_ROW_LANGUAGE))
+        return true;
     return !SectionHasInfo(shell.storeLetterSection) &&
            (row == FILTER_ROW_SORT || row == FILTER_ROW_GENRE || row == FILTER_ROW_RATING);
 }
@@ -7788,6 +7864,12 @@ static const StoreFilterView *MakeFilterPanel(const Shell &shell)
     FilterCheckRow(rows[FILTER_ROW_SHOW_MISSING], Tr(STR_SHOW_GAMES_YOU_CANT_DOWNLOAD), f.showMissing);
     rows[FILTER_ROW_RESET].kind = STORE_FILTER_BUTTON;
     rows[FILTER_ROW_RESET].label = Tr(STR_RESET_FILTERS);
+    static char notFor[64];
+    if (shell.storeLetterSection >= 0)
+        TrFormat(notFor, sizeof(notFor), STR_FILTER_NOT_FOR, SectionName(shell.storeLetterSection));
+    else
+        notFor[0] = '\0';
+    notFor[sizeof(notFor) - 1] = '\0';
     for (int r = 0; r < FILTER_ROW_COUNT; ++r)
     {
         if (!FilterRowDisabled(shell, r))
@@ -7795,7 +7877,7 @@ static const StoreFilterView *MakeFilterPanel(const Shell &shell)
         rows[r].disabled = true;
         rows[r].canDown = rows[r].canUp = false;
         if (r != FILTER_ROW_SORT)
-            rows[r].value = "Not for Original Xbox";
+            rows[r].value = notFor;
     }
 
     panel.rows = rows;
@@ -7955,7 +8037,7 @@ static bool OpenStoreSearch(Shell &shell)
 static bool LetterJumps(const Shell &shell)
 {
     return shell.storeLetter == STORE_LETTER_ALL && !shell.storeSearch && shell.storeGameCount > 0 &&
-           (shell.storeLetterArcade || FilterFor(shell.storeLetterSection).sort == STORE_SORT_AZ);
+           FilterFor(shell.storeLetterSection).sort == STORE_SORT_AZ;
 }
 
 static StoreLetterView MakeStoreLetterView(const Shell &shell)
@@ -8110,7 +8192,50 @@ static void PrefetchLetterCovers(char letter, int section)
     RequestStoreCoverArt(ids, idCount);
 }
 
-// A section's A-Z page, over the front page.
+// The Arcade page's rows under its A to Z - Popular, Top rated, a genre
+// each - as StoreRows.h has them, looked up once.
+static const XblaGame *g_xblaRowGames[STORE_ROWS_MAX][STORE_ROW_TILES_MAX];
+static StoreTileView g_xblaRowTiles[STORE_ROWS_MAX][STORE_ROW_TILES_MAX];
+static int g_xblaRowCounts[STORE_ROWS_MAX];
+static int g_xblaRowCount = -1; // -1 until built
+static int g_xblaRowSource[STORE_ROWS_MAX]; // each row's in StoreRows.h, for its name in the language shown
+
+static void BuildArcadeRows()
+{
+    if (g_xblaRowCount >= 0)
+        return;
+    g_xblaRowCount = 0;
+    const int rows = XblaRowCount() < STORE_ROWS_MAX ? XblaRowCount() : STORE_ROWS_MAX;
+    for (int r = 0; r < rows; ++r)
+    {
+        const XblaGame **games = g_xblaRowGames[g_xblaRowCount];
+        const int n = XblaRowGames(r, games, STORE_ROW_TILES_MAX);
+        if (n == 0)
+            continue;
+        for (int i = 0; i < n; ++i)
+        {
+            StoreTileView &tile = g_xblaRowTiles[g_xblaRowCount][i];
+            memset(&tile, 0, sizeof(tile));
+            tile.titleId = games[i]->titleId; // an arcade game's cover is by its own title ID
+            tile.name = games[i]->name;
+            tile.letter = games[i]->letter;
+            tile.gameTitleId = games[i]->titleId;
+        }
+        g_xblaRowSource[g_xblaRowCount] = r;
+        g_xblaRowCounts[g_xblaRowCount++] = n;
+    }
+}
+
+// Whether a section has rows under its letters: the Arcade's.
+static bool SectionHasRows(int section)
+{
+    if (section != SECTION_XBLA)
+        return false;
+    BuildArcadeRows();
+    return g_xblaRowCount > 0;
+}
+
+// A section's A-Z page, over the front page - on its letters.
 static void OpenSection(Shell &shell, int section)
 {
     if (!g_sectionCounted[section])
@@ -8121,6 +8246,10 @@ static void OpenSection(Shell &shell, int section)
     }
     shell.storeSection = section;
     shell.storeInSection = true;
+    shell.sectionRow = -1;
+    shell.sectionPlace = 0;
+    shell.sectionScroll = 0.0f;
+    memset(shell.sectionRowScroll, 0, sizeof(shell.sectionRowScroll));
     PrefetchLetterCovers(kStoreLetters[shell.sectionFocus[section]], section);
 }
 
@@ -8167,6 +8296,61 @@ static StoreSectionView MakeSectionView(const Shell &shell)
     return view;
 }
 
+// A section with rows - the Arcade's: its letters over them, on one page
+// that scrolls as the front page does.
+static StoreRowsView MakeSectionRowsView(const Shell &shell)
+{
+    const StoreSectionView section = MakeSectionView(shell);
+    StoreRowsView view;
+    memset(&view, 0, sizeof(view));
+    view.title = section.title;
+    view.subtitle = section.subtitle;
+    view.letters = section.letters;
+    view.letterCounts = section.counts;
+    view.letterFocus = shell.sectionRow < 0 ? section.focus : -1;
+    for (int r = 0; r < g_xblaRowCount; ++r)
+    {
+        StoreRowView &row = view.rows[r];
+        row.name = XblaRowName(g_xblaRowSource[r]);
+        row.tiles = g_xblaRowTiles[r];
+        row.count = g_xblaRowCounts[r];
+        row.scroll = shell.sectionRowScroll[r];
+    }
+    view.rowCount = g_xblaRowCount;
+    view.focusRow = shell.sectionRow < 0 ? 0 : shell.sectionRow;
+    view.focusPlace = shell.sectionPlace;
+    view.scroll = shell.sectionScroll;
+    view.focused = !shell.sidebarFocused;
+    return view;
+}
+
+// The D-pad on a section's rows. Up from the first goes back to the letters.
+static void StepSectionRows(WORD nav, Shell &shell)
+{
+    int &row = shell.sectionRow;
+    int &place = shell.sectionPlace;
+    if (nav == XINPUT_GAMEPAD_DPAD_UP)
+    {
+        if (row == 0)
+            row = -1; // on the letter it was last on
+        else
+            row--;
+    }
+    else if (nav == XINPUT_GAMEPAD_DPAD_DOWN && row + 1 < g_xblaRowCount)
+        row++;
+    else if (nav == XINPUT_GAMEPAD_DPAD_LEFT)
+    {
+        if (place == 0)
+            FocusSidebar(shell);
+        else
+            place--;
+    }
+    else if (nav == XINPUT_GAMEPAD_DPAD_RIGHT && place + 1 < g_xblaRowCounts[row])
+        place++;
+    if (row >= 0 && place >= g_xblaRowCounts[row])
+        place = g_xblaRowCounts[row] - 1;
+}
+
 // The D-pad on a section's letters, as on the front page's.
 static void StepSectionFocus(WORD nav, Shell &shell)
 {
@@ -8186,6 +8370,12 @@ static void StepSectionFocus(WORD nav, Shell &shell)
         l -= perRow;
     else if (nav == XINPUT_GAMEPAD_DPAD_DOWN && l / perRow < (STORE_LETTER_COUNT - 1) / perRow)
         l = (l + perRow < STORE_LETTER_COUNT) ? l + perRow : STORE_LETTER_COUNT - 1; // a shorter last row
+    else if (nav == XINPUT_GAMEPAD_DPAD_DOWN && SectionHasRows(shell.storeSection))
+    {
+        // Off the last letters, onto the rows under them.
+        shell.sectionRow = 0;
+        shell.sectionPlace = 0;
+    }
 }
 
 // The wallpapers for the featured tiles - again on the way back to the front
@@ -9806,6 +9996,7 @@ static unsigned long FocusSignature(const Shell &shell)
         InstallAsFolderSetting() ? 1 : 0,
         shell.queueSelected,
         shell.storeFocus, shell.storeInSection, shell.storeSection, shell.sectionFocus[shell.storeSection],
+        shell.sectionRow, shell.sectionPlace,
         shell.storeInLetter, shell.storeSelected, shell.storeInGame, shell.storeGameFocus, shell.storeVersionChosen,
         shell.storeFilterOpen, shell.storeFilterFocus, FilterSignature(),
         shell.storeInHomebrew, shell.homebrewRow, shell.homebrewPlace,
@@ -15709,6 +15900,11 @@ int main()
             {
                 acted = OpenStoreSearch(shell); // as on the front page; B from the results comes back here
             }
+            else if ((pressed & XINPUT_GAMEPAD_A) && shell.sectionRow >= 0 && SectionHasRows(set))
+            {
+                // A game in a row: its page, over this one.
+                OpenArcadeGame(shell, *g_xblaRowGames[shell.sectionRow][shell.sectionPlace]);
+            }
             else if (pressed & XINPUT_GAMEPAD_A)
             {
                 const int l = shell.sectionFocus[set];
@@ -15717,6 +15913,8 @@ int main()
                 else
                     ShowShellToast(Tr(STR_NO_GAMES_HERE), Tr(STR_NOTHING_IN_THE_COLLECTION_STARTS), UI_TOAST_INFO);
             }
+            else if (input.nav != 0 && shell.sectionRow >= 0 && SectionHasRows(set))
+                StepSectionRows(input.nav, shell);
             else if (input.nav != 0)
                 StepSectionFocus(input.nav, shell);
 
@@ -16390,10 +16588,15 @@ int main()
             else if (shell.storeInSection)
             {
                 const int l = shell.sectionFocus[shell.storeSection];
+                const bool withRows = SectionHasRows(shell.storeSection);
                 if (!shell.sidebarFocused)
                 {
                     static WCHAR browse[32];
-                    if (g_sectionLetterCounts[shell.storeSection][l] > 0)
+                    if (withRows && shell.sectionRow >= 0)
+                    {
+                        hintCount = AddHint(hints, hintCount, UI_BUTTON_A, TrW(STR_VIEW_GAME), TrW(STR_VIEW));
+                    }
+                    else if (g_sectionLetterCounts[shell.storeSection][l] > 0)
                     {
                         BrowseHint(browse, 32, kStoreLetters[l]);
                         hintCount = AddHint(hints, hintCount, UI_BUTTON_A, browse, TrW(STR_BROWSE));
@@ -16402,9 +16605,26 @@ int main()
                     hintCount = AddHint(hints, hintCount, UI_BUTTON_Y, TrW(STR_SEARCH));
                 }
 
-                StoreSectionView view = MakeSectionView(shell);
-                RenderStoreSectionFrame(view, hints, hintCount);
-                shell.sectionFocus[shell.storeSection] = view.focus;
+                if (withRows)
+                {
+                    // The Arcade's: its letters, then its rows, on one page.
+                    StoreRowsView view = MakeSectionRowsView(shell);
+                    RenderStoreRowsFrame(view, hints, hintCount);
+                    if (shell.sectionRow >= 0)
+                    {
+                        shell.sectionRow = view.focusRow;
+                        shell.sectionPlace = view.focusPlace;
+                    }
+                    shell.sectionScroll = view.scroll;
+                    for (int r = 0; r < view.rowCount; ++r)
+                        shell.sectionRowScroll[r] = view.rows[r].scroll;
+                }
+                else
+                {
+                    StoreSectionView view = MakeSectionView(shell);
+                    RenderStoreSectionFrame(view, hints, hintCount);
+                    shell.sectionFocus[shell.storeSection] = view.focus;
+                }
             }
             else
             {

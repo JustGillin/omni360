@@ -455,13 +455,15 @@ static bool ParseCatalog(const char *xml, unsigned long titleId, StoreDetails *d
 
     // The genres are the categories' names, less the two every game has -
     // told apart by ID (3000 Game Genres, 3027 Xbox LIVE Games), since
-    // their names are in the catalog's language.
+    // their names are in the catalog's language. Only the genres' own
+    // 3000s: Arcade games also carry ones from other lists ("Game Publisher
+    // Bit 1", 12001), which aren't genres.
     const char *p = xml;
     char id[16], name[64];
     while (TagText(p, "categoryId", id, sizeof(id), &p) && TagText(p, "name", name, sizeof(name), &p))
     {
         const long category = atol(id);
-        if (category != 3000 && category != 3027 && strstr(d->genre, name) == NULL)
+        if (category > 3000 && category < 4000 && category != 3027 && strstr(d->genre, name) == NULL)
         {
             size_t used = strlen(d->genre);
             _snprintf(d->genre + used, sizeof(d->genre) - used, "%s%s", used > 0 ? ", " : "", name);

@@ -68,6 +68,28 @@ GENRE_NAMES = {
 
 ROW = re.compile(r'^\s*\{ "((?:[^"\\]|\\.)*)", 0x([0-9A-F]{8}), 0x([0-9A-F]+), \d+, \d+, \'.\' \},')
 
+XBLA_TITLES = os.path.join(ROOT, "src", "XblaTitles.h")
+XBLA_ROW = re.compile(r'^\s*\{ "((?:[^"\\]|\\.)*)", "(?:[^"\\]|\\.)*", \d+ULL, 0x([0-9A-F]{8}), 0x000D0000,')
+
+
+def c_name(raw):
+    return raw.encode("latin-1").decode("unicode_escape").encode("latin-1").decode("utf-8", "replace")
+
+
+def arcade_games():
+    """{title ID: name} of the Store's Arcade games (src/XblaTitles.h) - the
+    first, where several RARs hold the same game, as XblaGameByTitleId picks."""
+    games = {}
+    with open(XBLA_TITLES, encoding="latin-1") as f:
+        for line in f:
+            m = XBLA_ROW.match(line)
+            if not m:
+                continue
+            tid = int(m.group(2), 16)
+            if tid not in games:
+                games[tid] = c_name(m.group(1))
+    return games
+
 
 def store_games():
     """{title ID: name} of the Store's 360 games - a USA or World one's name
@@ -79,7 +101,7 @@ def store_games():
             if not m or m.group(2) == "00000000":
                 continue
             tid, regions = int(m.group(2), 16), int(m.group(3), 16)
-            name = m.group(1).encode("latin-1").decode("unicode_escape").encode("latin-1").decode("utf-8", "replace")
+            name = c_name(m.group(1))
             if tid not in games or regions & 0x0003:
                 games[tid] = name
     return games
@@ -123,11 +145,10 @@ def c_string(s):
     return '"' + "".join(out) + '"'
 
 
-def main():
-    games = store_games()
-    cache = json.load(open(CACHE, encoding="utf-8")) if os.path.exists(CACHE) else {}
-    todo = [tid for tid in games if "%08X" % tid not in cache]
-    print("%d games, %d to ask the catalog about" % (len(games), len(todo)))
+def ask_all(tids, cache):
+    """Asks the catalog about the title IDs it hasn't answered for yet."""
+    todo = [tid for tid in tids if "%08X" % tid not in cache]
+    print("%d games, %d to ask the catalog about" % (len(tids), len(todo)))
     done = 0
     with concurrent.futures.ThreadPoolExecutor(8) as pool:
         for tid, answer in zip(todo, pool.map(ask, todo)):
@@ -141,40 +162,83 @@ def main():
     os.makedirs(os.path.dirname(CACHE), exist_ok=True)
     json.dump(cache, open(CACHE, "w", encoding="utf-8"))
 
-    known = {tid: cache["%08X" % tid] for tid in games
-             if "%08X" % tid in cache and not cache["%08X" % tid].get("none")}
-    print("%d in the catalog" % len(known))
+
+def genre_tags(info):
+    """A game's main genre (or None) and its TAG_ROWS tags."""
+    tags = [g for g in info["genres"] if g not in SKIP_GENRES]
+    if "Fighting" in tags and "Platformer" in tags:
+        tags = [g for g in tags if g not in ("Fighting", "Platformer")] + ["Action & Adventure"]
+    return next((g for g in MAIN_GENRES if g in tags), None), [g for g in TAG_ROWS if g in tags]
+
+
+def build_rows(games, known, tag_rows):
+    """Popular, Top rated, then a row for each genre with enough games, the
+    most-played first - of `games` ({title ID: name}), from `known`."""
+    mine = {t: known[t] for t in games if t in known}
 
     def by_popular(tids):
-        return sorted(tids, key=lambda t: (-known[t]["ratings"], games[t].lower()))
+        return sorted(tids, key=lambda t: (-mine[t]["ratings"], games[t].lower()))
 
-    rows = [("Popular", by_popular(known)[:ROW_GAMES])]
-    rated = [t for t in known if known[t]["ratings"] >= TOP_RATED_MIN]
-    rows.append(("Top rated", sorted(rated, key=lambda t: (-known[t]["stars"], -known[t]["ratings"]))[:ROW_GAMES]))
+    rows = [("Popular", by_popular(mine)[:ROW_GAMES])]
+    rated = [t for t in mine if mine[t]["ratings"] >= TOP_RATED_MIN]
+    rows.append(("Top rated", sorted(rated, key=lambda t: (-mine[t]["stars"], -mine[t]["ratings"]))[:ROW_GAMES]))
 
-    # Genres, the most-played first: each game in its main genre's row, and
-    # in Family's and Kinect's if it's tagged so.
     by_genre = {}
-    main_of = {}  # title ID -> its main genre, for the filters
-    tags_of = {}  # title ID -> its TAG_ROWS tags
-    for t, info in known.items():
-        tags = [g for g in info["genres"] if g not in SKIP_GENRES]
-        if "Fighting" in tags and "Platformer" in tags:
-            tags = [g for g in tags if g not in ("Fighting", "Platformer")] + ["Action & Adventure"]
-        main_genre = next((g for g in MAIN_GENRES if g in tags), None)
+    for t, info in mine.items():
+        main_genre, tags = genre_tags(info)
         if main_genre:
             by_genre.setdefault(main_genre, []).append(t)
-            main_of[t] = main_genre
-        tags_of[t] = [g for g in TAG_ROWS if g in tags]
-        for g in tags_of[t]:
-            by_genre.setdefault(g, []).append(t)
+        for g in tags:
+            if g in tag_rows:
+                by_genre.setdefault(g, []).append(t)
     genre_rows = []
     for g, tids in by_genre.items():
         if len(tids) >= GENRE_MIN_GAMES:
             ranked = by_popular(tids)
-            genre_rows.append((sum(known[t]["ratings"] for t in ranked[:ROW_GAMES]), GENRE_NAMES.get(g, g), ranked[:ROW_GAMES]))
+            genre_rows.append((sum(mine[t]["ratings"] for t in ranked[:ROW_GAMES]), GENRE_NAMES.get(g, g),
+                               ranked[:ROW_GAMES]))
     genre_rows.sort(reverse=True)
-    rows += [(name, tids) for _, name, tids in genre_rows]
+    return rows + [(name, tids) for _, name, tids in genre_rows], len(mine)
+
+
+def row_lines(prefix, rows, games):
+    """kXxxRowGames and kXxxRows, for rows of (name, title IDs)."""
+    L = ["// Title IDs, a row after another.", "static const unsigned long k%sRowGames[] =" % prefix, "{"]
+    first, at = [], 0
+    for name, tids in rows:
+        first.append(at)
+        L.append("    // %s" % name)
+        for t in tids:
+            L.append("    0x%08X, // %s" % (t, games[t].encode("ascii", "replace").decode("ascii")))
+        at += len(tids)
+    L += ["};", "", "static const StoreRow k%sRows[%s_ROW_COUNT] =" % (prefix, prefix.upper()), "{"]
+    for (name, tids), f in zip(rows, first):
+        L.append("    { %s, %d, %d }," % (c_string(name), f, len(tids)))
+    return L + ["};", ""]
+
+
+def main():
+    games = store_games()
+    arcade = arcade_games()
+    cache = json.load(open(CACHE, encoding="utf-8")) if os.path.exists(CACHE) else {}
+    ask_all(list(games) + [t for t in arcade if t not in games], cache)
+
+    every = dict(arcade)
+    every.update(games)  # a 360 game's name where an ID is both
+    known = {tid: cache["%08X" % tid] for tid in every
+             if "%08X" % tid in cache and not cache["%08X" % tid].get("none")}
+
+    rows, known360 = build_rows(games, known, TAG_ROWS)
+    arcade_rows, known_arcade = build_rows(arcade, known, ["Family"])
+    print("%d of %d 360 games and %d of %d Arcade games in the catalog"
+          % (known360, len(games), known_arcade, len(arcade)))
+
+    main_of, tags_of = {}, {}
+    for t, info in known.items():
+        main_genre, tags = genre_tags(info)
+        if main_genre:
+            main_of[t] = main_genre
+        tags_of[t] = tags
 
     genre_names = sorted(GENRE_NAMES.get(g, g) for g in MAIN_GENRES)
 
@@ -184,8 +248,11 @@ def main():
          "// people rated a game on Xbox Live - Top rated, of games with %d ratings or" % TOP_RATED_MIN,
          "// more, then a row for each genre with %d games or more, the most-played" % GENRE_MIN_GAMES,
          "// first: a game in its main genre's, and Family's and Kinect's if tagged so.",
-         "// And each game's genre, tags and rating, for the letter pages' filters.",
-         "// From the Xbox Live catalog, for %d of the Store's %d 360 games." % (len(known), len(games)),
+         "// The Arcade page's rows, the same way, from its games. And each game's",
+         "// genre, tags and rating, for the letter pages' filters - 360 and Arcade.",
+         "// From the Xbox Live catalog, for %d of the Store's %d 360 games and %d of"
+         % (known360, len(games), known_arcade),
+         "// its %d Arcade games." % len(arcade),
          "",
          "#ifndef STORE_ROWS_H",
          "#define STORE_ROWS_H",
@@ -193,11 +260,12 @@ def main():
          "struct StoreRow",
          "{",
          "    const char *name;",
-         "    unsigned short first; // into kStoreRowGames",
+         "    unsigned short first; // into kStoreRowGames, or kXblaRowGames",
          "    unsigned char count;",
          "};",
          "",
          "#define STORE_ROW_COUNT %d" % len(rows),
+         "#define XBLA_ROW_COUNT %d" % len(arcade_rows),
          "#define STORE_ROW_MAX_GAMES %d" % ROW_GAMES,
          "",
          "// A game's genre, tags and rating, by title ID - every one the catalog has.",
@@ -229,26 +297,18 @@ def main():
              sum(1 << i for i, g in enumerate(TAG_ROWS) if g in tags_of[t])) for t in sorted(known)] + [
          "};",
          "",
-         "// Title IDs, a row after another - each a game StoreGameByTitleId finds.",
-         "static const unsigned long kStoreRowGames[] =",
-         "{"]
-    first = []
-    at = 0
-    for name, tids in rows:
-        first.append(at)
-        L.append("    // %s" % name)
-        for t in tids:
-            L.append("    0x%08X, // %s" % (t, games[t].encode("ascii", "replace").decode("ascii")))
-        at += len(tids)
-    L += ["};", "", "static const StoreRow kStoreRows[STORE_ROW_COUNT] =", "{"]
-    for (name, tids), f in zip(rows, first):
-        L.append("    { %s, %d, %d }," % (c_string(name), f, len(tids)))
-    L += ["};", "", "#endif // STORE_ROWS_DATA", "", "#endif", ""]
+         "// The front page's - each a game StoreGameByTitleId finds."]
+    L += row_lines("Store", rows, games)
+    L += ["// The Arcade page's - each a game XblaGameByTitleId finds."]
+    L += row_lines("Xbla", arcade_rows, arcade)
+    L += ["#endif // STORE_ROWS_DATA", "", "#endif", ""]
     with open(OUT_HEADER, "w", encoding="utf-8", newline="\n") as out:
         out.write("\n".join(L))
-    for name, tids in rows:
-        print("%-26s %s" % (name, ", ".join(games[t] for t in tids[:5])))
-    print("wrote %s: %d rows" % (OUT_HEADER, len(rows)))
+    for label, rs, names in (("360", rows, games), ("Arcade", arcade_rows, arcade)):
+        print("--", label)
+        for name, tids in rs:
+            print("%-26s %s" % (name, ", ".join(names[t] for t in tids[:5])))
+    print("wrote %s: %d rows, %d Arcade rows" % (OUT_HEADER, len(rows), len(arcade_rows)))
 
 
 if __name__ == "__main__":

@@ -710,6 +710,30 @@ const char *StoreRowName(int row)
     return (row >= 0 && row < STORE_ROW_COUNT) ? TrEnglish(kStoreRows[row].name) : "";
 }
 
+int XblaRowCount()
+{
+    return XBLA_ROW_COUNT;
+}
+
+const char *XblaRowName(int row)
+{
+    return (row >= 0 && row < XBLA_ROW_COUNT) ? TrEnglish(kXblaRows[row].name) : "";
+}
+
+int XblaRowGames(int row, const XblaGame **out, int maxGames)
+{
+    if (row < 0 || row >= XBLA_ROW_COUNT || out == NULL)
+        return 0;
+    int n = 0;
+    for (int i = 0; i < kXblaRows[row].count && n < maxGames; ++i)
+    {
+        const XblaGame *game = XblaGameByTitleId(kXblaRowGames[kXblaRows[row].first + i]);
+        if (game != NULL)
+            out[n++] = game;
+    }
+    return n;
+}
+
 int StoreRowGames(int row, StoreGame *out, int maxGames)
 {
     if (row < 0 || row >= STORE_ROW_COUNT || out == NULL)

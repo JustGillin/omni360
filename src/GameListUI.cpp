@@ -9388,9 +9388,20 @@ void RenderStoreRowsFrame(StoreRowsView &view, const UiHint *hints, int hintCoun
     g_storeFrame++;
 
     // The front page's rows: the same tiles, gaps and labels, from under the
-    // header.
+    // header - or under a section's A to Z, laid out as the front page's.
     StoreLayout L = LayOutStore();
     L.rowsY = g_M.listY;
+    const bool hasLetters = view.letters != NULL;
+    const bool onLetters = hasLetters && view.letterFocus >= 0;
+    if (hasLetters)
+    {
+        L.azLabelY = g_M.listY;
+        L.azY = L.azLabelY + LineHeight(0.95f) * 1.3f + S(8.0f);
+        const int letterRows = (STORE_LETTER_COUNT + L.perRow - 1) / L.perRow;
+        L.rowsY = L.azY + letterRows * L.cell + (letterRows - 1) * L.cellGap + S(30.0f);
+        if (view.letterFocus >= STORE_LETTER_COUNT)
+            view.letterFocus = STORE_LETTER_COUNT - 1;
+    }
     const float clipTop = g_M.listY - S(6.0f);
     const float clipBottom = g_M.footerY - S(30.0f);
 
@@ -9419,6 +9430,8 @@ void RenderStoreRowsFrame(StoreRowsView &view, const UiHint *hints, int hintCoun
         target = (rowTop + rowBottom) * 0.5f - clipTop - (clipBottom - clipTop) * 0.5f;
         if (target > most) target = most;
         if (target < 0.0f) target = 0.0f;
+        if (onLetters)
+            target = 0.0f; // the letters are at the top
 
         StoreRowView &row = view.rows[focusRow];
         if (focusPlace < row.scroll)
@@ -9450,7 +9463,7 @@ void RenderStoreRowsFrame(StoreRowsView &view, const UiHint *hints, int hintCoun
         rowShown[r] = Glide(g_rowsPageShown[r], view.rows[r].scroll);
 
     // The focused tile, grown and drawn last.
-    const bool hasFocus = view.focused && focusCount > 0;
+    const bool hasFocus = view.focused && focusCount > 0 && !onLetters;
     const float growT = (FocusGrowFor(focusRow * 1000 + focusPlace, hasFocus) - 1.0f) / (FOCUS_GROW - 1.0f);
     float gx = 0.0f, gy = 0.0f, gw = L.rowTile, gh = L.rowTile;
     if (hasFocus)
@@ -9470,6 +9483,23 @@ void RenderStoreRowsFrame(StoreRowsView &view, const UiHint *hints, int hintCoun
     // --- Pass 1: quads ---
     DrawFrameBase(g_sidebar.focused);
     SetClip(g_M.contentX - S(12.0f), clipTop, g_M.contentW + S(24.0f), clipBottom - clipTop);
+
+    // A section's letters, as the front page's.
+    for (int i = 0; hasLetters && i < STORE_LETTER_COUNT; ++i)
+    {
+        float x, y;
+        StoreLetterRect(L, i, &x, &y);
+        y += sy;
+        if (y + L.cell < clipTop || y > clipBottom)
+            continue;
+        const bool isFocused = view.focused && onLetters && view.letterFocus == i;
+        D3DCOLOR fill = isFocused ? COL_SURFACE_HI : COL_SURFACE;
+        if (view.letterCounts != NULL && view.letterCounts[i] == 0)
+            fill = (fill & 0x00FFFFFF) | 0x8C000000;
+        FillRound(x, y, L.cell, L.cell, g_M.radius, fill);
+        if (isFocused)
+            FocusRing(x, y, L.cell, L.cell, g_M.radius);
+    }
 
     // Each row's tiles across, and the next cut off at the edge to show
     // there's more - two more while they glide. Covers are asked for as they
@@ -9536,6 +9566,23 @@ void RenderStoreRowsFrame(StoreRowsView &view, const UiHint *hints, int hintCoun
     SetClip(0.0f, clipTop, g_M.screenW, clipBottom - clipTop);
     const float textLeft = g_M.contentX - S(1.0f), textRight = g_M.contentX + g_M.contentW + S(1.0f);
     const float pad = S(12.0f);
+
+    if (hasLetters)
+    {
+        if (TextInClip(L.azLabelY + sy, LineHeight(0.95f) * 1.2f))
+            Text(g_M.contentX, L.azLabelY + sy, 0.95f, COL_TEXT, Tr(STR_STORE_A_TO_Z), 0, 0.0f, true);
+        for (int i = 0; i < STORE_LETTER_COUNT && view.letters[i] != '\0'; ++i)
+        {
+            float x, y;
+            StoreLetterRect(L, i, &x, &y);
+            y += sy;
+            if (!TextInClip(y, L.cell))
+                continue;
+            const bool empty = (view.letterCounts != NULL && view.letterCounts[i] == 0);
+            TextMid(x + L.cell * 0.5f, y + L.cell * 0.5f, 1.2f, empty ? COL_DIM : COL_TEXT,
+                    LetterTileLabel(view.letters[i]), ATGFONT_CENTER_X, 0.0f, true);
+        }
+    }
 
     // Two passes: the tiles wholly on screen, then those cut by the row's
     // edge - whose names would otherwise be missing until they scroll in.
@@ -10139,15 +10186,15 @@ void RenderStoreLetterFrame(StoreLetterView &view, const UiHint *hints, int hint
     const float pad = S(16.0f);
     for (int i = 0; i < tileTextCount; ++i)
     {
-        if (view.tiles[tileText[i].item].installed)
-        {
-            const TilePill p = PillFor(Tr(STR_PILL_INSTALLED), tileText[i].x, tileText[i].y, tileText[i].s);
-            TextMid(p.x + p.w * 0.5f, p.y + p.h * 0.5f, 0.56f, COL_ON_IMAGE, Tr(STR_PILL_INSTALLED), ATGFONT_CENTER_X,
-                    0.0f, true);
-        }
         const TileText &t = tileText[i];
         if (t.x + t.s > textRight)
-            continue;
+            continue; // under the panel: its pill's word too would show through
+        if (view.tiles[t.item].installed)
+        {
+            const TilePill p = PillFor(Tr(STR_PILL_INSTALLED), t.x, t.y, t.s);
+            TextMid(p.x + p.w * 0.5f, p.y + p.h * 0.5f, 0.56f, WithAlpha(COL_ON_IMAGE, see), Tr(STR_PILL_INSTALLED),
+                    ATGFONT_CENTER_X, 0.0f, true);
+        }
         if (t.indie)
             DrawIndieTileName(t.x, t.y, t.s, t.s, WithAlpha(COL_TEXT2, see), view.tiles[t.item].name);
         else if (!t.hasArt)

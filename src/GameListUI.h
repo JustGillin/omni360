@@ -721,6 +721,14 @@ struct StoreRowsView
     int focusPlace;
     float scroll;
     bool focused;
+
+    // A section's A to Z over its rows - the Arcade page's - as the front
+    // page's: letters (STORE_LETTER_COUNT characters) or NULL for none,
+    // each one's games (a letter with none is faded), and letterFocus the
+    // letter with focus, or -1 while it's on the rows.
+    const char *letters;
+    const int *letterCounts;
+    int letterFocus;
 };
 
 void RenderStoreRowsFrame(StoreRowsView &view, const UiHint *hints, int hintCount);

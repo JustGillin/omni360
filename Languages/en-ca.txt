@@ -727,6 +727,7 @@ RATING_4_UP = 4 stars and up
 GENRE_FAMILY = For the family
 GENRE_KINECT = Kinect
 FILTER_MISSING_SHOWN = With games you can't download
+FILTER_NOT_FOR = Not for {1}
 FILTER_REGIONS = Regions
 FILTER_SHOW_ONLY = Show only
 SEARCH_BEST_OF = Search  ·  the best {1} of {2}
