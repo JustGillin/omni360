@@ -34,6 +34,7 @@ CATALOG_URL = ("http://catalog.xboxlive.com/Catalog/Catalog.asmx/Query?methodNam
 ROW_GAMES = 24          # games in a row
 GENRE_MIN_GAMES = 12    # a genre with fewer has no row
 TOP_RATED_MIN = 2000    # ratings a game needs to be "top rated" - five stars from three people isn't
+XBOX_TOP_RATED_MIN = 20 # the same for an Original Xbox game: LaunchBox's users, a few hundred at most
 # Categories that aren't genres: the two every game has, and the video
 # store's, which some games carry too ("Sports" is its; games' is "Sports &
 # Recreation").
@@ -74,6 +75,23 @@ XBLA_ROW = re.compile(r'^\s*\{ "((?:[^"\\]|\\.)*)", "(?:[^"\\]|\\.)*", \d+ULL, 0
 
 def c_name(raw):
     return raw.encode("latin-1").decode("unicode_escape").encode("latin-1").decode("utf-8", "replace")
+
+
+XBOX_TITLES = os.path.join(ROOT, "src", "XboxTitles.h")
+XBOX_ROW = re.compile(r'^\s*\{ "((?:[^"\\]|\\.)*)", 0x([0-9A-F]{8}), 0x[0-9A-F]+, \d+, \d+, \'.\', STORE_SYSTEM_XBOX \},')
+LAUNCHBOX_XBOX = os.path.join(ROOT, "tools", "cache", "launchbox_xbox.json")
+
+
+def xbox_games():
+    """{title ID: name} of the Store's Original Xbox games - the first of
+    several sharing one, a USA or World one."""
+    games = {}
+    with open(XBOX_TITLES, encoding="latin-1") as f:
+        for line in f:
+            m = XBOX_ROW.match(line)
+            if m and m.group(2) != "00000000":
+                games.setdefault(int(m.group(2), 16), c_name(m.group(1)))
+    return games
 
 
 def arcade_games():
@@ -171,7 +189,7 @@ def genre_tags(info):
     return next((g for g in MAIN_GENRES if g in tags), None), [g for g in TAG_ROWS if g in tags]
 
 
-def build_rows(games, known, tag_rows):
+def build_rows(games, known, tag_rows, top_rated_min=TOP_RATED_MIN):
     """Popular, Top rated, then a row for each genre with enough games, the
     most-played first - of `games` ({title ID: name}), from `known`."""
     mine = {t: known[t] for t in games if t in known}
@@ -180,7 +198,7 @@ def build_rows(games, known, tag_rows):
         return sorted(tids, key=lambda t: (-mine[t]["ratings"], games[t].lower()))
 
     rows = [("Popular", by_popular(mine)[:ROW_GAMES])]
-    rated = [t for t in mine if mine[t]["ratings"] >= TOP_RATED_MIN]
+    rated = [t for t in mine if mine[t]["ratings"] >= top_rated_min]
     rows.append(("Top rated", sorted(rated, key=lambda t: (-mine[t]["stars"], -mine[t]["ratings"]))[:ROW_GAMES]))
 
     by_genre = {}
@@ -230,6 +248,20 @@ def main():
 
     rows, known360 = build_rows(games, known, TAG_ROWS)
     arcade_rows, known_arcade = build_rows(arcade, known, ["Family"])
+
+    # The Original Xbox's, from LaunchBox (make_xbox_info.py) - Xbox Live has
+    # none of them. Their title IDs are their own, so they sit in the same
+    # table. Their counts are LaunchBox users', so Top rated asks fewer.
+    xbox = xbox_games()
+    if os.path.exists(LAUNCHBOX_XBOX):
+        for key, info in json.load(open(LAUNCHBOX_XBOX, encoding="utf-8")).items():
+            tid = int(key, 16)
+            if tid in xbox and tid not in known:
+                known[tid] = info
+    else:
+        print("no %s - run make_xbox_info.py for the Original Xbox's" % LAUNCHBOX_XBOX)
+    xbox_rows, known_xbox = build_rows(xbox, known, [], XBOX_TOP_RATED_MIN)
+    print("%d of %d Original Xbox games from LaunchBox" % (known_xbox, len(xbox)))
     print("%d of %d 360 games and %d of %d Arcade games in the catalog"
           % (known360, len(games), known_arcade, len(arcade)))
 
@@ -266,6 +298,7 @@ def main():
          "",
          "#define STORE_ROW_COUNT %d" % len(rows),
          "#define XBLA_ROW_COUNT %d" % len(arcade_rows),
+         "#define XBOX_ROW_COUNT %d" % len(xbox_rows),
          "#define STORE_ROW_MAX_GAMES %d" % ROW_GAMES,
          "",
          "// A game's genre, tags and rating, by title ID - every one the catalog has.",
@@ -301,10 +334,12 @@ def main():
     L += row_lines("Store", rows, games)
     L += ["// The Arcade page's - each a game XblaGameByTitleId finds."]
     L += row_lines("Xbla", arcade_rows, arcade)
+    L += ["// The Original Xbox page's - each a game StoreGameByTitleId finds."]
+    L += row_lines("Xbox", xbox_rows, xbox)
     L += ["#endif // STORE_ROWS_DATA", "", "#endif", ""]
     with open(OUT_HEADER, "w", encoding="utf-8", newline="\n") as out:
         out.write("\n".join(L))
-    for label, rs, names in (("360", rows, games), ("Arcade", arcade_rows, arcade)):
+    for label, rs, names in (("360", rows, games), ("Arcade", arcade_rows, arcade), ("Original Xbox", xbox_rows, xbox)):
         print("--", label)
         for name, tids in rs:
             print("%-26s %s" % (name, ", ".join(names[t] for t in tids[:5])))

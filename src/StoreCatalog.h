@@ -61,6 +61,16 @@ int XblaRowCount();
 const char *XblaRowName(int row);
 int XblaRowGames(int row, const struct XblaGame **out, int maxGames);
 
+// The Original Xbox page's, from LaunchBox's ratings and genres
+// (tools/make_xbox_info.py), as StoreGameByTitleId finds them.
+int XboxRowCount();
+const char *XboxRowName(int row);
+int XboxRowGames(int row, StoreGame *out, int maxGames);
+
+// An Original Xbox game's details for its page, from the LaunchBox Games
+// Database (XboxInfo.h): NULL if it has none.
+const struct XboxInfo *XboxInfoOf(unsigned long titleId);
+
 // The front page's Collections - a series each, from StoreCollections.h
 // (tools/make_collections.py): its name, the game whose wallpaper is its
 // card, and its games oldest first, as StoreGameByTitleId finds them.

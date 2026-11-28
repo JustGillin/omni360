@@ -5,10 +5,12 @@
 #define STORE_ROWS_DATA
 #define STORE_COLLECTIONS_DATA
 #define CATALOG_TITLES_DATA
+#define XBOX_INFO_DATA
 #include "StoreCatalog.h"
 #include "Strings.h" // Tr() - every string the UI shows
 #include "StoreRows.h"
 #include "StoreCollections.h"
+#include "XboxInfo.h"       // the Original Xbox games' details, from LaunchBox
 
 #include <stdlib.h>
 #include <string.h>
@@ -734,6 +736,45 @@ int XblaRowGames(int row, const XblaGame **out, int maxGames)
     return n;
 }
 
+int XboxRowCount()
+{
+    return XBOX_ROW_COUNT;
+}
+
+const char *XboxRowName(int row)
+{
+    return (row >= 0 && row < XBOX_ROW_COUNT) ? TrEnglish(kXboxRows[row].name) : "";
+}
+
+int XboxRowGames(int row, StoreGame *out, int maxGames)
+{
+    if (row < 0 || row >= XBOX_ROW_COUNT || out == NULL)
+        return 0;
+    int n = 0;
+    for (int i = 0; i < kXboxRows[row].count && n < maxGames; ++i)
+    {
+        if (StoreGameByTitleId(kXboxRowGames[kXboxRows[row].first + i], &out[n]))
+            n++;
+    }
+    return n;
+}
+
+const XboxInfo *XboxInfoOf(unsigned long titleId)
+{
+    int lo = 0, hi = XBOX_INFO_COUNT - 1;
+    while (titleId != 0 && lo <= hi)
+    {
+        const int mid = (lo + hi) / 2;
+        if (kXboxInfo[mid].titleId == titleId)
+            return &kXboxInfo[mid];
+        if (kXboxInfo[mid].titleId < titleId)
+            lo = mid + 1;
+        else
+            hi = mid - 1;
+    }
+    return NULL;
+}
+
 int StoreRowGames(int row, StoreGame *out, int maxGames)
 {
     if (row < 0 || row >= STORE_ROW_COUNT || out == NULL)
@@ -835,14 +876,45 @@ static bool NamedForKinect(unsigned long titleId)
 // Like it: the same genre; a Kinect game only for a Kinect game, and one
 // made for Kinect only for another; and for a family game, one for the
 // family too.
+// Which list each kStoreGameInfo entry's game is in - the table holds the
+// 360's, the Arcade's and the Original Xbox's, whose ratings aren't
+// counted the same way (Xbox Live's against LaunchBox's), and More like
+// this keeps to the game's own. Worked out the first time it's asked.
+enum InfoKind { INFO_KIND_NONE, INFO_KIND_360, INFO_KIND_XBOX, INFO_KIND_ARCADE };
+
+static int InfoKindOf(unsigned long titleId)
+{
+    StoreGame game;
+    if (StoreGameByTitleId(titleId, &game))
+        return game.system == STORE_SYSTEM_XBOX ? INFO_KIND_XBOX : INFO_KIND_360;
+    return XblaGameByTitleId(titleId) != NULL ? INFO_KIND_ARCADE : INFO_KIND_NONE;
+}
+
+static unsigned char g_infoKinds[STORE_INFO_COUNT];
+static bool g_infoKindsKnown = false;
+
+static int InfoKindAt(int i)
+{
+    if (!g_infoKindsKnown)
+    {
+        for (int k = 0; k < STORE_INFO_COUNT; ++k)
+            g_infoKinds[k] = (unsigned char)InfoKindOf(kStoreGameInfo[k].titleId);
+        g_infoKindsKnown = true;
+    }
+    return g_infoKinds[i];
+}
+
 static int MostRatedLike(const StoreGameInfo &me, bool meForKinect, bool samePublisher, const StoreGame *out,
                          int count)
 {
+    const int myKind = InfoKindOf(me.titleId);
     int best = -1;
     for (int i = 0; i < STORE_INFO_COUNT; ++i)
     {
         const StoreGameInfo &g = kStoreGameInfo[i];
         if (g.titleId == me.titleId || g.genre != me.genre || g.stars < SIMILAR_MIN_STARS)
+            continue;
+        if (InfoKindAt(i) != myKind)
             continue;
         if ((g.tags & STORE_TAG_KINECT) && !(me.tags & STORE_TAG_KINECT))
             continue;

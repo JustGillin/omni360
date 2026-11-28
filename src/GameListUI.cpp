@@ -10583,8 +10583,9 @@ void RenderStoreGameFrame(StoreGameView &view, const UiHint *hints, int hintCoun
         bx += bw + S(16.0f);
     }
 
-    // An Original Xbox game's support, as a pill where "No details" would be.
-    const bool supportBadge = (view.meta == NULL && !view.loading && view.xboxSupport != STORE_XBOX_NONE);
+    // An Original Xbox game's support, as a pill at the start of the line
+    // under its name - its details, when LaunchBox has them, after it.
+    const bool supportBadge = (!view.loading && view.xboxSupport != STORE_XBOX_NONE);
     // Green, amber, red and grey; amber is light, so it takes dark text.
     StringId supportText = STR_OFFICIALLY_SUPPORTED;
     D3DCOLOR supportFill = COL_GREEN, supportInk = COL_ON_ACCENT;
@@ -10670,11 +10671,16 @@ void RenderStoreGameFrame(StoreGameView &view, const UiHint *hints, int hintCoun
 
     if (TextInClip(L.metaY, LineHeight(0.86f) * 1.2f))
     {
-        if (view.meta != NULL)
-            TextFit(L.textX, L.metaY, 0.86f, WithAlpha(COL_TEXT2, see), view.meta, textW);
-        else if (supportBadge)
+        if (supportBadge)
+        {
             TextMid(L.textX + badgeW * 0.5f, badgeY + badgeH * 0.5f, 0.72f, WithAlpha(supportInk, see), supportLabel,
                     ATGFONT_CENTER_X, 0.0f, true);
+            const float metaX = L.textX + badgeW + S(14.0f);
+            if (view.meta != NULL && metaX < L.textX + textW)
+                TextFit(metaX, L.metaY, 0.86f, WithAlpha(COL_TEXT2, see), view.meta, L.textX + textW - metaX);
+        }
+        else if (view.meta != NULL)
+            TextFit(L.textX, L.metaY, 0.86f, WithAlpha(COL_TEXT2, see), view.meta, textW);
         else if (!view.indie || view.loading) // an indie game's description already says why there are none
             TextFit(L.textX, L.metaY, 0.86f, WithAlpha(COL_DIM, see),
                     Tr(view.loading ? STR_STORE_LOADING_DETAILS : STR_STORE_NO_DETAILS), textW);

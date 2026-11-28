@@ -42,6 +42,7 @@ end-to-end on real hardware against a real 27-game library.
 #include "CoverArt.h"
 #include "StoreArt.h"
 #include "StoreCatalog.h"
+#include "XboxInfo.h"     // XboxInfo: an Original Xbox game's details, from LaunchBox
 #include "DiscWorker.h"
 #include "PcHelper.h"
 #include "Wallpapers.h"
@@ -7375,11 +7376,12 @@ static bool ClearSessionFilters()
 }
 
 // Whether a section's letters can be sorted and filtered by genre and
-// rating: the front page's (-1) and the Arcade's, which Xbox Live's catalog
-// has - not the Original Xbox's or indie games', which it hasn't.
+// rating: the front page's (-1) and the Arcade's, from Xbox Live's catalog,
+// and the Original Xbox's, from LaunchBox's - not indie games', which have
+// neither.
 static bool SectionHasInfo(int section)
 {
-    return section != SECTION_XBOX && section != SECTION_XBLIG;
+    return section != SECTION_XBLIG;
 }
 
 // Whether a section's games come in regions and languages: discs do - the
@@ -8192,47 +8194,78 @@ static void PrefetchLetterCovers(char letter, int section)
     RequestStoreCoverArt(ids, idCount);
 }
 
-// The Arcade page's rows under its A to Z - Popular, Top rated, a genre
-// each - as StoreRows.h has them, looked up once.
-static const XblaGame *g_xblaRowGames[STORE_ROWS_MAX][STORE_ROW_TILES_MAX];
-static StoreTileView g_xblaRowTiles[STORE_ROWS_MAX][STORE_ROW_TILES_MAX];
-static int g_xblaRowCounts[STORE_ROWS_MAX];
-static int g_xblaRowCount = -1; // -1 until built
-static int g_xblaRowSource[STORE_ROWS_MAX]; // each row's in StoreRows.h, for its name in the language shown
-
-static void BuildArcadeRows()
+// A section's rows under its A to Z - Popular, Top rated, a genre each - as
+// StoreRows.h has them, looked up once: the Arcade's games are XblaGames,
+// the Original Xbox's discs StoreGames, as each's letter pages hold them.
+struct SectionRowSet
 {
-    if (g_xblaRowCount >= 0)
-        return;
-    g_xblaRowCount = 0;
-    const int rows = XblaRowCount() < STORE_ROWS_MAX ? XblaRowCount() : STORE_ROWS_MAX;
+    bool built;
+    int count;
+    int counts[STORE_ROWS_MAX];
+    int source[STORE_ROWS_MAX]; // each row's in StoreRows.h, for its name in the language shown
+    StoreTileView tiles[STORE_ROWS_MAX][STORE_ROW_TILES_MAX];
+    const XblaGame *arcade[STORE_ROWS_MAX][STORE_ROW_TILES_MAX]; // the Arcade's
+    StoreGame discs[STORE_ROWS_MAX][STORE_ROW_TILES_MAX];        // the Original Xbox's
+};
+static SectionRowSet g_sectionRows[SECTION_COUNT];
+
+static SectionRowSet &SectionRows(int section)
+{
+    SectionRowSet &set = g_sectionRows[section];
+    if (set.built)
+        return set;
+    set.built = true;
+    set.count = 0;
+    const bool arcade = (section == SECTION_XBLA);
+    int rows = arcade ? XblaRowCount() : section == SECTION_XBOX ? XboxRowCount() : 0;
+    if (rows > STORE_ROWS_MAX)
+        rows = STORE_ROWS_MAX;
     for (int r = 0; r < rows; ++r)
     {
-        const XblaGame **games = g_xblaRowGames[g_xblaRowCount];
-        const int n = XblaRowGames(r, games, STORE_ROW_TILES_MAX);
+        const int row = set.count;
+        const int n = arcade ? XblaRowGames(r, set.arcade[row], STORE_ROW_TILES_MAX)
+                             : XboxRowGames(r, set.discs[row], STORE_ROW_TILES_MAX);
         if (n == 0)
             continue;
         for (int i = 0; i < n; ++i)
         {
-            StoreTileView &tile = g_xblaRowTiles[g_xblaRowCount][i];
+            StoreTileView &tile = set.tiles[row][i];
             memset(&tile, 0, sizeof(tile));
-            tile.titleId = games[i]->titleId; // an arcade game's cover is by its own title ID
-            tile.name = games[i]->name;
-            tile.letter = games[i]->letter;
-            tile.gameTitleId = games[i]->titleId;
+            if (arcade)
+            {
+                tile.titleId = set.arcade[row][i]->titleId; // an arcade game's cover is by its own title ID
+                tile.name = set.arcade[row][i]->name;
+                tile.letter = set.arcade[row][i]->letter;
+                tile.gameTitleId = set.arcade[row][i]->titleId;
+            }
+            else
+            {
+                const StoreGame &game = set.discs[row][i];
+                tile.titleId = StoreCoverKey(game.titleId, game.name);
+                tile.name = game.name;
+                tile.letter = game.letter;
+                tile.gameTitleId = game.titleId;
+            }
         }
-        g_xblaRowSource[g_xblaRowCount] = r;
-        g_xblaRowCounts[g_xblaRowCount++] = n;
+        set.source[row] = r;
+        set.counts[set.count++] = n;
     }
+    return set;
 }
 
-// Whether a section has rows under its letters: the Arcade's.
+static const char *SectionRowName(int section, int row)
+{
+    const int source = SectionRows(section).source[row];
+    return section == SECTION_XBLA ? XblaRowName(source) : XboxRowName(source);
+}
+
+// Whether a section has rows under its letters: the Arcade's and the
+// Original Xbox's.
 static bool SectionHasRows(int section)
 {
-    if (section != SECTION_XBLA)
+    if (section != SECTION_XBLA && section != SECTION_XBOX)
         return false;
-    BuildArcadeRows();
-    return g_xblaRowCount > 0;
+    return SectionRows(section).count > 0;
 }
 
 // A section's A-Z page, over the front page - on its letters.
@@ -8308,15 +8341,16 @@ static StoreRowsView MakeSectionRowsView(const Shell &shell)
     view.letters = section.letters;
     view.letterCounts = section.counts;
     view.letterFocus = shell.sectionRow < 0 ? section.focus : -1;
-    for (int r = 0; r < g_xblaRowCount; ++r)
+    const SectionRowSet &set = SectionRows(shell.storeSection);
+    for (int r = 0; r < set.count; ++r)
     {
         StoreRowView &row = view.rows[r];
-        row.name = XblaRowName(g_xblaRowSource[r]);
-        row.tiles = g_xblaRowTiles[r];
-        row.count = g_xblaRowCounts[r];
+        row.name = SectionRowName(shell.storeSection, r);
+        row.tiles = set.tiles[r];
+        row.count = set.counts[r];
         row.scroll = shell.sectionRowScroll[r];
     }
-    view.rowCount = g_xblaRowCount;
+    view.rowCount = set.count;
     view.focusRow = shell.sectionRow < 0 ? 0 : shell.sectionRow;
     view.focusPlace = shell.sectionPlace;
     view.scroll = shell.sectionScroll;
@@ -8329,6 +8363,7 @@ static void StepSectionRows(WORD nav, Shell &shell)
 {
     int &row = shell.sectionRow;
     int &place = shell.sectionPlace;
+    const SectionRowSet &set = SectionRows(shell.storeSection);
     if (nav == XINPUT_GAMEPAD_DPAD_UP)
     {
         if (row == 0)
@@ -8336,7 +8371,7 @@ static void StepSectionRows(WORD nav, Shell &shell)
         else
             row--;
     }
-    else if (nav == XINPUT_GAMEPAD_DPAD_DOWN && row + 1 < g_xblaRowCount)
+    else if (nav == XINPUT_GAMEPAD_DPAD_DOWN && row + 1 < set.count)
         row++;
     else if (nav == XINPUT_GAMEPAD_DPAD_LEFT)
     {
@@ -8345,10 +8380,10 @@ static void StepSectionRows(WORD nav, Shell &shell)
         else
             place--;
     }
-    else if (nav == XINPUT_GAMEPAD_DPAD_RIGHT && place + 1 < g_xblaRowCounts[row])
+    else if (nav == XINPUT_GAMEPAD_DPAD_RIGHT && place + 1 < set.counts[row])
         place++;
-    if (row >= 0 && place >= g_xblaRowCounts[row])
-        place = g_xblaRowCounts[row] - 1;
+    if (row >= 0 && place >= set.counts[row])
+        place = set.counts[row] - 1;
 }
 
 // The D-pad on a section's letters, as on the front page's.
@@ -9376,6 +9411,38 @@ static StoreGameView MakeStoreGameView(Shell &shell, const Library &lib)
         const bool unlisted = IsUnlistedXboxTitleId(g_storeGame.titleId);
         view.description = Tr(unlisted ? STR_XBOX_UNLISTED_DESCRIPTION : STR_XBOX_DESCRIPTION);
         view.xboxSupport = STORE_XBOX_OFFICIAL;
+
+        // What LaunchBox has on it (XboxInfo.h, StoreRows.h): who made it,
+        // its genre, how its players rated it, how many play, and a
+        // description in place of the stock paragraph.
+        const XboxInfo *info = XboxInfoOf(g_storeGame.titleId);
+        StoreGameInfo rated;
+        const bool hasRating = StoreGameInfoOf(g_storeGame.titleId, &rated);
+        if (info != NULL)
+        {
+            g_storeMeta[0] = '\0';
+            AppendText(g_storeMeta, sizeof(g_storeMeta), "", info->developer);
+            if (info->publisher[0] != '\0' && _stricmp(info->publisher, info->developer) != 0)
+                AppendText(g_storeMeta, sizeof(g_storeMeta), STORE_MIDDOT, info->publisher);
+            if (hasRating && rated.genre != 0)
+                AppendText(g_storeMeta, sizeof(g_storeMeta), STORE_MIDDOT, StoreGenreName(rated.genre));
+            view.meta = g_storeMeta[0] != '\0' ? g_storeMeta : NULL;
+            static char players[32];
+            players[0] = '\0';
+            if (info->players > 1)
+                _snprintf(players, sizeof(players), "1-%d players", info->players);
+            else if (info->players == 1)
+                _snprintf(players, sizeof(players), "1 player");
+            players[sizeof(players) - 1] = '\0';
+            view.players = players[0] != '\0' ? players : NULL;
+            if (info->overview[0] != '\0')
+                view.description = info->overview;
+        }
+        if (hasRating && rated.ratings > 0)
+        {
+            view.rating = rated.stars / 10.0f;
+            view.ratings = rated.ratings;
+        }
         if (unlisted)
         {
             // By how far players got on the best emulator: in-game or
@@ -9384,14 +9451,24 @@ static StoreGameView MakeStoreGameView(Shell &shell, const Library &lib)
             view.xboxSupport = best >= 4 ? STORE_XBOX_COMMUNITY
                              : best >= 1 ? STORE_XBOX_NOT_PLAYABLE
                                          : STORE_XBOX_UNTESTED;
-            // What players reported is worth more than a stock paragraph.
+            // What players reported is worth more than a stock paragraph -
+            // and goes first, ahead of a description, as it's what decides
+            // whether to install it.
             const char *issues = XefuKnownIssues(g_storeGame.titleId);
             if (issues != NULL)
             {
                 static char notes[1024];
+                static char both[2048];
                 TrFormat(notes, sizeof(notes), STR_PLAYERS_HAVE_REPORTED, issues);
                 notes[sizeof(notes) - 1] = '\0';
-                view.description = notes;
+                if (info != NULL && info->overview[0] != '\0')
+                {
+                    _snprintf(both, sizeof(both), "%s\n%s", notes, info->overview);
+                    both[sizeof(both) - 1] = '\0';
+                    view.description = both;
+                }
+                else
+                    view.description = notes;
             }
         }
     }
@@ -15903,7 +15980,11 @@ int main()
             else if ((pressed & XINPUT_GAMEPAD_A) && shell.sectionRow >= 0 && SectionHasRows(set))
             {
                 // A game in a row: its page, over this one.
-                OpenArcadeGame(shell, *g_xblaRowGames[shell.sectionRow][shell.sectionPlace]);
+                const SectionRowSet &rows = SectionRows(set);
+                if (set == SECTION_XBLA)
+                    OpenArcadeGame(shell, *rows.arcade[shell.sectionRow][shell.sectionPlace]);
+                else
+                    OpenStoreGame(shell, rows.discs[shell.sectionRow][shell.sectionPlace]);
             }
             else if (pressed & XINPUT_GAMEPAD_A)
             {
@@ -16607,7 +16688,7 @@ int main()
 
                 if (withRows)
                 {
-                    // The Arcade's: its letters, then its rows, on one page.
+                    // The Arcade's and the Original Xbox's: letters, then rows, on one page.
                     StoreRowsView view = MakeSectionRowsView(shell);
                     RenderStoreRowsFrame(view, hints, hintCount);
                     if (shell.sectionRow >= 0)
