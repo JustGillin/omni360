@@ -12,6 +12,10 @@ DESCRIPTION : The Store's artwork and details from Xbox Live, fetched and
 #include "OutputConsole.h"
 #include "ImageDecode.h"
 #include "MobCatTable.h"
+#include "CoverArt.h"     // IsIndieGameKey
+#include "StoreCatalog.h" // XboxInfoOf, IndieInfoOf
+#include "XboxInfo.h"
+#include "IndieInfo.h"
 
 #define STB_IMAGE_WRITE_IMPLEMENTATION
 #define STBI_WRITE_NO_STDIO
@@ -212,9 +216,43 @@ bool HasLaunchBoxBackground(unsigned long titleId)
     return LaunchBoxBackgroundFile(titleId) != NULL;
 }
 
-// The LaunchBox wallpaper, over HTTPS, kept at path as the marketplace's
-// would be - so it's asked for once. NULL if it can't be had now; it is
-// asked again next time, as a failure here says nothing about LaunchBox.
+// Screenshot n (1 up) of an Original Xbox game, by title ID, or an indie
+// game, by its IndieGameKey - from LaunchBox, as Xbox Live has none of
+// either (XboxInfo.h, IndieInfo.h). False if there's no such one.
+static bool LaunchBoxScreenshotFile(unsigned long key, int n, char *out, size_t outSize)
+{
+    const char *list = NULL;
+    if (IsIndieGameKey(key))
+    {
+        const IndieInfo *info = IndieInfoOf(key);
+        list = info != NULL ? info->screenshots : NULL;
+    }
+    else
+    {
+        const XboxInfo *info = XboxInfoOf(key);
+        list = info != NULL ? info->screenshots : NULL;
+    }
+    for (int i = 1; list != NULL && *list != '\0'; ++i)
+    {
+        const char *end = strchr(list, ' ');
+        const size_t len = end != NULL ? (size_t)(end - list) : strlen(list);
+        if (i == n)
+        {
+            if (len >= outSize)
+                return false;
+            memcpy(out, list, len);
+            out[len] = '\0';
+            return true;
+        }
+        list = end != NULL ? end + 1 : list + len;
+    }
+    return false;
+}
+
+// A LaunchBox image - a wallpaper or a screenshot - over HTTPS, kept at
+// path as the marketplace's would be, so it's asked for once. NULL if it
+// can't be had now; it is asked again next time, as a failure here says
+// nothing about LaunchBox.
 static unsigned char *FetchLaunchBoxBackground(unsigned long titleId, const char *file, const char *path,
                                                unsigned long *outSize)
 {
@@ -227,8 +265,7 @@ static unsigned char *FetchLaunchBoxBackground(unsigned long titleId, const char
         return NULL;
     unsigned long long len = IMAGE_MAX_BYTES;
     const int status = httpRequestHTTPS(url, HTTP_GET, NULL, NULL, "", image, &len, false, NULL, 0, QuietPrint);
-    dprintf("[store] %08lX: no wallpaper on the marketplace - LaunchBox %s -> HTTP %d, %I64u bytes\n", titleId,
-            file, status, len);
+    dprintf("[store] %08lX: LaunchBox %s -> HTTP %d, %I64u bytes\n", titleId, file, status, len);
     if (status != 200 || len < 64)
     {
         free(image);
@@ -259,6 +296,13 @@ static unsigned char *LoadArt(unsigned long titleId, StoreArtKind kind, unsigned
     const char *launchBox = (kind == STORE_ART_BACKGROUND) ? LaunchBoxBackgroundFile(titleId) : NULL;
     if (launchBox != NULL)
         return FetchLaunchBoxBackground(titleId, launchBox, path, outSize);
+    // So do an Original Xbox or indie game's screenshots.
+    char shot[96];
+    if (kind >= STORE_ART_SCREEN && LaunchBoxScreenshotFile(titleId, kind - STORE_ART_SCREEN, shot, sizeof(shot)))
+        return FetchLaunchBoxBackground(titleId, shot, path, outSize);
+    // An indie game's key is no title ID: the marketplace has nothing by it.
+    if (IsIndieGameKey(titleId))
+        return NULL;
     if (WrittenRecently(marker))
         return NULL;
 

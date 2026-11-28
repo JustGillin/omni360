@@ -9310,6 +9310,28 @@ static bool TrainerOnFor(const Library &lib, unsigned long titleId)
     return on;
 }
 
+// An Original Xbox or indie game's screenshots on its page: LaunchBox's,
+// up to four, space-separated file names in list (XboxInfo.h, IndieInfo.h)
+// - numbered 1 up, as the catalog numbers the 360's, and asked for once.
+static void LaunchBoxShots(Shell &shell, unsigned long key, const char *list, StoreGameView &view)
+{
+    static const int numbers[STORE_MAX_SCREENSHOTS] = { 1, 2, 3, 4 };
+    int count = 0;
+    for (const char *p = list; p != NULL && *p != '\0' && count < STORE_MAX_SCREENSHOTS; ++count)
+    {
+        const char *space = strchr(p, ' ');
+        p = space != NULL ? space + 1 : p + strlen(p);
+    }
+    view.screenshots = numbers;
+    view.screenshotCount = count;
+    if (!shell.storeShotsAsked && count > 0)
+    {
+        for (int i = 0; i < count; ++i)
+            RequestStoreArt(key, STORE_ART_SCREEN + numbers[i]);
+        shell.storeShotsAsked = true;
+    }
+}
+
 static StoreGameView MakeStoreGameView(Shell &shell, const Library &lib)
 {
     StoreGameView view;
@@ -9425,6 +9447,10 @@ static StoreGameView MakeStoreGameView(Shell &shell, const Library &lib)
             view.players = players[0] != '\0' ? players : NULL;
             if (info->overview[0] != '\0')
                 view.description = info->overview;
+            // Its screenshots, from LaunchBox by the same key - the page's
+            // art is looked up by it, as there's no title ID to go by.
+            view.titleId = key;
+            LaunchBoxShots(shell, key, info->screenshots, view);
         }
     }
     else if (StoreGameIsXbox())
@@ -9461,6 +9487,7 @@ static StoreGameView MakeStoreGameView(Shell &shell, const Library &lib)
             view.players = players[0] != '\0' ? players : NULL;
             if (info->overview[0] != '\0')
                 view.description = info->overview;
+            LaunchBoxShots(shell, g_storeGame.titleId, info->screenshots, view);
         }
         if (hasRating && rated.ratings > 0)
         {
